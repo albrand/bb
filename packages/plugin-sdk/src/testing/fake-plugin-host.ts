@@ -36,6 +36,8 @@ import {
   providerIconRefusalMessage,
   providerWithoutBridgeMessage,
   readRpcMethodContract,
+  readRpcPublicationOptions,
+  publishRpcMethod,
   registerSettingDescriptors,
   rejectStaleAgentToolFields,
   RESERVED_AGENT_TOOL_NAMES,
@@ -267,6 +269,9 @@ export interface FakePluginRegistrations {
   httpRoutes: FakeHttpRouteRecord[];
   websocketRoutes: ExperimentalFakeWebSocketRouteRecord[];
   rpcMethods: string[];
+  experimental_publishedRpcMethods: NonNullable<
+    ReturnType<typeof publishRpcMethod>
+  >[];
   services: FakeServiceRecord[];
   schedules: FakeScheduleRecord[];
   cli: FakeCliRecord | null;
@@ -602,6 +607,7 @@ function jsonRoundTrip(value: unknown, what: string): unknown {
 }
 
 interface FakeRpcRecord {
+  publication: ReturnType<typeof publishRpcMethod>;
   inputSchema: StandardSchemaV1;
   outputSchema: StandardSchemaV1;
   handler: (input: never) => unknown;
@@ -1266,7 +1272,7 @@ function createFakePluginHostInternal(
   // --- rpc ---
   const rpcHandlers = new Map<string, FakeRpcRecord>();
   const rpc: PluginRpc = {
-    register(contract, handlers) {
+    register(contract, handlers, options) {
       assertLive();
       if (
         typeof contract !== "object" ||
@@ -1282,6 +1288,7 @@ function createFakePluginHostInternal(
       ) {
         throw new Error("rpc.register handlers must be an object");
       }
+      const publicationOptions = readRpcPublicationOptions(options);
       const pending: Array<[string, FakeRpcRecord]> = [];
       const contractEntries = Object.entries(contract);
       const contractNames = new Set(contractEntries.map(([name]) => name));
@@ -1311,6 +1318,11 @@ function createFakePluginHostInternal(
         pending.push([
           name,
           {
+            publication: publishRpcMethod(
+              name,
+              methodContract,
+              publicationOptions,
+            ),
             inputSchema: methodContract.input,
             outputSchema: methodContract.output,
             handler: handler as (input: never) => unknown,
@@ -2219,6 +2231,11 @@ function createFakePluginHostInternal(
       settingsDescriptors,
       httpRoutes,
       websocketRoutes,
+      get experimental_publishedRpcMethods() {
+        return [...rpcHandlers.values()].flatMap((record) =>
+          record.publication === null ? [] : [record.publication],
+        );
+      },
       get rpcMethods() {
         return [...rpcHandlers.keys()];
       },

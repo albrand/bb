@@ -287,6 +287,7 @@ type ExpectedHostsKey =
   | "update";
 
 type ExpectedPluginsKey =
+  | "experimental_discoverRpc"
   | "applyUpdate"
   | "callRpc"
   | "catalog"

@@ -732,6 +732,10 @@ export interface PluginRpc {
   register<Contract extends PluginRpcContract>(
     contract: Contract,
     handlers: PluginRpcHandlers<Contract>,
+    options?: {
+      experimental_discoverable?: boolean;
+      experimental_description?: string;
+    },
   ): void;
 }
 
