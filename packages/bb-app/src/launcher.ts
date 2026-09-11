@@ -3152,19 +3152,27 @@ async function restartManagedProcess(
   return null;
 }
 
+export const DAEMON_DETACH_HEAD_START_MS = 3_000;
+
 export async function terminateManagedFullStackProcesses(
   args: TerminateManagedFullStackProcessesArgs,
 ): Promise<void> {
-  const terminationPromises: Promise<void>[] = [];
   const serverRun = args.processes.serverRun;
   const daemonRun = args.processes.daemonRun;
-  if (serverRun !== null) {
-    terminationPromises.push(serverRun.terminate(args.signal));
-  }
-  if (daemonRun !== null) {
-    terminationPromises.push(daemonRun.terminate(args.signal));
-  }
-  await Promise.all(terminationPromises);
+  const daemonTermination =
+    daemonRun === null ? Promise.resolve() : daemonRun.terminate(args.signal);
+  let headStart: NodeJS.Timeout | undefined;
+  await Promise.race([
+    daemonTermination,
+    new Promise<void>((resolve) => {
+      headStart = setTimeout(resolve, DAEMON_DETACH_HEAD_START_MS);
+    }),
+  ]);
+  clearTimeout(headStart);
+  await Promise.all([
+    daemonTermination,
+    serverRun === null ? Promise.resolve() : serverRun.terminate(args.signal),
+  ]);
 }
 
 export async function superviseFullStackProcesses(
