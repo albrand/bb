@@ -47,6 +47,10 @@ export {
   upsertProjectExecutionDefaults,
 } from "./project-execution-defaults.js";
 export {
+  getThreadExecutionReport,
+  upsertThreadExecutionReport,
+} from "./thread-execution-reports.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,

@@ -7,6 +7,7 @@ import {
   listThreadEnvironmentAssignmentsOnHost,
   MissingStoredTurnStartedError,
   events as storedEvents,
+  upsertThreadExecutionReport,
 } from "@bb/db";
 import type {
   AcceptedDaemonEvent,
@@ -235,6 +236,7 @@ function resolveProviderIdentifiers(event: HostDaemonEventEnvelope["event"]): {
     case "provider/modelFallback":
     case "provider/rateLimits/updated":
     case "provider.env-resolved":
+    case "thread/execution/reported":
       return { providerThreadId: event.providerThreadId };
     case "thread/compacted":
       return { providerThreadId: event.providerThreadId };
@@ -869,6 +871,25 @@ function dropInteractionLifecycleEvents(entries: PostableEventBatchEntry[]): {
   return { entries: kept, droppedLifecycleEvents };
 }
 
+function storeExecutionReports<
+  TEntry extends { envelope: HostDaemonEventEnvelope },
+>(deps: AppDeps, entries: TEntry[]): TEntry[] {
+  const kept: TEntry[] = [];
+  for (const entry of entries) {
+    const { event, threadId } = entry.envelope;
+    if (event.type === "thread/execution/reported") {
+      upsertThreadExecutionReport(deps.db, {
+        threadId,
+        execution: event.execution,
+        reportedAt: Date.now(),
+      });
+      continue;
+    }
+    kept.push(entry);
+  }
+  return kept;
+}
+
 export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
   const { post } = typedRoutes<HostDaemonInternalSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
@@ -907,8 +928,9 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           hostId: session.hostId,
           events,
         });
-      const { entries, droppedLifecycleEvents } =
+      const { entries: lifecycleFilteredEntries, droppedLifecycleEvents } =
         dropInteractionLifecycleEvents(ownedEntries);
+      const entries = storeExecutionReports(deps, lifecycleFilteredEntries);
       if (droppedLifecycleEvents.length > 0) {
         deps.logger.warn(
           {

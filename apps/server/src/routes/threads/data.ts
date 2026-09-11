@@ -4,6 +4,7 @@ import {
   getLatestThreadSequence,
   getLatestStoredConversationOutlineSequence,
   getThreadExecutionOverride,
+  getThreadExecutionReport,
   listQueuedThreadMessages,
 } from "@bb/db";
 import type { Hono } from "hono";
@@ -569,7 +570,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         reasoningLevel: overrides?.reasoningLevelOverride ?? null,
       },
       nextTurn,
-      executed: null,
+      executed: getThreadExecutionReport(deps.db, threadId),
     };
     return context.json(response);
   });
