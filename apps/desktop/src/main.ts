@@ -122,6 +122,7 @@ import {
   createDesktopUpdateService,
   createDesktopUpdateFeedUrl,
   type DesktopUpdateService,
+  shouldEnableDesktopVersionCheck,
 } from "./desktop-update-check.js";
 import {
   DESKTOP_RELEASE_CHANNEL,
@@ -2145,7 +2146,7 @@ async function runDesktopApp(): Promise<void> {
     currentVersion: desktopVersion,
     enabled:
       desktopUpdateSupport.versionCheck &&
-      (app.isPackaged || process.env.BB_DESKTOP_VERSION_CHECK === "1"),
+      shouldEnableDesktopVersionCheck({ env: process.env }),
     feedUrl: desktopUpdateFeedUrl,
     logger: createDesktopLogger(),
     platform: desktopPlatform,

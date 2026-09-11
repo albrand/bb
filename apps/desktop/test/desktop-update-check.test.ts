@@ -5,6 +5,7 @@ import {
   DESKTOP_UPDATE_ACTIVE_MIN_INTERVAL_MS,
   DESKTOP_UPDATE_CHECK_TIMEOUT_MS,
   parseDesktopVersionFeed,
+  shouldEnableDesktopVersionCheck,
 } from "../src/desktop-update-check.js";
 
 const checkedAt = "2026-05-21T00:00:00.000Z";
@@ -333,5 +334,15 @@ describe("desktop update service", () => {
     });
 
     expect(service.getInfo().platform).toBe("linux");
+  });
+
+  it("fork build: the version check stays off unless asked", () => {
+    // albrand/bb publishes no version feed; checking it only returns 404s.
+    expect(shouldEnableDesktopVersionCheck({ env: {} })).toBe(false);
+    expect(
+      shouldEnableDesktopVersionCheck({
+        env: { BB_DESKTOP_VERSION_CHECK: "1" },
+      }),
+    ).toBe(true);
   });
 });
