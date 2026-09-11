@@ -231,6 +231,7 @@ async function startIntegrationServer(
     transcriptionModel: "test/mock-transcription",
     isDevelopment: false,
     managedEnvironmentRetireGraceMs: 0,
+    turnAcceptanceGraceMs: 0,
   };
   const terminalSessions = new TerminalSessionLifecycle({
     attachTimeoutMs: 50,

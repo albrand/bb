@@ -76,6 +76,29 @@ describe("bb thread tell command output", () => {
     );
   });
 
+  it("bb thread tell reports a daemon refusal and exits non-zero", async () => {
+    const post = vi.fn(async () => ({
+      ok: true,
+      delivery: "sent",
+      refusal: {
+        code: "live_command_failed",
+        message: "Refusing to start a competing turn",
+      },
+    }));
+    stubServerApi({ "v1.threads.:id.send.$post": post });
+
+    try {
+      await runCommand(["thread", "tell", "thread-wedged", "hello"], register);
+
+      expect(String(vi.mocked(console.log).mock.calls[0]?.[0])).toMatch(
+        /^Thread thread-wedged refused the message: Refusing to start a competing turn\n.*bb thread stop thread-wedged/u,
+      );
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = undefined;
+    }
+  });
+
   it("bb thread tell keeps the steered wording for servers that only report ok", async () => {
     const post = vi.fn(async () => ({ ok: true }));
     stubServerApi({ "v1.threads.:id.send.$post": post });

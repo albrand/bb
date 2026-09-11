@@ -479,6 +479,9 @@ export function registerActionsCommands(
               ? {}
               : { sendAt: parseSendAt(opts.sendAt) }),
           });
+          if (response.delivery === "sent" && response.refusal) {
+            process.exitCode = 1;
+          }
           if (outputJson(opts, { threadId: id, ...response })) return;
           console.log(describeThreadTellOutcome(id, response));
         },
@@ -512,6 +515,9 @@ export function registerActionsCommands(
               : { sendAt: parseSendAt(opts.sendAt) }),
             ...(opts.reason === undefined ? {} : { reason: opts.reason }),
           });
+          if (response.delivery === "sent" && response.refusal) {
+            process.exitCode = 1;
+          }
           if (outputJson(opts, { threadId, ...response })) return;
           console.log(describeThreadRetryOutcome(threadId, response));
         },
@@ -632,6 +638,9 @@ function describeThreadTellOutcome(
     // same reason for the row afterwards.
     return `Thread ${threadId} message queued (${describeQueueWait(response.queuedMessage)}); it dispatches when that clears`;
   }
+  if (response.refusal) {
+    return describeRefusal(threadId, response.refusal);
+  }
   return response.mode === "steer"
     ? `Thread ${threadId} steered`
     : `Thread ${threadId} updated`;
@@ -647,9 +656,23 @@ function describeThreadRetryOutcome(
   response: ThreadRetryResult,
 ): string {
   const turn = `turn ${response.turnRequestId} (attempt ${response.attempt})`;
+  if (response.delivery === "sent" && response.refusal) {
+    return describeRefusal(threadId, response.refusal);
+  }
   return response.delivery === "queued"
     ? `Thread ${threadId} retry of ${turn} queued (${describeQueueWait(response)}); it dispatches when that clears`
     : `Thread ${threadId} retrying ${turn}`;
+}
+
+/**
+ * The daemon refused the turn: the message is on the thread as a failed turn,
+ * not running. `stop` clears a turn the daemon still holds.
+ */
+function describeRefusal(
+  threadId: string,
+  refusal: { code: string; message: string },
+): string {
+  return `Thread ${threadId} refused the message: ${refusal.message}\nIt is recorded as a failed turn. If a turn is stuck, run \`bb thread stop ${threadId}\`, then \`bb thread retry ${threadId}\`.`;
 }
 
 /** One short phrase for a queued row's wait, shared by `tell` and `queue`. */

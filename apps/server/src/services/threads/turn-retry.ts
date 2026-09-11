@@ -236,6 +236,7 @@ export async function retryFailedTurn(
         delivery: "sent",
         turnRequestId: originalRequestId,
         attempt,
+        ...(outcome.refusal ? { refusal: outcome.refusal } : {}),
       };
     }
     return {

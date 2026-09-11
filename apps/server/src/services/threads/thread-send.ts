@@ -98,6 +98,61 @@ interface SendThreadMessageArgs {
   trigger: SendThreadMessageTrigger;
 }
 
+/** The daemon's refusal of a turn it was sent, as the caller should see it. */
+export interface ThreadSendRefusal {
+  code: string;
+  message: string;
+}
+
+/**
+ * What a send learned from the daemon. `refusal` is null both when the daemon
+ * accepted the turn and when it had not answered within the grace period.
+ */
+export interface ThreadSendResult {
+  refusal: ThreadSendRefusal | null;
+}
+
+/** Held across the send guard, awaited after it: see `sendThreadMessage`. */
+interface DispatchedThreadSend {
+  acceptance: Promise<ThreadSendRefusal | null>;
+}
+
+const NO_REFUSAL: DispatchedThreadSend = { acceptance: Promise.resolve(null) };
+
+interface TurnAcceptanceWatch {
+  refuse: (error: Error) => void;
+  settle: () => void;
+  result: Promise<ThreadSendRefusal | null>;
+}
+
+function watchTurnAcceptance(graceMs: number): TurnAcceptanceWatch {
+  if (graceMs <= 0) {
+    // No wait at all, not a zero-length one: a timer, however short, never
+    // fires under fake timers and would hang the send.
+    return { refuse: () => {}, settle: () => {}, result: NO_REFUSAL.acceptance };
+  }
+  let resolve: (refusal: ThreadSendRefusal | null) => void = () => {};
+  const result = new Promise<ThreadSendRefusal | null>((settle) => {
+    resolve = settle;
+  });
+  const timer = setTimeout(() => resolve(null), graceMs);
+  timer.unref?.();
+  return {
+    refuse: (error) => {
+      clearTimeout(timer);
+      resolve({
+        code: error instanceof ApiError ? error.body.code : "turn_refused",
+        message: error.message,
+      });
+    },
+    settle: () => {
+      clearTimeout(timer);
+      resolve(null);
+    },
+    result,
+  };
+}
+
 interface ResolveMessageSenderArgs {
   senderThreadId?: string;
   targetThread: Thread;
@@ -402,23 +457,25 @@ function appendAndQueueSendThreadMessageInTransaction({
 export async function sendThreadMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
-): Promise<void> {
+): Promise<ThreadSendResult> {
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
     await clearThreadContext(deps, {
       environment: args.environment,
       thread: args.thread,
     });
-    return;
+    return { refusal: null };
   }
-  return withThreadSendGuard(args.thread.id, () =>
+  const dispatched = await withThreadSendGuard(args.thread.id, () =>
     sendThreadMessageWithoutContextClear(deps, args),
   );
+  // Outside the guard: waiting on the daemon must not hold up the next send.
+  return { refusal: await dispatched.acceptance };
 }
 
 async function sendThreadMessageWithoutContextClear(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
-): Promise<void> {
+): Promise<DispatchedThreadSend> {
   const { environment, payload, thread } = args;
   ensureThreadIsWritable(thread);
   if (args.trigger === "user") {
@@ -541,7 +598,7 @@ async function sendThreadMessageWithoutContextClear(
     if (shouldCaptureUserMessageSent) {
       captureUserMessageSentTelemetry(deps, thread);
     }
-    return;
+    return NO_REFUSAL;
   }
   const readyEnvironment = requireReadyThreadEnvironment(
     getEnvironment(deps.db, environment.id) ?? environment,
@@ -640,18 +697,31 @@ async function sendThreadMessageWithoutContextClear(
       queuedRequest.request.notificationChanges,
       queuedRequest.request.notificationMetadata,
     );
+    // Only a submit answers promptly; a `thread.start` answers once the
+    // provider session exists, which is no signal about the message.
+    const acceptance =
+      command.mode === "turn.submit"
+        ? watchTurnAcceptance(deps.config.turnAcceptanceGraceMs)
+        : null;
+    const onCommandSettled = args.historyReplacement?.onCommandSettled;
     startLiveHostCommand(deps, {
       command: command.command,
       hostId: readyEnvironment.hostId,
       timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
-      ...(args.historyReplacement?.onCommandSettled !== undefined
-        ? { onSettled: args.historyReplacement.onCommandSettled }
+      ...(acceptance !== null || onCommandSettled !== undefined
+        ? {
+            onSettled: async () => {
+              acceptance?.settle();
+              await onCommandSettled?.();
+            },
+          }
         : {}),
       onError: ({ error }) => {
         deps.logger.warn(
           { err: error, threadId: thread.id },
           "Live ready turn command failed",
         );
+        acceptance?.refuse(error);
       },
     });
     if (queuedRequest.activeThread) {
@@ -664,7 +734,7 @@ async function sendThreadMessageWithoutContextClear(
     if (shouldCaptureUserMessageSent) {
       captureUserMessageSentTelemetry(deps, thread);
     }
-    return;
+    return acceptance === null ? NO_REFUSAL : { acceptance: acceptance.result };
   }
 
   await ensureHostSessionReadyForWork(deps, {
@@ -714,18 +784,22 @@ async function sendThreadMessageWithoutContextClear(
     queuedRequest.request.notificationChanges,
     queuedRequest.request.notificationMetadata,
   );
+  const acceptance = watchTurnAcceptance(deps.config.turnAcceptanceGraceMs);
   startLiveHostCommand(deps, {
     command,
     hostId: readyEnvironment.hostId,
     timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
+    onSettled: () => acceptance.settle(),
     onError: ({ error }) => {
       deps.logger.warn(
         { err: error, threadId: thread.id },
         "Live turn submit command failed",
       );
+      acceptance.refuse(error);
     },
   });
   if (shouldCaptureUserMessageSent) {
     captureUserMessageSentTelemetry(deps, thread);
   }
+  return { acceptance: acceptance.result };
 }

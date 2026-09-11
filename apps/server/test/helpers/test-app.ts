@@ -202,6 +202,9 @@ export async function createTestAppHarness(
     inferenceModel: "test/mock-model",
     isDevelopment: true,
     managedEnvironmentRetireGraceMs: MANAGED_ENVIRONMENT_RETIRE_GRACE_MS,
+    // The capture never answers a submit, so a real grace would add seconds to
+    // every send. Tests of the grace itself override it.
+    turnAcceptanceGraceMs: 0,
     openAiApiKey: "test-openai-key",
     serverPort: 3334,
     sharedSkillRoots: { user: [], project: [] },
