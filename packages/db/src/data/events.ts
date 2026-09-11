@@ -69,7 +69,6 @@ import {
 } from "./retained-event-outputs.js";
 
 const STORED_EVENT_SEQUENCE_LOOKUP_CHUNK_SIZE = 250;
-export const STORED_TIMELINE_BYTE_PREFLIGHT_EVENT_LIMIT = 2_000;
 const SQLITE_MAX_VARIABLE_NUMBER = 32_766;
 const CLIENT_TURN_REQUEST_KEY_BATCH_SIZE = 995;
 const RESOLVED_ITEM_DELTA_PRUNE_BATCH_SIZE = 500;
@@ -1023,15 +1022,27 @@ export function getHighWaterMarks(
   const result: Record<string, number> = {};
 
   if (threadIds && threadIds.length > 0) {
-    const rows = db
-      .select({
-        threadId: events.threadId,
-        maxSeq: max(events.sequence),
-      })
-      .from(events)
-      .where(inArray(events.threadId, threadIds))
-      .groupBy(events.threadId)
-      .all();
+    const rows = queryInSqliteVariableBatches({
+      dedupeKey: (threadId) => threadId,
+      fixedVariableCount: 0,
+      queryBatch: (ids) =>
+        db.all<{ threadId: string; maxSeq: number | null }>(sql`
+          WITH requested(thread_id) AS (
+            VALUES ${sql.join(
+              ids.map((id) => sql`(${id})`),
+              sql`, `,
+            )}
+          )
+          SELECT thread_id AS threadId, (
+            SELECT sequence FROM events
+            WHERE events.thread_id = requested.thread_id
+            ORDER BY sequence DESC LIMIT 1
+          ) AS maxSeq
+          FROM requested
+        `),
+      values: threadIds,
+      variableCountPerValue: 1,
+    });
     for (const row of rows) {
       if (row.maxSeq != null) {
         result[row.threadId] = row.maxSeq;
@@ -1496,16 +1507,21 @@ export function listOpenTurnInputAcceptedRowsByThreadIds(
       const completed = alias(events, "completed_turn_for_accepted_input");
       return db
         .select(storedEventRowFields)
-        .from(events)
+        .from(
+          sql`(VALUES ${sql.join(
+            threadIds.map((id) => sql`(${id})`),
+            sql`, `,
+          )}) AS requested`,
+        )
+        .innerJoin(events, eq(events.threadId, sql`requested.column1`))
         .where(
           and(
-            inArray(events.threadId, [...threadIds]),
             eq(events.type, acceptedType),
             isNotNull(events.turnId),
             sql`${events.sequence} > COALESCE((
           SELECT MAX(interrupted.sequence)
           FROM events interrupted
-          WHERE interrupted.thread_id = ${events.threadId}
+          WHERE interrupted.thread_id = requested.column1
             AND interrupted.type = ${interruptedType}
         ), -1)`,
             notExists(
@@ -1545,11 +1561,21 @@ export function listStoredClientTurnRequestRowsByKeys(
     maximumValueCount: CLIENT_TURN_REQUEST_KEY_BATCH_SIZE,
     queryBatch: (keys) => {
       const requestType = "client/turn/requested" satisfies ThreadEventType;
-      const keyConditions = keys.map((key) =>
-        and(
-          eq(events.threadId, key.threadId),
-          sql`json_extract(${events.data}, '$.requestId') = ${key.requestId}`,
-        ),
+      const requestIdsByThread = new Map<string, string[]>();
+      for (const key of keys) {
+        const requestIds = requestIdsByThread.get(key.threadId) ?? [];
+        requestIds.push(key.requestId);
+        requestIdsByThread.set(key.threadId, requestIds);
+      }
+      const keyConditions = [...requestIdsByThread].map(
+        ([threadId, requestIds]) =>
+          and(
+            eq(events.threadId, threadId),
+            inArray(
+              sql<string>`json_extract(${events.data}, '$.requestId')`,
+              requestIds,
+            ),
+          ),
       );
       return db
         .select(storedEventRowFields)
@@ -3114,48 +3140,10 @@ export function getStoredTimelineWindowEventDataBytes(
   return row?.dataBytes ?? 0;
 }
 
-function getStoredTimelineWindowEventDataBytesPreflight(
-  db: DbConnection,
-  args: GetStoredTimelineWindowEventDataBytesArgs,
-): { dataBytes: number; isComplete: boolean } {
-  const data = storedTimelineWindowDataColumn(args.maxInlineOutputChars);
-  const boundedWindow = db
-    .select({ data: sql<string>`${data}`.as("data") })
-    .from(events)
-    .where(and(...storedTimelineWindowConditions(args)))
-    .orderBy(desc(events.sequence))
-    .limit(STORED_TIMELINE_BYTE_PREFLIGHT_EVENT_LIMIT + 1)
-    .as("bounded_timeline_byte_window");
-  const row = db
-    .select({
-      dataBytes: sql<number>`COALESCE(SUM(length(CAST(${boundedWindow.data} AS BLOB))), 0)`,
-      eventCount: sql<number>`COUNT(*)`,
-    })
-    .from(boundedWindow)
-    .get();
-  return {
-    dataBytes: row?.dataBytes ?? 0,
-    isComplete:
-      (row?.eventCount ?? 0) <= STORED_TIMELINE_BYTE_PREFLIGHT_EVENT_LIMIT,
-  };
-}
-
 export function findStoredTimelineWindowByteBudgetFloor(
   db: DbConnection,
   args: FindStoredTimelineWindowByteBudgetFloorArgs,
 ): StoredTimelineWindowByteBudgetFloor {
-  const preflight = getStoredTimelineWindowEventDataBytesPreflight(db, {
-    beforeSequence: args.beforeSequence,
-    excludedTypes: args.excludedTypes,
-    excludeDiagnosticEvents: args.excludeDiagnosticEvents,
-    maxInlineOutputChars: args.maxInlineOutputChars,
-    sequenceStart: args.sequenceStart,
-    threadId: args.threadId,
-  });
-  if (preflight.isComplete && preflight.dataBytes <= args.maxDataBytes) {
-    return { eventDataBytes: preflight.dataBytes, kind: "fits" };
-  }
-
   const data = storedTimelineWindowDataColumn(args.maxInlineOutputChars);
   const query = db
     .select({
