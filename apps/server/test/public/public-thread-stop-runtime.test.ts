@@ -61,6 +61,46 @@ describe("thread runtime stop", () => {
     });
   });
 
+  it("interrupts when the daemon declines a release to keep an active turn", async () => {
+    await withTestHarness(async (harness) => {
+      // The server believes the thread is idle, but the daemon still holds a
+      // turn that never reported completion. Left in place, every later send
+      // is refused with "Refusing to start a competing turn".
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "idle", visibility: "hidden" },
+      });
+      const responsePromise = harness.app.request(
+        `/api/v1/threads/${thread.id}/stop`,
+        { method: "POST" },
+      );
+      const release = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" &&
+          command.threadId === thread.id &&
+          command.intent === "release",
+      );
+      await reportQueuedCommandSuccess(harness, release, {
+        providerCheckpointId: null,
+        activeTurnRetained: true,
+      });
+
+      const interrupt = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" &&
+          command.threadId === thread.id &&
+          command.intent === "interrupt",
+      );
+      await reportQueuedCommandSuccess(harness, interrupt, {
+        providerCheckpointId: null,
+      });
+
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+    });
+  });
+
   it("settles background commands terminated by an idle runtime release", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness, {

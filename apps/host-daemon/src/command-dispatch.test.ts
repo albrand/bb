@@ -1041,7 +1041,10 @@ describe("dispatchCommand", () => {
 
     expect(runtime.stopThread).not.toHaveBeenCalled();
     expect(runtime.getActiveTurnId("thread-1")).toBe("turn-new");
-    expect(result).toEqual({ providerCheckpointId: null });
+    expect(result).toEqual({
+      providerCheckpointId: null,
+      activeTurnRetained: true,
+    });
   });
 
   it("treats thread.stop as successful when no runtime holds the thread", async () => {
