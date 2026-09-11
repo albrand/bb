@@ -1,10 +1,11 @@
 import type { ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
   closeSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -24,6 +25,7 @@ import {
   BRIDGE_RESUME_METHOD,
   BRIDGE_SOCKET_ENV,
   BRIDGE_SOCKET_TRANSPORT_VERSION,
+  BRIDGE_SPILL_ENV,
   decodeBridgeFrame,
   readBoundedLines,
 } from "@bb/provider-bridge-protocol/bridge-kit";
@@ -59,6 +61,7 @@ export interface BridgeWorkerPaths {
   id: string;
   socketPath: string;
   logPath: string;
+  spillPath: string;
 }
 
 export interface SpawnSocketBridgeWorkerArgs {
@@ -143,6 +146,7 @@ const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
 const BRIDGE_WORKER_ACK_INTERVAL_MS = 25;
 const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
+const SOCKET_DIRECTORY_DIGEST_CHARS = 16;
 
 export function allocateBridgeWorkerPaths(
   workerDir: string,
@@ -150,17 +154,80 @@ export function allocateBridgeWorkerPaths(
   ensurePrivateDirectory(workerDir);
   const id = randomBytes(6).toString("hex");
   const logPath = join(workerDir, `${id}.log`);
+  const spillPath = join(workerDir, `${id}.buf`);
   if (process.platform === "win32") {
-    return { id, socketPath: `\\\\.\\pipe\\bb-bridge-worker-${id}`, logPath };
+    return {
+      id,
+      socketPath: `\\\\.\\pipe\\bb-bridge-worker-${id}`,
+      logPath,
+      spillPath,
+    };
   }
-  const socketPath = join(workerDir, `${id}.sock`);
-  const socketPathBytes = Buffer.byteLength(socketPath);
-  if (socketPathBytes > UNIX_SOCKET_PATH_MAX_BYTES) {
+  const socketName = `${id}.sock`;
+  const socketDir = fitsUnixSocketPath(join(workerDir, socketName))
+    ? workerDir
+    : fallbackSocketDirectory(workerDir);
+  const socketPath = join(socketDir, socketName);
+  if (!fitsUnixSocketPath(socketPath)) {
     throw new Error(
-      `Bridge worker socket path is ${socketPathBytes} bytes, over the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte unix socket path limit on ${process.platform}: ${socketPath}`,
+      `Bridge worker socket path is ${Buffer.byteLength(socketPath)} bytes, over the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte unix socket path limit on ${process.platform}: ${socketPath}`,
     );
   }
-  return { id, socketPath, logPath };
+  return { id, socketPath, logPath, spillPath };
+}
+
+function fitsUnixSocketPath(path: string): boolean {
+  return Buffer.byteLength(path) <= UNIX_SOCKET_PATH_MAX_BYTES;
+}
+
+function fallbackSocketDirectory(workerDir: string): string {
+  const uid = process.getuid?.();
+  if (uid === undefined) {
+    throw new Error(
+      `Bridge worker directory ${workerDir} is too long for a unix socket path, and there is no user id for a private fallback directory`,
+    );
+  }
+  return privateSocketDirectory({ root: `/tmp/bb-${uid}`, uid, workerDir });
+}
+
+export function privateSocketDirectory(args: {
+  root: string;
+  uid: number;
+  workerDir: string;
+}): string {
+  const digest = createHash("sha256").update(args.workerDir).digest("hex");
+  const dir = join(args.root, digest.slice(0, SOCKET_DIRECTORY_DIGEST_CHARS));
+  for (const path of [args.root, dir]) {
+    try {
+      mkdirSync(path, { mode: 0o700 });
+    } catch (error) {
+      if (!(error instanceof Error && Reflect.get(error, "code") === "EEXIST")) {
+        throw error;
+      }
+    }
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      throw new Error(
+        `Refusing bridge worker socket directory ${path}: it is a symlink`,
+      );
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(
+        `Refusing bridge worker socket directory ${path}: it is not a directory`,
+      );
+    }
+    if (stat.uid !== args.uid) {
+      throw new Error(
+        `Refusing bridge worker socket directory ${path}: it is owned by uid ${stat.uid}, not the current user (${args.uid})`,
+      );
+    }
+    if ((stat.mode & 0o077) !== 0) {
+      throw new Error(
+        `Refusing bridge worker socket directory ${path}: it has mode ${(stat.mode & 0o777).toString(8)}, not 700`,
+      );
+    }
+  }
+  return dir;
 }
 
 function ensurePrivateDirectory(dir: string): void {
@@ -231,7 +298,11 @@ export class SocketBridgeWorker
           args: args.args,
           cwd: args.cwd,
           detached: supportsProcessGroups(),
-          env: { ...args.env, [BRIDGE_SOCKET_ENV]: this.socketPath },
+          env: {
+            ...args.env,
+            [BRIDGE_SOCKET_ENV]: this.socketPath,
+            [BRIDGE_SPILL_ENV]: paths.spillPath,
+          },
           stdio: ["ignore", logFd, logFd],
         });
       } finally {

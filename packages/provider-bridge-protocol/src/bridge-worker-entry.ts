@@ -13,6 +13,7 @@ import {
   BRIDGE_REPLAY_HARD_CAP_BYTES,
   BRIDGE_REPLAY_MEMORY_CAP_BYTES,
   BRIDGE_SOCKET_ENV,
+  BRIDGE_SPILL_ENV,
   createBridgeSocketServer,
 } from "./bridge-kit/bridge-socket-server.js";
 import {
@@ -65,14 +66,23 @@ function reportOversizedLine(bytes: number): void {
 const providerPauser = createDescendantPauser();
 const bridgeSocketPath = process.env[BRIDGE_SOCKET_ENV] ?? "";
 delete process.env[BRIDGE_SOCKET_ENV];
+const bridgeSpillPath = process.env[BRIDGE_SPILL_ENV] ?? "";
+delete process.env[BRIDGE_SPILL_ENV];
+
+function socketSpillPath(): string {
+  if (bridgeSpillPath !== "") return bridgeSpillPath;
+  if (bridgeSocketPath.endsWith(".sock")) {
+    return `${bridgeSocketPath.slice(0, -".sock".length)}.buf`;
+  }
+  return join(tempDir, "replay.buf");
+}
+
 const socketServer =
   bridgeSocketPath === ""
     ? null
     : createBridgeSocketServer({
         socketPath: bridgeSocketPath,
-        spillPath: bridgeSocketPath.endsWith(".sock")
-          ? `${bridgeSocketPath.slice(0, -".sock".length)}.buf`
-          : join(tempDir, "replay.buf"),
+        spillPath: socketSpillPath(),
         reattachTtlMs: BRIDGE_REATTACH_TTL_MS,
         memoryCapBytes: BRIDGE_REPLAY_MEMORY_CAP_BYTES,
         hardCapBytes: BRIDGE_REPLAY_HARD_CAP_BYTES,

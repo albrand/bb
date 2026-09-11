@@ -1,6 +1,16 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
 import { connect } from "node:net";
@@ -11,6 +21,7 @@ import {
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 import { readBridgeWorkerEntries } from "./bridge-worker-registry.js";
+import { privateSocketDirectory } from "./bridge-worker-socket.js";
 import type { AgentRuntimeProcessExitInfo } from "./types.js";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
@@ -96,6 +107,70 @@ describe("socket bridge workers", () => {
     }
     expect(readdirSync(bridgeWorkerDir)).toEqual([]);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "places the socket in a private /tmp directory when the data dir is too long for one beside the registry",
+    async () => {
+      const longWorkerDir = join(
+        dirname(bridgeWorkerDir),
+        "d".repeat(120),
+        "bridge-workers",
+      );
+      const events: ThreadEvent[] = [];
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath,
+          bridgeWorkers: {
+            dir: longWorkerDir,
+            environmentId: "env-1",
+            workspace: {
+              workspacePath,
+              workspaceProvisionType: "unmanaged",
+              personalWorkspaceRoot: null,
+            },
+          },
+          onEvent: (event) => events.push(event),
+        },
+      });
+      let socketDir: string | null = null;
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: fullRuntimeOptions,
+        });
+        const [registered] = readBridgeWorkerEntries(longWorkerDir).entries;
+        if (registered === undefined) throw new Error("no registered worker");
+        socketDir = dirname(registered.socketPath);
+        const root = `/tmp/bb-${process.getuid?.()}`;
+        expect(dirname(socketDir)).toBe(root);
+        expect(registered.socketPath).toMatch(/\/[0-9a-f]{12}\.sock$/u);
+        expect(Buffer.byteLength(registered.socketPath)).toBeLessThanOrEqual(
+          103,
+        );
+        expect(lstatSync(root).mode & 0o777).toBe(0o700);
+        expect(lstatSync(socketDir).mode & 0o777).toBe(0o700);
+        expect(existsSync(registered.socketPath)).toBe(true);
+
+        await runtime.runTurn({
+          clientRequestId: "creq_555555554d",
+          threadId: "t1",
+          input: [promptTextInput({ text: "hello over a long data dir" })],
+          options: fullRuntimeOptions,
+        });
+        await waitForThreadTurnCompleted({ events, threadId: "t1" });
+      } finally {
+        await runtime.shutdown();
+        if (socketDir !== null) {
+          expect(readdirSync(socketDir)).toEqual([]);
+          rmSync(socketDir, { recursive: true, force: true });
+        }
+      }
+      expect(readdirSync(longWorkerDir)).toEqual([]);
+    },
+  );
 
   it("reports the tail of a crashed socket worker's log as its stderr", async () => {
     const bridgeModulePath = join(workspacePath, "crashing-bridge.mjs");
@@ -419,6 +494,79 @@ describe("socket bridge workers", () => {
     }
   }, 20_000);
 });
+
+describe.skipIf(process.platform === "win32")(
+  "private socket directory",
+  () => {
+    let parent: string;
+    let root: string;
+    const uid = process.getuid?.() ?? -1;
+    const workerDir = "/some/long/data/dir/bridge-workers";
+
+    beforeEach(() => {
+      parent = shortTempDir();
+      root = join(parent, "bb-root");
+    });
+
+    afterEach(() => {
+      rmSync(parent, { recursive: true, force: true });
+    });
+
+    it("creates the root and a per-data-dir directory, both 0700, and returns the same one for the same data dir", () => {
+      const dir = privateSocketDirectory({ root, uid, workerDir });
+
+      expect(dirname(dir)).toBe(root);
+      expect(lstatSync(root).mode & 0o777).toBe(0o700);
+      expect(lstatSync(dir).mode & 0o777).toBe(0o700);
+      expect(privateSocketDirectory({ root, uid, workerDir })).toBe(dir);
+      expect(
+        privateSocketDirectory({ root, uid, workerDir: `${workerDir}-2` }),
+      ).not.toBe(dir);
+    });
+
+    it("refuses a root that is a symlink, even to a private directory the user owns", () => {
+      const target = join(parent, "elsewhere");
+      mkdirSync(target, { mode: 0o700 });
+      symlinkSync(target, root);
+
+      expect(() => privateSocketDirectory({ root, uid, workerDir })).toThrow(
+        /symlink/u,
+      );
+      expect(readdirSync(target)).toEqual([]);
+    });
+
+    it("refuses a root that other users can reach", () => {
+      mkdirSync(root, { mode: 0o700 });
+      chmodSync(root, 0o755);
+
+      expect(() => privateSocketDirectory({ root, uid, workerDir })).toThrow(
+        /mode 755/u,
+      );
+      expect(readdirSync(root)).toEqual([]);
+    });
+
+    it("refuses a root owned by another user", () => {
+      mkdirSync(root, { mode: 0o700 });
+
+      expect(() =>
+        privateSocketDirectory({ root, uid: uid + 1, workerDir }),
+      ).toThrow(/owned by uid/u);
+      expect(readdirSync(root)).toEqual([]);
+    });
+
+    it("refuses a per-data-dir directory replaced by a symlink", () => {
+      const dir = privateSocketDirectory({ root, uid, workerDir });
+      const target = join(parent, "elsewhere");
+      mkdirSync(target, { mode: 0o700 });
+      rmSync(dir, { recursive: true });
+      symlinkSync(target, dir);
+
+      expect(() => privateSocketDirectory({ root, uid, workerDir })).toThrow(
+        /symlink/u,
+      );
+    });
+  },
+);
 
 async function framesReplayedAfterResume(
   socketPath: string,
