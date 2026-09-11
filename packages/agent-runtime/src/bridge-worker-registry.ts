@@ -1,9 +1,11 @@
 import { execFile, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
+  lstatSync,
   readdirSync,
   readFileSync,
   renameSync,
+  type Stats,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -52,6 +54,63 @@ export type BridgeWorkerRegistryEntry = z.infer<
 >;
 
 const ENTRY_SUFFIX = ".json";
+const SOCKET_DIRECTORY_DIGEST_CHARS = 16;
+
+export function fallbackSocketRoot(uid: number): string {
+  return `/tmp/bb-${uid}`;
+}
+
+export function socketDirectoryFor(root: string, workerDir: string): string {
+  const digest = createHash("sha256").update(workerDir).digest("hex");
+  return join(root, digest.slice(0, SOCKET_DIRECTORY_DIGEST_CHARS));
+}
+
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+}
+
+export function privateDirectoryProblem(
+  path: string,
+  uid: number,
+): string | null {
+  const stat = lstatOrNull(path);
+  if (stat === null) return "it does not exist";
+  if (stat.isSymbolicLink()) return "it is a symlink";
+  if (!stat.isDirectory()) return "it is not a directory";
+  if (stat.uid !== uid) {
+    return `it is owned by uid ${stat.uid}, not the current user (${uid})`;
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    return `it has mode ${(stat.mode & 0o777).toString(8)}, not 700`;
+  }
+  return null;
+}
+
+function isTrustedSocketPath(
+  dir: string,
+  id: string,
+  socketPath: string,
+): boolean {
+  if (process.platform === "win32") {
+    return socketPath === `\\\\.\\pipe\\bb-bridge-worker-${id}`;
+  }
+  if (lstatOrNull(socketPath)?.isSymbolicLink() === true) return false;
+  const name = `${id}.sock`;
+  if (socketPath === join(dir, name)) return true;
+  const uid = process.getuid?.();
+  if (uid === undefined) return false;
+  const root = fallbackSocketRoot(uid);
+  const fallbackDir = socketDirectoryFor(root, dir);
+  return (
+    socketPath === join(fallbackDir, name) &&
+    privateDirectoryProblem(root, uid) === null &&
+    privateDirectoryProblem(fallbackDir, uid) === null
+  );
+}
 
 function entryPath(dir: string, id: string): string {
   return join(dir, `${id}${ENTRY_SUFFIX}`);
@@ -102,7 +161,11 @@ export function readBridgeWorkerEntries(dir: string): {
       const parsed = bridgeWorkerRegistryEntrySchema.safeParse(
         JSON.parse(readFileSync(join(dir, name), "utf8")),
       );
-      if (parsed.success && parsed.data.id === id) {
+      if (
+        parsed.success &&
+        parsed.data.id === id &&
+        isTrustedSocketPath(dir, id, parsed.data.socketPath)
+      ) {
         entries.push(parsed.data);
         continue;
       }
