@@ -361,6 +361,16 @@ export function addTokenUsage(
     totalTokens: total.totalTokens + last.totalTokens,
     inputTokens: total.inputTokens + last.inputTokens,
     cachedInputTokens: total.cachedInputTokens + last.cachedInputTokens,
+    // Optional on the wire: stay absent until some request reports it, so a
+    // provider that never does is not shown as writing zero.
+    ...(total.cacheWriteInputTokens === undefined &&
+    last.cacheWriteInputTokens === undefined
+      ? {}
+      : {
+          cacheWriteInputTokens:
+            (total.cacheWriteInputTokens ?? 0) +
+            (last.cacheWriteInputTokens ?? 0),
+        }),
     outputTokens: total.outputTokens + last.outputTokens,
     reasoningOutputTokens:
       total.reasoningOutputTokens + last.reasoningOutputTokens,

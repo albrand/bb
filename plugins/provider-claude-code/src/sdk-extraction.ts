@@ -337,6 +337,7 @@ function toTokenUsageBreakdown(
     totalTokens: inputTokens + outputTokens + cachedInputTokens,
     inputTokens,
     cachedInputTokens,
+    cacheWriteInputTokens: cacheCreationTokens,
     outputTokens,
     reasoningOutputTokens: 0,
   };
