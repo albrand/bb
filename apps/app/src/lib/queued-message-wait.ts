@@ -22,9 +22,22 @@ export function formatQueuedMessageCountdown(
   return `in ${Math.floor(remainingMs / DAY_MS)}d`;
 }
 
-export function isQueuedMessageSendNowAllowed(
-  waitingOn: QueuedMessageWaitingOn | null,
-): boolean {
+/**
+ * Whether the row offers "Send now".
+ *
+ * A failed row always does, whatever it is waiting on. Those waits normally
+ * mean "the server will do this for you, asking again changes nothing" — but a
+ * row the drain gave up on is precisely the case where nothing is going to
+ * happen on its own, and the queue's explicit-send path ignores the failure
+ * that the automatic drains refuse to look past. Without this the only
+ * affordance on a failed message is delete.
+ */
+export function isQueuedMessageSendNowAllowed(args: {
+  failureReason: string | null;
+  waitingOn: QueuedMessageWaitingOn | null;
+}): boolean {
+  if (args.failureReason !== null) return true;
+  const waitingOn = args.waitingOn;
   if (waitingOn === null) return true;
   switch (waitingOn.kind) {
     case "provisioning":

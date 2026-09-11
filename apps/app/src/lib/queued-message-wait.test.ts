@@ -200,25 +200,43 @@ describe("queuedMessageFallbackTitle", () => {
 });
 
 describe("isQueuedMessageSendNowAllowed", () => {
+  const waiting = (waitingOn: QueuedMessageWaitingOn | null) =>
+    isQueuedMessageSendNowAllowed({ failureReason: null, waitingOn });
+
   it("hides send-now only for the waits a re-attempt cannot clear", () => {
-    expect(isQueuedMessageSendNowAllowed({ kind: "time" })).toBe(true);
+    expect(waiting({ kind: "time" })).toBe(true);
     expect(
-      isQueuedMessageSendNowAllowed({
+      waiting({
         kind: "plugin",
         pluginId: "limiter",
         reason: "busy",
       }),
     ).toBe(true);
-    expect(isQueuedMessageSendNowAllowed({ kind: "thread-busy" })).toBe(true);
-    expect(isQueuedMessageSendNowAllowed({ kind: "turn-starting" })).toBe(
-      false,
-    );
-    expect(isQueuedMessageSendNowAllowed(null)).toBe(true);
-    expect(isQueuedMessageSendNowAllowed({ kind: "provisioning" })).toBe(false);
-    expect(isQueuedMessageSendNowAllowed({ kind: "interaction" })).toBe(false);
-    expect(
-      isQueuedMessageSendNowAllowed({ kind: "host-offline", hostName: "M4" }),
-    ).toBe(false);
+    expect(waiting({ kind: "thread-busy" })).toBe(true);
+    expect(waiting({ kind: "turn-starting" })).toBe(false);
+    expect(waiting(null)).toBe(true);
+    expect(waiting({ kind: "provisioning" })).toBe(false);
+    expect(waiting({ kind: "interaction" })).toBe(false);
+    expect(waiting({ kind: "host-offline", hostName: "M4" })).toBe(false);
+  });
+
+  it("offers send-now on a failed row whatever it is waiting on", () => {
+    // A row the drain gave up on is the one case where nothing will happen on
+    // its own, so the wait must stop hiding the only affordance that retries
+    // it. Every one of these renders as delete-only without this.
+    for (const waitingOn of [
+      { kind: "turn-starting" },
+      { kind: "provisioning" },
+      { kind: "interaction" },
+      { kind: "host-offline", hostName: "M4" },
+    ] as const) {
+      expect(
+        isQueuedMessageSendNowAllowed({
+          failureReason: "The message could not be sent.",
+          waitingOn,
+        }),
+      ).toBe(true);
+    }
   });
 });
 
