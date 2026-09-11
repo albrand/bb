@@ -669,6 +669,36 @@ describe("socket bridge workers", () => {
     }
   }, 30_000);
 
+  it("backs off when a replacement keeps stealing its socket", async () => {
+    const socketPath = join(bridgeWorkerDir, "storm.sock");
+    mkdirSync(bridgeWorkerDir, { recursive: true, mode: 0o700 });
+    let attempts = 0;
+    const listener = createServer((socket) => {
+      attempts += 1;
+      socket.on("error", () => undefined);
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => listener.listen(socketPath, resolve));
+    const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    const worker = adoptedWorker({
+      dir: bridgeWorkerDir,
+      pid: standIn.pid ?? 0,
+      socketPath,
+      workspacePath,
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(attempts).toBeGreaterThan(0);
+      expect(attempts).toBeLessThan(20);
+    } finally {
+      worker.release();
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+      if (standIn.pid !== undefined && isPidAlive(standIn.pid)) {
+        process.kill(standIn.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
+
   it.skipIf(process.platform === "win32")(
     "asks a worker that never opened its socket to stop before it kills it",
     async () => {
