@@ -1,11 +1,10 @@
 import type { ChildProcess } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
   closeSync,
   fstatSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -34,9 +33,12 @@ import {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerThread,
   type BridgeWorkerWorkspace,
+  fallbackSocketRoot,
+  privateDirectoryProblem,
   readProcessIdentity,
   readProcessIdentityAsync,
   removeBridgeWorkerFiles,
+  socketDirectoryFor,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
 
@@ -176,7 +178,6 @@ const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
 const BRIDGE_WORKER_ACK_INTERVAL_MS = 25;
 const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
-const SOCKET_DIRECTORY_DIGEST_CHARS = 16;
 
 export function allocateBridgeWorkerPaths(
   workerDir: string,
@@ -217,7 +218,11 @@ function fallbackSocketDirectory(workerDir: string): string {
       `Bridge worker directory ${workerDir} is too long for a unix socket path, and there is no user id for a private fallback directory`,
     );
   }
-  return privateSocketDirectory({ root: `/tmp/bb-${uid}`, uid, workerDir });
+  return privateSocketDirectory({
+    root: fallbackSocketRoot(uid),
+    uid,
+    workerDir,
+  });
 }
 
 export function privateSocketDirectory(args: {
@@ -225,8 +230,7 @@ export function privateSocketDirectory(args: {
   uid: number;
   workerDir: string;
 }): string {
-  const digest = createHash("sha256").update(args.workerDir).digest("hex");
-  const dir = join(args.root, digest.slice(0, SOCKET_DIRECTORY_DIGEST_CHARS));
+  const dir = socketDirectoryFor(args.root, args.workerDir);
   for (const path of [args.root, dir]) {
     try {
       mkdirSync(path, { mode: 0o700 });
@@ -235,25 +239,10 @@ export function privateSocketDirectory(args: {
         throw error;
       }
     }
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink()) {
+    const problem = privateDirectoryProblem(path, args.uid);
+    if (problem !== null) {
       throw new Error(
-        `Refusing bridge worker socket directory ${path}: it is a symlink`,
-      );
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(
-        `Refusing bridge worker socket directory ${path}: it is not a directory`,
-      );
-    }
-    if (stat.uid !== args.uid) {
-      throw new Error(
-        `Refusing bridge worker socket directory ${path}: it is owned by uid ${stat.uid}, not the current user (${args.uid})`,
-      );
-    }
-    if ((stat.mode & 0o077) !== 0) {
-      throw new Error(
-        `Refusing bridge worker socket directory ${path}: it has mode ${(stat.mode & 0o777).toString(8)}, not 700`,
+        `Refusing bridge worker socket directory ${path}: ${problem}`,
       );
     }
   }

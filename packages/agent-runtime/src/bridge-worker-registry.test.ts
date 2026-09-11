@@ -19,13 +19,14 @@ import {
 } from "./bridge-worker-registry.js";
 
 function entry(
+  dir: string,
   overrides: Partial<BridgeWorkerRegistryEntry>,
 ): BridgeWorkerRegistryEntry {
   return {
     id: "a1b2c3d4e5f6",
     pid: process.pid,
     processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
-    socketPath: "/tmp/unused.sock",
+    socketPath: join(dir, `${overrides.id ?? "a1b2c3d4e5f6"}.sock`),
     pluginId: "provider-codex",
     providerId: "codex",
     processKey: "codex#bridge:0123456789abcdef",
@@ -61,7 +62,7 @@ describe("bridge worker registry", () => {
   });
 
   it("round-trips an entry through an atomic, owner-only file", () => {
-    const written = entry({});
+    const written = entry(dir, {});
     writeBridgeWorkerEntry(dir, written);
 
     expect(readBridgeWorkerEntries(dir)).toEqual({
@@ -77,8 +78,8 @@ describe("bridge worker registry", () => {
   });
 
   it("reaps entries whose worker is gone, with their socket and log, and keeps live ones", () => {
-    const live = entry({ id: "aaaaaaaaaaaa" });
-    const dead = entry({
+    const live = entry(dir, { id: "aaaaaaaaaaaa" });
+    const dead = entry(dir, {
       id: "bbbbbbbbbbbb",
       pid: deadPid(),
       socketPath: join(dir, "bbbbbbbbbbbb.sock"),
@@ -100,7 +101,7 @@ describe("bridge worker registry", () => {
   it.skipIf(process.platform === "win32")(
     "reaps an entry whose pid is running a different process, without signalling it",
     () => {
-      const reused = entry({ id: "dddddddddddd", processIdentity: "stale" });
+      const reused = entry(dir, { id: "dddddddddddd", processIdentity: "stale" });
       writeBridgeWorkerEntry(dir, reused);
 
       const result = reapDeadBridgeWorkers(dir);
