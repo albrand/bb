@@ -1,3 +1,4 @@
+import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 import type {
   PermissionMode,
   AvailableModel,
@@ -71,7 +72,7 @@ export interface AgentRuntimeOptions {
 
   skillRoots?: readonly AgentRuntimeSkillRoot[];
 
-  onEvent: (event: ThreadEvent) => void;
+  onEvent: (event: ThreadEvent, delivery?: BridgeLineDelivery) => void;
 
   onToolCall: (request: ToolCallRequest) => Promise<ToolCallResponse>;
 

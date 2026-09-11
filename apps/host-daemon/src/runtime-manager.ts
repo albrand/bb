@@ -8,6 +8,7 @@ import {
   type AgentRuntimeOptions,
   type AgentRuntimeSkillRoot,
   type AgentRuntimeProcessExitInfo,
+  type BridgeLineDelivery,
   type ReapedIdleProviderSession,
 } from "@bb/agent-runtime";
 import type { Logger } from "@bb/logger";
@@ -180,7 +181,11 @@ export interface RuntimeManagerOptions {
   applyMachineEnvironment?: (
     shell: NonNullable<AgentRuntimeOptions["shellEnv"]>,
   ) => NonNullable<AgentRuntimeOptions["shellEnv"]>;
-  onEvent?: (args: { environmentId: string; event: ThreadEvent }) => void;
+  onEvent?: (args: {
+    environmentId: string;
+    event: ThreadEvent;
+    delivery?: BridgeLineDelivery;
+  }) => void;
   threadStorageRootPath?: string | null;
   onInjectedSkillsChanged?: (args: InjectedSkillsChangedNotification) => void;
   onDataDirSkillsWatchError?: (args: {
@@ -1237,10 +1242,11 @@ export class RuntimeManager {
               environmentId: args.environmentId,
             },
           }),
-      onEvent: (event) => {
+      onEvent: (event, delivery) => {
         this.options.onEvent?.({
           environmentId: args.environmentId,
           event,
+          ...(delivery === undefined ? {} : { delivery }),
         });
       },
       onToolCall:

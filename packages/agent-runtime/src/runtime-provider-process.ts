@@ -48,6 +48,7 @@ export interface RuntimeProviderProcess {
 interface RuntimeProviderProcessLineArgs {
   line: string;
   providerProcess: RuntimeProviderProcess;
+  wseq: number | null;
 }
 
 interface RuntimeProviderProcessManagerArgs {
@@ -125,6 +126,7 @@ interface ProviderProcessExitedErrorArgs {
 
 const PROVIDER_STDERR_TAIL_MAX_BYTES = 4_000;
 const PROVIDER_PROCESS_CLOSE_GRACE_MS = 1_000;
+const BRIDGE_WORKER_DETACH_SETTLE_TIMEOUT_MS = 5_000;
 
 class ProviderProcessExitedError extends Error {
   constructor(args: ProviderProcessExitedErrorArgs) {
@@ -336,7 +338,22 @@ export class RuntimeProviderProcessManager {
     await this.closeAll("detach");
   }
 
+  listProviderProcesses(): RuntimeProviderProcess[] {
+    return [...this.processes.values()];
+  }
+
   private async closeAll(mode: "stop" | "detach"): Promise<void> {
+    if (mode === "detach") {
+      await Promise.all(
+        [...this.processes.values()].map((providerProcess) =>
+          providerProcess.child instanceof SocketBridgeWorker
+            ? providerProcess.child.ackTracker.whenEventsSettled(
+                BRIDGE_WORKER_DETACH_SETTLE_TIMEOUT_MS,
+              )
+            : Promise.resolve(),
+        ),
+      );
+    }
     this.shuttingDown = true;
     const shutdownPromises: Promise<void>[] = [];
 
@@ -445,26 +462,28 @@ export class RuntimeProviderProcessManager {
       stderrTail: Buffer.alloc(0),
     };
 
-    readBoundedLines({
-      input: child.stdout,
-      onLine: (line) => {
-        if (
-          this.shuttingDown ||
-          !this.isCurrentProviderProcess({ providerProcess })
-        ) {
-          return;
-        }
-        this.args.handleStdoutLine({
-          line,
-          providerProcess,
-        });
-      },
-      onOverflow: (bytes) => {
-        this.args.onStderr?.(
-          `Discarded an oversized JSON-RPC line (${bytes} bytes) from provider "${args.providerId}".`,
-        );
-      },
-    });
+    const handleLine = (line: string, wseq: number | null): void => {
+      if (
+        this.shuttingDown ||
+        !this.isCurrentProviderProcess({ providerProcess })
+      ) {
+        return;
+      }
+      this.args.handleStdoutLine({ line, providerProcess, wseq });
+    };
+    if (child instanceof SocketBridgeWorker) {
+      child.setLineHandler(handleLine);
+    } else {
+      readBoundedLines({
+        input: child.stdout,
+        onLine: (line) => handleLine(line, null),
+        onOverflow: (bytes) => {
+          this.args.onStderr?.(
+            `Discarded an oversized JSON-RPC line (${bytes} bytes) from provider "${args.providerId}".`,
+          );
+        },
+      });
+    }
 
     child.stderr.on("data", (chunk: Buffer) => {
       if (

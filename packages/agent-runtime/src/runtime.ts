@@ -66,6 +66,8 @@ import {
   type ResolvedThreadEnvironmentEntry,
 } from "./thread-shell-environment.js";
 import { bridgeLaunchProcessKey } from "./bridge-launch-process-key.js";
+import type { BridgeLineAckTracker } from "./bridge-line-ack-tracker.js";
+import { SocketBridgeWorker } from "./bridge-worker-socket.js";
 
 interface RecordThreadExecutionOptionsArgs {
   options: AgentRuntimeExecutionOptions;
@@ -313,7 +315,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     env: options.env,
     getNextRequestId: () => nextRequestId++,
     handleStdoutLine: (args) =>
-      handleStdoutLine(args.line, args.providerProcess),
+      handleStdoutLine(args.line, args.providerProcess, args.wseq),
     onProcessExit: options.onProcessExit,
     onProviderThreadDetached: (threadId) => {
       threadIdentityRegistry.clearThread(threadId);
@@ -326,6 +328,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     skillRoots,
     workspacePath: options.workspacePath,
   });
+
+  let activeLineAckTracker: BridgeLineAckTracker | null = null;
 
   function resolveProviderProcessKey(
     args: ResolveProviderProcessKeyArgs,
@@ -1229,7 +1233,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       turnState.observe(normalizedEvent);
       backgroundWorkState.observe(normalizedEvent);
       observeProviderSessionIdleState(normalizedEvent);
-      options.onEvent(normalizedEvent);
+      options.onEvent(normalizedEvent, activeLineAckTracker?.delivery());
       threadGoalState.observe(normalizedEvent);
     }
   }
@@ -1267,7 +1271,58 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     });
   }
 
-  function handleStdoutLine(line: string, proc: ProviderProcess): void {
+  function handleStdoutLine(
+    line: string,
+    proc: ProviderProcess,
+    wseq: number | null,
+  ): void {
+    const tracker =
+      wseq !== null && proc.child instanceof SocketBridgeWorker
+        ? proc.child.ackTracker
+        : null;
+    if (tracker === null || wseq === null) {
+      processStdoutLine(line, proc);
+      return;
+    }
+    const parsedLine = parseJsonRpcLine(line);
+    tracker.beginLine(
+      wseq,
+      parsedLine.kind === "request" ? parsedLine.parsedId : null,
+    );
+    activeLineAckTracker = tracker;
+    try {
+      processStdoutLine(line, proc);
+    } finally {
+      activeLineAckTracker = null;
+      tracker.endLine(proc.adapter.hasPendingOutput());
+    }
+  }
+
+  function flushPendingProviderOutput(): void {
+    for (const proc of providerProcesses.listProviderProcesses()) {
+      const flushed = proc.adapter.flushPendingEvents();
+      const tracker =
+        proc.child instanceof SocketBridgeWorker ? proc.child.ackTracker : null;
+      const emitFlushed = (): void => {
+        activeLineAckTracker = tracker;
+        try {
+          for (const { threadId, events } of flushed) {
+            emitTranslatedEvents({ events, proc, sourceThreadId: threadId });
+          }
+        } finally {
+          activeLineAckTracker = null;
+        }
+      };
+      if (tracker === null) {
+        emitFlushed();
+        continue;
+      }
+      tracker.withLastLine(emitFlushed);
+      tracker.releasePendingOutput();
+    }
+  }
+
+  function processStdoutLine(line: string, proc: ProviderProcess): void {
     const parsedLine = parseJsonRpcLine(line);
     if (
       parsedLine.kind === "non_json" ||
@@ -2490,6 +2545,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   };
 
   async function closeRuntime(mode: "stop" | "detach"): Promise<void> {
+    if (mode === "detach") flushPendingProviderOutput();
     clearInterval(turnStartWatchdogTimer);
     await Promise.all(
       [...stagedThreadRewinds.keys()].map((leaseId) =>
