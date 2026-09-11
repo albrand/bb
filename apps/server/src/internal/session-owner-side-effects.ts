@@ -92,7 +92,7 @@ export async function handleHostSessionOpened(
     },
     "Session opened",
   );
-  const adoptedThreadIds = trustedAdoptedThreadIds(deps, args);
+  const adopted = classifyAdoptedThreads(deps, args);
 
   if (
     args.previousSession &&
@@ -119,12 +119,12 @@ export async function handleHostSessionOpened(
         reason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
       });
       interruptActiveThreadsForHost(deps, {
-        exceptThreadIds: adoptedThreadIds,
+        exceptThreadIds: adopted.excepted,
         hostId: args.hostId,
         reason: "host-daemon-restarted",
       });
       settleDanglingBackgroundTasks(deps, {
-        exceptThreadIds: adoptedThreadIds,
+        exceptThreadIds: adopted.excepted,
         hostId: args.hostId,
       });
     }
@@ -135,9 +135,10 @@ export async function handleHostSessionOpened(
     activeThreadIds: [
       ...new Set([
         ...args.activeThreads.map((thread) => thread.threadId),
-        ...adoptedThreadIds,
+        ...adopted.running,
       ]),
     ],
+    exceptThreadIds: adopted.excepted,
     hostId: args.hostId,
   });
 }
@@ -274,18 +275,26 @@ function completeDaemonActiveWorkDisconnectGrace(
   }
 }
 
-function trustedAdoptedThreadIds(
+function classifyAdoptedThreads(
   deps: Pick<AppDeps, "db">,
   args: Pick<HandleHostSessionOpenedArgs, "adoptedThreads">,
-): Set<string> {
-  const trusted = new Set<string>();
+): { excepted: Set<string>; running: Set<string> } {
+  const excepted = new Set<string>();
+  const running = new Set<string>();
   for (const thread of args.adoptedThreads) {
-    const activeTurnId = getActiveStoredTurnId(deps.db, thread.threadId);
-    if (activeTurnId === null || activeTurnId === thread.activeTurnId) {
-      trusted.add(thread.threadId);
+    const storedTurnId = getActiveStoredTurnId(deps.db, thread.threadId);
+    if (thread.activeTurnId !== null && storedTurnId === thread.activeTurnId) {
+      running.add(thread.threadId);
+    }
+    if (
+      thread.activeTurnId === null ||
+      storedTurnId === null ||
+      storedTurnId === thread.activeTurnId
+    ) {
+      excepted.add(thread.threadId);
     }
   }
-  return trusted;
+  return { excepted, running };
 }
 
 function notifyHostThreadRuntimeStatusChanged(
