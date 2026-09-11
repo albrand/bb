@@ -191,9 +191,11 @@ describe("socket bridge workers", () => {
       await runtime.detach();
 
       expect(() => process.kill(registered.pid, 0)).not.toThrow();
-      expect(readBridgeWorkerEntries(bridgeWorkerDir).entries).toEqual([
-        registered,
+      const kept = readBridgeWorkerEntries(bridgeWorkerDir).entries;
+      expect(kept.map((entry) => [entry.id, entry.pid])).toEqual([
+        [registered.id, registered.pid],
       ]);
+      expect(Object.keys(kept[0]?.threads ?? {})).toEqual(["t1"]);
       expect(
         events.some(
           (event) => event.type === "turn/completed" && event.threadId === "t1",
