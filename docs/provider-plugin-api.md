@@ -65,6 +65,7 @@ bb.providers.register({
     supportsThreadArchive: true,
     supportsThreadRename: true,
     supportsServiceTier: false,
+    reportsTokenUsage: true,     // optional; omitted = unknown, false = never reports
     reasoningLevels: ["low", "high"], // the coarse ladder; `reasoningLevels` below is precise
   },
   reasoningLevels: [             // picker options; model/list is precise

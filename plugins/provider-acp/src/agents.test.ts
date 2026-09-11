@@ -170,6 +170,14 @@ describe("customAcpAgentDefinition", () => {
 });
 
 describe("acpProviderDeclaration", () => {
+  it("declares that ACP agents do not report token usage (get-bb/bb#2397)", () => {
+    for (const agent of KNOWN_ACP_AGENTS) {
+      expect(acpProviderDeclaration(agent).capabilities.reportsTokenUsage).toBe(
+        false,
+      );
+    }
+  });
+
   it("declares a configured agent's native skill roots", () => {
     const [agent] = parseCustomAcpAgents({
       entries: [

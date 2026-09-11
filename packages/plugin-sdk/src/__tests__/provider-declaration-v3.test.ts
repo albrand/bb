@@ -389,4 +389,35 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
       'provider "my-agent": unknown declaration field "capabilities.experimental_fork"',
     );
   });
+
+  describe("reportsTokenUsage (get-bb/bb#2397)", () => {
+    const base = declaration().capabilities;
+
+    it("keeps an omitted field unknown rather than coercing it to true", () => {
+      const normalized = validatePluginProviderDeclaration(declaration());
+      expect(normalized.capabilities).not.toHaveProperty("reportsTokenUsage");
+    });
+
+    it("carries false and true through validation", () => {
+      for (const value of [false, true]) {
+        const normalized = validatePluginProviderDeclaration(
+          declaration({ capabilities: { ...base, reportsTokenUsage: value } }),
+        );
+        expect(normalized.capabilities.reportsTokenUsage).toBe(value);
+      }
+    });
+
+    it("rejects a non-boolean value", () => {
+      expect(() =>
+        validatePluginProviderDeclaration(
+          declaration({
+            capabilities: {
+              ...base,
+              reportsTokenUsage: "no" as unknown as boolean,
+            },
+          }),
+        ),
+      ).toThrow(/reportsTokenUsage must be a boolean/u);
+    });
+  });
 });
