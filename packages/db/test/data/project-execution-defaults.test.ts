@@ -124,6 +124,83 @@ describe("project-execution-defaults", () => {
     });
   });
 
+  it("keeps each provider's defaults when another provider is used", () => {
+    const { db, project } = setup();
+
+    upsertProjectExecutionDefaults(db, {
+      projectId: project.id,
+      providerId: "codex",
+      model: "gpt-5",
+      reasoningLevel: "high",
+      permissionMode: "full",
+      serviceTier: "default",
+      updatedAt: 1,
+    });
+    upsertProjectExecutionDefaults(db, {
+      projectId: project.id,
+      providerId: "claude-code",
+      model: "claude-opus-4-1",
+      reasoningLevel: "medium",
+      permissionMode: "auto",
+      serviceTier: "fast",
+      updatedAt: 2,
+    });
+
+    // Using claude-code must not erase what the project remembers for codex.
+    expect(
+      getProjectExecutionDefaults(db, {
+        projectId: project.id,
+        providerId: "codex",
+      }),
+    ).toMatchObject({ providerId: "codex", model: "gpt-5", reasoningLevel: "high" });
+    // Unscoped reads still preselect the most recently used provider.
+    expect(
+      getProjectExecutionDefaults(db, { projectId: project.id }),
+    ).toMatchObject({ providerId: "claude-code" });
+  });
+
+  it("returns null for a provider the project has never used", () => {
+    const { db, project } = setup();
+
+    upsertProjectExecutionDefaults(db, {
+      projectId: project.id,
+      providerId: "codex",
+      model: "gpt-5",
+      reasoningLevel: "high",
+      permissionMode: "full",
+      serviceTier: "default",
+    });
+
+    expect(
+      getProjectExecutionDefaults(db, {
+        projectId: project.id,
+        providerId: "claude-code",
+      }),
+    ).toBeNull();
+  });
+
+  it("drops the per-provider rows with the project", () => {
+    const { db, project } = setup();
+
+    upsertProjectExecutionDefaults(db, {
+      projectId: project.id,
+      providerId: "codex",
+      model: "gpt-5",
+      reasoningLevel: "high",
+      permissionMode: "full",
+      serviceTier: "default",
+    });
+    expect(deleteProject(db, noopNotifier, project.id)).toBe(true);
+
+    expect(
+      db.$client
+        .prepare<[string], { n: number }>(
+          "SELECT count(*) AS n FROM fork_project_provider_execution_defaults WHERE project_id = ?",
+        )
+        .get(project.id)?.n,
+    ).toBe(0);
+  });
+
   it("deletes defaults when the project is deleted", () => {
     const { db, project } = setup();
 
