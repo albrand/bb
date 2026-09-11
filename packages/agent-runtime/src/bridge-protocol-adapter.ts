@@ -22,6 +22,7 @@ import {
 import {
   ASSEMBLER_GRAMMAR_VERSIONS,
   createDeltaAssembler,
+  type SeedOpenTurnArgs,
 } from "@bb/provider-bridge-protocol/assembler";
 import { z } from "zod";
 import type {
@@ -61,6 +62,8 @@ export interface BridgeProtocolAdapter {
   translateEvent(event: ProviderRuntimeEvent): ThreadEvent[];
   hasPendingOutput(): boolean;
   flushPendingEvents(): { threadId: string; events: ThreadEvent[] }[];
+  seedOpenTurn(args: SeedOpenTurnArgs): void;
+  getProviderTurnId(threadId: string, bbTurnId: string): string | null;
   decodeRecoveryHint(event: ProviderRuntimeEvent): ProviderRecoveryHint | null;
   decodeToolCallRequest(
     request: ProviderInboundRequest,
@@ -516,6 +519,14 @@ export function createBridgeProtocolAdapter(
 
     flushPendingEvents() {
       return deltaAssembler.flushPending();
+    },
+
+    seedOpenTurn(args) {
+      deltaAssembler.seedOpenTurn(args);
+    },
+
+    getProviderTurnId(threadId, bbTurnId) {
+      return deltaAssembler.getProviderTurnId(threadId, bbTurnId) ?? null;
     },
 
     translateEvent(event: ProviderRuntimeEvent): ThreadEvent[] {

@@ -1,55 +1,14 @@
-import { execFile as execFileCallback } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { isNodeError, removePathWithRetry } from "./helpers/remove-path.js";
 import { integrationTmpBase } from "./helpers/tmp-base.js";
-
-const execFile = promisify(execFileCallback);
+import {
+  isProcessAlive,
+  killProcessesHoldingFilesUnder,
+} from "./helpers/tmp-root-processes.js";
 
 const INTEGRATION_TMP_PREFIX = "bb-integration-";
 const STALE_TMP_ROOT_AGE_MS = 60 * 60_000;
-
-function isExecExitCodeOne(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return false;
-  }
-
-  return Reflect.get(error, "code") === 1;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ESRCH") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function killProcess(pid: number): Promise<void> {
-  if (!isProcessAlive(pid)) {
-    return;
-  }
-
-  process.kill(pid, "SIGTERM");
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  if (!isProcessAlive(pid)) {
-    return;
-  }
-
-  process.kill(pid, "SIGKILL");
-}
 
 async function readParentPid(tmpRoot: string): Promise<number | null> {
   try {
@@ -64,36 +23,8 @@ async function readParentPid(tmpRoot: string): Promise<number | null> {
   }
 }
 
-async function listOpenFilePids(tmpRoot: string): Promise<number[]> {
-  let stdout: string;
-  try {
-    stdout = (
-      await execFile("lsof", ["-t", "+D", tmpRoot], { encoding: "utf8" })
-    ).stdout;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return [];
-    }
-    if (!isExecExitCodeOne(error)) {
-      throw error;
-    }
-    const partial =
-      typeof error === "object" && error !== null
-        ? Reflect.get(error, "stdout")
-        : undefined;
-    stdout = typeof partial === "string" ? partial : "";
-  }
-  return stdout
-    .split("\n")
-    .map((value) => Number.parseInt(value.trim(), 10))
-    .filter((value) => Number.isInteger(value) && value > 0);
-}
-
 async function cleanupTmpRoot(tmpRoot: string): Promise<void> {
-  const openFilePids = new Set(await listOpenFilePids(tmpRoot));
-  for (const pid of openFilePids) {
-    await killProcess(pid).catch(() => undefined);
-  }
+  await killProcessesHoldingFilesUnder(tmpRoot, { exclude: [] });
   await removePathWithRetry(tmpRoot);
 }
 

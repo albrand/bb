@@ -45,7 +45,15 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
+        bridgeWorkers: {
+          dir: bridgeWorkerDir,
+          environmentId: "env-1",
+          workspace: {
+            workspacePath,
+            workspaceProvisionType: "unmanaged",
+            personalWorkspaceRoot: null,
+          },
+        },
         onEvent: (event) => events.push(event),
       },
     });
@@ -107,7 +115,15 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
+        bridgeWorkers: {
+          dir: bridgeWorkerDir,
+          environmentId: "env-1",
+          workspace: {
+            workspacePath,
+            workspaceProvisionType: "unmanaged",
+            personalWorkspaceRoot: null,
+          },
+        },
         onEvent: () => undefined,
         onProcessExit: (info) => exits.push(info),
       },
@@ -140,7 +156,15 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
+        bridgeWorkers: {
+          dir: bridgeWorkerDir,
+          environmentId: "env-1",
+          workspace: {
+            workspacePath,
+            workspaceProvisionType: "unmanaged",
+            personalWorkspaceRoot: null,
+          },
+        },
         onEvent: (event, delivery) => {
           events.push(event);
           delivery?.onSettled();
@@ -213,7 +237,15 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
+        bridgeWorkers: {
+          dir: bridgeWorkerDir,
+          environmentId: "env-1",
+          workspace: {
+            workspacePath,
+            workspaceProvisionType: "unmanaged",
+            personalWorkspaceRoot: null,
+          },
+        },
         onEvent: (event, delivery) => {
           events.push(event);
           if (delivery !== undefined) deliveries.push(delivery);

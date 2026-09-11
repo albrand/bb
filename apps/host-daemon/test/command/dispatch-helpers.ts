@@ -443,6 +443,12 @@ export function createFakeRuntime() {
     async detach() {
       throw new Error("Unexpected runtime detach call");
     },
+    adoptBridgeWorkers() {
+      throw new Error("Unexpected bridge worker adoption");
+    },
+    completeBridgeWorkerAdoption() {
+      throw new Error("Unexpected bridge worker adoption");
+    },
   };
 
   return {

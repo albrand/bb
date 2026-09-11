@@ -1,3 +1,4 @@
+import { registerInternalForkAdoptionRoutes } from "./internal/fork-adoption.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -649,6 +650,7 @@ export function createApp(
   registerInternalEventRoutes(internalApi, deps);
   registerInternalToolCallRoutes(internalApi, deps);
   registerInternalInteractiveRequestRoutes(internalApi, deps);
+  registerInternalForkAdoptionRoutes(internalApi, deps);
   app.route("/internal", internalApi);
 
   app.get(

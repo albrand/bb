@@ -4,6 +4,7 @@ import {
   createAgentRuntime,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
+  type BridgeWorkerRegistryEntry,
   type AgentRuntime,
   type AgentRuntimeOptions,
   type AgentRuntimeSkillRoot,
@@ -44,7 +45,12 @@ import {
   stageInjectedSkillSources,
   type InjectedSkillsLogger,
 } from "./injected-skills.js";
-import { reconnectProvisionArgs } from "./workspace-provision-target.js";
+import {
+  reconnectProvisionArgs,
+  reconnectWorkspaceForProvision,
+} from "./workspace-provision-target.js";
+import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import { BRIDGE_SOCKET_TRANSPORT_VERSION } from "@bb/provider-bridge-protocol/bridge-kit";
 import {
   createProviderInstallationGate,
   PROVIDER_INSTALLATION_GATE_TTL_MS,
@@ -302,6 +308,11 @@ export class RuntimeManager {
   >();
   private readonly threadControlTails = new Map<string, Promise<void>>();
   private providerMaintenanceRuntime: AgentRuntime | null = null;
+  private readonly adoptedBridgeThreads: {
+    threadId: string;
+    activeTurnId: string | null;
+    runtime: AgentRuntime;
+  }[] = [];
   private pendingProviderMaintenanceRuntime: PendingProviderMaintenanceRuntime | null =
     null;
   private providerMaintenanceRuntimeGeneration = 0;
@@ -1213,8 +1224,46 @@ export class RuntimeManager {
     if (this.options.dataDir === undefined) return;
     const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
     const { live, reaped } = reapDeadBridgeWorkers(dir);
+    const adoptable = live.filter(isAdoptableBridgeWorker);
+    const unadopted = live.filter((entry) => !adoptable.includes(entry));
+    const byEnvironment = new Map<string, BridgeWorkerRegistryEntry[]>();
+    for (const entry of adoptable) {
+      const group = byEnvironment.get(entry.environmentId) ?? [];
+      group.push(entry);
+      byEnvironment.set(entry.environmentId, group);
+    }
+    for (const [environmentId, entries] of byEnvironment) {
+      const workspace = entries[0]?.workspace;
+      if (workspace === undefined) continue;
+      try {
+        const runtimeEntry = await this.ensureEnvironment({
+          environmentId,
+          workspacePath: workspace.workspacePath,
+          workspaceProvisionType: workspace.workspaceProvisionType,
+          ...(workspace.personalWorkspaceRoot === null
+            ? {}
+            : { personalWorkspaceRoot: workspace.personalWorkspaceRoot }),
+        });
+        const threads = runtimeEntry.runtime.adoptBridgeWorkers({
+          dir,
+          entries,
+        });
+        this.adoptedBridgeThreads.push(
+          ...threads.map((thread) => ({
+            ...thread,
+            runtime: runtimeEntry.runtime,
+          })),
+        );
+      } catch (error) {
+        this.options.logger?.warn(
+          { environmentId, err: error },
+          "Could not adopt provider bridge workers; retiring them",
+        );
+        unadopted.push(...entries);
+      }
+    }
     const retired = await Promise.all(
-      live.map(async (entry) => ({
+      unadopted.map(async (entry) => ({
         id: entry.id,
         outcome: await retireBridgeWorker({
           dir,
@@ -1225,9 +1274,47 @@ export class RuntimeManager {
     );
     if (reaped.length > 0 || retired.length > 0) {
       this.options.logger?.debug(
-        { reaped: reaped.map((entry) => entry.id), retired },
+        {
+          adopted: adoptable.map((entry) => entry.id),
+          reaped: reaped.map((entry) => entry.id),
+          retired,
+        },
         "Reconciled provider bridge workers left by a previous host daemon",
       );
+    }
+  }
+
+  listAdoptedBridgeThreads(): {
+    threadId: string;
+    activeTurnId: string | null;
+  }[] {
+    return this.adoptedBridgeThreads.map(({ threadId, activeTurnId }) => ({
+      threadId,
+      activeTurnId,
+    }));
+  }
+
+  async completeBridgeWorkerAdoption(
+    fetchActiveTurnIds: (
+      threadIds: readonly string[],
+    ) => Promise<ReadonlyMap<string, string | null>>,
+  ): Promise<void> {
+    const adopted = this.adoptedBridgeThreads.splice(0);
+    if (adopted.length === 0) return;
+    let activeTurnIds: ReadonlyMap<string, string | null>;
+    try {
+      activeTurnIds = await fetchActiveTurnIds(
+        adopted.map((thread) => thread.threadId),
+      );
+    } catch (error) {
+      this.options.logger?.warn(
+        { err: error },
+        "Could not confirm adopted turns with the server; continuing them as new segments",
+      );
+      activeTurnIds = new Map();
+    }
+    for (const runtime of new Set(adopted.map((thread) => thread.runtime))) {
+      runtime.completeBridgeWorkerAdoption(activeTurnIds);
     }
   }
 
@@ -1394,6 +1481,10 @@ export class RuntimeManager {
             bridgeWorkers: {
               dir: bridgeWorkerDirForDataDir(this.options.dataDir),
               environmentId: args.environmentId,
+              workspace: reconnectWorkspaceForProvision({
+                provision,
+                workspacePath: workspace.path,
+              }),
             },
           }),
       onEvent: (event, delivery) => {
@@ -1506,6 +1597,14 @@ export class RuntimeManager {
 export type RuntimeShutdownMode = "detach" | "stop";
 
 const BRIDGE_WORKER_RETIRE_TIMEOUT_MS = 2_000;
+
+function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
+  return (
+    entry.bridgeProtocolVersion === PROVIDER_BRIDGE_PROTOCOL_VERSION &&
+    entry.transportVersion === BRIDGE_SOCKET_TRANSPORT_VERSION &&
+    Object.keys(entry.threads).length > 0
+  );
+}
 
 function bridgeWorkerDirForDataDir(dataDir: string): string {
   return path.join(dataDir, "bridge-workers");

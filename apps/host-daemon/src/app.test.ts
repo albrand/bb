@@ -300,6 +300,8 @@ function createFakeRuntime(): AgentRuntime {
     },
     async shutdown() {},
     async detach() {},
+    adoptBridgeWorkers: () => [],
+    completeBridgeWorkerAdoption: () => undefined,
   };
 }
 

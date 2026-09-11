@@ -884,7 +884,18 @@ export async function createHostDaemonApp(
       sessionState.value = session?.sessionId ?? null;
       if (session === null) {
         clearInteractiveInterruptRetry();
+        return;
       }
+      void runtimeManager
+        .completeBridgeWorkerAdoption((threadIds) =>
+          serverClient.fetchActiveTurnIds(threadIds),
+        )
+        .catch((error) => {
+          options.logger.error(
+            { err: error },
+            "Completing provider bridge worker adoption failed",
+          );
+        });
     },
   });
   sendServerMessage = (message) => connection.sendMessage(message);

@@ -7,4 +7,5 @@ export {
   type DeltaAssembler,
   type DiffCumulativeTextArgs,
   type DiffCumulativeTextResult,
+  type SeedOpenTurnArgs,
 } from "./delta-assembler.js";
