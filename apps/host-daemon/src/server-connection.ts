@@ -35,6 +35,57 @@ export const SELF_UPDATE_DRAIN_TIMEOUT_MS = 10 * 60 * 1000;
 /** How often the drain gate re-checks for active agent turns. */
 export const SELF_UPDATE_DRAIN_POLL_INTERVAL_MS = 2_000;
 
+interface WaitForAgentWorkToDrainArgs {
+  getActiveThreadCount: () => Promise<number>;
+  hasOpenBackgroundWork: () => boolean;
+  logger: Pick<ServerConnectionOptions["logger"], "info" | "warn">;
+  timeoutMs: number;
+  pollIntervalMs: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Waits until no agent turn is running AND no background work (a shell command
+ * or sub-agent a finished turn left running) is open, or until the deadline.
+ *
+ * Background work counts because a restart kills it just the same, and a
+ * thread whose turn ended reads as idle while that work is still going.
+ */
+export async function waitForAgentWorkToDrain(
+  args: WaitForAgentWorkToDrainArgs,
+): Promise<"drained" | "timed-out"> {
+  const now = args.now ?? Date.now;
+  const sleep =
+    args.sleep ??
+    ((ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms);
+      }));
+  const deadline = now() + args.timeoutMs;
+  let announced = false;
+  for (;;) {
+    const activeThreadCount = await args.getActiveThreadCount();
+    const backgroundWorkOpen = args.hasOpenBackgroundWork();
+    if (activeThreadCount === 0 && !backgroundWorkOpen) return "drained";
+    if (now() >= deadline) {
+      args.logger.warn(
+        { activeThreadCount, backgroundWorkOpen, drainTimeoutMs: args.timeoutMs },
+        "Restarting for a protocol self-update while agent work is still running; it will be interrupted.",
+      );
+      return "timed-out";
+    }
+    if (!announced) {
+      announced = true;
+      args.logger.info(
+        { activeThreadCount, backgroundWorkOpen },
+        "Protocol self-update installed; waiting for agent work to finish before restarting the daemon.",
+      );
+    }
+    await sleep(args.pollIntervalMs);
+  }
+}
+
 interface InvalidServerMessageArgs {
   data: unknown;
   error: Error;
@@ -388,33 +439,15 @@ export class ServerConnection {
    * stuck turn cannot pin the daemon on an incompatible protocol forever.
    */
   private async waitForActiveTurnsToDrain(): Promise<void> {
-    if (this.options.getActiveThreads === undefined) return;
-    const deadline = Date.now() + SELF_UPDATE_DRAIN_TIMEOUT_MS;
-    let announced = false;
-    for (;;) {
-      const activeThreads = await this.options.getActiveThreads();
-      if (activeThreads.length === 0) return;
-      if (Date.now() >= deadline) {
-        this.options.logger.warn(
-          {
-            activeThreadCount: activeThreads.length,
-            drainTimeoutMs: SELF_UPDATE_DRAIN_TIMEOUT_MS,
-          },
-          "Restarting for a protocol self-update while agent turns are still active; those turns will be interrupted.",
-        );
-        return;
-      }
-      if (!announced) {
-        announced = true;
-        this.options.logger.info(
-          { activeThreadCount: activeThreads.length },
-          "Protocol self-update installed; waiting for active agent turns to finish before restarting the daemon.",
-        );
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, SELF_UPDATE_DRAIN_POLL_INTERVAL_MS);
-      });
-    }
+    const { getActiveThreads, hasOpenBackgroundWork } = this.options;
+    if (getActiveThreads === undefined) return;
+    await waitForAgentWorkToDrain({
+      getActiveThreadCount: async () => (await getActiveThreads()).length,
+      hasOpenBackgroundWork: hasOpenBackgroundWork ?? (() => false),
+      logger: this.options.logger,
+      timeoutMs: SELF_UPDATE_DRAIN_TIMEOUT_MS,
+      pollIntervalMs: SELF_UPDATE_DRAIN_POLL_INTERVAL_MS,
+    });
   }
 
   private logFatalConnectError(error: ServerResponseError): void {
