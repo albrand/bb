@@ -265,6 +265,7 @@ function completeDaemonActiveWorkDisconnectGrace(
     reason: "host-daemon-restarted",
     cause: "host-connection-lost",
   });
+
   if (detached.length > 0) {
     const nextExpiry = Math.min(...detached.map((thread) => thread.expiresAt));
     deps.hub.scheduleDaemonActiveWorkDisconnect(
@@ -287,8 +288,8 @@ function classifyAdoptedThreads(
       running.add(thread.threadId);
     }
     if (
-      storedTurnId === thread.activeTurnId ||
-      (thread.activeTurnId !== null && storedTurnId === null)
+      thread.activeTurnId !== null &&
+      (storedTurnId === thread.activeTurnId || storedTurnId === null)
     ) {
       excepted.add(thread.threadId);
     }
