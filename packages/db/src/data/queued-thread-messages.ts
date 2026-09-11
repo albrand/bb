@@ -120,7 +120,17 @@ export interface DeleteClaimedQueuedThreadMessageBatchInTransactionArgs {
 }
 
 export interface ReleaseStaleQueuedMessageClaimsArgs {
-  claimedBefore: number;
+  /**
+   * Release claims taken strictly before this instant, or EVERY claim when
+   * null.
+   *
+   * Null is not "no filter" as a convenience — it is the only correct answer
+   * for a server that has just started, where a cutoff of "now" silently keeps
+   * a claim taken in the same millisecond. There is no instant a caller can
+   * pass that means "all of them", because a claim is never in the future and
+   * the bound is exclusive.
+   */
+  claimedBefore: number | null;
   protectedClaimTokens: readonly string[];
 }
 
@@ -1324,7 +1334,9 @@ export function releaseStaleQueuedMessageClaims(
   const protectedClaimTokens = [...args.protectedClaimTokens];
   const staleClaimWhere = and(
     isNotNull(queuedThreadMessages.claimedAt),
-    lt(queuedThreadMessages.claimedAt, args.claimedBefore),
+    ...(args.claimedBefore === null
+      ? []
+      : [lt(queuedThreadMessages.claimedAt, args.claimedBefore)]),
     ...(protectedClaimTokens.length > 0
       ? [
           or(

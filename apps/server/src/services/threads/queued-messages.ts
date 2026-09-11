@@ -928,7 +928,10 @@ export function releaseOrphanedQueuedMessageDispatchClaims(
   deps: Pick<AppDeps, "db" | "hub">,
 ): number {
   return releaseStaleQueuedMessageClaims(deps.db, deps.hub, {
-    claimedBefore: Date.now(),
+    // Every claim, not "every claim older than now": the bound is exclusive,
+    // so a cutoff of this instant keeps a claim taken in the same millisecond
+    // — which a warm process reaches easily, and which is still a dead claim.
+    claimedBefore: null,
     protectedClaimTokens: [...activeQueuedMessageClaimTokens],
   });
 }
