@@ -27,6 +27,7 @@ import {
 } from "../services/threads/thread-lifecycle.js";
 import { buildThreadStatusChangeMetadataByThreadId } from "../services/threads/thread-runtime-display.js";
 import { settleDanglingBackgroundTasks } from "../services/threads/background-task-reconciliation.js";
+import { closeItemsOrphanedByAdoption } from "./fork-adoption.js";
 
 const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
   "Host daemon restarted while awaiting user interaction; retry the thread to continue";
@@ -130,6 +131,10 @@ export async function handleHostSessionOpened(
     }
   }
   clearDetachedThreads(deps.db, { hostId: args.hostId });
+  closeItemsOrphanedByAdoption(deps, {
+    adoptedThreadIds: adopted.excepted,
+    runningTurnIds: adopted.runningTurnIds,
+  });
 
   await reconcileDaemonReportedThreads(deps, {
     activeThreadIds: [
@@ -283,13 +288,19 @@ function completeDaemonActiveWorkDisconnectGrace(
 function classifyAdoptedThreads(
   deps: Pick<AppDeps, "db">,
   args: Pick<HandleHostSessionOpenedArgs, "adoptedThreads">,
-): { excepted: Set<string>; running: Set<string> } {
+): {
+  excepted: Set<string>;
+  running: Set<string>;
+  runningTurnIds: Map<string, string>;
+} {
   const excepted = new Set<string>();
   const running = new Set<string>();
+  const runningTurnIds = new Map<string, string>();
   for (const thread of args.adoptedThreads) {
     const storedTurnId = getActiveStoredTurnId(deps.db, thread.threadId);
     if (thread.activeTurnId !== null && storedTurnId === thread.activeTurnId) {
       running.add(thread.threadId);
+      runningTurnIds.set(thread.threadId, thread.activeTurnId);
     }
     if (
       thread.activeTurnId !== null &&
@@ -298,7 +309,7 @@ function classifyAdoptedThreads(
       excepted.add(thread.threadId);
     }
   }
-  return { excepted, running };
+  return { excepted, running, runningTurnIds };
 }
 
 function notifyHostThreadRuntimeStatusChanged(
