@@ -9,7 +9,25 @@ import {
 import { connect } from "node:net";
 import { join } from "node:path";
 import { BRIDGE_SHUTDOWN_METHOD } from "@bb/provider-bridge-protocol/bridge-kit";
+import { workspaceProvisionTypeSchema } from "@bb/domain";
 import { z } from "zod";
+
+const bridgeWorkerWorkspaceSchema = z.object({
+  workspacePath: z.string().min(1),
+  workspaceProvisionType: workspaceProvisionTypeSchema,
+  personalWorkspaceRoot: z.string().min(1).nullable(),
+});
+
+export type BridgeWorkerWorkspace = z.infer<typeof bridgeWorkerWorkspaceSchema>;
+
+const bridgeWorkerThreadSchema = z.object({
+  providerThreadId: z.string().min(1).nullable(),
+  activeTurnId: z.string().min(1).nullable(),
+  activeProviderTurnId: z.string().min(1).nullable(),
+  config: z.record(z.string(), z.unknown()),
+});
+
+export type BridgeWorkerThread = z.infer<typeof bridgeWorkerThreadSchema>;
 
 const bridgeWorkerRegistryEntrySchema = z.object({
   id: z.string().regex(/^[0-9a-f]+$/u),
@@ -22,6 +40,8 @@ const bridgeWorkerRegistryEntrySchema = z.object({
   bridgeProtocolVersion: z.number().int(),
   transportVersion: z.number().int(),
   startedAt: z.string().min(1),
+  workspace: bridgeWorkerWorkspaceSchema,
+  threads: z.record(z.string().min(1), bridgeWorkerThreadSchema),
 });
 
 export type BridgeWorkerRegistryEntry = z.infer<

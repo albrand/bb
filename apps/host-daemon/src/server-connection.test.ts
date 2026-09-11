@@ -88,6 +88,7 @@ function createServerClientFixture(args: CreateServerClientFixtureArgs = {}) {
     fetchSkillTree: unused,
     fetchPluginHostArtifact: unused,
     postEvents: unused,
+    fetchActiveTurnIds: unused,
     callTool: unused,
     registerInteractiveRequest: unused,
     interruptInteractiveRequests: unused,

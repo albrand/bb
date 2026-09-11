@@ -162,6 +162,13 @@ export interface DeltaAssembler {
   getOpenTurnId(threadId: string): string | undefined;
   hasPendingOutput(): boolean;
   flushPending(): { threadId: string; events: ThreadEvent[] }[];
+  seedOpenTurn(args: SeedOpenTurnArgs): void;
+}
+
+export interface SeedOpenTurnArgs {
+  threadId: string;
+  bbTurnId: string;
+  providerTurnId: string | null;
 }
 
 const SEP = THREAD_DELTA_KEY_SEPARATOR;
@@ -2118,6 +2125,15 @@ export function createDeltaAssembler(
         handleDelta(stateFor(args.threadId), delta, sink);
       }
       return events;
+    },
+
+    seedOpenTurn(args) {
+      const state = stateFor(args.threadId);
+      state.currentTurnId = args.bbTurnId;
+      if (args.providerTurnId !== null) {
+        state.bbTurnIdByProviderTurnId.set(args.providerTurnId, args.bbTurnId);
+        state.providerTurnIdByBbTurnId.set(args.bbTurnId, args.providerTurnId);
+      }
     },
 
     hasPendingOutput() {

@@ -8,6 +8,7 @@ import {
   supportsProcessGroups,
 } from "@bb/process-utils";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
+import type { BridgeWorkerRegistryEntry } from "./bridge-worker-registry.js";
 import {
   BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
   type BridgeWorkerProcess,
@@ -104,6 +105,21 @@ interface CleanupFailedStartupArgs {
 interface TerminateProviderProcessArgs {
   providerProcess: RuntimeProviderProcess;
   timeoutMs?: number;
+}
+
+interface AttachProviderProcessArgs {
+  adapter: BridgeProtocolAdapter;
+  child: BridgeWorkerProcess;
+  processKey: string;
+  providerId: string;
+}
+
+interface AdoptProviderProcessArgs {
+  bridgeLaunch: AgentRuntimeBridgeLaunch;
+  entry: BridgeWorkerRegistryEntry;
+  processKey: string;
+  providerId: string;
+  workerDir: string;
 }
 
 interface SpawnProviderArgs {
@@ -338,6 +354,10 @@ export class RuntimeProviderProcessManager {
     await this.closeAll("detach");
   }
 
+  getProviderProcess(processKey: string): RuntimeProviderProcess | undefined {
+    return this.processes.get(processKey);
+  }
+
   listProviderProcesses(): RuntimeProviderProcess[] {
     return [...this.processes.values()];
   }
@@ -433,8 +453,10 @@ export class RuntimeProviderProcessManager {
             detached: supportsProcessGroups(),
           })
         : new SocketBridgeWorker({
+            kind: "spawn",
             ...spawnRequest,
             workerDir: this.args.bridgeWorkers.dir,
+            workspace: this.args.bridgeWorkers.workspace,
             connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
             registration: {
               environmentId: this.args.bridgeWorkers.environmentId,
@@ -443,6 +465,33 @@ export class RuntimeProviderProcessManager {
               providerId: args.providerId,
             },
           });
+    return this.attachProviderProcess({
+      adapter: args.adapter,
+      child,
+      processKey: args.processKey,
+      providerId: args.providerId,
+    });
+  }
+
+  adoptProviderProcess(args: AdoptProviderProcessArgs): RuntimeProviderProcess {
+    this.currentProcessKeyByProviderId.set(args.providerId, args.processKey);
+    return this.attachProviderProcess({
+      adapter: this.getAdapter(args.providerId, args.bridgeLaunch),
+      child: new SocketBridgeWorker({
+        kind: "adopt",
+        entry: args.entry,
+        workerDir: args.workerDir,
+        connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
+      }),
+      processKey: args.processKey,
+      providerId: args.providerId,
+    });
+  }
+
+  private attachProviderProcess(
+    args: AttachProviderProcessArgs,
+  ): RuntimeProviderProcess {
+    const child = args.child;
     let finalizeExit: () => void = () => undefined;
     const exitFinalized = new Promise<void>((resolve) => {
       finalizeExit = resolve;

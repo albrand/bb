@@ -56,3 +56,34 @@ export function reconnectProvisionArgsFromWorkspaceContext(
     workspaceProvisionType: args.workspaceContext.workspaceProvisionType,
   });
 }
+
+export function reconnectWorkspaceForProvision(args: {
+  provision: ProvisionWorkspaceArgs;
+  workspacePath: string;
+}): {
+  workspacePath: string;
+  workspaceProvisionType: WorkspaceProvisionType;
+  personalWorkspaceRoot: string | null;
+} {
+  switch (args.provision.workspaceProvisionType) {
+    case "managed-worktree":
+    case "reconnect-managed-worktree":
+      return {
+        workspacePath: args.workspacePath,
+        workspaceProvisionType: "managed-worktree",
+        personalWorkspaceRoot: null,
+      };
+    case "personal":
+      return {
+        workspacePath: args.workspacePath,
+        workspaceProvisionType: "personal",
+        personalWorkspaceRoot: args.provision.personalWorkspaceRoot,
+      };
+    default:
+      return {
+        workspacePath: args.workspacePath,
+        workspaceProvisionType: "unmanaged",
+        personalWorkspaceRoot: null,
+      };
+  }
+}

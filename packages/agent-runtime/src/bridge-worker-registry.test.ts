@@ -31,6 +31,12 @@ function entry(
     bridgeProtocolVersion: 2,
     transportVersion: 1,
     startedAt: "2026-09-11T00:00:00.000Z",
+    workspace: {
+      workspacePath: "/tmp/workspace",
+      workspaceProvisionType: "unmanaged",
+      personalWorkspaceRoot: null,
+    },
+    threads: {},
     ...overrides,
   };
 }

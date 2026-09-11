@@ -1,6 +1,7 @@
 import pRetry, { AbortError } from "p-retry";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
+  hostDaemonActiveTurnsResponseSchema,
   hostDaemonEventBatchResponseSchema,
   hostDaemonInteractiveInterruptResponseSchema,
   hostDaemonInteractiveRequestResponseSchema,
@@ -187,6 +188,9 @@ export interface ServerClient {
     expectedByteLength: number;
   }): Promise<Uint8Array>;
   postEvents(events: HostDaemonEventEnvelope[]): Promise<EventPostResult>;
+  fetchActiveTurnIds(
+    threadIds: readonly string[],
+  ): Promise<Map<string, string | null>>;
   callTool(request: ToolCallRequest): Promise<HostDaemonToolCallResponse>;
   registerInteractiveRequest(
     request: PendingInteractionCreate,
@@ -534,6 +538,31 @@ export function createServerClient(
       }
       assertHostArtifactContentLength(response, args.expectedByteLength);
       return readHostArtifactBytes(response, args.expectedByteLength);
+    },
+
+    async fetchActiveTurnIds(
+      threadIds: readonly string[],
+    ): Promise<Map<string, string | null>> {
+      const response = await fetchFn(
+        buildInternalUrl("/session/fork/active-turns"),
+        {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            sessionId: requireSessionId(),
+            threadIds: [...threadIds],
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw await createResponseError("fetch active turns", response);
+      }
+      const parsed = hostDaemonActiveTurnsResponseSchema.parse(
+        await response.json(),
+      );
+      return new Map(
+        parsed.threads.map((thread) => [thread.threadId, thread.activeTurnId]),
+      );
     },
 
     async postEvents(

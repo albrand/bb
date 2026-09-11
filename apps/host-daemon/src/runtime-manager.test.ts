@@ -294,6 +294,8 @@ function createFakeRuntime() {
     hasOpenBackgroundWork: () => openBackgroundWork,
     shutdown: vi.fn(async () => undefined),
     detach: vi.fn(async () => undefined),
+    adoptBridgeWorkers: vi.fn(() => []),
+    completeBridgeWorkerAdoption: vi.fn(),
     endActiveTurn: (threadId) => {
       activeTurnsByThreadId.delete(threadId);
     },
@@ -2336,6 +2338,12 @@ describe("RuntimeManager bridge workers", () => {
         bridgeProtocolVersion: 2,
         transportVersion: 1,
         startedAt: "2026-09-11T00:00:00.000Z",
+        workspace: {
+          workspacePath: "/tmp/env-retire",
+          workspaceProvisionType: "unmanaged",
+          personalWorkspaceRoot: null,
+        },
+        threads: {},
       }),
     );
   }
@@ -2359,6 +2367,11 @@ describe("RuntimeManager bridge workers", () => {
     expect(createRuntime.mock.calls[0]?.[0].bridgeWorkers).toEqual({
       dir: path.join(dataDir, "bridge-workers"),
       environmentId: "env-1",
+      workspace: {
+        workspacePath: "/tmp/env-workers",
+        workspaceProvisionType: "unmanaged",
+        personalWorkspaceRoot: null,
+      },
     });
   });
 
@@ -2437,10 +2450,27 @@ describe("RuntimeManager bridge workers", () => {
       JSON.stringify({ ...entry, socketPath: path.join(socketDir, "w.sock") }),
     );
     await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
+    const incompatible = path.join(dir, "bbbbbbbbbbbb.json");
+    await fs.writeFile(
+      incompatible,
+      JSON.stringify({
+        ...JSON.parse(await fs.readFile(incompatible, "utf8")),
+        transportVersion: 99,
+        threads: {
+          t1: {
+            providerThreadId: "prov-1",
+            activeTurnId: "turn-1",
+            activeProviderTurnId: null,
+            config: {},
+          },
+        },
+      }),
+    );
+    const createRuntime = vi.fn(() => createFakeRuntime());
     const manager = new RuntimeManager({
       dataDir,
       provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-retire"),
-      createRuntime: () => createFakeRuntime(),
+      createRuntime,
     });
 
     try {
@@ -2451,6 +2481,8 @@ describe("RuntimeManager bridge workers", () => {
 
     expect(shutdowns).toEqual(["requested"]);
     expect(await fs.readdir(dir)).toEqual([]);
+    expect(createRuntime).not.toHaveBeenCalled();
+    expect(manager.listAdoptedBridgeThreads()).toEqual([]);
   });
 
   it("leaves a real worker running across a daemon exit, and the next daemon retires it", async () => {
@@ -2512,6 +2544,204 @@ describe("RuntimeManager bridge workers", () => {
         process.kill(registered.pid, "SIGKILL");
       }
     }
+  }, 30_000);
+
+  const adoptionRuntimeOptions = {
+    model: "test-model",
+    serviceTier: "default",
+    reasoningLevel: "medium",
+    providerOptions: {},
+    permissionMode: "full",
+    permissionScope: "full",
+    approvalReviewer: null,
+    permissionEscalation: null,
+  } as const;
+
+  async function startTurnThenDetach(label: string) {
+    const dataDir = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
+    );
+    tempDirs.push(dataDir);
+    const workspacePath = await makeTempDir(`bb-adopt-${label}-ws-`);
+    const bridgeLaunch = createScriptedEchoLaunch({
+      modulePath: fileURLToPath(
+        new URL(
+          "../../../tests/scripted-echo-provider/src/provider-bridge.ts",
+          import.meta.url,
+        ),
+      ),
+    });
+    const createManager = (events: ThreadEvent[]) =>
+      new RuntimeManager({
+        dataDir,
+        provisionWorkspace: createProvisionWorkspaceMock(workspacePath),
+        onEvent: ({ event, delivery }) => {
+          events.push(event);
+          delivery?.onSettled();
+        },
+      });
+    const dir = path.join(dataDir, "bridge-workers");
+    const before: ThreadEvent[] = [];
+    const exiting = createManager(before);
+    const entry = await exiting.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath,
+    });
+    await entry.runtime.startThread({
+      bridgeLaunch,
+      environmentId: "env-1",
+      threadId: "t1",
+      projectId: "p1",
+      providerId: "fake",
+      options: adoptionRuntimeOptions,
+    });
+    await entry.runtime.runTurn({
+      threadId: "t1",
+      clientRequestId: "creq_666666666a",
+      input: [{ type: "text", text: "delay:2500 stream:2", mentions: [] }],
+      options: adoptionRuntimeOptions,
+    });
+    await waitFor(() =>
+      before.some((event) => JSON.stringify(event).includes("chunk1")),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const turnStarted = before.find((event) => event.type === "turn/started");
+    if (turnStarted?.scope.kind !== "turn") {
+      throw new Error("the turn never started");
+    }
+    await exiting.shutdownAll("detach");
+    const registered = await readOnlyRegistryEntry(dir);
+    return {
+      before,
+      bbTurnId: turnStarted.scope.turnId,
+      createManager,
+      registered,
+      dir,
+    };
+  }
+
+  async function readOnlyRegistryEntry(dir: string) {
+    const names = (await fs.readdir(dir)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    expect(names).toHaveLength(1);
+    return JSON.parse(
+      await fs.readFile(path.join(dir, names[0] ?? ""), "utf8"),
+    ) as {
+      pid: number;
+      threads: Record<string, { activeTurnId: string | null }>;
+    };
+  }
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("timed out waiting");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  it("adopts a running turn on restart: same worker, same bb turn, no replayed output", async () => {
+    const { before, bbTurnId, createManager, registered, dir } =
+      await startTurnThenDetach("same-turn");
+    const after: ThreadEvent[] = [];
+    const adopting = createManager(after);
+    try {
+      expect(registered.threads.t1?.activeTurnId).toBe(bbTurnId);
+      await adopting.reconcileBridgeWorkers();
+      expect(adopting.listAdoptedBridgeThreads()).toEqual([
+        { threadId: "t1", activeTurnId: bbTurnId },
+      ]);
+      await adopting.completeBridgeWorkerAdoption(
+        async () => new Map([["t1", bbTurnId]]),
+      );
+      expect(adopting.get("env-1")?.runtime.getActiveTurnId("t1")).toBe(
+        bbTurnId,
+      );
+
+      await waitFor(() =>
+        after.some((event) => event.type === "turn/completed"),
+      );
+      const completed = after.find((event) => event.type === "turn/completed");
+      expect(completed?.scope).toEqual({ kind: "turn", turnId: bbTurnId });
+      expect(after.filter((event) => event.type === "turn/started")).toEqual(
+        [],
+      );
+      const all = [...before, ...after];
+      const deltasWith = (text: string) =>
+        all.filter(
+          (event) =>
+            event.type === "item/agentMessage/delta" &&
+            event.delta.includes(text),
+        );
+      expect(deltasWith("chunk1")).toHaveLength(1);
+      expect(deltasWith("chunk2")).toHaveLength(1);
+      expect(
+        all.filter(
+          (event) =>
+            event.type === "item/completed" &&
+            JSON.stringify(event).includes("Response to: delay:2500 stream:2"),
+        ),
+      ).toHaveLength(1);
+      expect((await readOnlyRegistryEntry(dir)).pid).toBe(registered.pid);
+      expect(isProcessAlive(registered.pid)).toBe(true);
+
+      const runtime = adopting.get("env-1")?.runtime;
+      await runtime?.runTurn({
+        threadId: "t1",
+        clientRequestId: "creq_666666666b",
+        input: [{ type: "text", text: "after adoption", mentions: [] }],
+        options: adoptionRuntimeOptions,
+      });
+      await waitFor(
+        () =>
+          after.filter((event) => event.type === "turn/completed").length === 2,
+      );
+      expect((await readOnlyRegistryEntry(dir)).pid).toBe(registered.pid);
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+    expect(isProcessAlive(registered.pid)).toBe(false);
+  }, 30_000);
+
+  it("opens a new turn segment when the server already ended the seeded turn", async () => {
+    const { bbTurnId, createManager, registered } =
+      await startTurnThenDetach("stale-seed");
+    const after: ThreadEvent[] = [];
+    const adopting = createManager(after);
+    try {
+      await adopting.reconcileBridgeWorkers();
+      await adopting.completeBridgeWorkerAdoption(
+        async () => new Map([["t1", null]]),
+      );
+      expect(adopting.get("env-1")?.runtime.getActiveTurnId("t1")).not.toBe(
+        bbTurnId,
+      );
+
+      await waitFor(() =>
+        after.some((event) => event.type === "turn/completed"),
+      );
+      const started = after.filter((event) => event.type === "turn/started");
+      expect(started).toHaveLength(1);
+      expect(started[0]?.scope).not.toEqual({ kind: "turn", turnId: bbTurnId });
+      const completed = after.find((event) => event.type === "turn/completed");
+      expect(completed?.scope).toEqual(started[0]?.scope);
+      expect(
+        after.some(
+          (event) =>
+            event.scope.kind === "turn" && event.scope.turnId === bbTurnId,
+        ),
+      ).toBe(false);
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+    expect(isProcessAlive(registered.pid)).toBe(false);
   }, 30_000);
 });
 

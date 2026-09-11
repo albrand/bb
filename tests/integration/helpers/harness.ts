@@ -13,6 +13,7 @@ import {
   type HostDaemon,
   type HostDaemonApp,
 } from "@bb/host-daemon/test";
+import { killProcessesHoldingFilesUnder } from "./tmp-root-processes.js";
 import { integrationTmpBase } from "./tmp-base.js";
 import { createHostDaemonClient } from "@bb/host-daemon-contract";
 import { initDb } from "../../../apps/server/src/db.js";
@@ -515,6 +516,9 @@ export async function createIntegrationHarness(
       .catch(() => undefined);
     await shutdownDaemon("integration-cleanup").catch(() => undefined);
     await server?.close().catch(() => undefined);
+    await killProcessesHoldingFilesUnder(tmpRoot, {
+      exclude: [process.pid, process.ppid],
+    }).catch(() => undefined);
     await removePathWithRetry(tmpRoot);
   }
 
