@@ -1,4 +1,10 @@
-import { getActiveStoredTurnId, recordDetachedThreads } from "@bb/db";
+import {
+  getActiveStoredTurnId,
+  getThread,
+  listUncompletedTurnItemRows,
+  recordDetachedThreads,
+} from "@bb/db";
+import { threadEventItemSchema, turnScope } from "@bb/domain";
 import {
   hostDaemonActiveTurnsRequestSchema,
   hostDaemonDetachNoticeRequestSchema,
@@ -6,8 +12,11 @@ import {
   type HostDaemonInternalSchema,
 } from "@bb/host-daemon-contract";
 import type { Hono } from "hono";
+import { z } from "zod";
 import { ApiError } from "../errors.js";
 import { requireThreadEnvironment } from "../services/lib/entity-lookup.js";
+import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "../services/threads/background-task-reconciliation.js";
+import { appendThreadEventsInTransaction } from "../services/threads/thread-events.js";
 import type { AppDeps } from "../types.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
 
@@ -80,4 +89,74 @@ export function registerInternalForkAdoptionRoutes(
       return context.json({ recordedThreadIds, expectAdoptionUntil });
     },
   );
+}
+
+export function closeItemsOrphanedByAdoption(
+  deps: Pick<AppDeps, "db" | "hub" | "logger">,
+  args: {
+    adoptedThreadIds: ReadonlySet<string>;
+    runningTurnIds: ReadonlyMap<string, string>;
+  },
+): void {
+  const closedThreadIds = new Set<string>();
+  deps.db.transaction(
+    (tx) => {
+      for (const threadId of args.adoptedThreadIds) {
+        settleDanglingBackgroundTasksForStoppedThreadInTransaction(
+          { db: tx, hub: deps.hub, logger: deps.logger },
+          { threadId },
+        );
+        const turnId = args.runningTurnIds.get(threadId);
+        const thread = getThread(tx, threadId);
+        if (turnId === undefined || thread === null) continue;
+        const completions = listUncompletedTurnItemRows(tx, {
+          threadId,
+          turnId,
+        }).flatMap((row) => {
+          const item = threadEventItemSchema.safeParse({
+            ...storedItem(row.data),
+            status: "interrupted",
+          });
+          if (!item.success) {
+            deps.logger.warn(
+              { threadId, turnId },
+              "Skipping an orphaned item with an unparsable payload",
+            );
+            return [];
+          }
+          const providerThreadId = row.providerThreadId ?? "";
+          return [
+            {
+              threadId,
+              environmentId: thread.environmentId,
+              providerThreadId,
+              type: "item/completed" as const,
+              scope: turnScope(turnId),
+              data: { providerThreadId, item: item.data },
+            },
+          ];
+        });
+        if (completions.length === 0) continue;
+        appendThreadEventsInTransaction(tx, completions);
+        closedThreadIds.add(threadId);
+      }
+    },
+    { behavior: "immediate" },
+  );
+  for (const threadId of closedThreadIds) {
+    deps.hub.notifyThread(threadId, ["events-appended"], {
+      eventTypes: ["item/completed"],
+    });
+  }
+}
+
+const storedItemDataSchema = z.object({ item: z.record(z.string(), z.unknown()) });
+
+function storedItem(data: string): Record<string, unknown> {
+  try {
+    const parsed = storedItemDataSchema.safeParse(JSON.parse(data));
+    return parsed.success ? parsed.data.item : {};
+  } catch {
+    return {};
+  }
 }
