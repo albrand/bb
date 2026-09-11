@@ -126,10 +126,16 @@ export function getQueuedMessageDispatchRetry(
 }
 
 /**
- * Forgets a row's budget. Called whenever the row gets a fresh, successful
- * statement of why it is waiting — a re-queue, a cleared wait, a host that went
- * away — because those supersede what the last attempt failed with, exactly as
- * they already supersede `failure_reason`.
+ * Forgets a row's budget. Two callers, and both are cases where the row is
+ * starting over rather than continuing: a host that went away (an absent
+ * machine is an unbounded wait, not a spent attempt) and a wait whose
+ * condition was actually answered.
+ *
+ * A re-queue is deliberately NOT one of them. It looks like it should be —
+ * it is a fresh, successful statement of why the row is waiting, and it does
+ * clear `failure_reason` — but the attempts behind it were still spent, and
+ * refunding them is how a thread alternating between busy and broken books
+ * attempt one forever without ever reaching an answer.
  */
 export function clearQueuedMessageDispatchRetry(
   db: DbConnection,
