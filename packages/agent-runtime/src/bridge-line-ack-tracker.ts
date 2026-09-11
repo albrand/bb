@@ -119,6 +119,22 @@ export class BridgeLineAckTracker {
     return this.ackable;
   }
 
+  keptWseqFor(id: string | number): number | null {
+    for (const [wseq, awaitingId] of this.awaitingPastAck) {
+      if (awaitingId === id) return wseq;
+    }
+    for (const line of this.lines) {
+      if (line.awaitingResponseId === id) return line.wseq;
+    }
+    return null;
+  }
+
+  restoreKept(wseq: number, id: string | number): void {
+    if (this.awaitingPastAck.has(wseq)) return;
+    this.awaitingPastAck.set(wseq, id);
+    this.args.onAckable(this.ackable);
+  }
+
   keptWseqs(): number[] {
     return [...this.awaitingPastAck.keys()].sort((a, b) => a - b);
   }
