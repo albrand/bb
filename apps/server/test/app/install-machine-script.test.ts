@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -980,5 +981,57 @@ fi
     expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
       "--user daemon-reload\n--user enable bb-host-daemon-machine-getbb-app.service\n--user restart bb-host-daemon-machine-getbb-app.service\n",
     );
+  });
+
+  it("writes a KillMode=process drop-in beside other drop-ins, before the one daemon-reload", () => {
+    const fixture = createFixture();
+    writeJoinedState(fixture);
+    writeServerInstallTools(fixture, 200);
+    const dropInDir = join(
+      fixture.homeDir,
+      ".config/systemd/user/bb-host-daemon-machine-getbb-app.service.d",
+    );
+    mkdirSync(dropInDir, { recursive: true });
+    const override = "[Service]\nEnvironment=HOST_OWNED=1\n";
+    writeFileSync(join(dropInDir, "override.conf"), override);
+    writeFileSync(
+      join(dropInDir, "10-bb-killmode.conf"),
+      "[Service]\nKillMode=mixed\n",
+    );
+    writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Linux\n");
+    writeExecutable(
+      join(fixture.binDir, "systemctl"),
+      `#!/bin/sh
+printf '%s %s\n' "$*" "$(cat "${join(dropInDir, "10-bb-killmode.conf")}" 2>/dev/null | tr '\n' '|')" >>"${join(fixture.dataDir, "systemctl.log")}"
+if [ "$*" = "--user restart bb-host-daemon-machine-getbb-app.service" ]; then
+  port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
+  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
+  echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
+fi
+`,
+    );
+
+    const result = runScript(JOIN_ARGS, fixture);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(dropInDir, "override.conf"), "utf8")).toBe(
+      override,
+    );
+    expect(readFileSync(join(dropInDir, "10-bb-killmode.conf"), "utf8")).toBe(
+      "[Service]\nKillMode=process\n",
+    );
+    expect(readdirSync(dropInDir).sort()).toEqual([
+      "10-bb-killmode.conf",
+      "override.conf",
+    ]);
+    expect(
+      readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")
+        .trim()
+        .split("\n"),
+    ).toEqual([
+      "--user daemon-reload [Service]|KillMode=process|",
+      "--user enable bb-host-daemon-machine-getbb-app.service [Service]|KillMode=process|",
+      "--user restart bb-host-daemon-machine-getbb-app.service [Service]|KillMode=process|",
+    ]);
   });
 });

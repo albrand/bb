@@ -776,6 +776,9 @@ KillMode=process
 [Install]
 WantedBy=default.target
 EOF
+  killmode_drop_in="$service_file.d/10-bb-killmode.conf"
+  mkdir -p "$service_file.d"
+  printf '[Service]\nKillMode=process\n' >"$killmode_drop_in"
   systemctl --user daemon-reload
   if ! systemctl_error=$(systemctl --user enable "$service_name.service" 2>&1); then
     fail_step "The bb host-daemon systemd service could not be enabled."
@@ -804,5 +807,5 @@ EOF
   ready_row "service" "$service_file"
   printf '\n'
   detail "Starts with your systemd user session."
-  detail "Uninstall: systemctl --user disable --now $service_name.service && rm '$service_file' && systemctl --user daemon-reload"
+  detail "Uninstall: systemctl --user disable --now $service_name.service && rm '$service_file' '$killmode_drop_in' && systemctl --user daemon-reload"
 fi
