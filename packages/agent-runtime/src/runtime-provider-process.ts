@@ -329,11 +329,24 @@ export class RuntimeProviderProcessManager {
   }
 
   async shutdown(): Promise<void> {
+    await this.closeAll("stop");
+  }
+
+  async detach(): Promise<void> {
+    await this.closeAll("detach");
+  }
+
+  private async closeAll(mode: "stop" | "detach"): Promise<void> {
     this.shuttingDown = true;
     const shutdownPromises: Promise<void>[] = [];
 
     for (const [processKey, providerProcess] of this.processes) {
-      if (!hasChildProcessExited(providerProcess.child)) {
+      if (
+        mode === "detach" &&
+        providerProcess.child instanceof SocketBridgeWorker
+      ) {
+        providerProcess.child.release();
+      } else if (!hasChildProcessExited(providerProcess.child)) {
         shutdownPromises.push(
           stopProcessGroupLeaderFirst({
             child: providerProcess.child,

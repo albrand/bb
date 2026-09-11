@@ -74,7 +74,9 @@ let nextRpcRequestIdValue = 1;
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all(managers.splice(0).map((manager) => manager.shutdownAll()));
+  await Promise.all(
+    managers.splice(0).map((manager) => manager.shutdownAll("stop")),
+  );
   await cleanupTempDirs();
 });
 

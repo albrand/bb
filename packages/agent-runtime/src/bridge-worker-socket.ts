@@ -118,6 +118,7 @@ export class SocketBridgeWorker
   readonly stderr = new PassThrough();
   private readonly child: ChildProcess;
   private socket: Socket | null = null;
+  private released = false;
   private exited = false;
   private stdoutEnded = false;
   private stderrEnded = false;
@@ -191,11 +192,26 @@ export class SocketBridgeWorker
     return this.child.kill(signal);
   }
 
+  release(): void {
+    if (this.released) return;
+    this.released = true;
+    this.child.removeAllListeners("exit");
+    this.child.removeAllListeners("error");
+    const socket = this.socket;
+    this.socket = null;
+    if (socket !== null) {
+      this.stdin.unpipe(socket);
+      socket.unpipe(this.stdout);
+      socket.end();
+      socket.unref();
+    }
+  }
+
   private async connect(deadline: number): Promise<void> {
-    while (!this.exited) {
+    while (!this.exited && !this.released) {
       try {
         const socket = await connectSocket(this.socketPath);
-        if (this.exited) {
+        if (this.exited || this.released) {
           socket.destroy();
           return;
         }
@@ -226,7 +242,7 @@ export class SocketBridgeWorker
   }
 
   private failToConnect(): void {
-    if (this.exited) return;
+    if (this.exited || this.released) return;
     killProcessGroup({ child: this.child, signal: "SIGKILL" });
     this.emit(
       "error",
