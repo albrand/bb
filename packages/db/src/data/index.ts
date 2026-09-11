@@ -51,6 +51,17 @@ export {
   upsertThreadExecutionReport,
 } from "./thread-execution-reports.js";
 export {
+  clearQueuedMessageDispatchRetry,
+  getQueuedMessageDispatchRetry,
+  listDeferredQueuedMessageDispatchRetryIds,
+  listDueQueuedMessageDispatchRetries,
+  recordQueuedMessageDispatchRetry,
+} from "./fork-queued-message-retries.js";
+export type {
+  QueuedMessageDispatchRetry,
+  QueuedMessageDispatchRetryRef,
+} from "./fork-queued-message-retries.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,
