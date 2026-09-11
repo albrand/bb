@@ -2650,6 +2650,105 @@ describe("RuntimeManager bridge workers", () => {
     }
   }
 
+  it("keeps environment values out of the worker registry, and adoption still runs the next turn", async () => {
+    const dataDir = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
+    );
+    tempDirs.push(dataDir);
+    const workspacePath = await makeTempDir("bb-adopt-secrets-ws-");
+    const shellSecret = "ghp_shellsecret0123456789";
+    const pluginSecret = "sk-pluginsecret0123456789";
+    const bridgeLaunch = createScriptedEchoLaunch({
+      modulePath: fileURLToPath(
+        new URL(
+          "../../../tests/scripted-echo-provider/src/provider-bridge.ts",
+          import.meta.url,
+        ),
+      ),
+    });
+    const events: ThreadEvent[] = [];
+    const createManager = () =>
+      new RuntimeManager({
+        dataDir,
+        provisionWorkspace: createProvisionWorkspaceMock(workspacePath),
+        shellEnv: { PATH: process.env.PATH ?? "", GITHUB_TOKEN: shellSecret },
+        onEvent: ({ event, delivery }) => {
+          events.push(event);
+          delivery?.onSettled();
+        },
+      });
+    const dir = path.join(dataDir, "bridge-workers");
+    const exiting = createManager();
+    const entry = await exiting.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath,
+    });
+    await entry.runtime.startThread({
+      bridgeLaunch,
+      contributedEnv: [
+        {
+          name: "PLUGIN_TOKEN",
+          value: pluginSecret,
+          source: { plugin: "secret-plugin" },
+          reason: "test",
+          secret: true,
+        },
+      ],
+      environmentId: "env-1",
+      threadId: "t1",
+      projectId: "p1",
+      providerId: "fake",
+      options: adoptionRuntimeOptions,
+    });
+    await exiting.shutdownAll("detach");
+    const names = (await fs.readdir(dir)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    const raw = await fs.readFile(path.join(dir, names[0] ?? ""), "utf8");
+    const registered = JSON.parse(raw) as {
+      pid: number;
+      threads: Record<
+        string,
+        { config: { envVars: unknown; contributedEnv: unknown } }
+      >;
+    };
+
+    const adopting = createManager();
+    try {
+      expect(names).toHaveLength(1);
+      expect(raw).not.toContain(shellSecret);
+      expect(raw).not.toContain(pluginSecret);
+      expect(raw).not.toContain(process.env.PATH ?? "PATH-unset");
+      expect(registered.threads.t1?.config.envVars).toEqual({});
+      expect(registered.threads.t1?.config.contributedEnv).toEqual([]);
+
+      await adopting.reconcileBridgeWorkers();
+      await adopting.completeBridgeWorkerAdoption(async () => new Map());
+      await adopting.get("env-1")?.runtime.runTurn({
+        threadId: "t1",
+        clientRequestId: "creq_777777777a",
+        input: [{ type: "text", text: "after adoption", mentions: [] }],
+        options: adoptionRuntimeOptions,
+      });
+      await waitFor(() =>
+        events.some((event) => event.type === "turn/completed"),
+      );
+      expect(
+        (await fs.readdir(dir))
+          .filter((name) => name.endsWith(".json"))
+          .map((name) => name),
+      ).toEqual(names);
+      expect(
+        await fs.readFile(path.join(dir, names[0] ?? ""), "utf8"),
+      ).not.toContain(shellSecret);
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
+
   it("adopts a running turn on restart: same worker, same bb turn, no replayed output", async () => {
     const { before, bbTurnId, createManager, registered, dir } =
       await startTurnThenDetach("same-turn");

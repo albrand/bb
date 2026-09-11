@@ -764,7 +764,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         activeTurnId === null
           ? null
           : target.proc.adapter.getProviderTurnId(threadId, activeTurnId),
-      config: Object.fromEntries(Object.entries(config)),
+      config: Object.fromEntries(
+        Object.entries({ ...config, envVars: {}, contributedEnv: [] }),
+      ),
     });
   }
 
