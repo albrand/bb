@@ -96,6 +96,100 @@ describe("a restarted daemon that adopted threads", () => {
     });
   });
 
+  it("closes the items an adopted turn left open, since the adopting daemon continues them under new ids", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, adopted, environment } =
+        seedTwoActiveTurns(harness);
+      const commandItem = (id: string, status: string) => ({
+        providerThreadId: "claude-session-1",
+        item: {
+          type: "commandExecution",
+          id,
+          command: "echo tick",
+          cwd: "/tmp/test",
+          status,
+          approvalStatus: null,
+        },
+      });
+      const seed = (
+        sequence: number,
+        type: "item/started" | "item/completed",
+        itemId: string,
+        itemKind: "commandExecution" | "backgroundTask",
+        data: Record<string, unknown>,
+      ) =>
+        seedStoredEvent(harness.deps, {
+          threadId: adopted.id,
+          environmentId: environment.id,
+          sequence,
+          type,
+          scope: turnScope("turn-adopted"),
+          providerThreadId: "claude-session-1",
+          itemId,
+          itemKind,
+          data,
+        });
+      seed(
+        2,
+        "item/started",
+        "i-done",
+        "commandExecution",
+        commandItem("i-done", "pending"),
+      );
+      seed(
+        3,
+        "item/completed",
+        "i-done",
+        "commandExecution",
+        commandItem("i-done", "completed"),
+      );
+      seed(
+        4,
+        "item/started",
+        "i-open",
+        "commandExecution",
+        commandItem("i-open", "pending"),
+      );
+      seed(5, "item/started", "task:open", "backgroundTask", {
+        providerThreadId: "claude-session-1",
+        item: {
+          id: "task:open",
+          type: "backgroundTask",
+          taskType: "local_bash",
+          description: "fixture task",
+          status: "pending",
+          taskStatus: "running",
+          skipTranscript: false,
+        },
+      });
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+
+      await openRestartedSession(harness, host, {
+        adoptedThreads: [
+          { threadId: adopted.id, activeTurnId: "turn-adopted" },
+        ],
+      });
+
+      const events = listEvents(harness.deps.db, { threadId: adopted.id });
+      const completedItems = events
+        .filter((row) => row.type === "item/completed")
+        .map((row) => {
+          const data = JSON.parse(row.data) as {
+            item: { id: string; status: string };
+          };
+          return [data.item.id, data.item.status];
+        });
+      expect(completedItems).toEqual([
+        ["i-done", "completed"],
+        ["i-open", "interrupted"],
+      ]);
+      expect(
+        events.filter((row) => row.type === "item/backgroundTask/completed"),
+      ).toHaveLength(1);
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
+    });
+  });
+
   it("revives an adopted thread that a command failed during the swap, because run.failed leaves its turn open", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, adopted } = seedTwoActiveTurns(harness);

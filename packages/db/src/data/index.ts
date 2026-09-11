@@ -59,6 +59,10 @@ export {
   recordDaemonReplayKeys,
 } from "./fork-daemon-event-replay-keys.js";
 export {
+  listUncompletedTurnItemRows,
+  type UncompletedTurnItemRow,
+} from "./fork-adopted-open-items.js";
+export {
   clearDetachedThreads,
   listPendingDetachedThreads,
   recordDetachedThreads,
