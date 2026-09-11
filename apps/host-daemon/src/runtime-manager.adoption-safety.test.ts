@@ -4,9 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentRuntimeProcessExitInfo } from "@bb/agent-runtime";
+import { readProcessIdentity } from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
-import { afterEach, describe, expect, it } from "vitest";
+import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import {
+  BRIDGE_SOCKET_TRANSPORT_VERSION,
+  createBridgeSocketServer,
+} from "@bb/provider-bridge-protocol/bridge-kit";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeManager } from "./runtime-manager.js";
 
 const CONNECT_TIMEOUT_WITH_MARGIN_MS = 17_000;
@@ -154,6 +160,86 @@ describe("bridge worker adoption safety", () => {
       await adopting.shutdownAll("detach");
     }
   }, 60_000);
+
+  it("retires a worker whose thread configs cannot be read, instead of leaving it unowned", async () => {
+    const dataDir = await fs.mkdtemp(path.join("/tmp", "bbw-"));
+    tempDirs.push(dataDir);
+    const workspacePath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "bb-adopt-unreadable-ws-"),
+    );
+    tempDirs.push(workspacePath);
+    const dir = path.join(dataDir, "bridge-workers");
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const id = "aaaaaaaaaaaa";
+    const socketPath = path.join(dir, `${id}.sock`);
+    const shutdowns: string[] = [];
+    const worker = createBridgeSocketServer({
+      socketPath,
+      spillPath: path.join(dir, `${id}.buf`),
+      reattachTtlMs: 60_000,
+      memoryCapBytes: 1024 * 1024,
+      hardCapBytes: 16 * 1024 * 1024,
+      onOverflow: () => undefined,
+      onBackpressure: () => undefined,
+    });
+    await worker.listen({
+      onLine: () => undefined,
+      onShutdown: (reason) => shutdowns.push(reason),
+    });
+    await fs.writeFile(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        pid: process.pid,
+        processIdentity: readProcessIdentity(process.pid),
+        socketPath,
+        pluginId: "provider-scripted-echo",
+        providerId: "fake",
+        processKey: "fake#bridge:0123456789abcdef",
+        environmentId: "env-1",
+        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+        startedAt: new Date().toISOString(),
+        workspace: {
+          workspacePath,
+          workspaceProvisionType: "unmanaged",
+          personalWorkspaceRoot: null,
+        },
+        threads: {
+          t1: {
+            providerThreadId: null,
+            activeTurnId: null,
+            activeProviderTurnId: null,
+            config: { unreadable: true },
+          },
+        },
+      }),
+    );
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    const manager = new RuntimeManager({ dataDir, logger });
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(manager.listAdoptedBridgeThreads()).toEqual([]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [
+          expect.objectContaining({
+            id,
+            reason: "thread-configs-unreadable",
+          }),
+        ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
 
   it("retires an adopted worker it cannot reach, without signalling it", async () => {
     const { createManager, dir, registered } =
