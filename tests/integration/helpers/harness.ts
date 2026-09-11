@@ -14,7 +14,7 @@ import {
   type HostDaemonApp,
 } from "@bb/host-daemon/test";
 import { killProcessesHoldingFilesUnder } from "./tmp-root-processes.js";
-import { integrationTmpBase } from "./tmp-base.js";
+import { HARNESS_TMP_ROOT_PREFIX, integrationTmpBase } from "./tmp-base.js";
 import { createHostDaemonClient } from "@bb/host-daemon-contract";
 import { initDb } from "../../../apps/server/src/db.js";
 import { createLifecycleDedupers } from "../../../apps/server/src/lifecycle-dedupers.js";
@@ -415,7 +415,7 @@ export async function createIntegrationHarness(
 ): Promise<IntegrationHarness> {
   await loadProjectEnvFile();
   const tmpRoot = await fs.mkdtemp(
-    path.join(integrationTmpBase(), "bb-integration-"),
+    path.join(integrationTmpBase(), HARNESS_TMP_ROOT_PREFIX),
   );
   await fs.writeFile(
     path.join(tmpRoot, "parent.pid"),

@@ -1,6 +1,9 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { homedir } from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 import { isNodeError } from "./remove-path.js";
+import { HARNESS_TMP_ROOT_PREFIX, integrationTmpBase } from "./tmp-base.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -70,10 +73,29 @@ async function listOpenFilePids(tmpRoot: string): Promise<number[]> {
     .filter((value) => Number.isInteger(value) && value > 0);
 }
 
+export function assertHarnessTmpRoot(root: string): string {
+  const resolved = path.resolve(root);
+  const base = path.resolve(integrationTmpBase());
+  const name = path.basename(resolved);
+  const refused = new Set([path.parse(resolved).root, base, homedir()]);
+  if (
+    refused.has(resolved) ||
+    path.dirname(resolved) !== base ||
+    !name.startsWith(HARNESS_TMP_ROOT_PREFIX) ||
+    name.length <= HARNESS_TMP_ROOT_PREFIX.length
+  ) {
+    throw new Error(
+      `Refusing to kill processes under ${root}: not a harness temp root (${path.join(base, `${HARNESS_TMP_ROOT_PREFIX}*`)})`,
+    );
+  }
+  return resolved;
+}
+
 export async function killProcessesHoldingFilesUnder(
   root: string,
   options: { exclude: readonly number[] },
 ): Promise<void> {
+  root = assertHarnessTmpRoot(root);
   const excluded = new Set(options.exclude);
   for (const pid of new Set(await listOpenFilePids(root))) {
     if (excluded.has(pid)) continue;
