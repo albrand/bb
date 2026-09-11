@@ -583,6 +583,50 @@ describe("dispatchCommand", () => {
     expect(runtime.steerTurn).not.toHaveBeenCalled();
   });
 
+  it("holds a thread command until bridge worker adoption has settled", async () => {
+    const runtime = createRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: async () => createWorkspace(),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/bb-command-dispatch-test",
+    });
+    runtime.setActiveTurn("thread-1", "turn-1");
+    const adoption = createDeferredPromise<void>();
+    vi.spyOn(manager, "whenBridgeWorkerAdoptionSettled").mockReturnValue(
+      adoption.promise,
+    );
+
+    const dispatchPromise = dispatchCommand(
+      {
+        type: "thread.stop",
+        intent: "interrupt",
+        environmentId: "env-1",
+        threadId: "thread-1",
+      },
+      {
+        dataDir: "/tmp/bb-data",
+        logger: silentLogger,
+        eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
+        fetchProjectAttachment: async () => {
+          throw new Error("Unexpected project attachment fetch");
+        },
+        fetchPluginHostArtifact: fetchDispatchTestArtifact,
+        ...unexpectedProviderMaintenance,
+        runtimeManager: manager,
+        threadStorageRootPath: "/tmp/bb-thread-storage",
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(runtime.stopThread).not.toHaveBeenCalled();
+
+    adoption.resolve(undefined);
+    await dispatchPromise;
+    expect(runtime.stopThread).toHaveBeenCalledWith({ threadId: "thread-1" });
+  });
+
   it("flushes buffered events before reporting thread.stop success", async () => {
     const runtime = createRuntime();
     const manager = new RuntimeManager({
