@@ -1105,9 +1105,22 @@ export class RuntimeManager {
           entry,
           reason: "incompatible-protocol-or-framing",
         }));
+    const newestByProcess = new Map<string, BridgeWorkerRegistryEntry>();
+    for (const entry of adoptable) {
+      const key = bridgeWorkerProcessSlot(entry);
+      const current = newestByProcess.get(key);
+      if (current === undefined || entry.startedAt > current.startedAt) {
+        newestByProcess.set(key, entry);
+      }
+    }
+    for (const entry of adoptable) {
+      if (newestByProcess.get(bridgeWorkerProcessSlot(entry)) !== entry) {
+        unadopted.push({ entry, reason: "superseded-by-newer-worker" });
+      }
+    }
     const adopted: BridgeWorkerRegistryEntry[] = [];
     const byEnvironment = new Map<string, BridgeWorkerRegistryEntry[]>();
-    for (const entry of adoptable) {
+    for (const entry of newestByProcess.values()) {
       const group = byEnvironment.get(entry.environmentId) ?? [];
       group.push(entry);
       byEnvironment.set(entry.environmentId, group);
@@ -1525,6 +1538,10 @@ export class RuntimeManager {
 export type RuntimeShutdownMode = "detach" | "stop";
 
 const BRIDGE_WORKER_RETIRE_TIMEOUT_MS = 2_000;
+
+function bridgeWorkerProcessSlot(entry: BridgeWorkerRegistryEntry): string {
+  return `${entry.environmentId}\n${entry.processKey}`;
+}
 
 function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
   return (
