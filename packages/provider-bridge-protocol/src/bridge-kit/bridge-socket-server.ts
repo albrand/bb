@@ -5,7 +5,7 @@ import { readBoundedLines } from "./bounded-line-reader.js";
 import { BridgeReplayBuffer } from "./bridge-replay-buffer.js";
 
 export const BRIDGE_SOCKET_ENV = "BB_BRIDGE_SOCKET";
-export const BRIDGE_SOCKET_TRANSPORT_VERSION = 1 as const;
+export const BRIDGE_SOCKET_TRANSPORT_VERSION = 2 as const;
 export const BRIDGE_SHUTDOWN_METHOD = "bridge/shutdown";
 export const BRIDGE_RESUME_METHOD = "bridge/resume";
 export const BRIDGE_ACK_METHOD = "bridge/ack";
@@ -40,7 +40,7 @@ export interface BridgeSocketServer {
 type BridgeControlMessage =
   | { kind: "shutdown" }
   | { kind: "resume"; afterWseq: number }
-  | { kind: "ack"; through: number };
+  | { kind: "ack"; through: number; keep: number[] };
 
 export function parseBridgeControlMessage(
   line: string,
@@ -71,9 +71,27 @@ export function parseBridgeControlMessage(
   }
   if (method === BRIDGE_ACK_METHOD) {
     const through = numberParam("through");
-    return through === null ? null : { kind: "ack", through };
+    const keep = wseqListParam(params, "keep");
+    return through === null || keep === null
+      ? null
+      : { kind: "ack", through, keep };
   }
   return null;
+}
+
+function wseqListParam(params: unknown, name: string): number[] | null {
+  if (typeof params !== "object" || params === null) return null;
+  const value: unknown = Reflect.get(params, name);
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const wseqs: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isSafeInteger(item) || item <= 0) {
+      return null;
+    }
+    wseqs.push(item);
+  }
+  return wseqs;
 }
 
 export function isBridgeShutdownRequest(line: string): boolean {
@@ -105,6 +123,7 @@ export function createBridgeSocketServer(
   let listenArgs: BridgeSocketListenArgs | null = null;
   let nextWseq = 1;
   let paused = false;
+  let kept: readonly number[] = [];
   const decoder = new StringDecoder("utf8");
   let partialLine = "";
   const buffer = new BridgeReplayBuffer({
@@ -151,11 +170,12 @@ export function createBridgeSocketServer(
       return;
     }
     if (message.kind === "ack") {
-      buffer.ackThrough(message.through);
+      kept = message.keep;
+      buffer.ackThrough(message.through, kept);
       updateBackpressure();
       return;
     }
-    buffer.ackThrough(message.afterWseq);
+    buffer.ackThrough(message.afterWseq, kept);
     for (const frame of buffer.framesAfter(message.afterWseq)) {
       socket.write(frame.bytes);
     }

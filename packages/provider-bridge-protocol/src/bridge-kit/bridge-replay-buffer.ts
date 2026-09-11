@@ -55,15 +55,20 @@ export class BridgeReplayBuffer {
     this.spilledBytes += frame.bytes.length;
   }
 
-  ackThrough(wseq: number): void {
-    while (this.inMemory.length > 0 && (this.inMemory[0]?.wseq ?? 0) <= wseq) {
-      const dropped = this.inMemory.shift();
-      this.memoryBytes -= dropped?.bytes.length ?? 0;
-    }
-    while (this.spilled.length > 0 && (this.spilled[0]?.wseq ?? 0) <= wseq) {
-      const dropped = this.spilled.shift();
-      this.spilledBytes -= dropped?.length ?? 0;
-    }
+  ackThrough(wseq: number, keep: readonly number[] = []): void {
+    const kept = new Set(keep);
+    this.memoryBytes -= dropAckedPrefix(
+      this.inMemory,
+      wseq,
+      kept,
+      (frame) => frame.bytes.length,
+    );
+    this.spilledBytes -= dropAckedPrefix(
+      this.spilled,
+      wseq,
+      kept,
+      (frame) => frame.length,
+    );
     if (this.spilled.length === 0 && this.spillFd !== null) {
       this.discardSpill();
     }
@@ -118,4 +123,24 @@ export class BridgeReplayBuffer {
       unlinkSync(this.args.spillPath);
     } catch {}
   }
+}
+
+function dropAckedPrefix<TFrame extends { wseq: number }>(
+  frames: TFrame[],
+  through: number,
+  kept: ReadonlySet<number>,
+  size: (frame: TFrame) => number,
+): number {
+  let end = 0;
+  while (end < frames.length && (frames[end]?.wseq ?? Infinity) <= through) {
+    end += 1;
+  }
+  const keptFrames: TFrame[] = [];
+  let freed = 0;
+  for (const frame of frames.splice(0, end)) {
+    if (kept.has(frame.wseq)) keptFrames.push(frame);
+    else freed += size(frame);
+  }
+  frames.unshift(...keptFrames);
+  return freed;
 }

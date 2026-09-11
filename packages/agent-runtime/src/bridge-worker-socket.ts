@@ -200,6 +200,7 @@ export class SocketBridgeWorker
   private closeEmitted = false;
   private lastReceivedWseq = 0;
   private ackedWseq = 0;
+  private ackedKeepKey = "";
   private ackTimer: NodeJS.Timeout | null = null;
   private lineHandler: ((line: string, wseq: number | null) => void) | null =
     null;
@@ -433,15 +434,22 @@ export class SocketBridgeWorker
 
   private sendAck(through: number): void {
     const socket = this.socket;
-    if (socket === null || through <= this.ackedWseq || !socket.writable) {
+    const keep = this.ackTracker.keptWseqs();
+    const keepKey = keep.join(",");
+    if (
+      socket === null ||
+      !socket.writable ||
+      (through <= this.ackedWseq && keepKey === this.ackedKeepKey)
+    ) {
       return;
     }
-    this.ackedWseq = through;
+    this.ackedWseq = Math.max(this.ackedWseq, through);
+    this.ackedKeepKey = keepKey;
     socket.write(
       `${JSON.stringify({
         jsonrpc: "2.0",
         method: BRIDGE_ACK_METHOD,
-        params: { through },
+        params: { through: this.ackedWseq, keep },
       })}\n`,
     );
   }

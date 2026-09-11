@@ -114,6 +114,33 @@ describe("createBridgeSocketServer", () => {
     second.socket.destroy();
   });
 
+  it("drops acknowledged lines but keeps the ones the runtime asked it to keep, and replays only those", async () => {
+    const { server, socketPath } = await startServer({
+      memoryCapBytes: 200,
+      hardCapBytes: 16 * 1024 * 1024,
+    });
+    const first = await connectBridgeSocket(socketPath);
+    for (let n = 1; n <= 6; n += 1) server.write(`${payload(n, 40)}\n`);
+    await first.waitForLine((line) => line === payload(6, 40));
+    first.send({ method: "bridge/ack", params: { through: 6, keep: [2, 5] } });
+    await wait(20);
+    expect(server.replayStats().frames).toBe(2);
+    first.socket.destroy();
+    await first.closed;
+
+    const second = await connectBridgeSocket(socketPath, { resumeAfter: 0 });
+    await second.waitForLine((line) => line === payload(5, 40));
+    expect(second.frames.map((frame) => frame.wseq)).toEqual([2, 5]);
+    second.send({ method: "bridge/ack", params: { through: 6, keep: [] } });
+    await wait(20);
+    expect(server.replayStats()).toEqual({
+      frames: 0,
+      memoryBytes: 0,
+      spilledBytes: 0,
+    });
+    second.socket.destroy();
+  });
+
   it("keeps a long detached period within its memory cap by spilling to disk", async () => {
     const memoryCapBytes = 64 * 1024;
     const { server, socketPath, spillPath } = await startServer({
