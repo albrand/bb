@@ -194,7 +194,7 @@ function threadShowEnvironmentJson(
 
 /**
  * What the thread runs with, labelled by what each value is. "Requested" is
- * never presented as what ran: no provider reports that yet.
+ * never presented as what ran; "Executed" is only what the provider reported.
  */
 export function printExecutionProfile(
   execution: ThreadExecutionProfileResult | null,
@@ -218,7 +218,10 @@ export function printExecutionProfile(
   console.log(
     `    Last requested: ${execution.lastRequested ? describe(execution.lastRequested) : "(no turn yet)"}`,
   );
-  console.log("    Executed:       not reported by the provider");
+  const { executed } = execution;
+  console.log(
+    `    Executed:       ${executed ? `${executed.model} · ${executed.reasoningLevel ?? "unreported"} · ${executed.permissionMode ?? "unreported"} · ${executed.serviceTier ?? "unreported"}` : "not reported by the provider"}`,
+  );
 }
 
 export function registerShowCommand(

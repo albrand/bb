@@ -29,6 +29,7 @@ import {
   threadTimelineGoalSchema,
   threadTimelineModelFallbackSchema,
   threadTimelinePendingTodosSchema,
+  threadExecutionReportSchema,
   threadEventTypeValues,
   threadVisibilitySchema,
   threadWithRuntimeSchema,
@@ -273,8 +274,10 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
  * - `overrides`: the sticky per-thread choices stored for the next turn; null
  *   means none is set (the default applies), not "unknown".
  * - `nextTurn`: what the next turn will be resolved to.
- * - `executed`: what the provider reports it ran. No provider reports it yet,
- *   so it is always null rather than a copy of the request.
+ * - `executed`: the latest session settings the provider reported (claude-code
+ *   system/init, codex thread start/resume/fork). Null when the provider never
+ *   reported, never a copy of the request; a null field inside it is one the
+ *   provider did not report in bb's vocabulary.
  */
 export const threadExecutionProfileResponseSchema = z.object({
   lastRequested: recordedThreadExecutionOptionsSchema.nullable(),
@@ -283,7 +286,7 @@ export const threadExecutionProfileResponseSchema = z.object({
     reasoningLevel: reasoningLevelSchema.nullable(),
   }),
   nextTurn: resolvedThreadExecutionOptionsSchema.nullable(),
-  executed: z.null(),
+  executed: threadExecutionReportSchema.nullable(),
 });
 export type ThreadExecutionProfileResponse = z.infer<
   typeof threadExecutionProfileResponseSchema
