@@ -300,6 +300,37 @@ describe("socket bridge workers", () => {
     }
   });
 
+  it("reconnects when its socket drops while the worker lives, and the turn completes with nothing lost or repeated", async () => {
+    const { events, registered } = await startStreamingTurn({ settle: true });
+    try {
+      const rogue = connect(registered.socketPath);
+      rogue.on("error", () => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      rogue.destroy();
+
+      await waitForRuntimeState({
+        label: "turn completed after the reconnect",
+        predicate: () =>
+          events.some(
+            (event) =>
+              event.type === "turn/completed" && event.threadId === "t1",
+          ),
+        timeoutMs: 10_000,
+      });
+      const text = JSON.stringify(events);
+      for (const chunk of ["chunk1", "chunk2", "chunk3"]) {
+        expect(text.split(chunk).length - 1).toBeGreaterThan(0);
+      }
+      expect(
+        events.filter(
+          (event) => event.type === "turn/completed" && event.threadId === "t1",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      retire(registered);
+    }
+  }, 20_000);
+
   it("keeps only an unanswered request for replay, not the output other threads produced after it", async () => {
     let requested = false;
     const events: ThreadEvent[] = [];

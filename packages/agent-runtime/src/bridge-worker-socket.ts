@@ -192,6 +192,7 @@ export class SocketBridgeWorker
   private readonly child: WorkerProcessHandle;
   private readonly registryEntry: BridgeWorkerRegistryEntry | null;
   private resumeRequested: boolean;
+  private readonly connectTimeoutMs: number;
   private socket: Socket | null = null;
   private released = false;
   private exited = false;
@@ -275,6 +276,7 @@ export class SocketBridgeWorker
     this.child.on("exit", (code, signal) => {
       this.handleExit(code, signal);
     });
+    this.connectTimeoutMs = args.connectTimeoutMs;
     void this.connect(Date.now() + args.connectTimeoutMs);
   }
 
@@ -374,7 +376,12 @@ export class SocketBridgeWorker
     socket.on("close", () => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.stdout.end();
+      this.stdin.unpipe(socket);
+      if (this.exited || this.released) {
+        this.stdout.end();
+        return;
+      }
+      void this.connect(Date.now() + this.connectTimeoutMs);
     });
     if (this.resumeRequested) this.sendResume(socket);
     this.stdin.pipe(socket);
