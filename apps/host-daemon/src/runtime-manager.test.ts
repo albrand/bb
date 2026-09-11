@@ -1996,3 +1996,74 @@ describe("RuntimeManager", () => {
     expect(runtimeB.shutdown).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("RuntimeManager bridge workers", () => {
+  function deadPid(): number {
+    const child = spawn(process.execPath, ["-e", ""]);
+    if (child.pid === undefined) throw new Error("could not spawn");
+    return child.pid;
+  }
+
+  async function writeRegistryEntry(args: {
+    dir: string;
+    id: string;
+    pid: number;
+  }): Promise<void> {
+    await fs.mkdir(args.dir, { recursive: true });
+    await fs.writeFile(
+      path.join(args.dir, `${args.id}.json`),
+      JSON.stringify({
+        id: args.id,
+        pid: args.pid,
+        socketPath: path.join(args.dir, `${args.id}.sock`),
+        pluginId: "provider-codex",
+        providerId: "codex",
+        processKey: "codex#bridge:0123456789abcdef",
+        environmentId: "env-1",
+        bridgeProtocolVersion: 2,
+        startedAt: "2026-09-11T00:00:00.000Z",
+      }),
+    );
+  }
+
+  it("runs environment workers over the data dir's bridge worker registry", async () => {
+    const dataDir = await makeTempDir("bb-runtime-manager-workers-");
+    const createRuntime = vi.fn((_options: AgentRuntimeOptions) =>
+      createFakeRuntime(),
+    );
+    const manager = new RuntimeManager({
+      dataDir,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-workers"),
+      createRuntime,
+    });
+
+    await manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/env-workers",
+    });
+
+    expect(createRuntime.mock.calls[0]?.[0].bridgeWorkers).toEqual({
+      dir: path.join(dataDir, "bridge-workers"),
+      environmentId: "env-1",
+    });
+  });
+
+  it("reaps the registry entries of workers that are no longer running", async () => {
+    const dataDir = await makeTempDir("bb-runtime-manager-reap-");
+    const dir = path.join(dataDir, "bridge-workers");
+    const gone = deadPid();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await writeRegistryEntry({ dir, id: "aaaaaaaaaaaa", pid: gone });
+    await fs.writeFile(path.join(dir, "aaaaaaaaaaaa.log"), "old log");
+    await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
+    const manager = new RuntimeManager({
+      dataDir,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-reap"),
+      createRuntime: () => createFakeRuntime(),
+    });
+
+    manager.reconcileBridgeWorkers();
+
+    expect((await fs.readdir(dir)).sort()).toEqual(["bbbbbbbbbbbb.json"]);
+  });
+});

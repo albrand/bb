@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
   createAgentRuntime,
+  reapDeadBridgeWorkers,
   type AgentRuntime,
   type AgentRuntimeOptions,
   type AgentRuntimeSkillRoot,
@@ -1047,6 +1048,19 @@ export class RuntimeManager {
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
+  reconcileBridgeWorkers(): void {
+    if (this.options.dataDir === undefined) return;
+    const { reaped } = reapDeadBridgeWorkers(
+      bridgeWorkerDirForDataDir(this.options.dataDir),
+    );
+    if (reaped.length > 0) {
+      this.options.logger?.debug(
+        { workerIds: reaped.map((entry) => entry.id) },
+        "Reaped registry entries of provider bridge workers that are no longer running",
+      );
+    }
+  }
+
   async shutdownAll(): Promise<void> {
     const entries = [...this.entries.values()];
     for (const pending of this.pendingEntries.values()) {
@@ -1206,7 +1220,10 @@ export class RuntimeManager {
       ...(this.options.dataDir === undefined
         ? {}
         : {
-            bridgeWorkerDir: path.join(this.options.dataDir, "bridge-workers"),
+            bridgeWorkers: {
+              dir: bridgeWorkerDirForDataDir(this.options.dataDir),
+              environmentId: args.environmentId,
+            },
           }),
       onEvent: (event) => {
         this.options.onEvent?.({
@@ -1305,4 +1322,8 @@ export class RuntimeManager {
         },
       });
   }
+}
+
+function bridgeWorkerDirForDataDir(dataDir: string): string {
+  return path.join(dataDir, "bridge-workers");
 }

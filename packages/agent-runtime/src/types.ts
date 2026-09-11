@@ -64,7 +64,7 @@ export interface AgentRuntimeOptions {
   threadStorageRootPath?: string;
 
   bridgeBundleDir?: string;
-  bridgeWorkerDir?: string;
+  bridgeWorkers?: AgentRuntimeBridgeWorkers;
   turnStartWatchdog?: { thresholdMs?: number; intervalMs?: number };
   rateLimitRetry?: { delaysMs?: readonly number[] };
   threadCreation?: { requestTimeoutMs?: number };
@@ -84,6 +84,11 @@ export interface AgentRuntimeOptions {
   onProcessExit?: (info: AgentRuntimeProcessExitInfo) => void;
 
   onProviderRecovery?: (hint: AgentRuntimeProviderRecoveryHint) => void;
+}
+
+export interface AgentRuntimeBridgeWorkers {
+  dir: string;
+  environmentId: string;
 }
 
 export interface AgentRuntimeProviderRecoveryHint {

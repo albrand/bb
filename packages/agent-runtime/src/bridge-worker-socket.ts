@@ -9,7 +9,6 @@ import {
   openSync,
   readSync,
   statSync,
-  unlinkSync,
 } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
@@ -19,7 +18,12 @@ import {
   spawnPortableProcess,
   supportsProcessGroups,
 } from "@bb/process-utils";
+import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
 import { BRIDGE_SOCKET_ENV } from "@bb/provider-bridge-protocol/bridge-kit";
+import {
+  removeBridgeWorkerFiles,
+  writeBridgeWorkerEntry,
+} from "./bridge-worker-registry.js";
 
 export interface BridgeWorkerProcess {
   readonly pid?: number | undefined;
@@ -52,6 +56,14 @@ export interface SpawnSocketBridgeWorkerArgs {
   env: NodeJS.ProcessEnv;
   workerDir: string;
   connectTimeoutMs: number;
+  registration: BridgeWorkerRegistration;
+}
+
+export interface BridgeWorkerRegistration {
+  environmentId: string;
+  pluginId: string;
+  processKey: string;
+  providerId: string;
 }
 
 export const BRIDGE_WORKER_CONNECT_TIMEOUT_MS = 15_000;
@@ -100,6 +112,7 @@ export class SocketBridgeWorker
   readonly id: string;
   readonly socketPath: string;
   readonly logPath: string;
+  readonly workerDir: string;
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
@@ -116,6 +129,7 @@ export class SocketBridgeWorker
     this.id = paths.id;
     this.socketPath = paths.socketPath;
     this.logPath = paths.logPath;
+    this.workerDir = args.workerDir;
     const logFd = openSync(this.logPath, "a", 0o600);
     try {
       this.child = spawnPortableProcess({
@@ -130,6 +144,16 @@ export class SocketBridgeWorker
       closeSync(logFd);
     }
     this.child.unref();
+    if (this.child.pid !== undefined) {
+      writeBridgeWorkerEntry(this.workerDir, {
+        ...args.registration,
+        id: this.id,
+        pid: this.child.pid,
+        socketPath: this.socketPath,
+        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+        startedAt: new Date().toISOString(),
+      });
+    }
     this.stdout.on("end", () => {
       this.stdoutEnded = true;
       this.maybeEmitClose();
@@ -216,8 +240,11 @@ export class SocketBridgeWorker
     this.exited = true;
     this.emit("exit", code, signal);
     const tail = readFileTail(this.logPath, BRIDGE_WORKER_LOG_TAIL_BYTES);
-    removeFile(this.logPath);
-    removeFile(this.socketPath);
+    removeBridgeWorkerFiles({
+      dir: this.workerDir,
+      id: this.id,
+      socketPath: this.socketPath,
+    });
     if (tail.length > 0) this.stderr.write(tail);
     this.stderr.end();
     if (this.socket === null) this.stdout.end();
@@ -258,11 +285,4 @@ function readFileTail(path: string, maxBytes: number): Buffer {
   } finally {
     closeSync(fd);
   }
-}
-
-function removeFile(path: string): void {
-  if (process.platform === "win32" && path.startsWith("\\\\.\\pipe\\")) return;
-  try {
-    unlinkSync(path);
-  } catch {}
 }

@@ -25,6 +25,7 @@ import {
 import type { RuntimeProviderIdentityState } from "./runtime-thread-identity.js";
 import type {
   AgentRuntimeBridgeLaunch,
+  AgentRuntimeBridgeWorkers,
   AgentRuntimeOptions,
   AgentRuntimeProcessExitThreadState,
   AgentRuntimeSkillRoot,
@@ -56,7 +57,7 @@ interface RuntimeProviderProcessManagerArgs {
     options: CreateBridgeAdapterOptions,
   ) => BridgeProtocolAdapter;
   bridgeBundleDir: string | undefined;
-  bridgeWorkerDir: string | undefined;
+  bridgeWorkers: AgentRuntimeBridgeWorkers | undefined;
   bridgeNodeEnv?: Record<string, string>;
   bridgeNodeExecutablePath?: string;
   captureThreadExitState: (
@@ -106,6 +107,7 @@ interface TerminateProviderProcessArgs {
 
 interface SpawnProviderArgs {
   adapter: BridgeProtocolAdapter;
+  pluginId: string;
   processKey: string;
   providerId: string;
 }
@@ -179,6 +181,7 @@ export class RuntimeProviderProcessManager {
       const adapter = this.getAdapter(args.providerId, args.bridgeLaunch);
       const providerProcess = this.spawnProvider({
         adapter,
+        pluginId: args.bridgeLaunch.pluginId,
         processKey: args.processKey,
         providerId: args.providerId,
       });
@@ -394,15 +397,21 @@ export class RuntimeProviderProcessManager {
       env,
     };
     const child: BridgeWorkerProcess =
-      this.args.bridgeWorkerDir === undefined
+      this.args.bridgeWorkers === undefined
         ? spawnPortablePipedProcess({
             ...spawnRequest,
             detached: supportsProcessGroups(),
           })
         : new SocketBridgeWorker({
             ...spawnRequest,
-            workerDir: this.args.bridgeWorkerDir,
+            workerDir: this.args.bridgeWorkers.dir,
             connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
+            registration: {
+              environmentId: this.args.bridgeWorkers.environmentId,
+              pluginId: args.pluginId,
+              processKey: args.processKey,
+              providerId: args.providerId,
+            },
           });
     let finalizeExit: () => void = () => undefined;
     const exitFinalized = new Promise<void>((resolve) => {

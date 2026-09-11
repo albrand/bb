@@ -915,6 +915,7 @@ export async function createHostDaemonApp(
         { dataDir: options.dataDir, serverUrl: options.serverUrl },
         "Host daemon connecting",
       );
+      runtimeManager.reconcileBridgeWorkers();
       await connection.start();
     },
   });
