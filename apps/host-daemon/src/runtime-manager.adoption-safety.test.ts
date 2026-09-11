@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentRuntimeProcessExitInfo } from "@bb/agent-runtime";
-import { readProcessIdentity } from "@bb/agent-runtime";
+import {
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+  readProcessIdentity,
+} from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
@@ -112,6 +116,74 @@ async function startTurnThenDetach(label: string) {
   return { createManager, dir, registered };
 }
 
+async function plantEntryWithListener(
+  label: string,
+  mutate: (
+    entry: Record<string, unknown>,
+  ) => Record<string, unknown> = (entry) => entry,
+) {
+  const dataDir = await fs.mkdtemp(path.join("/tmp", "bbw-"));
+  tempDirs.push(dataDir);
+  const workspacePath = await fs.mkdtemp(
+    path.join(os.tmpdir(), `bb-adopt-${label}-ws-`),
+  );
+  tempDirs.push(workspacePath);
+  const dir = path.join(dataDir, "bridge-workers");
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  const id = "aaaaaaaaaaaa";
+  const socketPath = path.join(dir, `${id}.sock`);
+  const shutdowns: string[] = [];
+  const worker = createBridgeSocketServer({
+    socketPath,
+    spillPath: path.join(dir, `${id}.buf`),
+    reattachTtlMs: 60_000,
+    memoryCapBytes: 1024 * 1024,
+    hardCapBytes: 16 * 1024 * 1024,
+    onOverflow: () => undefined,
+    onBackpressure: () => undefined,
+  });
+  await worker.listen({
+    onLine: () => undefined,
+    onShutdown: (reason) => shutdowns.push(reason),
+  });
+  const entryFile = path.join(dir, `${id}.json`);
+  await fs.writeFile(
+    entryFile,
+    JSON.stringify(
+      mutate({
+        id,
+        pid: process.pid,
+        processIdentity: readProcessIdentity(process.pid),
+        formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+        socketPath,
+        pluginId: "provider-scripted-echo",
+        providerId: "fake",
+        processKey: "fake#bridge:0123456789abcdef",
+        environmentId: "env-1",
+        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+        startedAt: new Date().toISOString(),
+        workspace: {
+          workspacePath,
+          workspaceProvisionType: "unmanaged",
+          personalWorkspaceRoot: null,
+        },
+        threads: {
+          t1: {
+            providerThreadId: null,
+            activeTurnId: null,
+            activeProviderTurnId: null,
+            config: { unreadable: true },
+          },
+        },
+      }),
+    ),
+  );
+  const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+  const manager = new RuntimeManager({ dataDir, logger });
+  return { dataDir, dir, entryFile, id, logger, manager, shutdowns, worker };
+}
+
 describe("bridge worker adoption safety", () => {
   it("review: pid reuse never signals an unrelated process", async () => {
     const { createManager, registered, dir } =
@@ -162,61 +234,8 @@ describe("bridge worker adoption safety", () => {
   }, 60_000);
 
   it("retires a worker whose thread configs cannot be read, instead of leaving it unowned", async () => {
-    const dataDir = await fs.mkdtemp(path.join("/tmp", "bbw-"));
-    tempDirs.push(dataDir);
-    const workspacePath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "bb-adopt-unreadable-ws-"),
-    );
-    tempDirs.push(workspacePath);
-    const dir = path.join(dataDir, "bridge-workers");
-    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-    const id = "aaaaaaaaaaaa";
-    const socketPath = path.join(dir, `${id}.sock`);
-    const shutdowns: string[] = [];
-    const worker = createBridgeSocketServer({
-      socketPath,
-      spillPath: path.join(dir, `${id}.buf`),
-      reattachTtlMs: 60_000,
-      memoryCapBytes: 1024 * 1024,
-      hardCapBytes: 16 * 1024 * 1024,
-      onOverflow: () => undefined,
-      onBackpressure: () => undefined,
-    });
-    await worker.listen({
-      onLine: () => undefined,
-      onShutdown: (reason) => shutdowns.push(reason),
-    });
-    await fs.writeFile(
-      path.join(dir, `${id}.json`),
-      JSON.stringify({
-        id,
-        pid: process.pid,
-        processIdentity: readProcessIdentity(process.pid),
-        socketPath,
-        pluginId: "provider-scripted-echo",
-        providerId: "fake",
-        processKey: "fake#bridge:0123456789abcdef",
-        environmentId: "env-1",
-        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
-        startedAt: new Date().toISOString(),
-        workspace: {
-          workspacePath,
-          workspaceProvisionType: "unmanaged",
-          personalWorkspaceRoot: null,
-        },
-        threads: {
-          t1: {
-            providerThreadId: null,
-            activeTurnId: null,
-            activeProviderTurnId: null,
-            config: { unreadable: true },
-          },
-        },
-      }),
-    );
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
-    const manager = new RuntimeManager({ dataDir, logger });
+    const { dir, id, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("unreadable");
     try {
       await manager.reconcileBridgeWorkers();
     } finally {
@@ -307,6 +326,57 @@ describe("bridge worker adoption safety", () => {
       await adopting.shutdownAll("detach");
     }
   }, 60_000);
+
+  it("retires an entry written in another registry format instead of adopting it", async () => {
+    const { dir, entryFile, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("format", (entry) => ({
+        ...entry,
+        formatVersion: 99,
+      }));
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(manager.listAdoptedBridgeThreads()).toEqual([]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(existsSync(entryFile)).toBe(false);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [
+          expect.objectContaining({ reason: "incompatible-registry-format" }),
+        ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
+  it("retires an unparseable entry over its socket when the socket path is one bb would have chosen", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("unparseable", (entry) => {
+        const { processIdentity: _dropped, ...withoutIdentity } = entry;
+        return withoutIdentity;
+      });
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retired: [expect.objectContaining({ reason: "unparseable-entry" })],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
 
   it("retires an adopted worker it cannot reach, without signalling it", async () => {
     const { createManager, dir, registered } =

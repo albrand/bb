@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   createAgentRuntime,
   readBridgeWorkerEntries,
   reapDeadBridgeWorkers,
@@ -1254,14 +1255,17 @@ export class RuntimeManager {
   async reconcileBridgeWorkers(): Promise<void> {
     if (this.options.dataDir === undefined) return;
     const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
-    const { live, reaped } = reapDeadBridgeWorkers(dir);
+    const { live, reaped, retirable } = reapDeadBridgeWorkers(dir);
     const adoptable = live.filter(isAdoptableBridgeWorker);
     const unadopted: { entry: BridgeWorkerRegistryEntry; reason: string }[] =
       live
         .filter((entry) => !adoptable.includes(entry))
         .map((entry) => ({
           entry,
-          reason: "incompatible-protocol-or-framing",
+          reason:
+            entry.formatVersion === BRIDGE_WORKER_REGISTRY_FORMAT_VERSION
+              ? "incompatible-protocol-or-framing"
+              : "incompatible-registry-format",
         }));
     const newestByProcess = new Map<string, BridgeWorkerRegistryEntry>();
     for (const entry of adoptable) {
@@ -1330,14 +1334,34 @@ export class RuntimeManager {
         );
       }
     }
-    const retired = await Promise.all(
-      unadopted.map(async ({ entry, reason }) => ({
+    const retirements: {
+      id: string;
+      pid: number | null;
+      reason: string;
+      socketPath: string;
+    }[] = [
+      ...unadopted.map(({ entry, reason }) => ({
         id: entry.id,
         pid: entry.pid,
         reason,
+        socketPath: entry.socketPath,
+      })),
+      ...retirable.map((item) => ({
+        id: item.id,
+        pid: null,
+        reason: "unparseable-entry",
+        socketPath: item.socketPath,
+      })),
+    ];
+    const retired = await Promise.all(
+      retirements.map(async ({ id, pid, reason, socketPath }) => ({
+        id,
+        pid,
+        reason,
         outcome: await retireBridgeWorker({
           dir,
-          entry,
+          id,
+          socketPath,
           timeoutMs: BRIDGE_WORKER_RETIRE_TIMEOUT_MS,
         }),
       })),
@@ -1717,6 +1741,7 @@ function bridgeWorkerProcessSlot(entry: BridgeWorkerRegistryEntry): string {
 
 function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
   return (
+    entry.formatVersion === BRIDGE_WORKER_REGISTRY_FORMAT_VERSION &&
     entry.bridgeProtocolVersion === PROVIDER_BRIDGE_PROTOCOL_VERSION &&
     entry.transportVersion === BRIDGE_SOCKET_TRANSPORT_VERSION &&
     Object.keys(entry.threads).length > 0

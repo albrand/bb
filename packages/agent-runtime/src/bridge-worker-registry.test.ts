@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type BridgeWorkerRegistryEntry,
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
   readProcessIdentity,
   reapDeadBridgeWorkers,
@@ -24,6 +25,7 @@ function entry(
 ): BridgeWorkerRegistryEntry {
   return {
     id: "a1b2c3d4e5f6",
+    formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
     pid: process.pid,
     processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
     socketPath: join(dir, `${overrides.id ?? "a1b2c3d4e5f6"}.sock`),
@@ -67,7 +69,7 @@ describe("bridge worker registry", () => {
 
     expect(readBridgeWorkerEntries(dir)).toEqual({
       entries: [written],
-      invalidIds: [],
+      invalid: [],
     });
     expect(readdirSync(dir)).toEqual([`${written.id}.json`]);
     if (process.platform !== "win32") {
@@ -116,6 +118,7 @@ describe("bridge worker registry", () => {
     expect(reapDeadBridgeWorkers(join(dir, "missing"))).toEqual({
       live: [],
       reaped: [],
+      retirable: [],
     });
   });
 });
