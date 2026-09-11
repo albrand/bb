@@ -1633,6 +1633,37 @@ describe("queued row affordances", () => {
     expect(queued.queryByLabelText("Send queued message 1 now")).toBeNull();
   });
 
+  it("offers Send now on a failed row whatever it is waiting on", () => {
+    // The waits that hide Send now are exactly the ones a failed row carries,
+    // so before this the only thing a user could do with a message that had
+    // given up was delete it.
+    const onSend = vi.fn();
+    const { getByLabelText } = render(
+      <QueuedMessagesList
+        attachedToComposer={true}
+        queuedMessages={[
+          {
+            ...makeQueuedMessage("q_failed_send", "Post the summary"),
+            waitingOn: { kind: "turn-starting" },
+            failureReason: "The message could not be sent.",
+          },
+        ]}
+        sendDisabled={false}
+        actionDisabled={false}
+        processingMessageId={null}
+        processingAction={null}
+        onSend={onSend}
+        onReorder={noop}
+        onSetGroupBoundary={noop}
+        onEdit={noop}
+        onDelete={noop}
+      />,
+    );
+
+    fireEvent.click(getByLabelText("Send queued message 1 now"));
+    expect(onSend).toHaveBeenCalledWith("q_failed_send");
+  });
+
   it("offers to steer a provisioning row when the thread is ready", () => {
     const onSend = vi.fn();
     const { getByLabelText } = render(
