@@ -141,6 +141,38 @@ describe("createBridgeSocketServer", () => {
     second.socket.destroy();
   });
 
+  it("stops spilling once memory has room again, even while a kept frame sits on disk", async () => {
+    const memoryCapBytes = 8 * 1024;
+    const { server, socketPath, spillPath } = await startServer({
+      memoryCapBytes,
+      hardCapBytes: 64 * 1024 * 1024,
+    });
+    for (let n = 1; n <= 20; n += 1) {
+      server.write(`${payload(n, 1_000)}\n`);
+    }
+    const client = await connectBridgeSocket(socketPath);
+    await client.waitForLine((line) => line === payload(20, 1_000));
+    client.ack(20, [20]);
+    await wait(50);
+    const spilledWithKeptFrame = server.replayStats().spilledBytes;
+    expect(spilledWithKeptFrame).toBeGreaterThan(0);
+    const spillSizeWithKeptFrame = statSync(spillPath).size;
+
+    let wseq = 20;
+    for (let batch = 0; batch < 100; batch += 1) {
+      for (let line = 0; line < 100; line += 1) {
+        wseq += 1;
+        server.write(`${payload(wseq, 8)}\n`);
+      }
+      client.ack(wseq, [20]);
+      await wait(2);
+    }
+
+    expect(statSync(spillPath).size).toBe(spillSizeWithKeptFrame);
+    expect(server.replayStats().spilledBytes).toBe(spilledWithKeptFrame);
+    client.socket.destroy();
+  }, 20_000);
+
   it("keeps a long detached period within its memory cap by spilling to disk", async () => {
     const memoryCapBytes = 64 * 1024;
     const { server, socketPath, spillPath } = await startServer({

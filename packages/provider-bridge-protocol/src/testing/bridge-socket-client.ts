@@ -16,7 +16,7 @@ export interface BridgeSocketTestClient {
   frames: BridgeSocketTestFrame[];
   closed: Promise<void>;
   send(message: Record<string, unknown>): void;
-  ack(through: number): void;
+  ack(through: number, keep?: readonly number[]): void;
   lastWseq(): number;
   waitForLine(predicate: (line: string) => boolean): Promise<string>;
 }
@@ -94,7 +94,8 @@ function connectOnce(socketPath: string): Promise<BridgeSocketTestClient> {
         frames,
         closed,
         send,
-        ack: (through) => send({ method: "bridge/ack", params: { through } }),
+        ack: (through, keep = []) =>
+          send({ method: "bridge/ack", params: { through, keep } }),
         lastWseq: () => frames.at(-1)?.wseq ?? 0,
         waitForLine: (predicate) => {
           const existing = lines.find(predicate);
