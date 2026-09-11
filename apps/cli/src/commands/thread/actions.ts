@@ -677,9 +677,17 @@ function describeRefusal(
 
 /** One short phrase for a queued row's wait, shared by `tell` and `queue`. */
 export function describeQueueWait(row: {
+  failureReason?: string | null;
   sendAt: number | null;
   waitingOn: QueuedMessageWaitingOn | null;
 }): string {
+  // A row the drain gave up on is not waiting for anything, and reading its
+  // wait back as "waiting for the current turn to start" is how a failed
+  // message looks like a healthy one in `bb thread queue list`. The wait is
+  // still there underneath — it is just no longer the interesting fact.
+  if (row.failureReason) {
+    return `failed: ${row.failureReason}`;
+  }
   const waitingOn = row.waitingOn ?? { kind: "thread-busy" as const };
   switch (waitingOn.kind) {
     case "time":
