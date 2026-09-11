@@ -731,6 +731,12 @@ export async function dispatchCommand<
   options: CommandDispatchOptions,
 ): Promise<HostDaemonCommandResult<TType>> {
   try {
+    if (
+      command.type.startsWith("thread.") ||
+      command.type.startsWith("turn.")
+    ) {
+      await options.runtimeManager.whenBridgeWorkerAdoptionSettled();
+    }
     return await commandHandlers[command.type](command, options);
   } catch (error) {
     throwExpectedWorkspacePathNotFoundOrRethrow(error);

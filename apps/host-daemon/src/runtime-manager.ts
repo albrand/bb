@@ -297,6 +297,7 @@ export class RuntimeManager {
     activeTurnId: string | null;
     runtime: AgentRuntime;
   }[] = [];
+  private adoptionSettled = settledAdoptionGate();
   private pendingProviderMaintenanceRuntime: PendingProviderMaintenanceRuntime | null =
     null;
   private providerMaintenanceRuntimeGeneration = 0;
@@ -1128,6 +1129,7 @@ export class RuntimeManager {
             runtime: runtimeEntry.runtime,
           })),
         );
+        if (threads.length > 0) this.adoptionSettled = pendingAdoptionGate();
       } catch (error) {
         this.options.logger?.warn(
           { environmentId, err: error },
@@ -1185,6 +1187,31 @@ export class RuntimeManager {
   ): Promise<void> {
     const adopted = this.adoptedBridgeThreads.splice(0);
     if (adopted.length === 0) return;
+    try {
+      await this.continueAdoptedThreads(adopted, fetchActiveTurnIds);
+    } finally {
+      this.adoptionSettled.resolve();
+    }
+  }
+
+  async whenBridgeWorkerAdoptionSettled(): Promise<void> {
+    if (this.adoptionSettled.settled) return;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      this.adoptionSettled.promise,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, BRIDGE_WORKER_ADOPTION_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+  }
+
+  private async continueAdoptedThreads(
+    adopted: typeof this.adoptedBridgeThreads,
+    fetchActiveTurnIds: (
+      threadIds: readonly string[],
+    ) => Promise<ReadonlyMap<string, string | null>>,
+  ): Promise<void> {
     let activeTurnIds: ReadonlyMap<string, string | null>;
     try {
       activeTurnIds = await fetchActiveTurnIds(
@@ -1492,6 +1519,37 @@ function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
     entry.transportVersion === BRIDGE_SOCKET_TRANSPORT_VERSION &&
     Object.keys(entry.threads).length > 0
   );
+}
+
+const BRIDGE_WORKER_ADOPTION_WAIT_MS = 15_000;
+
+interface AdoptionGate {
+  promise: Promise<void>;
+  resolve: () => void;
+  settled: boolean;
+}
+
+function settledAdoptionGate(): AdoptionGate {
+  return {
+    promise: Promise.resolve(),
+    resolve: () => undefined,
+    settled: true,
+  };
+}
+
+function pendingAdoptionGate(): AdoptionGate {
+  let settle: () => void = () => undefined;
+  const gate: AdoptionGate = {
+    promise: new Promise<void>((resolve) => {
+      settle = resolve;
+    }),
+    resolve: () => {
+      gate.settled = true;
+      settle();
+    },
+    settled: false,
+  };
+  return gate;
 }
 
 function bridgeWorkerDirForDataDir(dataDir: string): string {

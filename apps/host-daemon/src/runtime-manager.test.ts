@@ -2537,6 +2537,36 @@ describe("RuntimeManager bridge workers", () => {
     }
   }, 30_000);
 
+  it("holds thread commands until adoption has seeded the adopted turn", async () => {
+    const { bbTurnId, createManager, registered } =
+      await startTurnThenDetach("gate");
+    const adopting = createManager([]);
+    try {
+      await adopting.reconcileBridgeWorkers();
+      let settled = false;
+      const gate = adopting.whenBridgeWorkerAdoptionSettled().then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(settled).toBe(false);
+      expect(adopting.get("env-1")?.runtime.getActiveTurnId("t1")).toBeNull();
+
+      await adopting.completeBridgeWorkerAdoption(
+        async () => new Map([["t1", bbTurnId]]),
+      );
+      await gate;
+      expect(settled).toBe(true);
+      expect(adopting.get("env-1")?.runtime.getActiveTurnId("t1")).toBe(
+        bbTurnId,
+      );
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
+
   it("adopts a running turn on restart: same worker, same bb turn, no replayed output", async () => {
     const { before, bbTurnId, createManager, registered, dir } =
       await startTurnThenDetach("same-turn");
