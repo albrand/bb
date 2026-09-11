@@ -5,6 +5,7 @@ import {
   getQueuedThreadMessage,
   listDueQueuedMessageDispatchRetries,
   listEvents,
+  listQueuedThreadMessagesForApi,
   releaseQueuedMessageClaim,
   setQueuedThreadMessageWaitingOn,
 } from "@bb/db";
@@ -14,6 +15,7 @@ import {
   setPluginHookProvider,
   type PluginHookRegistration,
 } from "../../src/services/plugins/plugin-hook-registry.js";
+import { runStartupRecoverySweep } from "../../src/services/system/periodic-sweeps.js";
 import { QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS } from "../../src/services/threads/queue-drain-failure.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -299,6 +301,35 @@ describe("queued message dispatch retry", () => {
 
       expect(dispatchCount(harness, thread.id)).toBe(1);
       expect(getQueuedThreadMessage(harness.db, row.id)).toBeNull();
+    });
+  });
+
+  it("hands back a claim the previous server died holding", async () => {
+    await withTestHarness(async (harness) => {
+      const { row, thread } = seedRunnableThreadWithQueuedRow(harness);
+      const claimed = claimQueuedThreadMessageGroup(
+        harness.db,
+        harness.deps.hub,
+        row.id,
+        { kind: "explicit-send" },
+      );
+      expect(claimed).not.toBeNull();
+
+      // A claimed row is invisible everywhere a user or a drain would look for
+      // it, which is exactly right while a dispatch holds it and exactly wrong
+      // once that dispatch is a dead process.
+      expect(
+        listQueuedThreadMessagesForApi(harness.db, { threadId: thread.id }),
+      ).toEqual([]);
+
+      await runStartupRecoverySweep(harness.deps);
+
+      expect(getQueuedThreadMessage(harness.db, row.id)?.claimToken).toBeNull();
+      expect(
+        listQueuedThreadMessagesForApi(harness.db, {
+          threadId: thread.id,
+        }).map((queued) => queued.id),
+      ).toEqual([row.id]);
     });
   });
 

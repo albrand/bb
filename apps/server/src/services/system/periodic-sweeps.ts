@@ -53,6 +53,7 @@ import {
   runQueuedMessageDispatch,
   type QueueWaitPluginDirectory,
 } from "../threads/queued-message-dispatch.js";
+import { releaseOrphanedQueuedMessageDispatchClaims } from "../threads/queued-messages.js";
 import { deliverLegacyDeferredThreadMessages } from "../threads/legacy-deferred-messages.js";
 import { LIVE_DAEMON_COMMAND_TIMEOUT_MS } from "../hosts/live-command.js";
 import { runEventLoopWork, runEventLoopWorkSync } from "./event-loop-work.js";
@@ -615,6 +616,17 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
 export async function runStartupRecoverySweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): Promise<void> {
+  // Every claim on the queue belongs to a dispatch that died with the previous
+  // process, so none of them is protecting anything. Handing them back here
+  // rather than waiting out the stale-claim window is what stops a row claimed
+  // moments before a crash from being invisible for five minutes.
+  const releasedClaims = releaseOrphanedQueuedMessageDispatchClaims(deps);
+  if (releasedClaims > 0) {
+    deps.logger.info(
+      { releasedClaims },
+      "Released queued message claims left by a previous server",
+    );
+  }
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);

@@ -909,3 +909,26 @@ export function releaseStaleQueuedMessageDispatchClaims(
   });
 }
 
+/**
+ * Hands back every claim on the queue, for a server that has just started.
+ *
+ * A claim is an in-flight dispatch, and at startup there are none: whatever
+ * held these rows died with the previous process. Waiting out
+ * `STALE_QUEUED_MESSAGE_CLAIM_MS` instead would leave a row claimed moments
+ * before a crash invisible for five minutes — the queue list, the thread
+ * badges and every drain all filter claimed rows out — for a claim that is
+ * already known to be dead.
+ *
+ * The live token set is still passed rather than an empty list. It is empty on
+ * this path today, so it costs nothing, and it keeps the call safe if the
+ * startup sweep ever moves after the listener opens: a request that claims a
+ * row mid-sweep must not have that claim taken from under it.
+ */
+export function releaseOrphanedQueuedMessageDispatchClaims(
+  deps: Pick<AppDeps, "db" | "hub">,
+): number {
+  return releaseStaleQueuedMessageClaims(deps.db, deps.hub, {
+    claimedBefore: Date.now(),
+    protectedClaimTokens: [...activeQueuedMessageClaimTokens],
+  });
+}
