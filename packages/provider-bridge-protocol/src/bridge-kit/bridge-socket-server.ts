@@ -1,19 +1,28 @@
 import { chmodSync, unlinkSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import { readBoundedLines } from "./bounded-line-reader.js";
+import { BridgeReplayBuffer } from "./bridge-replay-buffer.js";
 
 export const BRIDGE_SOCKET_ENV = "BB_BRIDGE_SOCKET";
+export const BRIDGE_SOCKET_TRANSPORT_VERSION = 1 as const;
 export const BRIDGE_SHUTDOWN_METHOD = "bridge/shutdown";
+export const BRIDGE_RESUME_METHOD = "bridge/resume";
+export const BRIDGE_ACK_METHOD = "bridge/ack";
 export const BRIDGE_REATTACH_TTL_MS = 30 * 60 * 1000;
-export const BRIDGE_DISCONNECTED_BUFFER_MAX_BYTES = 64 * 1024 * 1024;
+export const BRIDGE_REPLAY_MEMORY_CAP_BYTES = 64 * 1024 * 1024;
+export const BRIDGE_REPLAY_HARD_CAP_BYTES = 1024 * 1024 * 1024;
 
 export type BridgeSocketShutdownReason = "requested" | "abandoned";
 
 export interface BridgeSocketServerArgs {
   socketPath: string;
+  spillPath: string;
   reattachTtlMs: number;
+  memoryCapBytes: number;
+  hardCapBytes: number;
   onOverflow: (bytes: number) => void;
-  onDroppedOutput: (bytes: number) => void;
+  onBackpressure: (paused: boolean) => void;
 }
 
 export interface BridgeSocketListenArgs {
@@ -25,20 +34,64 @@ export interface BridgeSocketServer {
   write(chunk: string | Uint8Array, callback?: (error?: Error) => void): void;
   listen(args: BridgeSocketListenArgs): Promise<void>;
   close(): void;
+  replayStats(): ReturnType<BridgeReplayBuffer["stats"]>;
+}
+
+type BridgeControlMessage =
+  | { kind: "shutdown" }
+  | { kind: "resume"; afterWseq: number }
+  | { kind: "ack"; through: number };
+
+export function parseBridgeControlMessage(
+  line: string,
+): BridgeControlMessage | null {
+  if (!line.includes('"bridge/')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const method = Reflect.get(parsed, "method");
+  const params: unknown = Reflect.get(parsed, "params");
+  const numberParam = (name: string): number | null => {
+    if (typeof params !== "object" || params === null) return null;
+    const value: unknown = Reflect.get(params, name);
+    return typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value >= 0
+      ? value
+      : null;
+  };
+  if (method === BRIDGE_SHUTDOWN_METHOD) return { kind: "shutdown" };
+  if (method === BRIDGE_RESUME_METHOD) {
+    const afterWseq = numberParam("afterWseq");
+    return afterWseq === null ? null : { kind: "resume", afterWseq };
+  }
+  if (method === BRIDGE_ACK_METHOD) {
+    const through = numberParam("through");
+    return through === null ? null : { kind: "ack", through };
+  }
+  return null;
 }
 
 export function isBridgeShutdownRequest(line: string): boolean {
-  if (!line.includes(BRIDGE_SHUTDOWN_METHOD)) return false;
-  try {
-    const parsed: unknown = JSON.parse(line);
-    return (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      Reflect.get(parsed, "method") === BRIDGE_SHUTDOWN_METHOD
-    );
-  } catch {
-    return false;
-  }
+  return parseBridgeControlMessage(line)?.kind === "shutdown";
+}
+
+export function encodeBridgeFrame(wseq: number, line: string): Buffer {
+  return Buffer.from(`${wseq}\t${line}\n`);
+}
+
+export function decodeBridgeFrame(
+  frame: string,
+): { wseq: number; line: string } | null {
+  const tab = frame.indexOf("\t");
+  if (tab <= 0) return null;
+  const wseq = Number(frame.slice(0, tab));
+  if (!Number.isSafeInteger(wseq) || wseq <= 0) return null;
+  return { wseq, line: frame.slice(tab + 1) };
 }
 
 export function createBridgeSocketServer(
@@ -46,11 +99,18 @@ export function createBridgeSocketServer(
 ): BridgeSocketServer {
   let server: Server | null = null;
   let current: Socket | null = null;
+  let resumed = false;
   let reattachTimer: NodeJS.Timeout | null = null;
   let closed = false;
-  const queued: Buffer[] = [];
-  let queuedBytes = 0;
   let listenArgs: BridgeSocketListenArgs | null = null;
+  let nextWseq = 1;
+  let paused = false;
+  const decoder = new StringDecoder("utf8");
+  let partialLine = "";
+  const buffer = new BridgeReplayBuffer({
+    spillPath: args.spillPath,
+    memoryCapBytes: args.memoryCapBytes,
+  });
 
   function clearReattachTimer(): void {
     if (reattachTimer === null) return;
@@ -73,6 +133,35 @@ export function createBridgeSocketServer(
     onShutdown?.(reason);
   }
 
+  function updateBackpressure(): void {
+    const retained = buffer.retainedBytes();
+    if (!paused && retained > args.hardCapBytes) {
+      paused = true;
+      args.onBackpressure(true);
+    } else if (paused && retained <= args.memoryCapBytes) {
+      paused = false;
+      args.onBackpressure(false);
+    }
+  }
+
+  function handleControl(socket: Socket, message: BridgeControlMessage): void {
+    if (message.kind === "shutdown") {
+      shutdown("requested");
+      return;
+    }
+    if (message.kind === "ack") {
+      buffer.ackThrough(message.through);
+      updateBackpressure();
+      return;
+    }
+    buffer.ackThrough(message.afterWseq);
+    for (const frame of buffer.framesAfter(message.afterWseq)) {
+      socket.write(frame.bytes);
+    }
+    resumed = true;
+    updateBackpressure();
+  }
+
   function attach(socket: Socket): void {
     if (closed || listenArgs === null) {
       socket.destroy();
@@ -80,12 +169,14 @@ export function createBridgeSocketServer(
     }
     const previous = current;
     current = socket;
+    resumed = false;
     clearReattachTimer();
     previous?.destroy();
     socket.on("error", () => undefined);
     socket.on("close", () => {
       if (current !== socket) return;
       current = null;
+      resumed = false;
       if (!closed) armReattachTimer();
     });
     const handlers = listenArgs;
@@ -93,18 +184,24 @@ export function createBridgeSocketServer(
       input: socket,
       onLine: (line) => {
         if (current !== socket) return;
-        if (isBridgeShutdownRequest(line)) {
-          shutdown("requested");
+        const control = parseBridgeControlMessage(line);
+        if (control !== null) {
+          handleControl(socket, control);
           return;
         }
         handlers.onLine(line);
       },
       onOverflow: args.onOverflow,
     });
-    const pending = queued.splice(0);
-    queuedBytes = 0;
-    for (const chunk of pending) {
-      socket.write(chunk);
+  }
+
+  function appendLine(line: string): void {
+    const wseq = nextWseq;
+    nextWseq += 1;
+    const bytes = encodeBridgeFrame(wseq, line);
+    buffer.append({ wseq, bytes });
+    if (current !== null && resumed && current.writable) {
+      current.write(bytes);
     }
   }
 
@@ -112,17 +209,18 @@ export function createBridgeSocketServer(
     chunk: string | Uint8Array,
     callback?: (error?: Error) => void,
   ): void {
-    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-    if (current !== null && current.writable) {
-      current.write(bytes, (error) => callback?.(error ?? undefined));
-      return;
+    const text =
+      typeof chunk === "string" ? chunk : decoder.write(Buffer.from(chunk));
+    let start = 0;
+    for (;;) {
+      const newline = text.indexOf("\n", start);
+      if (newline === -1) break;
+      appendLine(partialLine + text.slice(start, newline));
+      partialLine = "";
+      start = newline + 1;
     }
-    if (queuedBytes + bytes.length > BRIDGE_DISCONNECTED_BUFFER_MAX_BYTES) {
-      args.onDroppedOutput(bytes.length);
-    } else {
-      queued.push(Buffer.from(bytes));
-      queuedBytes += bytes.length;
-    }
+    partialLine += text.slice(start);
+    updateBackpressure();
     if (callback !== undefined) queueMicrotask(() => callback());
   }
 
@@ -149,6 +247,11 @@ export function createBridgeSocketServer(
     clearReattachTimer();
     current?.destroy();
     current = null;
+    if (paused) {
+      paused = false;
+      args.onBackpressure(false);
+    }
+    buffer.dispose();
     const listening = server;
     server = null;
     if (listening !== null) {
@@ -157,7 +260,7 @@ export function createBridgeSocketServer(
     }
   }
 
-  return { write, listen, close };
+  return { write, listen, close, replayStats: () => buffer.stats() };
 }
 
 function removeSocketFile(socketPath: string): void {

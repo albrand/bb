@@ -172,6 +172,9 @@ describe("socket bridge workers", () => {
       const lines: string[] = [];
       const socket = connect(registered.socketPath);
       socket.on("error", () => undefined);
+      socket.write(
+        `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq: 0 } })}\n`,
+      );
       const completed = new Promise<void>((resolve) => {
         readBoundedLines({
           input: socket,

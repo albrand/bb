@@ -19,7 +19,14 @@ import {
   supportsProcessGroups,
 } from "@bb/process-utils";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
-import { BRIDGE_SOCKET_ENV } from "@bb/provider-bridge-protocol/bridge-kit";
+import {
+  BRIDGE_ACK_METHOD,
+  BRIDGE_RESUME_METHOD,
+  BRIDGE_SOCKET_ENV,
+  BRIDGE_SOCKET_TRANSPORT_VERSION,
+  decodeBridgeFrame,
+  readBoundedLines,
+} from "@bb/provider-bridge-protocol/bridge-kit";
 import {
   removeBridgeWorkerFiles,
   writeBridgeWorkerEntry,
@@ -68,6 +75,7 @@ export interface BridgeWorkerRegistration {
 
 export const BRIDGE_WORKER_CONNECT_TIMEOUT_MS = 15_000;
 const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
+const BRIDGE_WORKER_ACK_INTERVAL_MS = 25;
 const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
 
@@ -123,6 +131,9 @@ export class SocketBridgeWorker
   private stdoutEnded = false;
   private stderrEnded = false;
   private closeEmitted = false;
+  private lastReceivedWseq = 0;
+  private ackedWseq = 0;
+  private ackTimer: NodeJS.Timeout | null = null;
 
   constructor(args: SpawnSocketBridgeWorkerArgs) {
     super();
@@ -152,6 +163,7 @@ export class SocketBridgeWorker
         pid: this.child.pid,
         socketPath: this.socketPath,
         bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
         startedAt: new Date().toISOString(),
       });
     }
@@ -197,11 +209,15 @@ export class SocketBridgeWorker
     this.released = true;
     this.child.removeAllListeners("exit");
     this.child.removeAllListeners("error");
+    if (this.ackTimer !== null) {
+      clearTimeout(this.ackTimer);
+      this.ackTimer = null;
+    }
+    this.sendAck(this.lastReceivedWseq);
     const socket = this.socket;
     this.socket = null;
     if (socket !== null) {
       this.stdin.unpipe(socket);
-      socket.unpipe(this.stdout);
       socket.end();
       socket.unref();
     }
@@ -237,8 +253,58 @@ export class SocketBridgeWorker
       this.socket = null;
       this.stdout.end();
     });
+    socket.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: BRIDGE_RESUME_METHOD,
+        params: { afterWseq: this.lastReceivedWseq },
+      })}\n`,
+    );
     this.stdin.pipe(socket);
-    socket.pipe(this.stdout, { end: false });
+    readBoundedLines({
+      input: socket,
+      onLine: (frame) => {
+        if (this.socket !== socket) return;
+        this.receiveFrame(frame);
+      },
+      onOverflow: () => undefined,
+    });
+  }
+
+  private receiveFrame(frame: string): void {
+    const decoded = decodeBridgeFrame(frame);
+    if (decoded === null) {
+      this.stdout.write(`${frame}\n`);
+      return;
+    }
+    if (decoded.wseq <= this.lastReceivedWseq) return;
+    this.lastReceivedWseq = decoded.wseq;
+    this.stdout.write(`${decoded.line}\n`);
+    this.scheduleAck();
+  }
+
+  private scheduleAck(): void {
+    if (this.ackTimer !== null) return;
+    this.ackTimer = setTimeout(() => {
+      this.ackTimer = null;
+      this.sendAck(this.lastReceivedWseq);
+    }, BRIDGE_WORKER_ACK_INTERVAL_MS);
+    this.ackTimer.unref();
+  }
+
+  private sendAck(through: number): void {
+    const socket = this.socket;
+    if (socket === null || through <= this.ackedWseq || !socket.writable) {
+      return;
+    }
+    this.ackedWseq = through;
+    socket.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: BRIDGE_ACK_METHOD,
+        params: { through },
+      })}\n`,
+    );
   }
 
   private failToConnect(): void {

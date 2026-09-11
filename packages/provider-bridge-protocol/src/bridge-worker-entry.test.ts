@@ -288,14 +288,18 @@ it("keeps a turn running across a dropped runtime connection on a socket transpo
     expect(worker.child.exitCode).toBeNull();
     expect(() => process.kill(worker.child.pid ?? -1, 0)).not.toThrow();
 
-    const second = await connectBridgeSocket(socketPath);
+    const second = await connectBridgeSocket(socketPath, {
+      resumeAfter: first.lastWseq(),
+    });
     await second.waitForLine((line) => line.includes("turn/completed"));
     const ticksAfterReconnect = second.lines
       .map(tickNumber)
       .filter((n): n is number => n !== null);
-    expect(ticksAfterReconnect.length).toBeGreaterThan(0);
-    expect(Math.min(...ticksAfterReconnect)).toBeGreaterThan(
-      lastTickBeforeDrop,
+    expect(ticksAfterReconnect).toEqual(
+      Array.from(
+        { length: 30 - lastTickBeforeDrop },
+        (_, index) => lastTickBeforeDrop + index + 1,
+      ),
     );
 
     second.send({ method: "bridge/shutdown" });
