@@ -47,6 +47,10 @@ export {
   upsertProjectExecutionDefaults,
 } from "./project-execution-defaults.js";
 export {
+  listStoredDaemonReplayKeys,
+  recordDaemonReplayKeys,
+} from "./fork-daemon-event-replay-keys.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,

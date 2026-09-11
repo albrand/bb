@@ -2707,4 +2707,42 @@ describe("delta assembler text-delta batching", () => {
       "turn/completed",
     ]);
   });
+
+  it("reports throttled text as pending and hands it all back on flush", () => {
+    let nowMs = 1_000;
+    const assembler = createDeltaAssembler({
+      providerId: "pi",
+      entropyPrefix: "as-test",
+      textDeltaFlushMs: 100,
+      now: () => nowMs,
+    });
+    const text = (value: string): ThreadDelta => ({
+      kind: "item.textDelta",
+      key: { providerItemId: "msg-1" },
+      channel: "agentMessage",
+      text: value,
+      providerTurnId: "turn-1",
+    });
+    assemble(
+      assembler,
+      { kind: "turn.open", providerTurnId: "turn-1" },
+      text("he"),
+    );
+    nowMs += 10;
+    const throttled = assemble(assembler, text("ll"));
+    nowMs += 10;
+    assemble(assembler, text("o"));
+
+    expect(throttled).toEqual([]);
+    expect(assembler.hasPendingOutput()).toBe(true);
+    const flushed = assembler.flushPending();
+    expect(flushed).toEqual([
+      {
+        threadId: THREAD_ID,
+        events: [expect.objectContaining({ delta: "llo" })],
+      },
+    ]);
+    expect(assembler.hasPendingOutput()).toBe(false);
+    expect(assembler.flushPending()).toEqual([]);
+  });
 });

@@ -4,8 +4,10 @@ import {
   deriveStoredEventItemFields,
   getThread,
   listCompletedTurnsByThreadIds,
+  listStoredDaemonReplayKeys,
   listThreadEnvironmentAssignmentsOnHost,
   MissingStoredTurnStartedError,
+  recordDaemonReplayKeys,
   events as storedEvents,
 } from "@bb/db";
 import type {
@@ -869,6 +871,24 @@ function dropInteractionLifecycleEvents(entries: PostableEventBatchEntry[]): {
   return { entries: kept, droppedLifecycleEvents };
 }
 
+function dropReplayedEntries(
+  deps: Pick<AppDeps, "db">,
+  entries: PostableEventBatchEntry[],
+): PostableEventBatchEntry[] {
+  const stored = listStoredDaemonReplayKeys(
+    deps.db,
+    entries.flatMap((entry) =>
+      entry.envelope.replayKey === undefined ? [] : [entry.envelope.replayKey],
+    ),
+  );
+  if (stored.size === 0) return entries;
+  return entries.filter(
+    (entry) =>
+      entry.envelope.replayKey === undefined ||
+      !stored.has(entry.envelope.replayKey),
+  );
+}
+
 export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
   const { post } = typedRoutes<HostDaemonInternalSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
@@ -907,8 +927,9 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           hostId: session.hostId,
           events,
         });
-      const { entries, droppedLifecycleEvents } =
+      const { entries: lifecycleFilteredEntries, droppedLifecycleEvents } =
         dropInteractionLifecycleEvents(ownedEntries);
+      const entries = dropReplayedEntries(deps, lifecycleFilteredEntries);
       if (droppedLifecycleEvents.length > 0) {
         deps.logger.warn(
           {
@@ -956,7 +977,18 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       let appendResult: AppendDaemonEventsResult;
       try {
         appendResult = deps.db.transaction(
-          (tx) => appendDaemonEventsInTransaction(tx, eventInputs),
+          (tx) => {
+            const result = appendDaemonEventsInTransaction(tx, eventInputs);
+            recordDaemonReplayKeys(deps.db, {
+              replayKeys: entries.flatMap((entry) =>
+                entry.envelope.replayKey === undefined
+                  ? []
+                  : [entry.envelope.replayKey],
+              ),
+              now: Date.now(),
+            });
+            return result;
+          },
           { behavior: "immediate" },
         );
       } catch (error) {

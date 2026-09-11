@@ -14,9 +14,15 @@ const QUEUE_DEPTH_WARN_THRESHOLD = 512;
 const QUEUE_DEPTH_WARN_MIN_AGE_MS = 5_000;
 const QUEUE_AGE_WARN_THRESHOLD_MS = 30_000;
 
+export interface EventSinkDelivery {
+  replayKey: string;
+  onSettled: () => void;
+}
+
 export interface EventSinkInput {
   event: ThreadEvent;
   threadId: string;
+  delivery?: EventSinkDelivery;
 }
 
 export interface EventPostResult {
@@ -106,6 +112,7 @@ function summarizeRejectedEvents(
 export function createEventSink(options: CreateEventSinkOptions): EventSink {
   const now = options.now ?? (() => Date.now());
   const queue: HostDaemonEventEnvelope[] = [];
+  const deliveries: (EventSinkDelivery | null)[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let flushPromise: Promise<void> | null = null;
   let disposed = false;
@@ -216,6 +223,9 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       const batch = queue.slice();
       const delivered = await deliverBatch(batch);
       queue.splice(0, delivered);
+      for (const delivery of deliveries.splice(0, delivered)) {
+        delivery?.onSettled();
+      }
       if (queue.length === 0) {
         backedUpSinceMs = null;
         backpressureLogged = false;
@@ -252,7 +262,11 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       queue.push({
         threadId: input.threadId,
         event: input.event,
+        ...(input.delivery === undefined
+          ? {}
+          : { replayKey: input.delivery.replayKey }),
       });
+      deliveries.push(input.delivery ?? null);
       maybeLogQueuePressure();
       scheduleFlush(
         shouldFlushThreadEventImmediately(input.event)
@@ -268,6 +282,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
         await flushPromise.catch(() => undefined);
       }
       queue.length = 0;
+      deliveries.length = 0;
     },
   };
 }

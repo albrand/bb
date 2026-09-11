@@ -189,6 +189,7 @@ const hostDaemonEventEnvelopeSchema = z
   .object({
     threadId: z.string().min(1),
     event: threadEventSchema,
+    replayKey: z.string().min(1).optional(),
   })
   .strict();
 export type HostDaemonEventEnvelope = z.infer<
@@ -213,8 +214,15 @@ const hostDaemonEventGroupSchema = z
   .object({
     threadId: z.string().min(1),
     events: z.array(hostDaemonWireEventSchema).min(1),
+    replayKeys: z.array(z.string().min(1).nullable()).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (group) =>
+      group.replayKeys === undefined ||
+      group.replayKeys.length === group.events.length,
+    { message: "replayKeys must pair one-to-one with events" },
+  );
 type HostDaemonEventGroup = z.infer<typeof hostDaemonEventGroupSchema>;
 
 export const hostDaemonEventBatchRequestSchema = z
@@ -235,18 +243,32 @@ export function groupHostDaemonEvents(
     const last = groups.at(-1);
     if (last?.threadId === envelope.threadId) {
       last.events.push(envelope.event);
+      last.replayKeys?.push(envelope.replayKey ?? null);
     } else {
-      groups.push({ threadId: envelope.threadId, events: [envelope.event] });
+      groups.push({
+        threadId: envelope.threadId,
+        events: [envelope.event],
+        replayKeys: [envelope.replayKey ?? null],
+      });
     }
   }
-  return groups;
+  return groups.map((group) =>
+    group.replayKeys?.some((key) => key !== null) === true
+      ? group
+      : { threadId: group.threadId, events: group.events },
+  );
 }
 
 export function ungroupHostDaemonEvents(
   groups: readonly HostDaemonEventGroup[],
 ): HostDaemonEventEnvelope[] {
   return groups.flatMap((group) =>
-    group.events.map((event) => ({ threadId: group.threadId, event })),
+    group.events.map((event, index) => {
+      const replayKey = group.replayKeys?.[index] ?? null;
+      return replayKey === null
+        ? { threadId: group.threadId, event }
+        : { threadId: group.threadId, event, replayKey };
+    }),
   );
 }
 

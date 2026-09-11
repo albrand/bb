@@ -27,6 +27,7 @@ import {
   decodeBridgeFrame,
   readBoundedLines,
 } from "@bb/provider-bridge-protocol/bridge-kit";
+import { BridgeLineAckTracker } from "./bridge-line-ack-tracker.js";
 import {
   removeBridgeWorkerFiles,
   writeBridgeWorkerEntry,
@@ -134,6 +135,9 @@ export class SocketBridgeWorker
   private lastReceivedWseq = 0;
   private ackedWseq = 0;
   private ackTimer: NodeJS.Timeout | null = null;
+  private lineHandler: ((line: string, wseq: number | null) => void) | null =
+    null;
+  readonly ackTracker: BridgeLineAckTracker;
 
   constructor(args: SpawnSocketBridgeWorkerArgs) {
     super();
@@ -142,6 +146,10 @@ export class SocketBridgeWorker
     this.socketPath = paths.socketPath;
     this.logPath = paths.logPath;
     this.workerDir = args.workerDir;
+    this.ackTracker = new BridgeLineAckTracker({
+      workerId: this.id,
+      onAckable: () => this.scheduleAck(),
+    });
     const logFd = openSync(this.logPath, "a", 0o600);
     try {
       this.child = spawnPortableProcess({
@@ -167,6 +175,7 @@ export class SocketBridgeWorker
         startedAt: new Date().toISOString(),
       });
     }
+    this.stdout.resume();
     this.stdout.on("end", () => {
       this.stdoutEnded = true;
       this.maybeEmitClose();
@@ -213,7 +222,7 @@ export class SocketBridgeWorker
       clearTimeout(this.ackTimer);
       this.ackTimer = null;
     }
-    this.sendAck(this.lastReceivedWseq);
+    this.sendAck(this.ackTracker.ackableThrough());
     const socket = this.socket;
     this.socket = null;
     if (socket !== null) {
@@ -261,6 +270,7 @@ export class SocketBridgeWorker
       })}\n`,
     );
     this.stdin.pipe(socket);
+    this.observeResponses();
     readBoundedLines({
       input: socket,
       onLine: (frame) => {
@@ -274,20 +284,42 @@ export class SocketBridgeWorker
   private receiveFrame(frame: string): void {
     const decoded = decodeBridgeFrame(frame);
     if (decoded === null) {
-      this.stdout.write(`${frame}\n`);
+      this.lineHandler?.(frame, null);
       return;
     }
     if (decoded.wseq <= this.lastReceivedWseq) return;
     this.lastReceivedWseq = decoded.wseq;
-    this.stdout.write(`${decoded.line}\n`);
-    this.scheduleAck();
+    this.lineHandler?.(decoded.line, decoded.wseq);
+  }
+
+  setLineHandler(handler: (line: string, wseq: number | null) => void): void {
+    this.lineHandler = handler;
+  }
+
+  private observingResponses = false;
+
+  private observeResponses(): void {
+    if (this.observingResponses) return;
+    this.observingResponses = true;
+    let pending = "";
+    this.stdin.on("data", (chunk: Buffer | string) => {
+      pending += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        const id = responseId(line);
+        if (id !== null) this.ackTracker.responded(id);
+        newline = pending.indexOf("\n");
+      }
+    });
   }
 
   private scheduleAck(): void {
     if (this.ackTimer !== null) return;
     this.ackTimer = setTimeout(() => {
       this.ackTimer = null;
-      this.sendAck(this.lastReceivedWseq);
+      this.sendAck(this.ackTracker.ackableThrough());
     }, BRIDGE_WORKER_ACK_INTERVAL_MS);
     this.ackTimer.unref();
   }
@@ -338,6 +370,19 @@ export class SocketBridgeWorker
     this.closeEmitted = true;
     this.emit("close", this.child.exitCode, this.child.signalCode);
   }
+}
+
+function responseId(line: string): string | number | null {
+  if (line.includes('"method"')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const id: unknown = Reflect.get(parsed, "id");
+  return typeof id === "string" || typeof id === "number" ? id : null;
 }
 
 function connectSocket(socketPath: string): Promise<Socket> {
