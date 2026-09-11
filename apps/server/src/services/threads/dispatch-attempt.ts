@@ -81,6 +81,7 @@ import {
   resolveMessageSenderThreadId,
   sendThreadMessage,
   type SendThreadMessageTransactionPreflight,
+  type ThreadSendRefusal,
 } from "./thread-send.js";
 import type { TurnRequestRetryMarker } from "./thread-events.js";
 import { restoreInterruptedThreadStartupRequest } from "./thread-provisioning.js";
@@ -234,7 +235,11 @@ export interface DispatchAttemptArgs {
 }
 
 export type DispatchAttemptOutcome =
-  | { kind: "dispatched" }
+  /**
+   * `refusal` is set when the daemon refused the turn within the send's grace
+   * period: the message was recorded, and the thread went to `error`.
+   */
+  | { kind: "dispatched"; refusal?: ThreadSendRefusal | null }
   | { kind: "queued"; entry: ThreadQueuedMessage };
 
 /**
@@ -574,7 +579,7 @@ async function runDispatchAttempt(
   }
 
   const environment = await requireThreadCommandEnvironment(deps, { thread });
-  await sendThreadMessage(deps, {
+  const sent = await sendThreadMessage(deps, {
     environment,
     payload: resolvedPayload,
     thread,
@@ -593,7 +598,7 @@ async function runDispatchAttempt(
   if (claimed !== null) {
     settleQueueRowDispatched({ row: claimed[0]! });
   }
-  return { kind: "dispatched" };
+  return { kind: "dispatched", refusal: sent.refusal };
 }
 
 function reattemptDispatchForThreadChange(

@@ -27,6 +27,7 @@ import { createProviderRegistryService } from "./services/providers/provider-reg
 import { createTelemetryService } from "./services/system/telemetry.js";
 import { TerminalSessionLifecycle } from "./services/terminals/terminal-session-lifecycle.js";
 import { createLifecycleDedupers } from "./lifecycle-dedupers.js";
+import { TURN_ACCEPTANCE_GRACE_MS } from "./constants.js";
 import type { ServerRuntimeConfig } from "./types.js";
 import { NotificationHub } from "./ws/hub.js";
 import { WatchInterestCoordinator } from "./ws/watch-interests.js";
@@ -80,6 +81,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     inferenceFallbackModel: serverConfig.BB_INFERENCE_FALLBACK,
     inferenceModel: serverConfig.BB_INFERENCE,
     isDevelopment: !isProduction,
+    turnAcceptanceGraceMs: TURN_ACCEPTANCE_GRACE_MS,
     openAiApiKey: serverConfig.OPENAI_API_KEY,
     serverPort: serverConfig.BB_SERVER_PORT,
     sharedSkillRoots: { user: [], project: [] },

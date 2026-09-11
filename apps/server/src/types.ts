@@ -37,6 +37,8 @@ export interface ServerRuntimeConfig {
   serverPort: number;
   sharedSkillRoots: ProviderNativeSkillRoots;
   transcriptionModel: string;
+  /** See `TURN_ACCEPTANCE_GRACE_MS` in constants.ts; tests that do not answer submits use 0. */
+  turnAcceptanceGraceMs: number;
   appUrl?: string;
   devAppPort?: number;
   launchId?: string;

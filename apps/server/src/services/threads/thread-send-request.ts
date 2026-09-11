@@ -41,7 +41,11 @@ export async function acceptThreadSendRequest(
     trigger: "user",
   });
   if (outcome.kind === "dispatched") {
-    return { ok: true, delivery: "sent" };
+    return {
+      ok: true,
+      delivery: "sent",
+      ...(outcome.refusal ? { refusal: outcome.refusal } : {}),
+    };
   }
   return {
     ok: true,

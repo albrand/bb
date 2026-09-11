@@ -200,6 +200,7 @@ async function startIntegrationServer(
     sharedSkillRoots: { user: [], project: [] },
     transcriptionModel: "test/mock-transcription",
     isDevelopment: false,
+    turnAcceptanceGraceMs: 0,
   };
   const terminalSessions = new TerminalSessionLifecycle({
     attachTimeoutMs: 50,

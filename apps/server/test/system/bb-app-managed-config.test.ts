@@ -72,6 +72,7 @@ function createRuntimeConfig(): ServerRuntimeConfig {
     inferenceFallbackModel: "openai/gpt-4o-mini-fallback",
     inferenceModel: "openai/gpt-4o-mini",
     isDevelopment: false,
+    turnAcceptanceGraceMs: 0,
     openAiApiKey: "ambient-openai-key",
     serverPort: 38886,
     sharedSkillRoots: { user: [], project: [] },

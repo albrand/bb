@@ -263,6 +263,16 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
  * it is waiting, moved onto the queued arm where it can be typed.
  */
 export const sendMessageDeliverySchema = z.enum(["sent", "queued"]);
+
+/**
+ * Set on a `sent` response when the daemon refused the turn right away, e.g.
+ * "Refusing to start a competing turn". The message is recorded and the thread
+ * is in `error`; without this the caller was told the message went.
+ */
+export const sendMessageRefusalSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
 export type SendMessageDelivery = z.infer<typeof sendMessageDeliverySchema>;
 
 /**
@@ -271,7 +281,11 @@ export type SendMessageDelivery = z.infer<typeof sendMessageDeliverySchema>;
  * for now" would invite every caller to check fields that cannot exist.
  */
 export const sendMessageResponseSchema = z.discriminatedUnion("delivery", [
-  z.object({ ok: z.literal(true), delivery: z.literal("sent") }),
+  z.object({
+    ok: z.literal(true),
+    delivery: z.literal("sent"),
+    refusal: sendMessageRefusalSchema.optional(),
+  }),
   z.object({
     ok: z.literal(true),
     delivery: z.literal("queued"),
@@ -343,6 +357,7 @@ export const retryTurnResponseSchema = z.discriminatedUnion("delivery", [
     turnRequestId: clientTurnRequestIdSchema,
     /** Which attempt this retry is: 2 is the first retry. */
     attempt: z.number().int().min(2),
+    refusal: sendMessageRefusalSchema.optional(),
   }),
   z.object({
     ok: z.literal(true),
