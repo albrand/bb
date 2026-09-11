@@ -37,7 +37,6 @@ export class BridgeReplayBuffer {
 
   append(frame: BridgeReplayFrame): void {
     const spilling =
-      this.spilled.length > 0 ||
       this.memoryBytes + frame.bytes.length > this.args.memoryCapBytes;
     if (!spilling) {
       this.inMemory.push(frame);
@@ -79,14 +78,34 @@ export class BridgeReplayBuffer {
     keep: readonly number[] = [],
   ): Generator<BridgeReplayFrame> {
     const kept = new Set(keep);
-    for (const frame of this.inMemory) {
-      if (frame.wseq > wseq || kept.has(frame.wseq)) yield frame;
-    }
-    for (const spilled of [...this.spilled]) {
-      if ((spilled.wseq <= wseq && !kept.has(spilled.wseq)) || this.spillFd === null) continue;
-      const bytes = Buffer.alloc(spilled.length);
-      readSync(this.spillFd, bytes, 0, spilled.length, spilled.offset);
-      yield { wseq: spilled.wseq, bytes };
+    const inMemory = [...this.inMemory];
+    const spilled = [...this.spilled];
+    let memoryIndex = 0;
+    let spilledIndex = 0;
+    while (memoryIndex < inMemory.length || spilledIndex < spilled.length) {
+      const memoryFrame = inMemory[memoryIndex];
+      const spilledFrame = spilled[spilledIndex];
+      if (
+        memoryFrame !== undefined &&
+        (spilledFrame === undefined || memoryFrame.wseq <= spilledFrame.wseq)
+      ) {
+        memoryIndex += 1;
+        if (memoryFrame.wseq > wseq || kept.has(memoryFrame.wseq)) {
+          yield memoryFrame;
+        }
+        continue;
+      }
+      if (spilledFrame === undefined) break;
+      spilledIndex += 1;
+      if (
+        (spilledFrame.wseq <= wseq && !kept.has(spilledFrame.wseq)) ||
+        this.spillFd === null
+      ) {
+        continue;
+      }
+      const bytes = Buffer.alloc(spilledFrame.length);
+      readSync(this.spillFd, bytes, 0, spilledFrame.length, spilledFrame.offset);
+      yield { wseq: spilledFrame.wseq, bytes };
     }
   }
 
