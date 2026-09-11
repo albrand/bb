@@ -33,6 +33,11 @@ export type {
   ServerConnectionOptions,
 } from "./server-connection-support.js";
 
+/** How long a protocol self-update waits for in-flight agent turns to finish. */
+export const SELF_UPDATE_DRAIN_TIMEOUT_MS = 10 * 60 * 1000;
+/** How often the drain gate re-checks for active agent turns. */
+export const SELF_UPDATE_DRAIN_POLL_INTERVAL_MS = 2_000;
+
 interface InvalidServerMessageArgs {
   data: unknown;
   error: Error;
@@ -362,6 +367,7 @@ export class ServerConnection {
             force: error.protocolUpdateRetryRequested,
           });
         if (result === "updated") {
+          await this.waitForActiveTurnsToDrain();
           await this.options.onSelfUpdateInstalled?.();
         }
       }
@@ -374,6 +380,42 @@ export class ServerConnection {
         this.logFatalConnectError(error);
       }
       throw error;
+    }
+  }
+
+  /**
+   * A protocol self-update restarts the daemon, and restarting kills every
+   * provider bridge worker it owns, interrupting any agent turn in flight.
+   * Wait for turns to finish first; past the deadline, restart anyway so a
+   * stuck turn cannot pin the daemon on an incompatible protocol forever.
+   */
+  private async waitForActiveTurnsToDrain(): Promise<void> {
+    if (this.options.getActiveThreads === undefined) return;
+    const deadline = Date.now() + SELF_UPDATE_DRAIN_TIMEOUT_MS;
+    let announced = false;
+    for (;;) {
+      const activeThreads = await this.options.getActiveThreads();
+      if (activeThreads.length === 0) return;
+      if (Date.now() >= deadline) {
+        this.options.logger.warn(
+          {
+            activeThreadCount: activeThreads.length,
+            drainTimeoutMs: SELF_UPDATE_DRAIN_TIMEOUT_MS,
+          },
+          "Restarting for a protocol self-update while agent turns are still active; those turns will be interrupted.",
+        );
+        return;
+      }
+      if (!announced) {
+        announced = true;
+        this.options.logger.info(
+          { activeThreadCount: activeThreads.length },
+          "Protocol self-update installed; waiting for active agent turns to finish before restarting the daemon.",
+        );
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, SELF_UPDATE_DRAIN_POLL_INTERVAL_MS);
+      });
     }
   }
 
