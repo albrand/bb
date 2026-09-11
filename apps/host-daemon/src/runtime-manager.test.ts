@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
+import { readProcessIdentity } from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
 import { threadScope, turnScope } from "@bb/domain";
@@ -2490,7 +2491,11 @@ describe("RuntimeManager bridge workers", () => {
     const entry = JSON.parse(await fs.readFile(registered, "utf8"));
     await fs.writeFile(
       registered,
-      JSON.stringify({ ...entry, socketPath: path.join(socketDir, "w.sock") }),
+      JSON.stringify({
+        ...entry,
+        processIdentity: readProcessIdentity(process.pid),
+        socketPath: path.join(socketDir, "w.sock"),
+      }),
     );
     await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
     const incompatible = path.join(dir, "bbbbbbbbbbbb.json");
@@ -2498,6 +2503,7 @@ describe("RuntimeManager bridge workers", () => {
       incompatible,
       JSON.stringify({
         ...JSON.parse(await fs.readFile(incompatible, "utf8")),
+        processIdentity: readProcessIdentity(process.pid),
         transportVersion: 99,
         threads: {
           t1: {

@@ -5,6 +5,7 @@ export {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerWorkspace,
   readBridgeWorkerEntries,
+  readProcessIdentity,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
 } from "./bridge-worker-registry.js";

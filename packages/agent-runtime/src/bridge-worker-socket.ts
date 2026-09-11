@@ -34,7 +34,8 @@ import {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerThread,
   type BridgeWorkerWorkspace,
-  isBridgeWorkerPidAlive,
+  readProcessIdentity,
+  readProcessIdentityAsync,
   removeBridgeWorkerFiles,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -100,28 +101,32 @@ interface WorkerProcessHandle {
 const ADOPTED_WORKER_EXIT_POLL_MS = 500;
 
 class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
-  readonly pid: number;
   exitCode: number | null = null;
   readonly signalCode: NodeJS.Signals | null = null;
   killed = false;
+  private readonly recordedPid: number;
+  private readonly processIdentity: string;
   private readonly poll: NodeJS.Timeout;
+  private polling = false;
 
-  constructor(pid: number) {
+  constructor(entry: { pid: number; processIdentity: string }) {
     super();
-    this.pid = pid;
+    this.recordedPid = entry.pid;
+    this.processIdentity = entry.processIdentity;
     this.poll = setInterval(() => {
-      if (isBridgeWorkerPidAlive(this.pid)) return;
-      this.stopWatching();
-      this.exitCode = -1;
-      this.emit("exit", this.exitCode, null);
+      void this.checkStillRunning();
     }, ADOPTED_WORKER_EXIT_POLL_MS);
     this.poll.unref();
   }
 
+  get pid(): number | undefined {
+    return this.isRecordedProcess() ? this.recordedPid : undefined;
+  }
+
   kill(signal: NodeJS.Signals): boolean {
-    if (this.exitCode !== null) return false;
+    if (!this.isRecordedProcess()) return false;
     try {
-      process.kill(this.pid, signal);
+      process.kill(this.recordedPid, signal);
       this.killed = true;
       return true;
     } catch {
@@ -129,8 +134,33 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
     }
   }
 
+  markGone(): void {
+    if (this.exitCode !== null) return;
+    this.stopWatching();
+    this.exitCode = -1;
+    this.emit("exit", this.exitCode, null);
+  }
+
   stopWatching(): void {
     clearInterval(this.poll);
+  }
+
+  private isRecordedProcess(): boolean {
+    return (
+      this.exitCode === null &&
+      readProcessIdentity(this.recordedPid) === this.processIdentity
+    );
+  }
+
+  private async checkStillRunning(): Promise<void> {
+    if (this.polling || this.exitCode !== null) return;
+    this.polling = true;
+    try {
+      const identity = await readProcessIdentityAsync(this.recordedPid);
+      if (identity !== this.processIdentity) this.markGone();
+    } finally {
+      this.polling = false;
+    }
   }
 }
 
@@ -262,6 +292,7 @@ export class SocketBridgeWorker
   private readonly connectTimeoutMs: number;
   private socket: Socket | null = null;
   private released = false;
+  private daemonStopped = false;
   private exited = false;
   private stdoutEnded = false;
   private stderrEnded = false;
@@ -281,7 +312,7 @@ export class SocketBridgeWorker
       this.id = args.entry.id;
       this.socketPath = args.entry.socketPath;
       this.logPath = join(args.workerDir, `${args.entry.id}.log`);
-      this.child = new AdoptedProcessHandle(args.entry.pid);
+      this.child = new AdoptedProcessHandle(args.entry);
       this.registryEntry = args.entry;
       this.resumeRequested = false;
     } else {
@@ -310,13 +341,16 @@ export class SocketBridgeWorker
       }
       child.unref();
       this.child = child;
+      const processIdentity =
+        child.pid === undefined ? null : readProcessIdentity(child.pid);
       this.registryEntry =
-        child.pid === undefined
+        child.pid === undefined || processIdentity === null
           ? null
           : {
               ...args.registration,
               id: this.id,
               pid: child.pid,
+              processIdentity,
               socketPath: this.socketPath,
               bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
               transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
@@ -532,15 +566,27 @@ export class SocketBridgeWorker
     );
   }
 
+  get stoppedByDaemon(): boolean {
+    return this.daemonStopped;
+  }
+
+  get registeredPid(): number | null {
+    return this.registryEntry?.pid ?? null;
+  }
+
   private failToConnect(): void {
     if (this.exited || this.released) return;
-    killProcessGroup({ child: this.child, signal: "SIGKILL" });
-    this.emit(
-      "error",
-      new Error(
-        `Provider bridge worker did not open its socket at ${this.socketPath}`,
-      ),
+    this.daemonStopped = true;
+    const error = new Error(
+      `Provider bridge worker did not open its socket at ${this.socketPath}`,
     );
+    if (this.child instanceof AdoptedProcessHandle) {
+      this.emit("error", error);
+      this.child.markGone();
+      return;
+    }
+    killProcessGroup({ child: this.child, signal: "SIGKILL" });
+    this.emit("error", error);
   }
 
   private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
