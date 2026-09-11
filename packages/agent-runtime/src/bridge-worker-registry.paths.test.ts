@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type BridgeWorkerRegistryEntry,
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
   readProcessIdentity,
   reapDeadBridgeWorkers,
@@ -41,6 +42,7 @@ describe.skipIf(process.platform === "win32")(
     function entryAt(id: string, socketPath: string): BridgeWorkerRegistryEntry {
       return {
         id,
+        formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
         pid: process.pid,
         processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
         socketPath,
@@ -75,9 +77,9 @@ describe.skipIf(process.platform === "win32")(
         writeBridgeWorkerEntry(dir, beside);
         writeBridgeWorkerEntry(dir, relocated);
 
-        const { entries, invalidIds } = readBridgeWorkerEntries(dir);
+        const { entries, invalid } = readBridgeWorkerEntries(dir);
 
-        expect(invalidIds).toEqual([]);
+        expect(invalid).toEqual([]);
         expect(entries).toHaveLength(2);
         expect(entries).toEqual(expect.arrayContaining([beside, relocated]));
       } finally {

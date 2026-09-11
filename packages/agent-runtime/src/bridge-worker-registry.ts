@@ -35,6 +35,7 @@ export type BridgeWorkerThread = z.infer<typeof bridgeWorkerThreadSchema>;
 
 const bridgeWorkerRegistryEntrySchema = z.object({
   id: z.string().regex(/^[0-9a-f]+$/u),
+  formatVersion: z.number().int(),
   pid: z.number().int().positive(),
   processIdentity: z.string().min(1),
   socketPath: z.string().min(1),
@@ -55,6 +56,8 @@ export type BridgeWorkerRegistryEntry = z.infer<
 
 const ENTRY_SUFFIX = ".json";
 const SOCKET_DIRECTORY_DIGEST_CHARS = 16;
+
+export const BRIDGE_WORKER_REGISTRY_FORMAT_VERSION = 1 as const;
 
 export function fallbackSocketRoot(uid: number): string {
   return `/tmp/bb-${uid}`;
@@ -142,25 +145,30 @@ export function removeBridgeWorkerFiles(args: {
   if (!args.socketPath.startsWith("\\\\")) removeIfPresent(args.socketPath);
 }
 
+export interface InvalidBridgeWorkerEntry {
+  id: string;
+  socketPath: string | null;
+}
+
 export function readBridgeWorkerEntries(dir: string): {
   entries: BridgeWorkerRegistryEntry[];
-  invalidIds: string[];
+  invalid: InvalidBridgeWorkerEntry[];
 } {
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return { entries: [], invalidIds: [] };
+    return { entries: [], invalid: [] };
   }
   const entries: BridgeWorkerRegistryEntry[] = [];
-  const invalidIds: string[] = [];
+  const invalid: InvalidBridgeWorkerEntry[] = [];
   for (const name of names) {
     if (!name.endsWith(ENTRY_SUFFIX)) continue;
     const id = name.slice(0, -ENTRY_SUFFIX.length);
+    let raw: unknown = null;
     try {
-      const parsed = bridgeWorkerRegistryEntrySchema.safeParse(
-        JSON.parse(readFileSync(join(dir, name), "utf8")),
-      );
+      raw = JSON.parse(readFileSync(join(dir, name), "utf8"));
+      const parsed = bridgeWorkerRegistryEntrySchema.safeParse(raw);
       if (
         parsed.success &&
         parsed.data.id === id &&
@@ -170,9 +178,20 @@ export function readBridgeWorkerEntries(dir: string): {
         continue;
       }
     } catch {}
-    invalidIds.push(id);
+    invalid.push({ id, socketPath: salvagedSocketPath(dir, id, raw) });
   }
-  return { entries, invalidIds };
+  return { entries, invalid };
+}
+
+function salvagedSocketPath(
+  dir: string,
+  id: string,
+  raw: unknown,
+): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const socketPath: unknown = Reflect.get(raw, "socketPath");
+  if (typeof socketPath !== "string") return null;
+  return isTrustedSocketPath(dir, id, socketPath) ? socketPath : null;
 }
 
 const execFileAsync = promisify(execFile);
@@ -242,12 +261,22 @@ export function reapDeadBridgeWorkers(
   isAlive: (
     entry: BridgeWorkerRegistryEntry,
   ) => boolean = isBridgeWorkerAlive,
-): { live: BridgeWorkerRegistryEntry[]; reaped: BridgeWorkerRegistryEntry[] } {
-  const { entries, invalidIds } = readBridgeWorkerEntries(dir);
-  for (const id of invalidIds) {
-    removeIfPresent(entryPath(dir, id));
-    removeIfPresent(join(dir, `${id}.log`));
-    removeIfPresent(join(dir, `${id}.buf`));
+): {
+  live: BridgeWorkerRegistryEntry[];
+  reaped: BridgeWorkerRegistryEntry[];
+  retirable: { id: string; socketPath: string }[];
+} {
+  const { entries, invalid } = readBridgeWorkerEntries(dir);
+  const retirable: { id: string; socketPath: string }[] = [];
+  for (const item of invalid) {
+    const socketPath = item.socketPath;
+    if (socketPath !== null) {
+      retirable.push({ id: item.id, socketPath });
+      continue;
+    }
+    removeIfPresent(entryPath(dir, item.id));
+    removeIfPresent(join(dir, `${item.id}.log`));
+    removeIfPresent(join(dir, `${item.id}.buf`));
   }
   const live: BridgeWorkerRegistryEntry[] = [];
   const reaped: BridgeWorkerRegistryEntry[] = [];
@@ -263,16 +292,17 @@ export function reapDeadBridgeWorkers(
     });
     reaped.push(entry);
   }
-  return { live, reaped };
+  return { live, reaped, retirable };
 }
 
 export async function retireBridgeWorker(args: {
   dir: string;
-  entry: BridgeWorkerRegistryEntry;
+  id: string;
+  socketPath: string;
   timeoutMs: number;
 }): Promise<"retired" | "unreachable"> {
   const outcome = await new Promise<"retired" | "unreachable">((resolve) => {
-    const socket = connect(args.entry.socketPath);
+    const socket = connect(args.socketPath);
     let requested = false;
     const timer = setTimeout(() => socket.destroy(), args.timeoutMs);
     socket.once("connect", () => {
@@ -289,8 +319,8 @@ export async function retireBridgeWorker(args: {
   });
   removeBridgeWorkerFiles({
     dir: args.dir,
-    id: args.entry.id,
-    socketPath: args.entry.socketPath,
+    id: args.id,
+    socketPath: args.socketPath,
   });
   return outcome;
 }

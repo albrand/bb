@@ -33,6 +33,7 @@ import {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerThread,
   type BridgeWorkerWorkspace,
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   fallbackSocketRoot,
   privateDirectoryProblem,
   readProcessIdentity,
@@ -100,7 +101,7 @@ interface WorkerProcessHandle {
   removeAllListeners(event: "exit" | "error"): unknown;
 }
 
-const ADOPTED_WORKER_EXIT_POLL_MS = 500;
+const ADOPTED_WORKER_EXIT_POLL_MS = 5_000;
 
 class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
   exitCode: number | null = null;
@@ -338,6 +339,7 @@ export class SocketBridgeWorker
           : {
               ...args.registration,
               id: this.id,
+              formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
               pid: child.pid,
               processIdentity,
               socketPath: this.socketPath,
