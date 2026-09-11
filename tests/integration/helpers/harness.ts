@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
@@ -14,6 +13,7 @@ import {
   type HostDaemon,
   type HostDaemonApp,
 } from "@bb/host-daemon/test";
+import { integrationTmpBase } from "./tmp-base.js";
 import { createHostDaemonClient } from "@bb/host-daemon-contract";
 import { initDb } from "../../../apps/server/src/db.js";
 import { createLifecycleDedupers } from "../../../apps/server/src/lifecycle-dedupers.js";
@@ -413,7 +413,9 @@ export async function createIntegrationHarness(
   options: CreateHarnessOptions = {},
 ): Promise<IntegrationHarness> {
   await loadProjectEnvFile();
-  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), "bb-integration-"));
+  const tmpRoot = await fs.mkdtemp(
+    path.join(integrationTmpBase(), "bb-integration-"),
+  );
   await fs.writeFile(
     path.join(tmpRoot, "parent.pid"),
     `${process.pid}\n`,
@@ -496,7 +498,7 @@ export async function createIntegrationHarness(
       .catch(() => undefined);
     await currentResources.daemonApp.localApi?.close().catch(() => undefined);
     await currentResources.daemonApp.runtimeManager
-      .shutdownAll()
+      .shutdownAll("stop")
       .catch(() => undefined);
     await currentResources.daemonApp.eventSink.dispose().catch(() => undefined);
     await currentResources.releaseLock().catch(() => undefined);
@@ -508,6 +510,9 @@ export async function createIntegrationHarness(
     }
     cleanedUp = true;
 
+    await daemonResources?.daemonApp.runtimeManager
+      .shutdownAll("stop")
+      .catch(() => undefined);
     await shutdownDaemon("integration-cleanup").catch(() => undefined);
     await server?.close().catch(() => undefined);
     await removePathWithRetry(tmpRoot);

@@ -976,6 +976,7 @@ fi
     expect(unit).toContain(
       `Environment="BB_APP_NPM_PREFIX=${realpathSync(fixture.dataDir)}/npm"`,
     );
+    expect(unit).toMatch(/^KillMode=process$/mu);
     expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
       "--user daemon-reload\n--user enable bb-host-daemon-machine-getbb-app.service\n--user restart bb-host-daemon-machine-getbb-app.service\n",
     );
