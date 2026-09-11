@@ -120,6 +120,39 @@ describe("a restarted daemon that adopted threads", () => {
     });
   });
 
+  it("leaves an idle thread on an adopted worker idle across a restart", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, thread } = seedThreadFixture(harness, {
+        thread: { status: "idle" },
+      });
+      const eventsBefore = listEvents(harness.deps.db, { threadId: thread.id });
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+
+      await openRestartedSession(harness, host, {
+        adoptedThreads: [{ threadId: thread.id, activeTurnId: null }],
+      });
+
+      expect(getThread(harness.deps.db, thread.id)?.status).toBe("idle");
+      expect(listEvents(harness.deps.db, { threadId: thread.id })).toEqual(
+        eventsBefore,
+      );
+    });
+  });
+
+  it("does not interrupt an active thread whose adopted worker reports no turn, and does not count it as running", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, adopted } = seedTwoActiveTurns(harness);
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+
+      await openRestartedSession(harness, host, {
+        adoptedThreads: [{ threadId: adopted.id, activeTurnId: null }],
+      });
+
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
+      expect(interruptionTypes(harness, adopted.id)).toEqual([]);
+    });
+  });
+
   it("interrupts an adopted thread whose turn the server no longer recognizes", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, adopted } = seedTwoActiveTurns(harness);

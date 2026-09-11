@@ -271,6 +271,7 @@ interface InterruptActiveThreadsResult {
 
 interface ReconcileDaemonReportedThreadsArgs {
   activeThreadIds: readonly string[];
+  exceptThreadIds?: ReadonlySet<string>;
   hostId: string;
   sameDaemonInstance: boolean;
 }
@@ -1878,10 +1879,12 @@ export async function reconcileDaemonReportedThreads(
     .all();
 
   interruptActiveThreads(deps, {
-    threads: activeButMissing.map((thread) => ({
-      environmentId: thread.environmentId,
-      threadId: thread.id,
-    })),
+    threads: activeButMissing
+      .filter((thread) => args.exceptThreadIds?.has(thread.id) !== true)
+      .map((thread) => ({
+        environmentId: thread.environmentId,
+        threadId: thread.id,
+      })),
     reason: "host-daemon-restarted",
     cause: args.sameDaemonInstance ? "host-connection-lost" : undefined,
   });
