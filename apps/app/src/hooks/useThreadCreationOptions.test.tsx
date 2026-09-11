@@ -25,6 +25,9 @@ const PROJECT_PROVIDER_ID = "project-provider";
 
 vi.mock("@/lib/sdk", () => ({
   sdk: {
+    projects: {
+      defaultExecutionOptions: vi.fn(),
+    },
     system: {
       executionOptions: vi.fn(),
       providerStates: vi.fn(),
@@ -649,6 +652,54 @@ describe("useThreadCreationOptions", () => {
     expect(result.current.serviceTier).toBe("fast");
     rerender({ tier: "default", threadId: "thr_two" });
     expect(result.current.serviceTier).toBe("default");
+  });
+
+  it("falls back to the project's remembered settings for a provider this browser never chose (get-bb/bb#3463)", async () => {
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
+      providerExecutionOptionsResponse(args?.providerId),
+    );
+    vi.mocked(sdk.projects.defaultExecutionOptions).mockImplementation(
+      async (args) =>
+        args.providerId === PROJECT_PROVIDER_ID
+          ? {
+              providerId: PROJECT_PROVIDER_ID,
+              model: "project-remembered",
+              reasoningLevel: "high",
+              permissionMode: "full",
+              serviceTier: "default",
+            }
+          : null,
+    );
+    const { wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "new-thread",
+          preferenceProjectId: PROJECT_ID,
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialModel: "global-default",
+        }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.selectedModel).toBe("global-default");
+    });
+
+    act(() => {
+      result.current.setSelectedProviderId(PROJECT_PROVIDER_ID);
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
+      expect(result.current.selectedModel).toBe("project-remembered");
+      expect(result.current.reasoningLevel).toBe("high");
+    });
+    expect(sdk.projects.defaultExecutionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: PROJECT_ID,
+        providerId: PROJECT_PROVIDER_ID,
+      }),
+    );
   });
 
   it("keeps provider selections local in component-local composers", async () => {

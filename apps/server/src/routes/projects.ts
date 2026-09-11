@@ -385,10 +385,17 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     ),
   );
 
-  get(routes.defaultExecutionOptions, (context) => {
+  get(routes.defaultExecutionOptions, (context, query) => {
     const projectId = context.req.param("id");
     requirePublicProject(deps.db, projectId);
-    return context.json(getProjectExecutionDefaults(deps.db, { projectId }));
+    return context.json(
+      getProjectExecutionDefaults(deps.db, {
+        projectId,
+        ...(query.providerId === undefined
+          ? {}
+          : { providerId: query.providerId }),
+      }),
+    );
   });
 
   get(routes.promptHistory, (context, query) => {

@@ -221,7 +221,13 @@ export type ProjectAttachmentContentQuery = z.infer<
   typeof projectAttachmentContentQuerySchema
 >;
 
-export const projectDefaultExecutionOptionsQuerySchema = z.object({});
+export const projectDefaultExecutionOptionsQuerySchema = z.object({
+  /**
+   * Fork (albrand/bb): the provider whose remembered settings are wanted.
+   * Omitted, the project's most recently used provider's.
+   */
+  providerId: z.string().min(1).optional(),
+});
 export type ProjectDefaultExecutionOptionsQuery = z.infer<
   typeof projectDefaultExecutionOptionsQuerySchema
 >;

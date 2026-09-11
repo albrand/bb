@@ -128,10 +128,9 @@ type ProjectSourceBranchesQueryKeyPrefix = readonly [
   typeof PROJECT_SOURCE_BRANCHES_QUERY_KEY,
   string,
 ];
-type ProjectDefaultExecutionOptionsQueryKey = readonly [
-  typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY,
-  string,
-];
+type ProjectDefaultExecutionOptionsQueryKey =
+  | readonly [typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, string]
+  | readonly [typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, string, string];
 type ProjectPromptHistoryQueryKeyPrefix = readonly [
   typeof PROJECT_PROMPT_HISTORY_QUERY_KEY,
 ];
@@ -502,6 +501,7 @@ type HostPathExistenceQueryKeyPrefix = readonly [
 ];
 interface ProjectDefaultExecutionOptionsQueryKeyArgs {
   projectId: string;
+  providerId?: string;
 }
 
 export function hostsQueryKey(includeCreating = false): HostsQueryKey {
@@ -605,8 +605,13 @@ export function projectPromptHistoryQueryKey(
 
 export function projectDefaultExecutionOptionsQueryKey({
   projectId,
+  providerId,
 }: ProjectDefaultExecutionOptionsQueryKeyArgs): ProjectDefaultExecutionOptionsQueryKey {
-  return [PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, projectId];
+  // The per-provider key extends the project key, so invalidating the project
+  // key refreshes both.
+  return providerId === undefined
+    ? [PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, projectId]
+    : [PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, projectId, providerId];
 }
 
 export function projectPromptHistoryQueryKeyPrefix(): ProjectPromptHistoryQueryKeyPrefix {
