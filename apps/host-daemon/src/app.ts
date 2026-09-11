@@ -822,6 +822,7 @@ export async function createHostDaemonApp(
     onSelfUpdateInstalled: () => requestDaemonRestart(),
     createWebSocket: options.createWebSocket,
     getActiveThreads: () => runtimeManager.listActiveThreads(),
+    hasOpenBackgroundWork: () => runtimeManager.hasOpenBackgroundWork(),
     getLoadedEnvironments: () => runtimeManager.listLoadedEnvironments(),
     onHostRpcRequest: async (message) => {
       if (message.command.type === "environment.destroy") {

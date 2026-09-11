@@ -538,6 +538,13 @@ export class RuntimeManager {
     return activeThreads;
   }
 
+  hasOpenBackgroundWork(): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.runtime.hasOpenBackgroundWork()) return true;
+    }
+    return false;
+  }
+
   listLoadedEnvironments(): HostDaemonLoadedEnvironment[] {
     return [...this.entries.keys()].map((environmentId) => ({
       environmentId,
