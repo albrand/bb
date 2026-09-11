@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -9,6 +8,11 @@ import {
   supportsProcessGroups,
 } from "@bb/process-utils";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
+import {
+  BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
+  type BridgeWorkerProcess,
+  SocketBridgeWorker,
+} from "./bridge-worker-socket.js";
 import type { CreateBridgeAdapterOptions } from "./provider-adapter.js";
 import { createProviderForId } from "./provider-registry.js";
 import {
@@ -28,7 +32,7 @@ import type {
 
 export interface RuntimeProviderProcess {
   adapter: BridgeProtocolAdapter;
-  child: ChildProcess;
+  child: BridgeWorkerProcess;
   expectedShutdownExpectations: number;
   exitFinalized: Promise<void>;
   identity: RuntimeProviderIdentityState;
@@ -52,6 +56,7 @@ interface RuntimeProviderProcessManagerArgs {
     options: CreateBridgeAdapterOptions,
   ) => BridgeProtocolAdapter;
   bridgeBundleDir: string | undefined;
+  bridgeWorkerDir: string | undefined;
   bridgeNodeEnv?: Record<string, string>;
   bridgeNodeExecutablePath?: string;
   captureThreadExitState: (
@@ -382,13 +387,23 @@ export class RuntimeProviderProcessManager {
       env[PROVIDER_BRIDGE_RECORD_DIR_ENV] = join(recordRoot, args.providerId);
     }
 
-    const child = spawnPortablePipedProcess({
+    const spawnRequest = {
       command: processConfig.command,
       args: processConfig.args,
       cwd: this.args.workspacePath,
-      detached: supportsProcessGroups(),
       env,
-    });
+    };
+    const child: BridgeWorkerProcess =
+      this.args.bridgeWorkerDir === undefined
+        ? spawnPortablePipedProcess({
+            ...spawnRequest,
+            detached: supportsProcessGroups(),
+          })
+        : new SocketBridgeWorker({
+            ...spawnRequest,
+            workerDir: this.args.bridgeWorkerDir,
+            connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
+          });
     let finalizeExit: () => void = () => undefined;
     const exitFinalized = new Promise<void>((resolve) => {
       finalizeExit = resolve;
@@ -619,17 +634,17 @@ export class RuntimeProviderProcessManager {
   }
 }
 
-export function hasChildProcessExited(child: ChildProcess): boolean {
+export function hasChildProcessExited(child: BridgeWorkerProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
 function getChildProcessExitStatus(
-  child: ChildProcess,
+  child: BridgeWorkerProcess,
 ): ProviderProcessExitStatus {
   return { code: child.exitCode, signal: child.signalCode };
 }
 
-function formatChildProcessExitStatus(child: ChildProcess): string {
+function formatChildProcessExitStatus(child: BridgeWorkerProcess): string {
   return formatProviderProcessExitStatus(getChildProcessExitStatus(child));
 }
 

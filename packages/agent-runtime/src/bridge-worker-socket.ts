@@ -1,0 +1,268 @@
+import type { ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
+import {
+  chmodSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { connect, type Socket } from "node:net";
+import { join } from "node:path";
+import { PassThrough, type Readable, type Writable } from "node:stream";
+import {
+  killProcessGroup,
+  spawnPortableProcess,
+  supportsProcessGroups,
+} from "@bb/process-utils";
+import { BRIDGE_SOCKET_ENV } from "@bb/provider-bridge-protocol/bridge-kit";
+
+export interface BridgeWorkerProcess {
+  readonly pid?: number | undefined;
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  readonly killed: boolean;
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  kill(signal: NodeJS.Signals): boolean;
+  on(
+    event: "exit" | "close",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
+  on(event: "error", listener: (error: Error) => void): this;
+  once(event: "exit", listener: () => void): this;
+  emit(event: "exit" | "close" | "error", ...args: unknown[]): boolean;
+}
+
+export interface BridgeWorkerPaths {
+  id: string;
+  socketPath: string;
+  logPath: string;
+}
+
+export interface SpawnSocketBridgeWorkerArgs {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  workerDir: string;
+  connectTimeoutMs: number;
+}
+
+export const BRIDGE_WORKER_CONNECT_TIMEOUT_MS = 15_000;
+const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
+const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
+const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
+
+export function allocateBridgeWorkerPaths(
+  workerDir: string,
+): BridgeWorkerPaths {
+  ensurePrivateDirectory(workerDir);
+  const id = randomBytes(6).toString("hex");
+  const logPath = join(workerDir, `${id}.log`);
+  if (process.platform === "win32") {
+    return { id, socketPath: `\\\\.\\pipe\\bb-bridge-worker-${id}`, logPath };
+  }
+  const socketPath = join(workerDir, `${id}.sock`);
+  const socketPathBytes = Buffer.byteLength(socketPath);
+  if (socketPathBytes > UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw new Error(
+      `Bridge worker socket path is ${socketPathBytes} bytes, over the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte unix socket path limit on ${process.platform}: ${socketPath}`,
+    );
+  }
+  return { id, socketPath, logPath };
+}
+
+function ensurePrivateDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") return;
+  const stat = statSync(dir);
+  const uid = process.getuid?.();
+  if (uid !== undefined && stat.uid !== uid) {
+    throw new Error(
+      `Bridge worker directory ${dir} is owned by uid ${stat.uid}, not the current user (${uid})`,
+    );
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    chmodSync(dir, 0o700);
+  }
+}
+
+export class SocketBridgeWorker
+  extends EventEmitter
+  implements BridgeWorkerProcess
+{
+  readonly id: string;
+  readonly socketPath: string;
+  readonly logPath: string;
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  private readonly child: ChildProcess;
+  private socket: Socket | null = null;
+  private exited = false;
+  private stdoutEnded = false;
+  private stderrEnded = false;
+  private closeEmitted = false;
+
+  constructor(args: SpawnSocketBridgeWorkerArgs) {
+    super();
+    const paths = allocateBridgeWorkerPaths(args.workerDir);
+    this.id = paths.id;
+    this.socketPath = paths.socketPath;
+    this.logPath = paths.logPath;
+    const logFd = openSync(this.logPath, "a", 0o600);
+    try {
+      this.child = spawnPortableProcess({
+        command: args.command,
+        args: args.args,
+        cwd: args.cwd,
+        detached: supportsProcessGroups(),
+        env: { ...args.env, [BRIDGE_SOCKET_ENV]: this.socketPath },
+        stdio: ["ignore", logFd, logFd],
+      });
+    } finally {
+      closeSync(logFd);
+    }
+    this.child.unref();
+    this.stdout.on("end", () => {
+      this.stdoutEnded = true;
+      this.maybeEmitClose();
+    });
+    this.stderr.on("end", () => {
+      this.stderrEnded = true;
+      this.maybeEmitClose();
+    });
+    this.child.on("error", (error) => {
+      this.emit("error", error);
+    });
+    this.child.on("exit", (code, signal) => {
+      this.handleExit(code, signal);
+    });
+    void this.connect(Date.now() + args.connectTimeoutMs);
+  }
+
+  get pid(): number | undefined {
+    return this.child.pid;
+  }
+
+  get exitCode(): number | null {
+    return this.child.exitCode;
+  }
+
+  get signalCode(): NodeJS.Signals | null {
+    return this.child.signalCode;
+  }
+
+  get killed(): boolean {
+    return this.child.killed;
+  }
+
+  kill(signal: NodeJS.Signals): boolean {
+    return this.child.kill(signal);
+  }
+
+  private async connect(deadline: number): Promise<void> {
+    while (!this.exited) {
+      try {
+        const socket = await connectSocket(this.socketPath);
+        if (this.exited) {
+          socket.destroy();
+          return;
+        }
+        this.attach(socket);
+        return;
+      } catch {
+        if (Date.now() > deadline) {
+          this.failToConnect();
+          return;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, BRIDGE_WORKER_CONNECT_RETRY_MS),
+        );
+      }
+    }
+  }
+
+  private attach(socket: Socket): void {
+    this.socket = socket;
+    socket.on("error", () => undefined);
+    socket.on("close", () => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      this.stdout.end();
+    });
+    this.stdin.pipe(socket);
+    socket.pipe(this.stdout, { end: false });
+  }
+
+  private failToConnect(): void {
+    if (this.exited) return;
+    killProcessGroup({ child: this.child, signal: "SIGKILL" });
+    this.emit(
+      "error",
+      new Error(
+        `Provider bridge worker did not open its socket at ${this.socketPath}`,
+      ),
+    );
+  }
+
+  private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+    this.exited = true;
+    this.emit("exit", code, signal);
+    const tail = readFileTail(this.logPath, BRIDGE_WORKER_LOG_TAIL_BYTES);
+    removeFile(this.logPath);
+    removeFile(this.socketPath);
+    if (tail.length > 0) this.stderr.write(tail);
+    this.stderr.end();
+    if (this.socket === null) this.stdout.end();
+  }
+
+  private maybeEmitClose(): void {
+    if (this.closeEmitted || !this.exited) return;
+    if (!this.stdoutEnded || !this.stderrEnded) return;
+    this.closeEmitted = true;
+    this.emit("close", this.child.exitCode, this.child.signalCode);
+  }
+}
+
+function connectSocket(socketPath: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(socketPath);
+    socket.once("error", reject);
+    socket.once("connect", () => {
+      socket.off("error", reject);
+      resolve(socket);
+    });
+  });
+}
+
+function readFileTail(path: string, maxBytes: number): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return Buffer.alloc(0);
+  }
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    return buffer;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function removeFile(path: string): void {
+  if (process.platform === "win32" && path.startsWith("\\\\.\\pipe\\")) return;
+  try {
+    unlinkSync(path);
+  } catch {}
+}
