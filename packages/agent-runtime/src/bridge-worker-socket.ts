@@ -180,6 +180,9 @@ const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
 const BRIDGE_WORKER_ACK_INTERVAL_MS = 25;
 const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
 const BRIDGE_WORKER_FORCE_STOP_GRACE_MS = 1_000;
+const BRIDGE_WORKER_RECONNECT_BACKOFF_MS = 100;
+const BRIDGE_WORKER_RECONNECT_BACKOFF_CAP_MS = 2_000;
+const BRIDGE_WORKER_STABLE_CONNECTION_MS = 1_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
 
 export function allocateBridgeWorkerPaths(
@@ -296,6 +299,7 @@ export class SocketBridgeWorker
   private unconfirmedResponses: { id: string | number; wseq: number }[] = [];
   private readonly restoredKeeps = new Set<number>();
   private confirmResponsesOnNextFrame = false;
+  private reconnectBackoffMs = 0;
   private lineHandler: ((line: string, wseq: number | null) => void) | null =
     null;
   readonly ackTracker: BridgeLineAckTracker;
@@ -473,6 +477,7 @@ export class SocketBridgeWorker
 
   private attach(socket: Socket): void {
     this.socket = socket;
+    const attachedAt = Date.now();
     socket.on("error", () => undefined);
     socket.on("close", () => {
       if (this.socket !== socket) return;
@@ -487,7 +492,16 @@ export class SocketBridgeWorker
         this.ackTracker.restoreKept(unconfirmed.wseq, unconfirmed.id);
         this.restoredKeeps.add(unconfirmed.wseq);
       }
-      void this.connect(Date.now() + this.connectTimeoutMs);
+      this.reconnectBackoffMs =
+        Date.now() - attachedAt < BRIDGE_WORKER_STABLE_CONNECTION_MS
+          ? Math.min(
+              this.reconnectBackoffMs === 0
+                ? BRIDGE_WORKER_RECONNECT_BACKOFF_MS
+                : this.reconnectBackoffMs * 2,
+              BRIDGE_WORKER_RECONNECT_BACKOFF_CAP_MS,
+            )
+          : 0;
+      void this.reconnectAfterBackoff();
     });
     if (this.resumeRequested) this.sendResume(socket);
     this.scheduleAck();
@@ -501,6 +515,17 @@ export class SocketBridgeWorker
       },
       onOverflow: () => undefined,
     });
+  }
+
+  private async reconnectAfterBackoff(): Promise<void> {
+    if (this.reconnectBackoffMs > 0) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, this.reconnectBackoffMs);
+        timer.unref();
+      });
+      if (this.exited || this.released) return;
+    }
+    await this.connect(Date.now() + this.connectTimeoutMs);
   }
 
   private receiveFrame(frame: string): void {
