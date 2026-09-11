@@ -1942,6 +1942,7 @@ describe("RuntimeManager", () => {
     });
 
     onProcessExit?.({
+      bridgeWorker: null,
       providerId: "fake",
       threads: [
         {
@@ -1986,6 +1987,7 @@ describe("RuntimeManager", () => {
     });
     runningProviders = ["fake-beta"];
     onProcessExit?.({
+      bridgeWorker: null,
       providerId: "fake-alpha",
       threads: [
         {
@@ -2050,6 +2052,7 @@ describe("RuntimeManager", () => {
     });
 
     onProcessExit({
+      bridgeWorker: null,
       providerId: "codex",
       threads: [
         {
@@ -2139,6 +2142,7 @@ describe("RuntimeManager", () => {
     }
 
     onProcessExit({
+      bridgeWorker: null,
       providerId: "codex",
       threads: [
         {
@@ -2188,6 +2192,7 @@ describe("RuntimeManager", () => {
     }
 
     onProcessExit({
+      bridgeWorker: null,
       providerId: "claude-code",
       threads: [
         {
@@ -2258,6 +2263,7 @@ describe("RuntimeManager", () => {
     emittedEvents.splice(0, emittedEvents.length);
 
     onProcessExit({
+      bridgeWorker: null,
       providerId: "codex",
       threads: [
         {
@@ -2649,6 +2655,69 @@ describe("RuntimeManager bridge workers", () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
+
+  it("logs which workers an idle runtime stops when the shell environment changes, and why", async () => {
+    const dataDir = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
+    );
+    tempDirs.push(dataDir);
+    const workspacePath = await makeTempDir("bb-evict-log-ws-");
+    const bridgeLaunch = createScriptedEchoLaunch({
+      modulePath: fileURLToPath(
+        new URL(
+          "../../../tests/scripted-echo-provider/src/provider-bridge.ts",
+          import.meta.url,
+        ),
+      ),
+    });
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    const manager = new RuntimeManager({
+      dataDir,
+      logger,
+      provisionWorkspace: createProvisionWorkspaceMock(workspacePath),
+      shellEnv: { PATH: process.env.PATH ?? "" },
+    });
+    const entry = await manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath,
+    });
+    await entry.runtime.ensureProvider({ bridgeLaunch, providerId: "fake" });
+    const dir = path.join(dataDir, "bridge-workers");
+    const registered = JSON.parse(
+      await fs.readFile(
+        path.join(
+          dir,
+          (await fs.readdir(dir)).find((name) => name.endsWith(".json")) ?? "",
+        ),
+        "utf8",
+      ),
+    ) as { id: string; pid: number };
+
+    try {
+      await manager.replaceBaseShellEnv({
+        PATH: process.env.PATH ?? "",
+        CHANGED: "1",
+      });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        {
+          environmentId: "env-1",
+          reason: "idle-after-shell-environment-change",
+          bridgeWorkers: [{ id: registered.id, pid: registered.pid }],
+        },
+        "Stopping environment runtime and its provider bridge workers",
+      );
+      await waitFor(() => !isProcessAlive(registered.pid));
+      expect(
+        (await fs.readdir(dir)).filter((name) => name.endsWith(".json")),
+      ).toEqual([]);
+    } finally {
+      await manager.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
 
   it("keeps environment values out of the worker registry, and adoption still runs the next turn", async () => {
     const dataDir = await fs.mkdtemp(

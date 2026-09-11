@@ -4,6 +4,7 @@ export type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 export {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerWorkspace,
+  readBridgeWorkerEntries,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
 } from "./bridge-worker-registry.js";
