@@ -435,4 +435,15 @@ describe("desktop auto-update service", () => {
       }),
     ).toBe(true);
   });
+
+  it("fork build: a packaged app does not self-update unless asked", () => {
+    // albrand/bb fork. The official updater would replace this build with
+    // upstream's and drop the fork's patches.
+    expect(
+      shouldEnableDesktopAutoUpdate({
+        env: {},
+        isPackaged: true,
+      }),
+    ).toBe(false);
+  });
 });
