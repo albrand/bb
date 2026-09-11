@@ -287,9 +287,8 @@ function classifyAdoptedThreads(
       running.add(thread.threadId);
     }
     if (
-      thread.activeTurnId === null ||
-      storedTurnId === null ||
-      storedTurnId === thread.activeTurnId
+      storedTurnId === thread.activeTurnId ||
+      (thread.activeTurnId !== null && storedTurnId === null)
     ) {
       excepted.add(thread.threadId);
     }
