@@ -20,6 +20,7 @@ const bridgeWorkerRegistryEntrySchema = z.object({
   processKey: z.string().min(1),
   environmentId: z.string().min(1),
   bridgeProtocolVersion: z.number().int(),
+  transportVersion: z.number().int(),
   startedAt: z.string().min(1),
 });
 
@@ -55,6 +56,7 @@ export function removeBridgeWorkerFiles(args: {
 }): void {
   removeIfPresent(entryPath(args.dir, args.id));
   removeIfPresent(join(args.dir, `${args.id}.log`));
+  removeIfPresent(join(args.dir, `${args.id}.buf`));
   if (!args.socketPath.startsWith("\\\\")) removeIfPresent(args.socketPath);
 }
 

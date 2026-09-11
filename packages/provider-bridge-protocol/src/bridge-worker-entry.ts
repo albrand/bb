@@ -1,5 +1,5 @@
 import { rmSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createPluginProcessTempDir } from "@bb/process-utils";
 import { readBoundedLines } from "./bridge-kit/bounded-line-reader.js";
@@ -7,8 +7,11 @@ import {
   createRecordingLineSplitter,
   getBridgeRecorder,
 } from "./bridge-kit/bridge-recorder.js";
+import { signalDescendantProcesses } from "./bridge-kit/bridge-descendants.js";
 import {
   BRIDGE_REATTACH_TTL_MS,
+  BRIDGE_REPLAY_HARD_CAP_BYTES,
+  BRIDGE_REPLAY_MEMORY_CAP_BYTES,
   BRIDGE_SOCKET_ENV,
   createBridgeSocketServer,
 } from "./bridge-kit/bridge-socket-server.js";
@@ -66,12 +69,20 @@ const socketServer =
     ? null
     : createBridgeSocketServer({
         socketPath: bridgeSocketPath,
+        spillPath: bridgeSocketPath.endsWith(".sock")
+          ? `${bridgeSocketPath.slice(0, -".sock".length)}.buf`
+          : join(tempDir, "replay.buf"),
         reattachTtlMs: BRIDGE_REATTACH_TTL_MS,
+        memoryCapBytes: BRIDGE_REPLAY_MEMORY_CAP_BYTES,
+        hardCapBytes: BRIDGE_REPLAY_HARD_CAP_BYTES,
         onOverflow: reportOversizedLine,
-        onDroppedOutput: (bytes) => {
+        onBackpressure: (paused) => {
           process.stderr.write(
-            `Dropped ${bytes} bytes of bridge output while no runtime was attached.\n`,
+            paused
+              ? "Pausing the provider: unacknowledged bridge output reached its cap.\n"
+              : "Resuming the provider: the runtime caught up.\n",
           );
+          signalDescendantProcesses(paused ? "SIGSTOP" : "SIGCONT");
         },
       });
 if (socketServer !== null) {
