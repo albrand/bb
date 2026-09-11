@@ -28,6 +28,7 @@ import type {
   AgentRuntimeBridgeLaunch,
   AgentRuntimeBridgeWorkers,
   AgentRuntimeOptions,
+  AgentRuntimeProcessExitInfo,
   AgentRuntimeProcessExitThreadState,
   AgentRuntimeSkillRoot,
 } from "./types.js";
@@ -663,6 +664,7 @@ export class RuntimeProviderProcessManager {
     args.providerProcess.pending.clear();
 
     this.args.onProcessExit?.({
+      bridgeWorker: bridgeWorkerIdentity(args.providerProcess.child),
       providerId: args.providerId,
       threads: [...args.providerProcess.identity.threadIds].map((threadId) =>
         this.args.captureThreadExitState(threadId),
@@ -706,6 +708,7 @@ export class RuntimeProviderProcessManager {
     args.providerProcess.pending.clear();
 
     this.args.onProcessExit?.({
+      bridgeWorker: bridgeWorkerIdentity(args.providerProcess.child),
       providerId: args.providerId,
       threads,
       code: args.code,
@@ -723,6 +726,14 @@ export class RuntimeProviderProcessManager {
       args.providerProcess
     );
   }
+}
+
+function bridgeWorkerIdentity(
+  child: BridgeWorkerProcess,
+): AgentRuntimeProcessExitInfo["bridgeWorker"] {
+  return child instanceof SocketBridgeWorker
+    ? { id: child.id, pid: child.pid ?? null }
+    : null;
 }
 
 export function hasChildProcessExited(child: BridgeWorkerProcess): boolean {
