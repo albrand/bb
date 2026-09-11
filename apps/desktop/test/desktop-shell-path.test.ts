@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultSpawnLoginShellPath,
   ensurePackagedUserShellPath,
   type DesktopShellPathLogger,
   type ShellPathSpawnResult,
@@ -92,7 +93,7 @@ describe("desktop shell PATH loading", () => {
       {
         args: ["-ilc", 'printf "%s" "$PATH"'],
         command: "/bin/zsh",
-        timeoutMs: 2_000,
+        timeoutMs: 10_000,
       },
     ]);
   });
@@ -183,7 +184,7 @@ describe("desktop shell PATH loading", () => {
       {
         args: ["-ilc", 'printf "%s" "$PATH"'],
         command: "/usr/bin/fish",
-        timeoutMs: 2_000,
+        timeoutMs: 10_000,
       },
     ]);
   });
@@ -221,5 +222,27 @@ describe("desktop shell PATH loading", () => {
       reason: "unsupported-platform",
     });
     expect(env.PATH).toBe("C:\\Windows\\System32");
+  });
+
+  it("kills a shell that ignores SIGTERM instead of blocking the app", () => {
+    const started = Date.now();
+    const result = defaultSpawnLoginShellPath({
+      command: "/bin/sh",
+      args: ["-c", "trap '' TERM; sleep 30"],
+      timeoutMs: 500,
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result.signal).toBe("SIGKILL");
+  });
+
+  it("gives the shell no stdin to wait on", () => {
+    const started = Date.now();
+    const result = defaultSpawnLoginShellPath({
+      command: "/bin/sh",
+      args: ["-c", "cat; printf done"],
+      timeoutMs: 5_000,
+    });
+    expect(result.stdout).toBe("done");
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

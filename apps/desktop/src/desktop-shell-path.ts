@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 const MACOS_LOGIN_SHELL = "/bin/zsh";
 const SHELL_PATH_COMMAND = 'printf "%s" "$PATH"';
-const SHELL_PATH_TIMEOUT_MS = 2_000;
+const SHELL_PATH_TIMEOUT_MS = 10_000;
 
 export interface DesktopShellPathLogger {
   warn(message: string): void;
@@ -54,13 +54,14 @@ interface ShellPathUpdatedResult {
   path: string;
 }
 
-function defaultSpawnLoginShellPath(
+export function defaultSpawnLoginShellPath(
   args: SpawnLoginShellPathArgs,
 ): ShellPathSpawnResult {
   const result = spawnSync(args.command, args.args, {
     encoding: "utf8",
     timeout: args.timeoutMs,
     killSignal: "SIGKILL",
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   return {
