@@ -2695,6 +2695,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         ...new Set([
           ...turnState.getActiveThreadIds(),
           ...pendingTurnStarts.keys(),
+          ...pendingAdoptions
+            .filter((adoption) => adoption.activeTurnId !== null)
+            .map((adoption) => adoption.threadId),
         ]),
       ];
     },

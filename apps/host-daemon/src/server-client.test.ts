@@ -69,6 +69,7 @@ describe("createServerClient", () => {
       localApiPort: null,
       activeThreads: [],
       loadedEnvironments: [],
+      adoptedThreads: [],
     });
 
     await expect(result).rejects.toMatchObject({
@@ -118,10 +119,55 @@ describe("createServerClient", () => {
         localApiPort: 38_888,
         activeThreads: [],
         loadedEnvironments: [],
+        adoptedThreads: [],
       });
       expect(fetchFn).toHaveBeenCalledOnce();
     },
   );
+
+  it("sends adopted threads on session open only when there are any, so the request stays stock-shaped", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json(
+        {
+          sessionId: "session-1",
+          heartbeatIntervalMs: 30_000,
+          leaseTimeoutMs: 90_000,
+        },
+        { status: 201 },
+      );
+    });
+    const client = createServerClient({
+      fetchFn,
+      getSessionId: () => "session-1",
+      hostKey: "host-key",
+      logger: createLogger(),
+      serverUrl: "https://bb.example.test",
+    });
+    const open = (
+      adoptedThreads: { threadId: string; activeTurnId: string | null }[],
+    ) =>
+      client.openSession({
+        hostId: "host-1",
+        hostName: "Host",
+        hostType: "persistent",
+        dataDir: "/tmp/bb",
+        instanceId: "instance-1",
+        localApiPort: null,
+        activeThreads: [],
+        loadedEnvironments: [],
+        adoptedThreads,
+      });
+
+    await open([]);
+    await open([{ threadId: "thr_1", activeTurnId: "turn-1" }]);
+
+    expect(Object.hasOwn(bodies[0] ?? {}, "adoptedThreads")).toBe(false);
+    expect(bodies[1]?.adoptedThreads).toEqual([
+      { threadId: "thr_1", activeTurnId: "turn-1" },
+    ]);
+  });
 
   it("refuses to fetch project attachments over insecure non-loopback HTTP", async () => {
     const fetchFn = vi.fn<FetchFn>();

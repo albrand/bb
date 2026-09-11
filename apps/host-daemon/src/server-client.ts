@@ -2,6 +2,8 @@ import pRetry, { AbortError } from "p-retry";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   hostDaemonActiveTurnsResponseSchema,
+  hostDaemonDetachNoticeResponseSchema,
+  type HostDaemonAdoptedThread,
   hostDaemonEventBatchResponseSchema,
   hostDaemonInteractiveInterruptResponseSchema,
   hostDaemonInteractiveRequestResponseSchema,
@@ -172,6 +174,7 @@ interface OpenSessionArgs {
   loadedEnvironments:
     | HostDaemonLoadedEnvironment[]
     | Promise<HostDaemonLoadedEnvironment[]>;
+  adoptedThreads: HostDaemonAdoptedThread[];
 }
 
 export interface ServerClient {
@@ -189,6 +192,7 @@ export interface ServerClient {
   fetchActiveTurnIds(
     threadIds: readonly string[],
   ): Promise<Map<string, string | null>>;
+  postDetachNotice(threadIds: readonly string[]): Promise<void>;
   callTool(request: ToolCallRequest): Promise<HostDaemonToolCallResponse>;
   registerInteractiveRequest(
     request: PendingInteractionCreate,
@@ -448,6 +452,9 @@ export function createServerClient(
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: await args.activeThreads,
         loadedEnvironments: await args.loadedEnvironments,
+        ...(args.adoptedThreads.length > 0
+          ? { adoptedThreads: args.adoptedThreads }
+          : {}),
       };
       const response = await fetchFn(buildInternalUrl("/session/open"), {
         method: "POST",
@@ -530,6 +537,24 @@ export function createServerClient(
       }
       assertHostArtifactContentLength(response, args.expectedByteLength);
       return readHostArtifactBytes(response, args.expectedByteLength);
+    },
+
+    async postDetachNotice(threadIds: readonly string[]): Promise<void> {
+      const response = await fetchFn(
+        buildInternalUrl("/session/fork/detach-notice"),
+        {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            sessionId: requireSessionId(),
+            threadIds: [...threadIds],
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw await createResponseError("post detach notice", response);
+      }
+      hostDaemonDetachNoticeResponseSchema.parse(await response.json());
     },
 
     async fetchActiveTurnIds(

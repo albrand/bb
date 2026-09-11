@@ -149,6 +149,7 @@ export function registerInternalSessionRoutes(
 
     await handleHostSessionOpened(deps, {
       activeThreads: payload.activeThreads,
+      adoptedThreads: payload.adoptedThreads ?? [],
       hostId: daemon.hostId,
       openedSession: session,
       previousSession,

@@ -290,6 +290,7 @@ export class RuntimeManager {
   >();
   private readonly threadControlTails = new Map<string, Promise<void>>();
   private providerMaintenanceRuntime: AgentRuntime | null = null;
+  private runtimesClosed = false;
   private readonly adoptedBridgeThreads: {
     threadId: string;
     activeTurnId: string | null;
@@ -890,6 +891,9 @@ export class RuntimeManager {
   }
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
+    if (this.runtimesClosed) {
+      throw new Error("Host daemon runtimes are shutting down");
+    }
     const skillConfig = await this.resolveRuntimeSkillConfig(args);
     const existing = this.entries.get(args.environmentId);
     if (existing) {
@@ -1157,6 +1161,7 @@ export class RuntimeManager {
   }
 
   async shutdownAll(mode: RuntimeShutdownMode): Promise<void> {
+    this.runtimesClosed = true;
     const entries = [...this.entries.values()];
     for (const pending of this.pendingEntries.values()) {
       try {

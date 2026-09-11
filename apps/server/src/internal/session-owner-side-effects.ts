@@ -1,12 +1,18 @@
 import { eq } from "drizzle-orm";
 import {
+  clearDetachedThreads,
   closeSession,
+  getActiveStoredTurnId,
   hostDaemonSessions,
   listActiveHostThreads,
   listHostThreadIds,
+  listPendingDetachedThreads,
   type HostDaemonSessionRow,
 } from "@bb/db";
-import type { HostDaemonActiveThread } from "@bb/host-daemon-contract";
+import type {
+  HostDaemonActiveThread,
+  HostDaemonAdoptedThread,
+} from "@bb/host-daemon-contract";
 import {
   DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS,
   DAEMON_DISCONNECT_GRACE_MS,
@@ -50,6 +56,7 @@ type DaemonDisconnectGraceDeps = Pick<
 
 interface HandleHostSessionOpenedArgs {
   activeThreads: HostDaemonActiveThread[];
+  adoptedThreads: readonly HostDaemonAdoptedThread[];
   hostId: string;
   openedSession: HostDaemonSessionRow;
   previousSession: HostDaemonSessionRow | null;
@@ -70,6 +77,7 @@ interface CompleteDaemonDisconnectGraceArgs {
 
 interface CompleteDaemonActiveWorkDisconnectGraceArgs {
   hostId: string;
+  sessionId: string;
 }
 
 export async function handleHostSessionOpened(
@@ -84,6 +92,7 @@ export async function handleHostSessionOpened(
     },
     "Session opened",
   );
+  const adoptedThreadIds = trustedAdoptedThreadIds(deps, args);
 
   const sameDaemonInstance =
     args.previousSession?.instanceId === args.openedSession.instanceId;
@@ -110,15 +119,25 @@ export async function handleHostSessionOpened(
         reason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
       });
       interruptActiveThreadsForHost(deps, {
+        exceptThreadIds: adoptedThreadIds,
         hostId: args.hostId,
         reason: "host-daemon-restarted",
       });
-      settleDanglingBackgroundTasks(deps, { hostId: args.hostId });
+      settleDanglingBackgroundTasks(deps, {
+        exceptThreadIds: adoptedThreadIds,
+        hostId: args.hostId,
+      });
     }
   }
+  clearDetachedThreads(deps.db, { hostId: args.hostId });
 
   await reconcileDaemonReportedThreads(deps, {
-    activeThreadIds: args.activeThreads.map((thread) => thread.threadId),
+    activeThreadIds: [
+      ...new Set([
+        ...args.activeThreads.map((thread) => thread.threadId),
+        ...adoptedThreadIds,
+      ]),
+    ],
     hostId: args.hostId,
     sameDaemonInstance,
   });
@@ -161,6 +180,7 @@ export function handleDaemonSocketClosed(
     () =>
       completeDaemonActiveWorkDisconnectGrace(deps, {
         hostId: session.hostId,
+        sessionId: args.sessionId,
       }),
   );
 }
@@ -211,7 +231,15 @@ function completeDaemonDisconnectGrace(
     hostId: args.hostId,
     reason: DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON,
   });
-  settleDanglingBackgroundTasks(deps, { hostId: args.hostId });
+  settleDanglingBackgroundTasks(deps, {
+    exceptThreadIds: new Set(
+      listPendingDetachedThreads(deps.db, {
+        hostId: args.hostId,
+        now: Date.now(),
+      }).map((thread) => thread.threadId),
+    ),
+    hostId: args.hostId,
+  });
   notifyHostThreadRuntimeStatusChanged(deps, args.hostId);
 }
 
@@ -226,11 +254,39 @@ function completeDaemonActiveWorkDisconnectGrace(
     return;
   }
 
+  const now = Date.now();
+  const detached = listPendingDetachedThreads(deps.db, {
+    hostId: args.hostId,
+    now,
+  });
   interruptActiveThreadsForHost(deps, {
+    exceptThreadIds: new Set(detached.map((thread) => thread.threadId)),
     hostId: args.hostId,
     reason: "host-daemon-restarted",
     cause: "host-connection-lost",
   });
+  if (detached.length > 0) {
+    const nextExpiry = Math.min(...detached.map((thread) => thread.expiresAt));
+    deps.hub.scheduleDaemonActiveWorkDisconnect(
+      args.sessionId,
+      Math.max(nextExpiry - now, 0) + 1,
+      () => completeDaemonActiveWorkDisconnectGrace(deps, args),
+    );
+  }
+}
+
+function trustedAdoptedThreadIds(
+  deps: Pick<AppDeps, "db">,
+  args: Pick<HandleHostSessionOpenedArgs, "adoptedThreads">,
+): Set<string> {
+  const trusted = new Set<string>();
+  for (const thread of args.adoptedThreads) {
+    const activeTurnId = getActiveStoredTurnId(deps.db, thread.threadId);
+    if (activeTurnId === null || activeTurnId === thread.activeTurnId) {
+      trusted.add(thread.threadId);
+    }
+  }
+  return trusted;
 }
 
 function notifyHostThreadRuntimeStatusChanged(
