@@ -2466,16 +2466,16 @@ describe("RuntimeManager bridge workers", () => {
   });
 
   it("retires live workers a previous daemon left behind, since it cannot adopt them", async () => {
-    const dataDir = await makeTempDir("bb-runtime-manager-retire-");
-    const dir = path.join(dataDir, "bridge-workers");
-    const socketDir = await fs.mkdtemp(
+    const dataDir = await fs.mkdtemp(
       path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
     );
-    tempDirs.push(socketDir);
+    tempDirs.push(dataDir);
+    const dir = path.join(dataDir, "bridge-workers");
+    await fs.mkdir(dir, { recursive: true });
     const shutdowns: string[] = [];
     const worker = createBridgeSocketServer({
-      socketPath: path.join(socketDir, "w.sock"),
-      spillPath: path.join(socketDir, "w.buf"),
+      socketPath: path.join(dir, "aaaaaaaaaaaa.sock"),
+      spillPath: path.join(dir, "aaaaaaaaaaaa.buf"),
       reattachTtlMs: 60_000,
       memoryCapBytes: 1024 * 1024,
       hardCapBytes: 16 * 1024 * 1024,
@@ -2494,7 +2494,6 @@ describe("RuntimeManager bridge workers", () => {
       JSON.stringify({
         ...entry,
         processIdentity: readProcessIdentity(process.pid),
-        socketPath: path.join(socketDir, "w.sock"),
       }),
     );
     await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
