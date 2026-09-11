@@ -290,6 +290,14 @@ export const threadEventTokenUsageBreakdownSchema = z.object({
   totalTokens: z.number(),
   inputTokens: z.number(),
   cachedInputTokens: z.number(),
+  /**
+   * The part of the prompt written to the prompt cache on this request, when
+   * the provider reports it. Cache writes and cache reads are priced very
+   * differently (Anthropic: 1.25x vs 0.1x base input), so a consumer pricing
+   * usage needs them apart. For claude-code this is the cache-write share of
+   * `cachedInputTokens`; codex reports it separately.
+   */
+  cacheWriteInputTokens: z.number().optional(),
   outputTokens: z.number(),
   reasoningOutputTokens: z.number(),
 });
