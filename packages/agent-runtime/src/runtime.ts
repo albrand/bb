@@ -1,10 +1,16 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 import {
   normalizeProviderThreadNameEvent,
   toProviderExternalThreadName,
 } from "@bb/domain";
-import type { DynamicTool, InstructionMode, ThreadEvent } from "@bb/domain";
+import {
+  turnScope,
+  type DynamicTool,
+  type InstructionMode,
+  type ThreadEvent,
+} from "@bb/domain";
 import type { AdapterCommand } from "./provider-adapter.js";
 import {
   BRIDGE_JSON_RPC_ERRORS,
@@ -52,6 +58,8 @@ import { RuntimeThreadGoalState } from "./runtime-thread-goal-state.js";
 import { RuntimeBackgroundWorkState } from "./runtime-background-work-state.js";
 import { RuntimeTurnState } from "./runtime-turn-state.js";
 import type {
+  AdoptBridgeWorkersArgs,
+  AdoptedBridgeThread,
   AgentRuntimeContributedEnvEntry,
   AgentRuntime,
   AgentRuntimeProviderRecoveryHint,
@@ -179,6 +187,49 @@ function defaultBridgeNodeEnv(): Record<string, string> | undefined {
 }
 
 type ProviderProcess = RuntimeProviderProcess;
+
+interface PendingAdoption {
+  proc: ProviderProcess;
+  threadId: string;
+  activeTurnId: string | null;
+  activeProviderTurnId: string | null;
+}
+
+const adoptedThreadConfigSchema = z
+  .object({
+    bridgeLaunch: z
+      .object({
+        pluginId: z.string().min(1),
+        dataDir: z.string().min(1),
+        source: z
+          .object({
+            kind: z.literal("artifact"),
+            digest: z.string(),
+            artifactPath: z.string().min(1),
+          })
+          .passthrough(),
+        capabilities: z.object({}).passthrough(),
+        providerOptions: z.object({}).passthrough(),
+        envPassthrough: z.array(z.string()),
+      })
+      .passthrough(),
+    contributedEnv: z.array(z.unknown()),
+    environmentId: z.string().min(1),
+    envVars: z.record(z.string(), z.string()),
+    instructionMode: z.string().min(1),
+    options: z.object({}).passthrough(),
+    processKey: z.string().min(1),
+    providerId: z.string().min(1),
+    sessionRestorable: z.boolean(),
+  })
+  .passthrough();
+
+function parseAdoptedThreadConfig(
+  value: Record<string, unknown>,
+): ThreadRuntimeConfig | null {
+  const parsed = adoptedThreadConfigSchema.safeParse(value);
+  return parsed.success ? (value as unknown as ThreadRuntimeConfig) : null;
+}
 
 const threadGoalClearResultSchema = z.object({ cleared: z.boolean() }).strict();
 const THREAD_GOAL_CLEAR_EVENT_TIMEOUT_MS = 5_000;
@@ -330,6 +381,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   });
 
   let activeLineAckTracker: BridgeLineAckTracker | null = null;
+  const pendingAdoptions: PendingAdoption[] = [];
 
   function resolveProviderProcessKey(
     args: ResolveProviderProcessKeyArgs,
@@ -683,6 +735,114 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     config: ThreadRuntimeConfig,
   ): void {
     threadRuntimeConfigs.set(threadId, config);
+    persistAdoptableThread(threadId);
+  }
+
+  function socketWorkerForThread(threadId: string): {
+    proc: ProviderProcess;
+    worker: SocketBridgeWorker;
+  } | null {
+    const config = threadRuntimeConfigs.get(threadId);
+    if (config === undefined) return null;
+    const proc = providerProcesses.getProviderProcess(config.processKey);
+    if (proc === undefined || !(proc.child instanceof SocketBridgeWorker)) {
+      return null;
+    }
+    return { proc, worker: proc.child };
+  }
+
+  function persistAdoptableThread(threadId: string): void {
+    const target = socketWorkerForThread(threadId);
+    const config = threadRuntimeConfigs.get(threadId);
+    if (target === null || config === undefined) return;
+    const activeTurnId = turnState.getActiveTurnId(threadId);
+    target.worker.recordThread(threadId, {
+      providerThreadId:
+        threadIdentityRegistry.getProviderThreadId(threadId) ?? null,
+      activeTurnId,
+      activeProviderTurnId:
+        activeTurnId === null
+          ? null
+          : target.proc.adapter.getProviderTurnId(threadId, activeTurnId),
+      config: Object.fromEntries(Object.entries(config)),
+    });
+  }
+
+  function adoptBridgeWorkers(
+    args: AdoptBridgeWorkersArgs,
+  ): AdoptedBridgeThread[] {
+    const adoptedThreads: AdoptedBridgeThread[] = [];
+    for (const entry of args.entries) {
+      const threads = Object.entries(entry.threads).flatMap(
+        ([threadId, thread]) => {
+          const config = parseAdoptedThreadConfig(thread.config);
+          return config === null ? [] : [{ threadId, thread, config }];
+        },
+      );
+      const [first] = threads;
+      if (first === undefined) continue;
+      const proc = providerProcesses.adoptProviderProcess({
+        bridgeLaunch: first.config.bridgeLaunch,
+        entry,
+        processKey: entry.processKey,
+        providerId: entry.providerId,
+        workerDir: args.dir,
+      });
+      for (const { threadId, thread, config } of threads) {
+        threadIdentityRegistry.registerThreadProvider({
+          threadId,
+          providerId: entry.providerId,
+          providerState: proc.identity,
+          expectsIdentityNotification: false,
+        });
+        if (thread.providerThreadId !== null) {
+          recordProviderThreadIdentity(proc, threadId, thread.providerThreadId);
+        }
+        threadRuntimeConfigs.set(threadId, config);
+        pendingAdoptions.push({
+          proc,
+          threadId,
+          activeTurnId: thread.activeTurnId,
+          activeProviderTurnId: thread.activeProviderTurnId,
+        });
+        adoptedThreads.push({ threadId, activeTurnId: thread.activeTurnId });
+      }
+    }
+    return adoptedThreads;
+  }
+
+  function completeBridgeWorkerAdoption(
+    serverActiveTurnIds: ReadonlyMap<string, string | null>,
+  ): void {
+    const adoptions = pendingAdoptions.splice(0);
+    for (const adoption of adoptions) {
+      if (adoption.activeTurnId !== null) {
+        const serverTurnId = serverActiveTurnIds.get(adoption.threadId) ?? null;
+        const continuesServerTurn = serverTurnId === adoption.activeTurnId;
+        const bbTurnId = continuesServerTurn
+          ? adoption.activeTurnId
+          : `${adoption.activeTurnId}-adopted-${randomUUID().slice(0, 8)}`;
+        const seed: ThreadEvent = {
+          type: "turn/started",
+          threadId: adoption.threadId,
+          providerThreadId:
+            threadIdentityRegistry.getProviderThreadId(adoption.threadId) ?? "",
+          scope: turnScope(bbTurnId),
+        };
+        turnState.observe(seed);
+        threadEventGrammar.observe(seed);
+        adoption.proc.adapter.seedOpenTurn({
+          threadId: adoption.threadId,
+          bbTurnId,
+          providerTurnId: adoption.activeProviderTurnId,
+        });
+        if (!continuesServerTurn) options.onEvent(seed);
+      }
+      persistAdoptableThread(adoption.threadId);
+    }
+    for (const proc of new Set(adoptions.map((adoption) => adoption.proc))) {
+      if (proc.child instanceof SocketBridgeWorker) proc.child.resume();
+    }
   }
 
   function updateSessionRestoreCapability(
@@ -699,6 +859,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   }
 
   function clearThreadRuntimeConfig(threadId: string): void {
+    socketWorkerForThread(threadId)?.worker.recordThread(threadId, null);
     threadsAwaitingBridgeRestart.delete(threadId);
     threadsRetryingBridgeRestartOnIdle.delete(threadId);
     idleProviderSessionSinceMsByThreadId.delete(threadId);
@@ -781,6 +942,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       threadId,
       providerThreadId,
     });
+    persistAdoptableThread(threadId);
   }
 
   function forgetThreadRuntimeStateForProviderState(
@@ -1235,6 +1397,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       observeProviderSessionIdleState(normalizedEvent);
       options.onEvent(normalizedEvent, activeLineAckTracker?.delivery());
       threadGoalState.observe(normalizedEvent);
+      if (
+        normalizedEvent.type === "turn/started" ||
+        normalizedEvent.type === "turn/completed"
+      ) {
+        persistAdoptableThread(targetThreadId);
+      }
     }
   }
 
@@ -2538,6 +2706,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     async shutdown() {
       await closeRuntime("stop");
     },
+
+    adoptBridgeWorkers,
+
+    completeBridgeWorkerAdoption,
 
     async detach() {
       await closeRuntime("detach");

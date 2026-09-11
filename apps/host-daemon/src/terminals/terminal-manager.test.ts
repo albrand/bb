@@ -237,6 +237,8 @@ function createFakeRuntime(): AgentRuntime {
     hasOpenBackgroundWork: vi.fn(() => false),
     shutdown: vi.fn(async () => undefined),
     detach: vi.fn(async () => undefined),
+    adoptBridgeWorkers: vi.fn(() => []),
+    completeBridgeWorkerAdoption: vi.fn(),
   };
 }
 

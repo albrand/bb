@@ -29,6 +29,10 @@ import {
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import { BridgeLineAckTracker } from "./bridge-line-ack-tracker.js";
 import {
+  type BridgeWorkerRegistryEntry,
+  type BridgeWorkerThread,
+  type BridgeWorkerWorkspace,
+  isBridgeWorkerPidAlive,
   removeBridgeWorkerFiles,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -58,6 +62,7 @@ export interface BridgeWorkerPaths {
 }
 
 export interface SpawnSocketBridgeWorkerArgs {
+  kind: "spawn";
   command: string;
   args: string[];
   cwd: string;
@@ -65,6 +70,65 @@ export interface SpawnSocketBridgeWorkerArgs {
   workerDir: string;
   connectTimeoutMs: number;
   registration: BridgeWorkerRegistration;
+  workspace: BridgeWorkerWorkspace;
+}
+
+export interface AdoptSocketBridgeWorkerArgs {
+  kind: "adopt";
+  entry: BridgeWorkerRegistryEntry;
+  workerDir: string;
+  connectTimeoutMs: number;
+}
+
+interface WorkerProcessHandle {
+  readonly pid?: number | undefined;
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  readonly killed: boolean;
+  kill(signal: NodeJS.Signals): boolean;
+  on(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  removeAllListeners(event: "exit" | "error"): unknown;
+}
+
+const ADOPTED_WORKER_EXIT_POLL_MS = 500;
+
+class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
+  readonly pid: number;
+  exitCode: number | null = null;
+  readonly signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  private readonly poll: NodeJS.Timeout;
+
+  constructor(pid: number) {
+    super();
+    this.pid = pid;
+    this.poll = setInterval(() => {
+      if (isBridgeWorkerPidAlive(this.pid)) return;
+      this.stopWatching();
+      this.exitCode = -1;
+      this.emit("exit", this.exitCode, null);
+    }, ADOPTED_WORKER_EXIT_POLL_MS);
+    this.poll.unref();
+  }
+
+  kill(signal: NodeJS.Signals): boolean {
+    if (this.exitCode !== null) return false;
+    try {
+      process.kill(this.pid, signal);
+      this.killed = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  stopWatching(): void {
+    clearInterval(this.poll);
+  }
 }
 
 export interface BridgeWorkerRegistration {
@@ -125,7 +189,9 @@ export class SocketBridgeWorker
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  private readonly child: ChildProcess;
+  private readonly child: WorkerProcessHandle;
+  private readonly registryEntry: BridgeWorkerRegistryEntry | null;
+  private resumeRequested: boolean;
   private socket: Socket | null = null;
   private released = false;
   private exited = false;
@@ -139,42 +205,60 @@ export class SocketBridgeWorker
     null;
   readonly ackTracker: BridgeLineAckTracker;
 
-  constructor(args: SpawnSocketBridgeWorkerArgs) {
+  constructor(args: SpawnSocketBridgeWorkerArgs | AdoptSocketBridgeWorkerArgs) {
     super();
-    const paths = allocateBridgeWorkerPaths(args.workerDir);
-    this.id = paths.id;
-    this.socketPath = paths.socketPath;
-    this.logPath = paths.logPath;
     this.workerDir = args.workerDir;
+    if (args.kind === "adopt") {
+      this.id = args.entry.id;
+      this.socketPath = args.entry.socketPath;
+      this.logPath = join(args.workerDir, `${args.entry.id}.log`);
+      this.child = new AdoptedProcessHandle(args.entry.pid);
+      this.registryEntry = args.entry;
+      this.resumeRequested = false;
+    } else {
+      const paths = allocateBridgeWorkerPaths(args.workerDir);
+      this.id = paths.id;
+      this.socketPath = paths.socketPath;
+      this.logPath = paths.logPath;
+      this.resumeRequested = true;
+      const logFd = openSync(this.logPath, "a", 0o600);
+      let child: ChildProcess;
+      try {
+        child = spawnPortableProcess({
+          command: args.command,
+          args: args.args,
+          cwd: args.cwd,
+          detached: supportsProcessGroups(),
+          env: { ...args.env, [BRIDGE_SOCKET_ENV]: this.socketPath },
+          stdio: ["ignore", logFd, logFd],
+        });
+      } finally {
+        closeSync(logFd);
+      }
+      child.unref();
+      this.child = child;
+      this.registryEntry =
+        child.pid === undefined
+          ? null
+          : {
+              ...args.registration,
+              id: this.id,
+              pid: child.pid,
+              socketPath: this.socketPath,
+              bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+              transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+              startedAt: new Date().toISOString(),
+              workspace: args.workspace,
+              threads: {},
+            };
+      if (this.registryEntry !== null) {
+        writeBridgeWorkerEntry(this.workerDir, this.registryEntry);
+      }
+    }
     this.ackTracker = new BridgeLineAckTracker({
       workerId: this.id,
       onAckable: () => this.scheduleAck(),
     });
-    const logFd = openSync(this.logPath, "a", 0o600);
-    try {
-      this.child = spawnPortableProcess({
-        command: args.command,
-        args: args.args,
-        cwd: args.cwd,
-        detached: supportsProcessGroups(),
-        env: { ...args.env, [BRIDGE_SOCKET_ENV]: this.socketPath },
-        stdio: ["ignore", logFd, logFd],
-      });
-    } finally {
-      closeSync(logFd);
-    }
-    this.child.unref();
-    if (this.child.pid !== undefined) {
-      writeBridgeWorkerEntry(this.workerDir, {
-        ...args.registration,
-        id: this.id,
-        pid: this.child.pid,
-        socketPath: this.socketPath,
-        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
-        startedAt: new Date().toISOString(),
-      });
-    }
     this.stdout.resume();
     this.stdout.on("end", () => {
       this.stdoutEnded = true;
@@ -213,9 +297,38 @@ export class SocketBridgeWorker
     return this.child.kill(signal);
   }
 
+  recordThread(threadId: string, thread: BridgeWorkerThread | null): void {
+    const entry = this.registryEntry;
+    if (entry === null || this.exited || this.released) return;
+    if (thread === null) {
+      if (!(threadId in entry.threads)) return;
+      delete entry.threads[threadId];
+    } else {
+      entry.threads[threadId] = thread;
+    }
+    writeBridgeWorkerEntry(this.workerDir, entry);
+  }
+
+  resume(): void {
+    if (this.resumeRequested) return;
+    this.resumeRequested = true;
+    if (this.socket !== null) this.sendResume(this.socket);
+  }
+
+  private sendResume(socket: Socket): void {
+    socket.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: BRIDGE_RESUME_METHOD,
+        params: { afterWseq: this.lastReceivedWseq },
+      })}\n`,
+    );
+  }
+
   release(): void {
     if (this.released) return;
     this.released = true;
+    if (this.child instanceof AdoptedProcessHandle) this.child.stopWatching();
     this.child.removeAllListeners("exit");
     this.child.removeAllListeners("error");
     if (this.ackTimer !== null) {
@@ -262,13 +375,7 @@ export class SocketBridgeWorker
       this.socket = null;
       this.stdout.end();
     });
-    socket.write(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        method: BRIDGE_RESUME_METHOD,
-        params: { afterWseq: this.lastReceivedWseq },
-      })}\n`,
-    );
+    if (this.resumeRequested) this.sendResume(socket);
     this.stdin.pipe(socket);
     this.observeResponses();
     readBoundedLines({

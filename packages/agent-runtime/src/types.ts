@@ -1,5 +1,9 @@
 import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 import type {
+  BridgeWorkerRegistryEntry,
+  BridgeWorkerWorkspace,
+} from "./bridge-worker-registry.js";
+import type {
   PermissionMode,
   AvailableModel,
   ClientTurnRequestId,
@@ -90,6 +94,7 @@ export interface AgentRuntimeOptions {
 export interface AgentRuntimeBridgeWorkers {
   dir: string;
   environmentId: string;
+  workspace: BridgeWorkerWorkspace;
 }
 
 export interface AgentRuntimeProviderRecoveryHint {
@@ -363,4 +368,20 @@ export interface AgentRuntime {
   shutdown(): Promise<void>;
 
   detach(): Promise<void>;
+
+  adoptBridgeWorkers(args: AdoptBridgeWorkersArgs): AdoptedBridgeThread[];
+
+  completeBridgeWorkerAdoption(
+    serverActiveTurnIds: ReadonlyMap<string, string | null>,
+  ): void;
+}
+
+export interface AdoptBridgeWorkersArgs {
+  dir: string;
+  entries: readonly BridgeWorkerRegistryEntry[];
+}
+
+export interface AdoptedBridgeThread {
+  threadId: string;
+  activeTurnId: string | null;
 }

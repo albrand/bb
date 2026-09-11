@@ -202,6 +202,8 @@ function createRuntime(): FakeDispatchRuntime {
     hasOpenBackgroundWork: () => false,
     shutdown: vi.fn(async () => undefined),
     detach: vi.fn(async () => undefined),
+    adoptBridgeWorkers: vi.fn(() => []),
+    completeBridgeWorkerAdoption: vi.fn(),
     setActiveTurn: (threadId, turnId) => {
       hostedThreadIds.add(threadId);
       activeTurnsByThreadId.set(threadId, turnId);

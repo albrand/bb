@@ -1,50 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { listOpenFilePids, readPositivePidFile } from "@bb/test-helpers";
-import { isNodeError, removePathWithRetry } from "./helpers/remove-path.js";
+import { readPositivePidFile } from "@bb/test-helpers";
+import { removePathWithRetry } from "./helpers/remove-path.js";
 import { integrationTmpBase } from "./helpers/tmp-base.js";
+import {
+  isProcessAlive,
+  killProcessesHoldingFilesUnder,
+} from "./helpers/tmp-root-processes.js";
 
 const INTEGRATION_TMP_PREFIX = "bb-integration-";
 const STALE_TMP_ROOT_AGE_MS = 60 * 60_000;
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ESRCH") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function killProcess(pid: number): Promise<void> {
-  if (!isProcessAlive(pid)) {
-    return;
-  }
-
-  process.kill(pid, "SIGTERM");
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  if (!isProcessAlive(pid)) {
-    return;
-  }
-
-  process.kill(pid, "SIGKILL");
-}
-
 async function cleanupTmpRoot(tmpRoot: string): Promise<void> {
-  const openFilePids = new Set(await listOpenFilePids(tmpRoot));
-  for (const pid of openFilePids) {
-    await killProcess(pid).catch(() => undefined);
-  }
+  await killProcessesHoldingFilesUnder(tmpRoot, { exclude: [] });
   await removePathWithRetry(tmpRoot);
 }
 

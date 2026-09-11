@@ -1,3 +1,4 @@
+import { registerInternalForkAdoptionRoutes } from "./internal/fork-adoption.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
 import { enrolledInstallerScript } from "./services/machines/manual-enrollment-command.js";
 import { getMachineEnrollmentService } from "./services/machines/machine-services.js";
@@ -696,6 +697,7 @@ export function createApp(
   registerInternalEventRoutes(internalApi, deps);
   registerInternalToolCallRoutes(internalApi, deps);
   registerInternalInteractiveRequestRoutes(internalApi, deps);
+  registerInternalForkAdoptionRoutes(internalApi, deps);
   app.route("/internal", internalApi);
 
   const assertBrowserWebSocketAllowed = (

@@ -850,7 +850,18 @@ export async function createHostDaemonApp(
       desktopBrowserBroker.setConnected(session !== null);
       if (session === null) {
         clearInteractiveInterruptRetry();
+        return;
       }
+      void runtimeManager
+        .completeBridgeWorkerAdoption((threadIds) =>
+          serverClient.fetchActiveTurnIds(threadIds),
+        )
+        .catch((error) => {
+          options.logger.error(
+            { err: error },
+            "Completing provider bridge worker adoption failed",
+          );
+        });
     },
   });
   sendServerMessage = (message) => connection.sendMessage(message);

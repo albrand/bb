@@ -1,5 +1,9 @@
 import { hostDaemonContributedEnvEntrySchema } from "./commands.js";
 import { desktopBrowserChangedSchema } from "./desktop-browser.js";
+import type {
+  HostDaemonActiveTurnsRequest,
+  HostDaemonActiveTurnsResponse,
+} from "./fork-adoption.js";
 import type { Hono } from "hono";
 import { hc } from "hono/client";
 import {
@@ -926,6 +930,12 @@ export type HostDaemonInternalSchema = {
     $post: Endpoint<
       { json: HostDaemonInteractiveInterruptRequest },
       HostDaemonInteractiveInterruptResponse
+    >;
+  };
+  "/session/fork/active-turns": {
+    $post: Endpoint<
+      { json: HostDaemonActiveTurnsRequest },
+      HostDaemonActiveTurnsResponse
     >;
   };
 };
