@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { UsageProvider } from "./usage-schema.js";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import {
   loadPluginApp,
@@ -52,6 +53,36 @@ function threadOnMachine(
 
 describe("provider usage footer disclosure", () => {
   it("aggregates every machine and keeps machine and provider selection local to the card", async () => {
+    const pooledAccounts: UsageProvider[] = (
+      [
+        ["codex", "Codex", "team@example.com", 46],
+        ["codex", "Codex", "personal@example.com", 82],
+        ["claude-code", "Claude Code", "claude-team@example.com", 97],
+      ] as const
+    ).map(([providerId, displayName, email, usedPercent]) => ({
+      id: email,
+      providerId: providerId,
+      accountLabel: email,
+      displayName: displayName,
+      logoUrl: `/api/v1/system/providers/${providerId}/logo`,
+      iconGlyph: null,
+      iconTint: null,
+      signInHint: "Sign in.",
+      expiredHint: "Sign in again.",
+      usage: {
+        status: "ok",
+        accountEmail: email,
+        planLabel: "Pro",
+        windows: [
+          {
+            label: "Weekly limit",
+            usedPercent: usedPercent,
+            resetsAt: null,
+            cost: null,
+          },
+        ],
+      },
+    }));
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
@@ -67,6 +98,8 @@ describe("provider usage footer disclosure", () => {
                   providers: [
                     {
                       id: "claude-code",
+                      providerId: "claude-code",
+                      accountLabel: null,
                       displayName: "Claude Code",
                       logoUrl:
                         "/api/v1/system/providers/claude-code/logo?h=claude",
@@ -90,6 +123,8 @@ describe("provider usage footer disclosure", () => {
                     },
                     {
                       id: "codex",
+                      providerId: "codex",
+                      accountLabel: null,
                       displayName: "Codex",
                       logoUrl: "/api/v1/system/providers/codex/logo?h=codex",
                       iconGlyph: null,
@@ -120,6 +155,8 @@ describe("provider usage footer disclosure", () => {
                   providers: [
                     {
                       id: "codex",
+                      providerId: "codex",
+                      accountLabel: null,
                       displayName: "Codex",
                       logoUrl: "/api/v1/system/providers/codex/logo?h=codex",
                       iconGlyph: null,
@@ -141,6 +178,13 @@ describe("provider usage footer disclosure", () => {
                       },
                     },
                   ],
+                },
+                {
+                  id: "source:account-pool",
+                  displayName: "Account Pooler",
+                  status: "connected",
+                  error: null,
+                  providers: pooledAccounts,
                 },
                 {
                   id: "host-intel",
@@ -277,6 +321,28 @@ describe("provider usage footer disclosure", () => {
       }),
     );
 
+    fireEvent.pointerDown(
+      slot.getByRole("button", { name: "Usage machine: Intel" }),
+      { button: 0 },
+    );
+    fireEvent.click(
+      slot.getByRole("menuitemradio", { name: "Account Pooler" }),
+    );
+    expect(slot.getAllByRole("tab")).toHaveLength(2);
+    const poolCodexTab = slot.getByRole("tab", { name: "Codex" });
+    expect(
+      poolCodexTab.querySelector("[data-provider-logo*='/codex/']"),
+    ).not.toBeNull();
+    expect(
+      poolCodexTab.querySelector('[data-provider-usage-tone="warning"]'),
+    ).not.toBeNull();
+    expect(slot.getAllByText("team@example.com")).toHaveLength(1);
+    expect(slot.getAllByText("personal@example.com")).toHaveLength(1);
+    expect(slot.getByText("46% used")).toBeTruthy();
+    expect(slot.getByText("82% used")).toBeTruthy();
+    fireEvent.click(slot.getByRole("tab", { name: "Claude Code" }));
+    expect(slot.getByText("claude-team@example.com")).toBeTruthy();
+    expect(slot.queryByText("personal@example.com")).toBeNull();
     await mounted.lifecycle.dispose();
   }, 15_000);
 });

@@ -36,6 +36,8 @@ const iconTintSchema = z.strictObject({
 
 export const usageProviderSchema = z.strictObject({
   id: nonemptyStringSchema,
+  providerId: nonemptyStringSchema,
+  accountLabel: z.nullable(nonemptyStringSchema),
   displayName: nonemptyStringSchema,
   logoUrl: z.nullable(nonemptyStringSchema),
   iconGlyph: z.nullable(nonemptyStringSchema),
