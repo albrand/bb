@@ -267,6 +267,7 @@ describe("first-party provider plugins", () => {
             supportsFork: true,
             supportsSessionRewind: true,
             modelCatalogScope: "host",
+            reportsTokenUsage: true,
           },
           composerActions: [skills, plan, goal],
         });
@@ -288,6 +289,7 @@ describe("first-party provider plugins", () => {
             supportsFork: true,
             supportsSessionRewind: true,
             modelCatalogScope: "host",
+            reportsTokenUsage: true,
           },
           composerActions: [skills, plan],
         });
@@ -324,6 +326,7 @@ describe("first-party provider plugins", () => {
             supportsFork: false,
             supportsSessionRewind: false,
             modelCatalogScope: "host",
+            reportsTokenUsage: false,
           },
           composerActions: [skills],
         });
