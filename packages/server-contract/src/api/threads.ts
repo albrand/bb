@@ -15,6 +15,8 @@ import {
   queuedMessageWaitReasonSchema,
   reasoningLevelSchema,
   rawThreadIdSchema,
+  recordedThreadExecutionOptionsSchema,
+  resolvedThreadExecutionOptionsSchema,
   serviceTierSchema,
   threadOriginKindSchema,
   threadListEntrySchema,
@@ -219,6 +221,31 @@ export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
  * message, and there is only one now — so the useful half of that answer, WHY
  * it is waiting, moved onto the queued arm where it can be typed.
  */
+/**
+ * Fork (albrand/bb), get-bb/bb#1787: what a thread runs with, read back.
+ *
+ * Each field is named for what it is, because the old `execution` field on a
+ * turn request held the REQUEST and read as what ran:
+ * - `lastRequested`: the tuple the latest turn request carried.
+ * - `overrides`: the sticky per-thread choices stored for the next turn; null
+ *   means none is set (the default applies), not "unknown".
+ * - `nextTurn`: what the next turn will be resolved to.
+ * - `executed`: what the provider reports it ran. No provider reports it yet,
+ *   so it is always null rather than a copy of the request.
+ */
+export const threadExecutionProfileResponseSchema = z.object({
+  lastRequested: recordedThreadExecutionOptionsSchema.nullable(),
+  overrides: z.object({
+    model: z.string().nullable(),
+    reasoningLevel: reasoningLevelSchema.nullable(),
+  }),
+  nextTurn: resolvedThreadExecutionOptionsSchema.nullable(),
+  executed: z.null(),
+});
+export type ThreadExecutionProfileResponse = z.infer<
+  typeof threadExecutionProfileResponseSchema
+>;
+
 export const sendMessageDeliverySchema = z.enum(["sent", "queued"]);
 
 /**

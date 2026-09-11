@@ -3,6 +3,7 @@ import {
   getAppSettings,
   getLatestThreadSequence,
   getLatestStoredConversationOutlineSequence,
+  getThreadExecutionOverride,
   listQueuedThreadMessages,
 } from "@bb/db";
 import type { Hono } from "hono";
@@ -16,6 +17,7 @@ import {
   typedRoutes,
   type PublicApiSchema,
   type ThreadConversationOutlineResponse,
+  type ThreadExecutionProfileResponse,
   type ThreadTimelineQuery,
 } from "@bb/server-contract";
 import type {
@@ -74,6 +76,7 @@ import {
 } from "../../services/threads/thread-data.js";
 import { listThreadPromptHistory } from "../../services/prompt-history.js";
 import { tryResolveExistingThreadExecutionPlan } from "../../services/threads/thread-execution-plan.js";
+import { getLastExecutionOptions } from "../../services/threads/thread-events.js";
 import {
   parseBoundedPositiveOptionalInteger,
   parseInteger,
@@ -545,6 +548,30 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         })
       )?.resolvedExecution ?? null,
     );
+  });
+
+  get(routes.executionProfile, async (context) => {
+    const threadId = context.req.param("id");
+    requirePublicThread(deps.db, threadId);
+    const overrides = getThreadExecutionOverride(deps.db, threadId);
+    const nextTurn =
+      (
+        await tryResolveExistingThreadExecutionPlan(deps, {
+          executionSource: "client/turn/requested",
+          input: {},
+          threadId,
+        })
+      )?.resolvedExecution ?? null;
+    const response: ThreadExecutionProfileResponse = {
+      lastRequested: getLastExecutionOptions(deps, threadId),
+      overrides: {
+        model: overrides?.modelOverride ?? null,
+        reasoningLevel: overrides?.reasoningLevelOverride ?? null,
+      },
+      nextTurn,
+      executed: null,
+    };
+    return context.json(response);
   });
 
   get(routes.worktreeFile, async (context) =>
