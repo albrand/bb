@@ -974,13 +974,6 @@ export async function createHostDaemonApp(
       idleProviderSessionReaper.stop();
       eventLoopStallMonitor.stop();
       hostDaemonHealthMonitor.stop();
-      await pluginHostManager.shutdown();
-      await options.closeMachineAuthProxy?.();
-      await localApi?.close();
-      connectTunnel.shutdown();
-      await watchManager.shutdown();
-      disposeParcelWatcherBackend();
-      await terminalManager.shutdownAll();
       await announceDetachedThreads({
         connectionOpen: () => sessionState.value !== null,
         postDetachNotice: (threadIds) =>
@@ -999,6 +992,13 @@ export async function createHostDaemonApp(
       await eventSink.flush();
       await eventSink.dispose();
       await connection.shutdown();
+      await pluginHostManager.shutdown();
+      await options.closeMachineAuthProxy?.();
+      await localApi?.close();
+      connectTunnel.shutdown();
+      await watchManager.shutdown();
+      disposeParcelWatcherBackend();
+      await terminalManager.shutdownAll();
     },
     onStart: async () => {
       options.logger.info(
