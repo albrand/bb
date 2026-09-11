@@ -264,7 +264,8 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
         event: input.event,
         ...(input.delivery === undefined
           ? {}
-          : { replayKey: input.delivery.replayKey }),
+          : // Fork daemons only talk to this Mac's fork server, so this optional field never reaches a stock server (no protocol bump, #3143).
+            { replayKey: input.delivery.replayKey }),
       });
       deliveries.push(input.delivery ?? null);
       maybeLogQueuePressure();
