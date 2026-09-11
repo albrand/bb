@@ -241,6 +241,73 @@ describe("bridge worker adoption safety", () => {
     );
   });
 
+  it("retires the older of two workers registered for the same provider process", async () => {
+    const dataDir = await fs.mkdtemp(path.join("/tmp", "bbw-"));
+    tempDirs.push(dataDir);
+    const workspacePath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "bb-adopt-duplicate-ws-"),
+    );
+    tempDirs.push(workspacePath);
+    const dir = path.join(dataDir, "bridge-workers");
+    const bridgeLaunch = createScriptedEchoLaunch({
+      modulePath: fileURLToPath(
+        new URL(
+          "../../../tests/scripted-echo-provider/src/provider-bridge.ts",
+          import.meta.url,
+        ),
+      ),
+    });
+    const detachWorker = async (threadId: string): Promise<void> => {
+      const manager = new RuntimeManager({ dataDir });
+      const entry = await manager.ensureEnvironment({
+        environmentId: "env-1",
+        workspacePath,
+      });
+      await entry.runtime.startThread({
+        bridgeLaunch,
+        environmentId: "env-1",
+        threadId,
+        projectId: "p1",
+        providerId: "fake",
+        options: runtimeOptions,
+      });
+      await manager.shutdownAll("detach");
+    };
+    await detachWorker("t1");
+    await detachWorker("t2");
+    const registered = await Promise.all(
+      (await registryFileNames(dir)).map(
+        async (name) =>
+          JSON.parse(await fs.readFile(path.join(dir, name), "utf8")) as {
+            id: string;
+            pid: number;
+            processKey: string;
+            startedAt: string;
+          },
+      ),
+    );
+    registered.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const [older, newer] = registered;
+    if (older === undefined || newer === undefined) {
+      throw new Error("expected two registered workers");
+    }
+    livePids.push(older.pid, newer.pid);
+    expect(older.processKey).toBe(newer.processKey);
+    const adopting = new RuntimeManager({ dataDir });
+    try {
+      await adopting.reconcileBridgeWorkers();
+      await waitFor(() => !isProcessAlive(older.pid));
+
+      expect(
+        adopting.listAdoptedBridgeThreads().map((thread) => thread.threadId),
+      ).toEqual(["t2"]);
+      expect(isProcessAlive(newer.pid)).toBe(true);
+      expect(await registryFileNames(dir)).toEqual([`${newer.id}.json`]);
+    } finally {
+      await adopting.shutdownAll("detach");
+    }
+  }, 60_000);
+
   it("retires an adopted worker it cannot reach, without signalling it", async () => {
     const { createManager, dir, registered } =
       await startTurnThenDetach("unreachable");
