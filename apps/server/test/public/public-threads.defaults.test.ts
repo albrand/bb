@@ -401,6 +401,47 @@ describe("public thread default routes", () => {
     });
   });
 
+  it("answers the defaults route for a named provider", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/thread-defaults-route-provider",
+      });
+      upsertProjectExecutionDefaults(harness.db, {
+        projectId: project.id,
+        providerId: "claude-code",
+        model: "claude-remembered",
+        serviceTier: "default",
+        reasoningLevel: "low",
+        permissionMode: "auto",
+      });
+      upsertProjectExecutionDefaults(harness.db, {
+        projectId: project.id,
+        providerId: "codex",
+        model: "gpt-5",
+        serviceTier: "fast",
+        reasoningLevel: "high",
+        permissionMode: "accept-edits",
+      });
+      const read = async (query: string) => {
+        const response = await harness.app.request(
+          `/api/v1/projects/${project.id}/default-execution-options${query}`,
+        );
+        expect(response.status).toBe(200);
+        return readJson(response);
+      };
+
+      expect(await read("?providerId=claude-code")).toMatchObject({
+        providerId: "claude-code",
+        model: "claude-remembered",
+        reasoningLevel: "low",
+      });
+      expect(await read("")).toMatchObject({ providerId: "codex", model: "gpt-5" });
+      expect(await read("?providerId=never-used")).toBeNull();
+    });
+  });
+
   it("uses the catalog isDefault model when provider and project defaults are omitted", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);

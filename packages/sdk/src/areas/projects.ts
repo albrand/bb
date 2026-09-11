@@ -92,6 +92,8 @@ export interface ProjectBranchesArgs extends ProjectBranchesQuery {
 
 export interface ProjectDefaultExecutionOptionsArgs {
   projectId: string;
+  /** The provider whose remembered settings are wanted; omitted, the latest. */
+  providerId?: string;
   signal?: AbortSignal;
 }
 
@@ -454,7 +456,10 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
         transport.api.v1.projects[":id"]["default-execution-options"].$get(
           {
             param: { id: input.projectId },
-            query: {},
+            query:
+              input.providerId === undefined
+                ? {}
+                : { providerId: input.providerId },
           },
           ...signalRequestArgs(input.signal),
         ),
