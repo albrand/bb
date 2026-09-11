@@ -8,6 +8,11 @@ import {
   getBridgeRecorder,
 } from "./bridge-kit/bridge-recorder.js";
 import {
+  BRIDGE_REATTACH_TTL_MS,
+  BRIDGE_SOCKET_ENV,
+  createBridgeSocketServer,
+} from "./bridge-kit/bridge-socket-server.js";
+import {
   PROVIDER_BRIDGE_EXPORT_NAME,
   parseProviderBridgeEntry,
   type ProviderBridgeEntry,
@@ -47,6 +52,41 @@ function removeTempDir(): void {
   } catch {}
 }
 process.once("exit", removeTempDir);
+
+function reportOversizedLine(bytes: number): void {
+  process.stderr.write(
+    `Discarded an oversized JSON-RPC line from the runtime (${bytes} bytes).\n`,
+  );
+}
+
+const bridgeSocketPath = process.env[BRIDGE_SOCKET_ENV] ?? "";
+delete process.env[BRIDGE_SOCKET_ENV];
+const socketServer =
+  bridgeSocketPath === ""
+    ? null
+    : createBridgeSocketServer({
+        socketPath: bridgeSocketPath,
+        reattachTtlMs: BRIDGE_REATTACH_TTL_MS,
+        onOverflow: reportOversizedLine,
+        onDroppedOutput: (bytes) => {
+          process.stderr.write(
+            `Dropped ${bytes} bytes of bridge output while no runtime was attached.\n`,
+          );
+        },
+      });
+if (socketServer !== null) {
+  process.stdout.write = ((
+    chunk: string | Uint8Array,
+    ...rest: unknown[]
+  ): boolean => {
+    const callback = rest.find(
+      (value): value is (error?: Error) => void => typeof value === "function",
+    );
+    socketServer.write(chunk, callback);
+    return true;
+  }) as typeof process.stdout.write;
+  process.once("exit", () => socketServer.close());
+}
 
 const recorder = getBridgeRecorder();
 if (recorder !== null) {
@@ -97,22 +137,35 @@ if (entry.onSigint) {
   process.once("SIGINT", entry.onSigint);
 }
 
-readBoundedLines({
-  input: process.stdin,
-  onLine:
-    recorder === null
-      ? entry.handleLine
-      : (line) => {
-          recorder.recordRuntimeLine("runtime→bridge", line);
-          entry.handleLine(line);
-        },
-  onOverflow: (bytes) => {
-    process.stderr.write(
-      `Discarded an oversized JSON-RPC line from the runtime (${bytes} bytes).\n`,
-    );
-  },
-  onClose: () => {
-    removeTempDir();
-    entry.onClose?.();
-  },
-});
+const onRuntimeLine =
+  recorder === null
+    ? entry.handleLine
+    : (line: string) => {
+        recorder.recordRuntimeLine("runtime→bridge", line);
+        entry.handleLine(line);
+      };
+
+const BRIDGE_CLOSE_EXIT_GRACE_MS = 10_000;
+
+function closeBridge(): void {
+  removeTempDir();
+  setTimeout(() => process.exit(0), BRIDGE_CLOSE_EXIT_GRACE_MS).unref();
+  entry.onClose?.();
+}
+
+if (socketServer === null) {
+  readBoundedLines({
+    input: process.stdin,
+    onLine: onRuntimeLine,
+    onOverflow: reportOversizedLine,
+    onClose: closeBridge,
+  });
+} else {
+  await socketServer
+    .listen({ onLine: onRuntimeLine, onShutdown: closeBridge })
+    .catch((error: unknown) => {
+      fail(
+        `provider bridge could not listen on ${bridgeSocketPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+}

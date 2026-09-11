@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import type {
   AgentRuntimeExecutionOptions,
   AgentRuntimeOptions,
@@ -13,6 +12,7 @@ import { isApprovalPendingInteractionPayload } from "@bb/domain";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import {
   type JsonRpcMessage,
+  type JsonRpcPeer,
   ProviderResponseEncodeError,
   sendJsonRpcError,
   sendJsonRpcResult,
@@ -24,7 +24,7 @@ export type RuntimeProviderRequestKind = "interactive request" | "tool call";
 
 interface RuntimeProviderRequestProcess {
   adapter: BridgeProtocolAdapter;
-  child: ChildProcess;
+  child: JsonRpcPeer;
   interactiveRequestScope: string;
 }
 

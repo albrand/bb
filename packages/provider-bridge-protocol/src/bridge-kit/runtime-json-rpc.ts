@@ -1,10 +1,13 @@
-import type { ChildProcess } from "node:child_process";
 import type { Writable } from "node:stream";
 import { z } from "zod";
 import { bridgeErrorDataSchema, type ProviderRecoveryHint } from "../errors.js";
 import type { ProviderRequestCommandPlan } from "./contracts.js";
 
 export type JsonRpcObject = Record<string, unknown>;
+
+export interface JsonRpcPeer {
+  readonly stdin: Writable | null;
+}
 
 export interface JsonRpcMessage extends JsonRpcObject {
   jsonrpc: "2.0";
@@ -99,7 +102,7 @@ export type ParsedJsonRpcLine =
   | ParsedJsonRpcNotificationLine;
 
 export interface SendJsonRpcRequestArgs<TResult> {
-  child: ChildProcess;
+  child: JsonRpcPeer;
   getNextId: () => number;
   message: JsonRpcMessage | ProviderRequestCommandPlan;
   pending: Map<string | number, PendingJsonRpcRequest>;
@@ -108,20 +111,20 @@ export interface SendJsonRpcRequestArgs<TResult> {
 }
 
 interface SendJsonRpcResultArgs {
-  child: ChildProcess;
+  child: JsonRpcPeer;
   id: string | number;
   result: unknown;
 }
 
 interface SendJsonRpcErrorArgs {
-  child: ChildProcess;
+  child: JsonRpcPeer;
   code?: number;
   id: string | number;
   message: string;
 }
 
 interface SendProviderResponseEncodeErrorArgs {
-  child: ChildProcess;
+  child: JsonRpcPeer;
   error: unknown;
   id: string | number;
 }
@@ -196,7 +199,7 @@ function ensureJsonRpcStdinErrorHandler(stdin: Writable): void {
   stdin.on("error", handleJsonRpcStdinError);
 }
 
-function writeJsonRpcLine(child: ChildProcess, line: string): void {
+function writeJsonRpcLine(child: JsonRpcPeer, line: string): void {
   const stdin = child.stdin;
   if (!stdin || stdin.destroyed || !stdin.writable) {
     return;
@@ -281,7 +284,7 @@ export function settleJsonRpcResponse(args: SettleJsonRpcResponseArgs): void {
 }
 
 export function sendJsonRpc(
-  child: ChildProcess,
+  child: JsonRpcPeer,
   message: JsonRpcMessage | ProviderRequestCommandPlan,
 ): void {
   const line = JSON.stringify(toJsonRpcMessage(message));

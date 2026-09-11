@@ -55,8 +55,16 @@ interface KillProcessGroupArgs {
   signal: NodeJS.Signals;
 }
 
+export interface ProcessGroupLeader {
+  readonly pid?: number | undefined;
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  kill(signal: NodeJS.Signals): boolean;
+  once(event: "exit", listener: () => void): unknown;
+}
+
 interface StopProcessGroupLeaderFirstArgs {
-  child: ChildProcess;
+  child: ProcessGroupLeader;
   timeoutMs: number;
   killGraceMs: number;
 }
@@ -210,7 +218,7 @@ export function isProcessGroupAlive(child: {
   }
 }
 
-function hasChildExited(child: ChildProcess): boolean {
+function hasChildExited(child: ProcessGroupLeader): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 

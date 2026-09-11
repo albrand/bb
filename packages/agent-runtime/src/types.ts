@@ -64,6 +64,7 @@ export interface AgentRuntimeOptions {
   threadStorageRootPath?: string;
 
   bridgeBundleDir?: string;
+  bridgeWorkerDir?: string;
   turnStartWatchdog?: { thresholdMs?: number; intervalMs?: number };
   rateLimitRetry?: { delaysMs?: readonly number[] };
   threadCreation?: { requestTimeoutMs?: number };

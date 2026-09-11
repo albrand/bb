@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
+import {
+  connectBridgeSocket,
+  createShortSocketDir,
+} from "./testing/bridge-socket-client.js";
 
 const workerEntry = fileURLToPath(
   new URL("./bridge-worker-entry.ts", import.meta.url),
@@ -201,3 +205,152 @@ it("tees both sides of the runtime wire when record mode is on", async () => {
     "bridge→runtime",
   ]);
 });
+
+const LONG_TURN_BRIDGE = [
+  "import { writeFileSync } from 'node:fs';",
+  "import { join } from 'node:path';",
+  "let context = null;",
+  "const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\\n');",
+  "export const experimental_providerBridge = {",
+  "  experimental_apiVersion: 1,",
+  "  start(value) { context = value; },",
+  "  handleLine(line) {",
+  "    const request = JSON.parse(line);",
+  "    if (request.method !== 'turn/start') return;",
+  "    send({ id: request.id, result: { pid: process.pid } });",
+  "    let n = 0;",
+  "    const timer = setInterval(() => {",
+  "      n += 1;",
+  "      send({ method: 'turn/tick', params: { n } });",
+  "      if (n === 30) { clearInterval(timer); send({ method: 'turn/completed', params: { n } }); }",
+  "    }, 20);",
+  "  },",
+  "  onClose() {",
+  "    writeFileSync(join(context.dataDir, 'closed'), 'closed');",
+  "    process.exit(0);",
+  "  },",
+  "};",
+].join("\n");
+
+function spawnSocketWorker(args: string[], socketPath: string) {
+  const child = spawn(
+    process.execPath,
+    [
+      "--conditions=source",
+      "--import",
+      import.meta.resolve("tsx"),
+      workerEntry,
+      ...args,
+    ],
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: { ...process.env, BB_BRIDGE_SOCKET: socketPath },
+    },
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  const exited = new Promise<number | null>((resolve) => {
+    child.on("exit", (code) => resolve(code));
+  });
+  return { child, exited, stderr: () => stderr };
+}
+
+function tickNumber(line: string): number | null {
+  const message = JSON.parse(line) as {
+    method?: string;
+    params?: { n?: number };
+  };
+  return message.method === "turn/tick" ? (message.params?.n ?? null) : null;
+}
+
+it("keeps a turn running across a dropped runtime connection on a socket transport", async () => {
+  const fixture = await createFixture(LONG_TURN_BRIDGE);
+  const socketDir = await createShortSocketDir();
+  tempDirs.push(socketDir);
+  const socketPath = join(socketDir, "w.sock");
+  const worker = spawnSocketWorker(
+    [fixture.bridgeModulePath, "provider-fixture", fixture.dataDir],
+    socketPath,
+  );
+  try {
+    const first = await connectBridgeSocket(socketPath);
+    first.send({ id: 1, method: "turn/start", params: {} });
+    await first.waitForLine((line) => (tickNumber(line) ?? 0) >= 3);
+    first.socket.destroy();
+    await first.closed;
+    const lastTickBeforeDrop = Math.max(
+      ...first.lines.map((line) => tickNumber(line) ?? 0),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(worker.child.exitCode).toBeNull();
+    expect(() => process.kill(worker.child.pid ?? -1, 0)).not.toThrow();
+
+    const second = await connectBridgeSocket(socketPath);
+    await second.waitForLine((line) => line.includes("turn/completed"));
+    const ticksAfterReconnect = second.lines
+      .map(tickNumber)
+      .filter((n): n is number => n !== null);
+    expect(ticksAfterReconnect.length).toBeGreaterThan(0);
+    expect(Math.min(...ticksAfterReconnect)).toBeGreaterThan(
+      lastTickBeforeDrop,
+    );
+
+    second.send({ method: "bridge/shutdown" });
+    expect(await worker.exited).toBe(0);
+    expect(await readFile(join(fixture.dataDir, "closed"), "utf8")).toBe(
+      "closed",
+    );
+    expect(existsSync(socketPath)).toBe(false);
+  } finally {
+    worker.child.kill("SIGKILL");
+  }
+}, 20_000);
+
+it("does not read the runtime from stdin on a socket transport", async () => {
+  const fixture = await createFixture(LONG_TURN_BRIDGE);
+  const socketDir = await createShortSocketDir();
+  tempDirs.push(socketDir);
+  const socketPath = join(socketDir, "w.sock");
+  const worker = spawnSocketWorker(
+    [fixture.bridgeModulePath, "provider-fixture", fixture.dataDir],
+    socketPath,
+  );
+  try {
+    const client = await connectBridgeSocket(socketPath);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(worker.child.exitCode).toBeNull();
+    expect(existsSync(join(fixture.dataDir, "closed"))).toBe(false);
+    client.socket.destroy();
+  } finally {
+    worker.child.kill("SIGKILL");
+  }
+}, 20_000);
+
+it("exits after a requested shutdown even when the bridge's close never finishes", async () => {
+  const fixture = await createFixture(
+    [
+      "export const experimental_providerBridge = {",
+      "  experimental_apiVersion: 1,",
+      "  handleLine() {},",
+      "  onClose() { setInterval(() => undefined, 1000); },",
+      "};",
+    ].join("\n"),
+  );
+  const socketDir = await createShortSocketDir();
+  tempDirs.push(socketDir);
+  const socketPath = join(socketDir, "w.sock");
+  const worker = spawnSocketWorker(
+    [fixture.bridgeModulePath, "provider-fixture", fixture.dataDir],
+    socketPath,
+  );
+  try {
+    const client = await connectBridgeSocket(socketPath);
+    client.send({ method: "bridge/shutdown" });
+    expect(await worker.exited).toBe(0);
+  } finally {
+    worker.child.kill("SIGKILL");
+  }
+}, 20_000);
