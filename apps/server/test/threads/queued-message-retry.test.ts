@@ -16,7 +16,10 @@ import {
   type PluginHookRegistration,
 } from "../../src/services/plugins/plugin-hook-registry.js";
 import { runStartupRecoverySweep } from "../../src/services/system/periodic-sweeps.js";
-import { QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS } from "../../src/services/threads/queue-drain-failure.js";
+import {
+  QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS,
+  recordQueuedMessageDrainFailure,
+} from "../../src/services/threads/queue-drain-failure.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
 import { textInput } from "../helpers/prompt-input.js";
 import {
@@ -47,9 +50,14 @@ afterEach(() => {
  * hours on 2026-09-11: something behind the server broke for a moment, and
  * nothing about the message itself was wrong.
  */
-function installDispatchGate(
-  decide: (attempt: number) => { action: "proceed" } | { action: "reject"; message: string },
-): { attempts: () => number } {
+type GateDecision =
+  | { action: "proceed" }
+  | { action: "reject"; message: string }
+  | { action: "wait"; reason: string };
+
+function installDispatchGate(decide: (attempt: number) => GateDecision): {
+  attempts: () => number;
+} {
   let attempts = 0;
   const registry: HookRegistry = { "message.dispatch": [] };
   registry["message.dispatch"].push({
@@ -132,6 +140,12 @@ function dispatchCount(harness: TestAppHarness, threadId: string): number {
       event.type === "client/turn/requested" &&
       JSON.stringify(event.data).includes(QUEUED_TEXT),
   ).length;
+}
+
+function reread(harness: TestAppHarness, queuedMessageId: string) {
+  const row = getQueuedThreadMessage(harness.db, queuedMessageId);
+  if (row === null) throw new Error("the queued row vanished");
+  return row;
 }
 
 function retryOf(harness: TestAppHarness, queuedMessageId: string) {
@@ -217,6 +231,38 @@ describe("queued message dispatch retry", () => {
           kind: "explicit-send",
         }),
       ).not.toBeNull();
+    });
+  });
+
+  it("does not refund the budget when a re-attempt queues instead of failing", async () => {
+    await withTestHarness(async (harness) => {
+      const gate = installDispatchGate((attempt) => {
+        if (attempt === 1) throw new Error("boom");
+        return { action: "wait", reason: "holding" };
+      });
+      const { row, thread } = seedRunnableThreadWithQueuedRow(harness);
+
+      await drain(harness, thread.id);
+      const booked = retryOf(harness, row.id);
+      expect(booked?.attempt).toBe(1);
+
+      await drainDueRetries(harness, booked!.nextAttemptAt);
+
+      // The re-attempt decided to wait rather than failing, and a re-queue
+      // does clear `failureReason` — but the attempts behind it were still
+      // spent. Refunding them here is how a thread that alternates between
+      // busy and broken never converges on an answer: booked 1, cleared,
+      // booked 1, forever.
+      expect(gate.attempts()).toBe(2);
+      expect(reread(harness, row.id).failureReason).toBeNull();
+      expect(retryOf(harness, row.id)?.attempt).toBe(1);
+
+      recordQueuedMessageDrainFailure(harness.deps, {
+        error: new Error("boom"),
+        row,
+        thread,
+      });
+      expect(retryOf(harness, row.id)?.attempt).toBe(2);
     });
   });
 

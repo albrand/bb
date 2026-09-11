@@ -642,6 +642,12 @@ function describeRefusal(
 
 /** One short phrase for a queued row's wait, shared by `tell` and `queue`. */
 export function describeQueueWait(row: {
+  /**
+   * Absent, rather than null, only for the retry response — a retry that has
+   * just queued has not had a drain attempt yet, so it has no failure to
+   * report and the contract gives it no field. Every caller rendering a row
+   * that has been sitting in the queue passes it.
+   */
   failureReason?: string | null;
   sendAt: number | null;
   waitingOn: QueuedMessageWaitingOn | null;
