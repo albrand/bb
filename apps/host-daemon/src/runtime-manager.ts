@@ -1105,6 +1105,7 @@ export class RuntimeManager {
           entry,
           reason: "incompatible-protocol-or-framing",
         }));
+    const adopted: BridgeWorkerRegistryEntry[] = [];
     const byEnvironment = new Map<string, BridgeWorkerRegistryEntry[]>();
     for (const entry of adoptable) {
       const group = byEnvironment.get(entry.environmentId) ?? [];
@@ -1123,6 +1124,20 @@ export class RuntimeManager {
           dir,
           entries,
         });
+        const adoptedThreadIds = new Set(
+          threads.map((thread) => thread.threadId),
+        );
+        for (const entry of entries) {
+          if (
+            Object.keys(entry.threads).some((threadId) =>
+              adoptedThreadIds.has(threadId),
+            )
+          ) {
+            adopted.push(entry);
+          } else {
+            unadopted.push({ entry, reason: "thread-configs-unreadable" });
+          }
+        }
         this.adoptedBridgeThreads.push(
           ...threads.map((thread) => ({
             ...thread,
@@ -1152,12 +1167,10 @@ export class RuntimeManager {
         }),
       })),
     );
-    if (adoptable.length > 0 || reaped.length > 0 || retired.length > 0) {
+    if (adopted.length > 0 || reaped.length > 0 || retired.length > 0) {
       this.options.logger?.info(
         {
-          adopted: adoptable
-            .filter((entry) => !retired.some((item) => item.id === entry.id))
-            .map((entry) => ({ id: entry.id, pid: entry.pid })),
+          adopted: adopted.map((entry) => ({ id: entry.id, pid: entry.pid })),
           reaped: reaped.map((entry) => ({
             id: entry.id,
             pid: entry.pid,
