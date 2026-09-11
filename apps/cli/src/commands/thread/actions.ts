@@ -691,7 +691,7 @@ export function describeQueueWait(row: {
   // wait back as "waiting for the current turn to start" is how a failed
   // message looks like a healthy one in `bb thread queue list`. The wait is
   // still there underneath — it is just no longer the interesting fact.
-  if (row.failureReason) {
+  if (row.failureReason !== undefined && row.failureReason !== null) {
     return `failed: ${row.failureReason}`;
   }
   const waitingOn = row.waitingOn ?? { kind: "thread-busy" as const };
