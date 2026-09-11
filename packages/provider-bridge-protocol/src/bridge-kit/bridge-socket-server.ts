@@ -5,6 +5,7 @@ import { readBoundedLines } from "./bounded-line-reader.js";
 import { BridgeReplayBuffer } from "./bridge-replay-buffer.js";
 
 export const BRIDGE_SOCKET_ENV = "BB_BRIDGE_SOCKET";
+export const BRIDGE_SPILL_ENV = "BB_BRIDGE_SPILL";
 export const BRIDGE_SOCKET_TRANSPORT_VERSION = 2 as const;
 export const BRIDGE_SHUTDOWN_METHOD = "bridge/shutdown";
 export const BRIDGE_RESUME_METHOD = "bridge/resume";
