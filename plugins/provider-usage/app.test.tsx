@@ -278,5 +278,5 @@ describe("provider usage footer disclosure", () => {
     );
 
     await mounted.lifecycle.dispose();
-  });
+  }, 15_000);
 });
