@@ -25,19 +25,56 @@ export function listDescendantPids(
   return descendants;
 }
 
-export function signalDescendantProcesses(signal: "SIGSTOP" | "SIGCONT"): void {
-  if (process.platform === "win32") return;
-  let psOutput: string;
+export interface DescendantPauser {
+  stop(): number[];
+  resume(): number[];
+}
+
+export interface DescendantPauserDeps {
+  listDescendants: () => number[];
+  signal: (pid: number, signal: "SIGSTOP" | "SIGCONT") => boolean;
+}
+
+function listOwnDescendants(): number[] {
+  if (process.platform === "win32") return [];
   try {
-    psOutput = execFileSync("ps", ["-A", "-o", "pid=,ppid="], {
+    const psOutput = execFileSync("ps", ["-A", "-o", "pid=,ppid="], {
       encoding: "utf8",
     });
+    return listDescendantPids(psOutput, process.pid);
   } catch {
-    return;
+    return [];
   }
-  for (const pid of listDescendantPids(psOutput, process.pid)) {
-    try {
-      process.kill(pid, signal);
-    } catch {}
+}
+
+function signalPid(pid: number, signal: "SIGSTOP" | "SIGCONT"): boolean {
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+export function createDescendantPauser(
+  deps: DescendantPauserDeps = {
+    listDescendants: listOwnDescendants,
+    signal: signalPid,
+  },
+): DescendantPauser {
+  const stopped = new Set<number>();
+  return {
+    stop() {
+      for (const pid of deps.listDescendants()) {
+        if (deps.signal(pid, "SIGSTOP")) stopped.add(pid);
+      }
+      return [...stopped];
+    },
+    resume() {
+      const pids = [...new Set([...stopped, ...deps.listDescendants()])];
+      stopped.clear();
+      for (const pid of pids) deps.signal(pid, "SIGCONT");
+      return pids;
+    },
+  };
 }
