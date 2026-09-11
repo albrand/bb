@@ -1,4 +1,5 @@
 import { getActiveStoredTurnId, getThread, listEvents } from "@bb/db";
+import { turnScope } from "@bb/domain";
 import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS } from "../../src/constants.js";
@@ -7,6 +8,7 @@ import { handleDaemonSocketClosed } from "../../src/internal/session-owner-side-
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import {
+  seedStoredEvent,
   seedThread,
   seedThreadFixture,
   seedTurnStarted,
@@ -166,6 +168,60 @@ describe("a restarted daemon that adopted threads", () => {
       });
 
       expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
+    });
+  });
+
+  it("settles a detached thread's background tasks once the adoption window ends without a daemon", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, adopted, environment } =
+        seedTwoActiveTurns(harness);
+      seedStoredEvent(harness.deps, {
+        threadId: adopted.id,
+        environmentId: environment.id,
+        sequence: 2,
+        type: "item/started",
+        scope: turnScope("turn-adopted"),
+        providerThreadId: "claude-session-1",
+        itemId: "task:wf-1",
+        itemKind: "backgroundTask",
+        data: {
+          providerThreadId: "claude-session-1",
+          item: {
+            id: "task:wf-1",
+            type: "backgroundTask",
+            taskType: "local_workflow",
+            description: "fixture workflow",
+            status: "pending",
+            taskStatus: "running",
+            skipTranscript: false,
+            workflowName: "fixture-mini",
+            usage: { totalTokens: 100, toolUses: 2, durationMs: 1500 },
+          },
+        },
+      });
+      await harness.app.request("/internal/session/fork/detach-notice", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          threadIds: [adopted.id],
+        }),
+      });
+      const settled = () =>
+        listEvents(harness.deps.db, { threadId: adopted.id }).some(
+          (row) => row.type === "item/backgroundTask/completed",
+        );
+
+      vi.useFakeTimers({ now: Date.now() });
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+      await vi.advanceTimersByTimeAsync(
+        DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS + 1,
+      );
+      expect(settled()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(DETACHED_THREAD_ADOPTION_WINDOW_MS);
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
+      expect(settled()).toBe(true);
     });
   });
 

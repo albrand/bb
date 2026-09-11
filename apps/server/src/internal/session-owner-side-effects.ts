@@ -260,13 +260,17 @@ function completeDaemonActiveWorkDisconnectGrace(
     hostId: args.hostId,
     now,
   });
+  const detachedThreadIds = new Set(detached.map((thread) => thread.threadId));
   interruptActiveThreadsForHost(deps, {
-    exceptThreadIds: new Set(detached.map((thread) => thread.threadId)),
+    exceptThreadIds: detachedThreadIds,
     hostId: args.hostId,
     reason: "host-daemon-restarted",
     cause: "host-connection-lost",
   });
-
+  settleDanglingBackgroundTasks(deps, {
+    exceptThreadIds: detachedThreadIds,
+    hostId: args.hostId,
+  });
   if (detached.length > 0) {
     const nextExpiry = Math.min(...detached.map((thread) => thread.expiresAt));
     deps.hub.scheduleDaemonActiveWorkDisconnect(
