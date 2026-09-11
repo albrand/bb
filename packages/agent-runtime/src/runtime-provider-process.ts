@@ -651,9 +651,9 @@ export class RuntimeProviderProcessManager {
   private handleProviderProcessError(args: ProviderProcessErrorArgs): void {
     if (this.shuttingDown) return;
     if (!this.isCurrentProviderProcess(args)) return;
-    const expected = consumeExpectedProviderProcessShutdown(
-      args.providerProcess,
-    );
+    const expected =
+      consumeExpectedProviderProcessShutdown(args.providerProcess) ||
+      isBridgeWorkerStoppedByDaemon(args.providerProcess.child);
     this.processes.delete(args.providerProcess.processKey);
     const message = args.err.message;
     for (const [, pending] of args.providerProcess.pending) {
@@ -732,8 +732,12 @@ function bridgeWorkerIdentity(
   child: BridgeWorkerProcess,
 ): AgentRuntimeProcessExitInfo["bridgeWorker"] {
   return child instanceof SocketBridgeWorker
-    ? { id: child.id, pid: child.pid ?? null }
+    ? { id: child.id, pid: child.registeredPid ?? child.pid ?? null }
     : null;
+}
+
+function isBridgeWorkerStoppedByDaemon(child: BridgeWorkerProcess): boolean {
+  return child instanceof SocketBridgeWorker && child.stoppedByDaemon;
 }
 
 export function hasChildProcessExited(child: BridgeWorkerProcess): boolean {

@@ -1,3 +1,4 @@
+import { execFile, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   readdirSync,
@@ -8,6 +9,7 @@ import {
 } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { BRIDGE_SHUTDOWN_METHOD } from "@bb/provider-bridge-protocol/bridge-kit";
 import { workspaceProvisionTypeSchema } from "@bb/domain";
 import { z } from "zod";
@@ -32,6 +34,7 @@ export type BridgeWorkerThread = z.infer<typeof bridgeWorkerThreadSchema>;
 const bridgeWorkerRegistryEntrySchema = z.object({
   id: z.string().regex(/^[0-9a-f]+$/u),
   pid: z.number().int().positive(),
+  processIdentity: z.string().min(1),
   socketPath: z.string().min(1),
   pluginId: z.string().min(1),
   providerId: z.string().min(1),
@@ -109,27 +112,84 @@ export function readBridgeWorkerEntries(dir: string): {
   return { entries, invalidIds };
 }
 
-export function isBridgeWorkerPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error instanceof Error && Reflect.get(error, "code") === "EPERM";
+const execFileAsync = promisify(execFile);
+const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
+const DARWIN_PS_PATH = "/bin/ps";
+const LINUX_STAT_START_TIME_FIELD = 19;
+
+function darwinPsArgs(pid: number): string[] {
+  return ["-o", "lstart=", "-p", String(pid)];
+}
+
+function darwinProcessIdentity(psOutput: string): string | null {
+  const started = psOutput.trim();
+  return started === "" ? null : `darwin:${started}`;
+}
+
+function linuxProcessIdentity(stat: string, bootId: string): string | null {
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const startTime = fields[LINUX_STAT_START_TIME_FIELD];
+  return startTime === undefined || startTime === ""
+    ? null
+    : `linux:${bootId.trim()}:${startTime}`;
+}
+
+export function readProcessIdentity(pid: number): string | null {
+  if (process.platform === "linux") {
+    try {
+      return linuxProcessIdentity(
+        readFileSync(`/proc/${pid}/stat`, "utf8"),
+        readFileSync(LINUX_BOOT_ID_PATH, "utf8"),
+      );
+    } catch {
+      return null;
+    }
   }
+  if (process.platform !== "darwin") return null;
+  const result = spawnSync(DARWIN_PS_PATH, darwinPsArgs(pid), {
+    encoding: "utf8",
+    env: { LC_ALL: "C" },
+  });
+  return result.status === 0 ? darwinProcessIdentity(result.stdout) : null;
+}
+
+export async function readProcessIdentityAsync(
+  pid: number,
+): Promise<string | null> {
+  if (process.platform !== "darwin") return readProcessIdentity(pid);
+  try {
+    const { stdout } = await execFileAsync(DARWIN_PS_PATH, darwinPsArgs(pid), {
+      encoding: "utf8",
+      env: { LC_ALL: "C" },
+    });
+    return darwinProcessIdentity(stdout);
+  } catch {
+    return null;
+  }
+}
+
+export function isBridgeWorkerAlive(
+  entry: Pick<BridgeWorkerRegistryEntry, "pid" | "processIdentity">,
+): boolean {
+  return readProcessIdentity(entry.pid) === entry.processIdentity;
 }
 
 export function reapDeadBridgeWorkers(
   dir: string,
-  isAlive: (pid: number) => boolean = isBridgeWorkerPidAlive,
+  isAlive: (
+    entry: BridgeWorkerRegistryEntry,
+  ) => boolean = isBridgeWorkerAlive,
 ): { live: BridgeWorkerRegistryEntry[]; reaped: BridgeWorkerRegistryEntry[] } {
   const { entries, invalidIds } = readBridgeWorkerEntries(dir);
   for (const id of invalidIds) {
     removeIfPresent(entryPath(dir, id));
+    removeIfPresent(join(dir, `${id}.log`));
+    removeIfPresent(join(dir, `${id}.buf`));
   }
   const live: BridgeWorkerRegistryEntry[] = [];
   const reaped: BridgeWorkerRegistryEntry[] = [];
   for (const entry of entries) {
-    if (isAlive(entry.pid)) {
+    if (isAlive(entry)) {
       live.push(entry);
       continue;
     }

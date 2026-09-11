@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type BridgeWorkerRegistryEntry,
   readBridgeWorkerEntries,
+  readProcessIdentity,
   reapDeadBridgeWorkers,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -23,6 +24,7 @@ function entry(
   return {
     id: "a1b2c3d4e5f6",
     pid: process.pid,
+    processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
     socketPath: "/tmp/unused.sock",
     pluginId: "provider-codex",
     providerId: "codex",
@@ -94,6 +96,20 @@ describe("bridge worker registry", () => {
     expect(readdirSync(dir).sort()).toEqual(["aaaaaaaaaaaa.json"]);
     expect(existsSync(join(dir, "bbbbbbbbbbbb.log"))).toBe(false);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "reaps an entry whose pid is running a different process, without signalling it",
+    () => {
+      const reused = entry({ id: "dddddddddddd", processIdentity: "stale" });
+      writeBridgeWorkerEntry(dir, reused);
+
+      const result = reapDeadBridgeWorkers(dir);
+
+      expect(result.live).toEqual([]);
+      expect(result.reaped).toEqual([reused]);
+      expect(readdirSync(dir)).toEqual([]);
+    },
+  );
 
   it("treats a missing registry directory as empty", () => {
     expect(reapDeadBridgeWorkers(join(dir, "missing"))).toEqual({
