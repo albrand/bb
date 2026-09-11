@@ -17,6 +17,7 @@ import type { AppDeps } from "../../types.js";
 import { appendThreadEventsInTransaction } from "./thread-events.js";
 
 interface SettleDanglingBackgroundTasksArgs {
+  exceptThreadIds?: ReadonlySet<string>;
   hostId: string;
 }
 
@@ -50,7 +51,7 @@ export function settleDanglingBackgroundTasks(
 ): void {
   const rows = listOpenBackgroundTaskItemRowsForHost(deps.db, {
     hostId: args.hostId,
-  });
+  }).filter((row) => args.exceptThreadIds?.has(row.threadId) !== true);
   if (rows.length === 0) {
     return;
   }

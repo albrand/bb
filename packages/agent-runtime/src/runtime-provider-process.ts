@@ -363,6 +363,7 @@ export class RuntimeProviderProcessManager {
   }
 
   private async closeAll(mode: "stop" | "detach"): Promise<void> {
+    this.shuttingDown = true;
     if (mode === "detach") {
       await Promise.all(
         [...this.processes.values()].map((providerProcess) =>

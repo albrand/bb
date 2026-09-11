@@ -2395,24 +2395,33 @@ describe("RuntimeManager bridge workers", () => {
 
   it("detaches environment runtimes in detach mode and stops them in stop mode", async () => {
     const runtimes: ReturnType<typeof createFakeRuntime>[] = [];
-    const manager = new RuntimeManager({
-      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-modes"),
-      createRuntime: () => {
-        const runtime = createFakeRuntime();
-        runtimes.push(runtime);
-        return runtime;
-      },
-    });
-    await manager.ensureEnvironment({
+    const createManager = () =>
+      new RuntimeManager({
+        provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-modes"),
+        createRuntime: () => {
+          const runtime = createFakeRuntime();
+          runtimes.push(runtime);
+          return runtime;
+        },
+      });
+    const detaching = createManager();
+    await detaching.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: "/tmp/env-modes",
     });
-    await manager.shutdownAll("detach");
-    await manager.ensureEnvironment({
+    await detaching.shutdownAll("detach");
+    await expect(
+      detaching.ensureEnvironment({
+        environmentId: "env-2",
+        workspacePath: "/tmp/env-modes",
+      }),
+    ).rejects.toThrow(/shutting down/u);
+    const stopping = createManager();
+    await stopping.ensureEnvironment({
       environmentId: "env-2",
       workspacePath: "/tmp/env-modes",
     });
-    await manager.shutdownAll("stop");
+    await stopping.shutdownAll("stop");
 
     const [detached, stopped] = runtimes;
     expect(detached?.detach).toHaveBeenCalledTimes(1);
@@ -2652,6 +2661,7 @@ describe("RuntimeManager bridge workers", () => {
       expect(adopting.listAdoptedBridgeThreads()).toEqual([
         { threadId: "t1", activeTurnId: bbTurnId },
       ]);
+      expect(adopting.listActiveThreads()).toEqual([{ threadId: "t1" }]);
       await adopting.completeBridgeWorkerAdoption(
         async () => new Map([["t1", bbTurnId]]),
       );

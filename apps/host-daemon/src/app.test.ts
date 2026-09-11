@@ -167,6 +167,12 @@ function createFetchRecorder(
         };
       return Response.json(response);
     }
+    if (url.pathname === "/internal/session/fork/detach-notice") {
+      return Response.json({
+        recordedThreadIds: JSON.parse(request.body ?? "{}").threadIds ?? [],
+        expectAdoptionUntil: 0,
+      });
+    }
     if (url.pathname === "/internal/session/interactive-request/interrupt") {
       return Response.json({
         ok: true,
@@ -783,6 +789,55 @@ describe("createHostDaemonApp", () => {
 
     expect(runtime.detach).toHaveBeenCalledTimes(1);
     expect(runtime.shutdown).not.toHaveBeenCalled();
+  });
+
+  it("tells the server which threads to expect back before it detaches from their workers", async () => {
+    const dataDir = await makeTempDir("bb-host-daemon-app-notice-");
+    const workspacePath = await makeTempDir("bb-host-daemon-notice-workspace-");
+    const fetchRecorder = createFetchRecorder();
+    const requestsSeenAtDetach: string[] = [];
+    const runtime = {
+      ...createFakeRuntime(),
+      getLiveThreadIds: () => ["thr_live"],
+      detach: vi.fn(async () => {
+        requestsSeenAtDetach.push(
+          ...fetchRecorder.requests.map((request) => request.pathname),
+        );
+      }),
+    } satisfies AgentRuntime;
+    const app = await createHostDaemonApp({
+      dataDir,
+      serverUrl: "http://127.0.0.1:3334",
+      hostKey: "host-key-notice",
+      hostType: "persistent",
+      hostId: "host-notice",
+      hostName: "Notice Host",
+      instanceId: "instance-notice",
+      logger: createLogger(),
+      releaseLock: async () => undefined,
+      localApiConfig: null,
+      createRuntime: () => runtime,
+      fetchFn: fetchRecorder.fetchFn,
+      createWebSocket: createOpeningWebSocket(),
+    });
+    await app.runtimeManager.ensureEnvironment({
+      environmentId: "env-app-notice",
+      workspacePath,
+    });
+    await app.connection.start();
+
+    await app.daemon.shutdown("SIGTERM", 0);
+
+    const notices = fetchRecorder.requests.filter(
+      (request) => request.pathname === "/internal/session/fork/detach-notice",
+    );
+    expect(notices.map((request) => JSON.parse(request.body ?? "{}"))).toEqual([
+      { sessionId: "session-app-test", threadIds: ["thr_live"] },
+    ]);
+    expect(requestsSeenAtDetach).toContain(
+      "/internal/session/fork/detach-notice",
+    );
+    expect(runtime.detach).toHaveBeenCalledTimes(1);
   });
 
   it("forgets server-retired loaded environments when opening a session", async () => {

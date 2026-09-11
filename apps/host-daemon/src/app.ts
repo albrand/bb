@@ -825,6 +825,7 @@ export async function createHostDaemonApp(
     getActiveThreads: () => runtimeManager.listActiveThreads(),
     hasOpenBackgroundWork: () => runtimeManager.hasOpenBackgroundWork(),
     getLoadedEnvironments: () => runtimeManager.listLoadedEnvironments(),
+    getAdoptedThreads: () => runtimeManager.listAdoptedBridgeThreads(),
     onHostRpcRequest: async (message) => {
       if (message.command.type === "environment.destroy") {
         await watchManager.removeEnvironmentWorkspaceWatch(
@@ -949,6 +950,20 @@ export async function createHostDaemonApp(
       await watchManager.shutdown();
       disposeParcelWatcherBackend();
       await terminalManager.shutdownAll();
+      await announceDetachedThreads({
+        connectionOpen: () => sessionState.value !== null,
+        postDetachNotice: (threadIds) =>
+          serverClient.postDetachNotice(threadIds),
+        threadIds: runtimeManager
+          .listActiveThreads()
+          .map((thread) => thread.threadId),
+        timeoutMs: DETACH_NOTICE_TIMEOUT_MS,
+      }).catch((error) => {
+        options.logger.warn(
+          { err: error },
+          "Could not tell the server which threads to expect back",
+        );
+      });
       await runtimeManager.shutdownAll("detach");
       await eventSink.flush();
       await eventSink.dispose();
@@ -983,4 +998,23 @@ export async function createHostDaemonApp(
     router,
     connection,
   };
+}
+
+const DETACH_NOTICE_TIMEOUT_MS = 2_000;
+
+async function announceDetachedThreads(args: {
+  connectionOpen: () => boolean;
+  postDetachNotice: (threadIds: readonly string[]) => Promise<void>;
+  threadIds: readonly string[];
+  timeoutMs: number;
+}): Promise<void> {
+  if (args.threadIds.length === 0 || !args.connectionOpen()) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    args.postDetachNotice(args.threadIds),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, args.timeoutMs);
+      timer.unref();
+    }),
+  ]).finally(() => clearTimeout(timer));
 }

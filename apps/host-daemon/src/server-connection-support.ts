@@ -1,3 +1,4 @@
+import type { HostDaemonAdoptedThread } from "@bb/host-daemon-contract";
 import ReconnectingWebSocket from "partysocket/ws";
 import {
   type HostDaemonActiveThread,
@@ -74,6 +75,7 @@ export interface ServerConnectionOptions {
   getLoadedEnvironments?: () =>
     | HostDaemonLoadedEnvironment[]
     | Promise<HostDaemonLoadedEnvironment[]>;
+  getAdoptedThreads?: () => HostDaemonAdoptedThread[];
   onTerminalMessage?: (
     message: HostDaemonServerTerminalMessage,
   ) => void | Promise<void>;

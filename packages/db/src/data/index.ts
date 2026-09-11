@@ -66,6 +66,11 @@ export {
   recordDaemonReplayKeys,
 } from "./fork-daemon-event-replay-keys.js";
 export {
+  clearDetachedThreads,
+  listPendingDetachedThreads,
+  recordDetachedThreads,
+} from "./fork-detached-threads.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,
