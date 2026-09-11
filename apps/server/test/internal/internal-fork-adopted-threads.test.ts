@@ -1,9 +1,10 @@
-import { getThread, listEvents } from "@bb/db";
+import { getActiveStoredTurnId, getThread, listEvents } from "@bb/db";
 import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS } from "../../src/constants.js";
 import { DETACHED_THREAD_ADOPTION_WINDOW_MS } from "../../src/internal/fork-adoption.js";
 import { handleDaemonSocketClosed } from "../../src/internal/session-owner-side-effects.js";
+import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import {
   seedThread,
@@ -90,6 +91,32 @@ describe("a restarted daemon that adopted threads", () => {
         "system/error",
         "system/thread/interrupted",
       ]);
+    });
+  });
+
+  it("revives an adopted thread that a command failed during the swap, because run.failed leaves its turn open", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, adopted } = seedTwoActiveTurns(harness);
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        event: { type: "run.failed" },
+        threadId: adopted.id,
+      });
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
+      expect(getActiveStoredTurnId(harness.deps.db, adopted.id)).toBe(
+        "turn-adopted",
+      );
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+
+      await openRestartedSession(harness, host, {
+        adoptedThreads: [
+          { threadId: adopted.id, activeTurnId: "turn-adopted" },
+        ],
+      });
+
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
+      expect(interruptionTypes(harness, adopted.id)).not.toContain(
+        "system/thread/interrupted",
+      );
     });
   });
 
