@@ -904,7 +904,7 @@ export async function createHostDaemonApp(
       await watchManager.shutdown();
       disposeParcelWatcherBackend();
       await terminalManager.shutdownAll();
-      await runtimeManager.shutdownAll();
+      await runtimeManager.shutdownAll("detach");
       await eventSink.flush();
       await eventSink.dispose();
       await connection.shutdown();
@@ -915,7 +915,7 @@ export async function createHostDaemonApp(
         { dataDir: options.dataDir, serverUrl: options.serverUrl },
         "Host daemon connecting",
       );
-      runtimeManager.reconcileBridgeWorkers();
+      await runtimeManager.reconcileBridgeWorkers();
       await connection.start();
     },
   });

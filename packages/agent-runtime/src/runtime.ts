@@ -2481,22 +2481,32 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async shutdown() {
-      clearInterval(turnStartWatchdogTimer);
-      await Promise.all(
-        [...stagedThreadRewinds.keys()].map((leaseId) =>
-          discardStagedThreadRewind(leaseId),
-        ),
-      );
-      idleProviderSessionSinceMsByThreadId.clear();
-      pendingTurnStarts.clear();
-      threadOperationCounts.clear();
-      threadGoalState.clear();
-      turnState.clear();
-      backgroundWorkState.clear();
-      threadEventGrammar.clear();
-      await providerProcesses.shutdown();
+      await closeRuntime("stop");
+    },
+
+    async detach() {
+      await closeRuntime("detach");
     },
   };
+
+  async function closeRuntime(mode: "stop" | "detach"): Promise<void> {
+    clearInterval(turnStartWatchdogTimer);
+    await Promise.all(
+      [...stagedThreadRewinds.keys()].map((leaseId) =>
+        discardStagedThreadRewind(leaseId),
+      ),
+    );
+    idleProviderSessionSinceMsByThreadId.clear();
+    pendingTurnStarts.clear();
+    threadOperationCounts.clear();
+    threadGoalState.clear();
+    turnState.clear();
+    backgroundWorkState.clear();
+    threadEventGrammar.clear();
+    await (mode === "detach"
+      ? providerProcesses.detach()
+      : providerProcesses.shutdown());
+  }
 
   return runtime;
 }

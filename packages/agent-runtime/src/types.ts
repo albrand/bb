@@ -360,4 +360,6 @@ export interface AgentRuntime {
   hasOpenBackgroundWork(): boolean;
 
   shutdown(): Promise<void>;
+
+  detach(): Promise<void>;
 }

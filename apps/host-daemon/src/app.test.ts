@@ -311,6 +311,7 @@ function createFakeRuntime(): AgentRuntime {
       return false;
     },
     async shutdown() {},
+    async detach() {},
   };
 }
 
@@ -842,6 +843,40 @@ describe("createHostDaemonApp", () => {
     } finally {
       await app.daemon.shutdown("test", 0);
     }
+  });
+
+  it("detaches from its provider workers instead of stopping them when it shuts down", async () => {
+    const dataDir = await makeTempDir("bb-host-daemon-app-detach-");
+    const workspacePath = await makeTempDir("bb-host-daemon-detach-workspace-");
+    const runtime = {
+      ...createFakeRuntime(),
+      shutdown: vi.fn(async () => undefined),
+      detach: vi.fn(async () => undefined),
+    } satisfies AgentRuntime;
+    const app = await createHostDaemonApp({
+      dataDir,
+      serverUrl: "http://127.0.0.1:3334",
+      hostKey: "host-key-detach",
+      hostType: "persistent",
+      hostId: "host-detach",
+      hostName: "Detach Host",
+      instanceId: "instance-detach",
+      logger: createLogger(),
+      releaseLock: async () => undefined,
+      localApiConfig: null,
+      createRuntime: () => runtime,
+      fetchFn: createFetchRecorder().fetchFn,
+      createWebSocket: createOpeningWebSocket(),
+    });
+    await app.runtimeManager.ensureEnvironment({
+      environmentId: "env-app-detach",
+      workspacePath,
+    });
+
+    await app.daemon.shutdown("SIGTERM", 0);
+
+    expect(runtime.detach).toHaveBeenCalledTimes(1);
+    expect(runtime.shutdown).not.toHaveBeenCalled();
   });
 
   it("forgets server-retired loaded environments when opening a session", async () => {

@@ -428,6 +428,9 @@ export function createFakeRuntime() {
     async shutdown() {
       state.shutdownCount += 1;
     },
+    async detach() {
+      throw new Error("Unexpected runtime detach call");
+    },
   };
 
   return {

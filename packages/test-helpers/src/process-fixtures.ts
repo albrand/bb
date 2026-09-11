@@ -41,21 +41,29 @@ export async function resolveProjectEnvCandidates(
 }
 
 export async function listOpenFilePids(targetPath: string): Promise<number[]> {
+  let stdout: string;
   try {
-    const { stdout } = await execFile("lsof", ["-t", "+D", targetPath], {
-      encoding: "utf8",
-    });
-    return stdout
-      .split("\n")
-      .map((value) => Number.parseInt(value.trim(), 10))
-      .filter((value) => Number.isInteger(value) && value > 0);
+    stdout = (
+      await execFile("lsof", ["-t", "+D", targetPath], { encoding: "utf8" })
+    ).stdout;
   } catch (error) {
     const code = readErrorCode(error);
-    if (code === "ENOENT" || code === 1) {
+    if (code === "ENOENT") {
       return [];
     }
-    throw error;
+    if (code !== 1) {
+      throw error;
+    }
+    const partial =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "stdout")
+        : undefined;
+    stdout = typeof partial === "string" ? partial : "";
   }
+  return stdout
+    .split("\n")
+    .map((value) => Number.parseInt(value.trim(), 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
 }
 
 export async function readPositivePidFile(

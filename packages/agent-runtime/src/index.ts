@@ -3,6 +3,7 @@ export { bridgeLaunchProcessKey } from "./bridge-launch-process-key.js";
 export {
   type BridgeWorkerRegistryEntry,
   reapDeadBridgeWorkers,
+  retireBridgeWorker,
 } from "./bridge-worker-registry.js";
 export type {
   AgentRuntime,

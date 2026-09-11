@@ -201,6 +201,7 @@ function createRuntime(): FakeDispatchRuntime {
     getLiveThreadIds: vi.fn(() => [...activeTurnsByThreadId.keys()]),
     hasOpenBackgroundWork: () => false,
     shutdown: vi.fn(async () => undefined),
+    detach: vi.fn(async () => undefined),
     setActiveTurn: (threadId, turnId) => {
       hostedThreadIds.add(threadId);
       activeTurnsByThreadId.set(threadId, turnId);

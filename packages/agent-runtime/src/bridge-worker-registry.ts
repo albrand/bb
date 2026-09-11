@@ -6,7 +6,9 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
+import { BRIDGE_SHUTDOWN_METHOD } from "@bb/provider-bridge-protocol/bridge-kit";
 import { z } from "zod";
 
 const bridgeWorkerRegistryEntrySchema = z.object({
@@ -117,6 +119,35 @@ export function reapDeadBridgeWorkers(
     reaped.push(entry);
   }
   return { live, reaped };
+}
+
+export async function retireBridgeWorker(args: {
+  dir: string;
+  entry: BridgeWorkerRegistryEntry;
+  timeoutMs: number;
+}): Promise<"retired" | "unreachable"> {
+  const outcome = await new Promise<"retired" | "unreachable">((resolve) => {
+    const socket = connect(args.entry.socketPath);
+    let requested = false;
+    const timer = setTimeout(() => socket.destroy(), args.timeoutMs);
+    socket.once("connect", () => {
+      requested = true;
+      socket.write(
+        `${JSON.stringify({ jsonrpc: "2.0", method: BRIDGE_SHUTDOWN_METHOD })}\n`,
+      );
+    });
+    socket.on("error", () => undefined);
+    socket.once("close", () => {
+      clearTimeout(timer);
+      resolve(requested ? "retired" : "unreachable");
+    });
+  });
+  removeBridgeWorkerFiles({
+    dir: args.dir,
+    id: args.entry.id,
+    socketPath: args.entry.socketPath,
+  });
+  return outcome;
 }
 
 function removeIfPresent(path: string): void {

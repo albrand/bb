@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   createAgentRuntime,
   reapDeadBridgeWorkers,
+  retireBridgeWorker,
   type AgentRuntime,
   type AgentRuntimeOptions,
   type AgentRuntimeSkillRoot,
@@ -1048,20 +1049,29 @@ export class RuntimeManager {
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
-  reconcileBridgeWorkers(): void {
+  async reconcileBridgeWorkers(): Promise<void> {
     if (this.options.dataDir === undefined) return;
-    const { reaped } = reapDeadBridgeWorkers(
-      bridgeWorkerDirForDataDir(this.options.dataDir),
+    const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
+    const { live, reaped } = reapDeadBridgeWorkers(dir);
+    const retired = await Promise.all(
+      live.map(async (entry) => ({
+        id: entry.id,
+        outcome: await retireBridgeWorker({
+          dir,
+          entry,
+          timeoutMs: BRIDGE_WORKER_RETIRE_TIMEOUT_MS,
+        }),
+      })),
     );
-    if (reaped.length > 0) {
+    if (reaped.length > 0 || retired.length > 0) {
       this.options.logger?.debug(
-        { workerIds: reaped.map((entry) => entry.id) },
-        "Reaped registry entries of provider bridge workers that are no longer running",
+        { reaped: reaped.map((entry) => entry.id), retired },
+        "Reconciled provider bridge workers left by a previous host daemon",
       );
     }
   }
 
-  async shutdownAll(): Promise<void> {
+  async shutdownAll(mode: RuntimeShutdownMode): Promise<void> {
     const entries = [...this.entries.values()];
     for (const pending of this.pendingEntries.values()) {
       try {
@@ -1072,7 +1082,9 @@ export class RuntimeManager {
     this.pendingEntries.clear();
 
     for (const entry of entries) {
-      await entry.runtime.shutdown();
+      await (mode === "detach"
+        ? entry.runtime.detach()
+        : entry.runtime.shutdown());
     }
     await this.shutdownProviderMaintenanceRuntime();
     await this.stopWatchingDataDirSkillsRoot();
@@ -1323,6 +1335,10 @@ export class RuntimeManager {
       });
   }
 }
+
+export type RuntimeShutdownMode = "detach" | "stop";
+
+const BRIDGE_WORKER_RETIRE_TIMEOUT_MS = 2_000;
 
 function bridgeWorkerDirForDataDir(dataDir: string): string {
   return path.join(dataDir, "bridge-workers");

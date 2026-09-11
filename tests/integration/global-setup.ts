@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { listOpenFilePids, readPositivePidFile } from "@bb/test-helpers";
 import { isNodeError, removePathWithRetry } from "./helpers/remove-path.js";
+import { integrationTmpBase } from "./helpers/tmp-base.js";
 
 const INTEGRATION_TMP_PREFIX = "bb-integration-";
 const STALE_TMP_ROOT_AGE_MS = 60 * 60_000;
@@ -49,20 +49,22 @@ async function cleanupTmpRoot(tmpRoot: string): Promise<void> {
 }
 
 async function listIntegrationTmpRoots(): Promise<string[]> {
-  const entries = await fs.readdir(tmpdir(), { withFileTypes: true });
+  const entries = await fs.readdir(integrationTmpBase(), {
+    withFileTypes: true,
+  });
   return entries
     .filter(
       (entry) =>
         entry.isDirectory() && entry.name.startsWith(INTEGRATION_TMP_PREFIX),
     )
-    .map((entry) => path.join(tmpdir(), entry.name));
+    .map((entry) => path.join(integrationTmpBase(), entry.name));
 }
 
-export default async function globalSetup(): Promise<void> {
+async function sweepIntegrationTmpRoots(minAgeMs: number): Promise<void> {
   const now = Date.now();
   for (const tmpRoot of await listIntegrationTmpRoots()) {
     const metadata = await fs.stat(tmpRoot).catch(() => null);
-    if (!metadata || now - metadata.mtimeMs < STALE_TMP_ROOT_AGE_MS) {
+    if (!metadata || now - metadata.mtimeMs < minAgeMs) {
       continue;
     }
 
@@ -75,4 +77,9 @@ export default async function globalSetup(): Promise<void> {
 
     await cleanupTmpRoot(tmpRoot).catch(() => undefined);
   }
+}
+
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  await sweepIntegrationTmpRoots(STALE_TMP_ROOT_AGE_MS);
+  return () => sweepIntegrationTmpRoots(0);
 }

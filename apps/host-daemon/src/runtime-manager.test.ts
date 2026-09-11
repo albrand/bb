@@ -2,8 +2,10 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
+import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
 import { threadScope, turnScope } from "@bb/domain";
 import type { HostDaemonInjectedSkillSource } from "@bb/host-daemon-contract";
@@ -18,6 +20,7 @@ import {
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
 } from "@bb/test-helpers";
+import { createBridgeSocketServer } from "@bb/provider-bridge-protocol/bridge-kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeManager,
@@ -274,6 +277,7 @@ function createFakeRuntime() {
     ],
     hasOpenBackgroundWork: () => openBackgroundWork,
     shutdown: vi.fn(async () => undefined),
+    detach: vi.fn(async () => undefined),
     endActiveTurn: (threadId) => {
       activeTurnsByThreadId.delete(threadId);
     },
@@ -1990,7 +1994,7 @@ describe("RuntimeManager", () => {
       workspacePath: "/tmp/env-b",
     });
 
-    await manager.shutdownAll();
+    await manager.shutdownAll("stop");
 
     expect(runtimeA.shutdown).toHaveBeenCalledTimes(1);
     expect(runtimeB.shutdown).toHaveBeenCalledTimes(1);
@@ -2055,15 +2059,154 @@ describe("RuntimeManager bridge workers", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await writeRegistryEntry({ dir, id: "aaaaaaaaaaaa", pid: gone });
     await fs.writeFile(path.join(dir, "aaaaaaaaaaaa.log"), "old log");
-    await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
     const manager = new RuntimeManager({
       dataDir,
       provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-reap"),
       createRuntime: () => createFakeRuntime(),
     });
 
-    manager.reconcileBridgeWorkers();
+    await manager.reconcileBridgeWorkers();
 
-    expect((await fs.readdir(dir)).sort()).toEqual(["bbbbbbbbbbbb.json"]);
+    expect(await fs.readdir(dir)).toEqual([]);
   });
+
+  it("detaches environment runtimes in detach mode and stops them in stop mode", async () => {
+    const runtimes: ReturnType<typeof createFakeRuntime>[] = [];
+    const manager = new RuntimeManager({
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-modes"),
+      createRuntime: () => {
+        const runtime = createFakeRuntime();
+        runtimes.push(runtime);
+        return runtime;
+      },
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/env-modes",
+    });
+    await manager.shutdownAll("detach");
+    await manager.ensureEnvironment({
+      environmentId: "env-2",
+      workspacePath: "/tmp/env-modes",
+    });
+    await manager.shutdownAll("stop");
+
+    const [detached, stopped] = runtimes;
+    expect(detached?.detach).toHaveBeenCalledTimes(1);
+    expect(detached?.shutdown).not.toHaveBeenCalled();
+    expect(stopped?.shutdown).toHaveBeenCalledTimes(1);
+    expect(stopped?.detach).not.toHaveBeenCalled();
+  });
+
+  it("retires live workers a previous daemon left behind, since it cannot adopt them", async () => {
+    const dataDir = await makeTempDir("bb-runtime-manager-retire-");
+    const dir = path.join(dataDir, "bridge-workers");
+    const socketDir = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
+    );
+    tempDirs.push(socketDir);
+    const shutdowns: string[] = [];
+    const worker = createBridgeSocketServer({
+      socketPath: path.join(socketDir, "w.sock"),
+      reattachTtlMs: 60_000,
+      onOverflow: () => undefined,
+      onDroppedOutput: () => undefined,
+    });
+    await worker.listen({
+      onLine: () => undefined,
+      onShutdown: (reason) => shutdowns.push(reason),
+    });
+    await writeRegistryEntry({ dir, id: "aaaaaaaaaaaa", pid: process.pid });
+    const registered = path.join(dir, "aaaaaaaaaaaa.json");
+    const entry = JSON.parse(await fs.readFile(registered, "utf8"));
+    await fs.writeFile(
+      registered,
+      JSON.stringify({ ...entry, socketPath: path.join(socketDir, "w.sock") }),
+    );
+    await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
+    const manager = new RuntimeManager({
+      dataDir,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-retire"),
+      createRuntime: () => createFakeRuntime(),
+    });
+
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(await fs.readdir(dir)).toEqual([]);
+  });
+
+  it("leaves a real worker running across a daemon exit, and the next daemon retires it", async () => {
+    const dataDir = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
+    );
+    tempDirs.push(dataDir);
+    const workspacePath = await makeTempDir("bb-runtime-manager-detach-ws-");
+    const bridgeLaunch = createScriptedEchoLaunch({
+      modulePath: fileURLToPath(
+        new URL(
+          "../../../tests/scripted-echo-provider/src/provider-bridge.ts",
+          import.meta.url,
+        ),
+      ),
+    });
+    const createManager = () =>
+      new RuntimeManager({
+        dataDir,
+        provisionWorkspace: createProvisionWorkspaceMock(workspacePath),
+      });
+    const dir = path.join(dataDir, "bridge-workers");
+    const exiting = createManager();
+    const entry = await exiting.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath,
+    });
+    await entry.runtime.ensureProvider({ bridgeLaunch, providerId: "fake" });
+    const registered = JSON.parse(
+      await fs.readFile(
+        path.join(
+          dir,
+          (await fs.readdir(dir)).find((name) => name.endsWith(".json")) ?? "",
+        ),
+        "utf8",
+      ),
+    ) as { pid: number };
+
+    try {
+      await exiting.shutdownAll("detach");
+
+      expect(() => process.kill(registered.pid, 0)).not.toThrow();
+      expect(
+        (await fs.readdir(dir)).filter((name) => name.endsWith(".json")),
+      ).toHaveLength(1);
+
+      await createManager().reconcileBridgeWorkers();
+
+      const deadline = Date.now() + 10_000;
+      while (isProcessAlive(registered.pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(isProcessAlive(registered.pid)).toBe(false);
+      expect(
+        (await fs.readdir(dir)).filter((name) => name.endsWith(".json")),
+      ).toEqual([]);
+    } finally {
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
 });
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

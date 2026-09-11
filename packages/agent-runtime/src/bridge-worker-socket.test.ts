@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
+import { connect } from "node:net";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import { readBoundedLines } from "@bb/provider-bridge-protocol/bridge-kit";
 import { readBridgeWorkerEntries } from "./bridge-worker-registry.js";
 import type { AgentRuntimeProcessExitInfo } from "./types.js";
 import { promptTextInput } from "./test/prompt-input.js";
@@ -128,4 +130,79 @@ describe("socket bridge workers", () => {
       await runtime.shutdown();
     }
   });
+
+  it("detaches from a worker without stopping it or the turn it is running", async () => {
+    const events: ThreadEvent[] = [];
+    const runtime = createScriptedEchoRuntime({
+      runtime: {
+        workspacePath,
+        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
+        onEvent: (event) => events.push(event),
+      },
+    });
+    await runtime.startThread({
+      environmentId: "env-1",
+      threadId: "t1",
+      projectId: "p1",
+      providerId: "fake",
+      options: fullRuntimeOptions,
+    });
+    const [registered] = readBridgeWorkerEntries(bridgeWorkerDir).entries;
+    if (registered === undefined) throw new Error("no registered worker");
+    try {
+      await runtime.runTurn({
+        clientRequestId: "creq_555555554b",
+        threadId: "t1",
+        input: [promptTextInput({ text: "delay:800 outlived-the-runtime" })],
+        options: fullRuntimeOptions,
+      });
+
+      await runtime.detach();
+
+      expect(() => process.kill(registered.pid, 0)).not.toThrow();
+      expect(readBridgeWorkerEntries(bridgeWorkerDir).entries).toEqual([
+        registered,
+      ]);
+      expect(
+        events.some(
+          (event) => event.type === "turn/completed" && event.threadId === "t1",
+        ),
+      ).toBe(false);
+
+      const lines: string[] = [];
+      const socket = connect(registered.socketPath);
+      socket.on("error", () => undefined);
+      const completed = new Promise<void>((resolve) => {
+        readBoundedLines({
+          input: socket,
+          onLine: (line) => {
+            lines.push(line);
+            if (line.includes("Response to: delay:800 outlived-the-runtime")) {
+              resolve();
+            }
+          },
+          onOverflow: () => undefined,
+        });
+      });
+      await completed;
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/shutdown" })}\n`,
+      );
+      await waitForRuntimeState({
+        label: "retired worker exited",
+        predicate: () => !isPidAlive(registered.pid),
+      });
+    } finally {
+      if (isPidAlive(registered.pid)) process.kill(registered.pid, "SIGKILL");
+    }
+  });
 });
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

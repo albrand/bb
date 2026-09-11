@@ -475,7 +475,7 @@ describe("CommandRouter", () => {
     expect(oldStopThread.mock.invocationCallOrder[0]).toBeLessThan(
       newResumeThread.mock.invocationCallOrder[0],
     );
-    await runtimeManager.shutdownAll();
+    await runtimeManager.shutdownAll("stop");
   });
 
   it.each(["codex", "claude-code", "acp-cursor"])(
