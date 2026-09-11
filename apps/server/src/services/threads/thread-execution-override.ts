@@ -199,6 +199,7 @@ function resolveFallbackModel(
   }
   const projectDefaults = getProjectExecutionDefaults(deps.db, {
     projectId: thread.projectId,
+    providerId: thread.providerId,
   });
   return projectDefaults?.model ?? null;
 }

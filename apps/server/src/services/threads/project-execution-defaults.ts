@@ -78,13 +78,16 @@ export function resolveProjectExecutionDefaultsForCreate(
   deps: Pick<AppDeps, "db" | "providerRegistry">,
   args: ResolveProjectExecutionDefaultsForCreateArgs,
 ): ResolvedProjectExecutionDefaultsForCreate {
-  const storedDefaults = getProjectExecutionDefaults(deps.db, {
-    projectId: args.projectId,
-  });
   const requestedProviderId = resolveRequestedCreateExecutionValue({
     field: "providerId",
     sources: args.executionInputSources,
     value: args.providerId,
+  });
+  // A requested provider gets ITS remembered settings; none requested gets the
+  // project's most recently used provider.
+  const storedDefaults = getProjectExecutionDefaults(deps.db, {
+    projectId: args.projectId,
+    ...(requestedProviderId ? { providerId: requestedProviderId } : {}),
   });
   const requestedModel = resolveRequestedCreateExecutionValue({
     field: "model",

@@ -10,6 +10,12 @@ import { projectExecutionDefaults } from "../schema.js";
 
 export interface GetProjectExecutionDefaultsArgs {
   projectId: string;
+  /**
+   * The provider whose remembered settings are wanted. Omitted, the project's
+   * most recently used provider is returned, which is what preselects a new
+   * thread.
+   */
+  providerId?: string;
 }
 
 export interface ListProjectExecutionDefaultsByProjectIdsArgs {
@@ -25,9 +31,118 @@ export interface UpsertProjectExecutionDefaultsArgs extends GetProjectExecutionD
   updatedAt?: number;
 }
 
+/**
+ * Fork (albrand/bb): settings remembered per provider.
+ *
+ * `project_execution_defaults` holds one row per project, so using a second
+ * provider in a project overwrote the first provider's model and reasoning.
+ * The latest provider's row stays there exactly as upstream writes it; this
+ * side table keeps every provider's last settings.
+ *
+ * Deliberately not a drizzle migration. bb validates its applied-migration
+ * history, so a fork-numbered migration collides with upstream's next one and
+ * can stop the official app from starting after a rollback. A table created
+ * here is invisible to that history, the official app ignores it, and
+ * dropping it loses nothing but the remembered settings.
+ */
+const PER_PROVIDER_TABLE = "fork_project_provider_execution_defaults";
+
+interface PerProviderRow {
+  providerId: string;
+  model: string;
+  reasoningLevel: ReasoningLevel;
+  permissionMode: PermissionMode;
+  serviceTier: ServiceTier;
+}
+
+const perProviderTableReady = new WeakSet<object>();
+
+function ensurePerProviderTable(db: DbConnection): void {
+  if (perProviderTableReady.has(db.$client)) {
+    return;
+  }
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS ${PER_PROVIDER_TABLE} (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      provider_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      reasoning_level TEXT NOT NULL,
+      permission_mode TEXT NOT NULL,
+      service_tier TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, provider_id)
+    )
+  `);
+  perProviderTableReady.add(db.$client);
+}
+
+function getPerProviderExecutionDefaults(
+  db: DbConnection,
+  args: { projectId: string; providerId: string },
+): ProjectExecutionDefaults | null {
+  ensurePerProviderTable(db);
+  const row = db.$client
+    .prepare<[string, string], PerProviderRow>(
+      `
+        SELECT provider_id AS providerId, model,
+          reasoning_level AS reasoningLevel,
+          permission_mode AS permissionMode,
+          service_tier AS serviceTier
+        FROM ${PER_PROVIDER_TABLE}
+        WHERE project_id = ? AND provider_id = ?
+      `,
+    )
+    .get(args.projectId, args.providerId);
+  return row === undefined ? null : { ...row };
+}
+
+function upsertPerProviderExecutionDefaults(
+  db: DbConnection,
+  args: UpsertProjectExecutionDefaultsArgs & { updatedAt: number },
+): void {
+  ensurePerProviderTable(db);
+  db.$client
+    .prepare<[string, string, string, string, string, string, number]>(
+      `
+        INSERT INTO ${PER_PROVIDER_TABLE} (project_id, provider_id, model,
+          reasoning_level, permission_mode, service_tier, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (project_id, provider_id) DO UPDATE SET
+          model = excluded.model,
+          reasoning_level = excluded.reasoning_level,
+          permission_mode = excluded.permission_mode,
+          service_tier = excluded.service_tier,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .run(
+      args.projectId,
+      args.providerId,
+      args.model,
+      args.reasoningLevel,
+      args.permissionMode,
+      args.serviceTier,
+      args.updatedAt,
+    );
+}
+
 export function getProjectExecutionDefaults(
   db: DbConnection,
   args: GetProjectExecutionDefaultsArgs,
+): ProjectExecutionDefaults | null {
+  const latest = getLatestProjectExecutionDefaults(db, args.projectId);
+  if (args.providerId === undefined || latest?.providerId === args.providerId) {
+    return latest;
+  }
+  return getPerProviderExecutionDefaults(db, {
+    projectId: args.projectId,
+    providerId: args.providerId,
+  });
+}
+
+function getLatestProjectExecutionDefaults(
+  db: DbConnection,
+  projectId: string,
 ): ProjectExecutionDefaults | null {
   const row = db
     .select({
@@ -38,7 +153,7 @@ export function getProjectExecutionDefaults(
       serviceTier: projectExecutionDefaults.serviceTier,
     })
     .from(projectExecutionDefaults)
-    .where(eq(projectExecutionDefaults.projectId, args.projectId))
+    .where(eq(projectExecutionDefaults.projectId, projectId))
     .get();
 
   return row ?? null;
@@ -108,6 +223,7 @@ export function upsertProjectExecutionDefaults(
       serviceTier: projectExecutionDefaults.serviceTier,
     })
     .get();
+  upsertPerProviderExecutionDefaults(db, { ...args, updatedAt });
 
   return row;
 }
