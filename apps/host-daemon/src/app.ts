@@ -1014,7 +1014,7 @@ export async function createHostDaemonApp(
   };
 }
 
-const DETACH_NOTICE_TIMEOUT_MS = 2_000;
+const DETACH_NOTICE_TIMEOUT_MS = 1_000;
 
 async function announceDetachedThreads(args: {
   connectionOpen: () => boolean;
