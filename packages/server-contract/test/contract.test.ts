@@ -310,6 +310,11 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "queuedMessageListQuerySchema.waitHolder",
     ],
   },
+  {
+    reason:
+      "A send reports refusal only when the daemon refused the turn inside the acceptance grace; omission means the message was accepted or is still queued.",
+    fields: ["sendQueuedMessageResponseSchema.refusal"],
+  },
 ];
 
 function buildIntentionalOptionalServerFields(
