@@ -59,6 +59,8 @@ export interface BridgeProtocolAdapter {
     selectedOnlyModels: AvailableModel[];
   };
   translateEvent(event: ProviderRuntimeEvent): ThreadEvent[];
+  hasPendingOutput(): boolean;
+  flushPendingEvents(): { threadId: string; events: ThreadEvent[] }[];
   decodeRecoveryHint(event: ProviderRuntimeEvent): ProviderRecoveryHint | null;
   decodeToolCallRequest(
     request: ProviderInboundRequest,
@@ -507,6 +509,14 @@ export function createBridgeProtocolAdapter(
     },
 
     parseModelListResult: parseAvailableModelList,
+
+    hasPendingOutput(): boolean {
+      return deltaAssembler.hasPendingOutput();
+    },
+
+    flushPendingEvents() {
+      return deltaAssembler.flushPending();
+    },
 
     translateEvent(event: ProviderRuntimeEvent): ThreadEvent[] {
       const method = event.method;

@@ -361,4 +361,71 @@ describe("event sink", () => {
       }
     }).not.toThrow();
   });
+
+  it("posts a worker line's replay key and settles its delivery once the server answered", async () => {
+    let answer: () => void = () => undefined;
+    const postEvents = vi.fn<CreateEventSinkOptions["postEvents"]>(
+      (events) =>
+        new Promise((resolve) => {
+          answer = () =>
+            resolve({
+              acceptedEvents: events.map((event, eventIndex) => ({
+                eventIndex,
+                sequence: eventIndex + 1,
+                threadId: event.threadId,
+              })),
+              rejectedEvents: [],
+            });
+        }),
+    );
+    const onSettled = vi.fn();
+    const sink = createEventSink({
+      isSessionOpen: () => true,
+      logger: createLogger(),
+      postEvents,
+    });
+
+    sink.emit({
+      threadId: "thr_1",
+      event: systemErrorEvent("thr_1"),
+      delivery: { replayKey: "w1:7:0", onSettled },
+    });
+    const flushing = sink.flush();
+    await Promise.resolve();
+
+    expect(postEvents).toHaveBeenCalledWith([
+      {
+        threadId: "thr_1",
+        event: systemErrorEvent("thr_1"),
+        replayKey: "w1:7:0",
+      },
+    ]);
+    expect(onSettled).not.toHaveBeenCalled();
+    answer();
+    await flushing;
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("never settles the delivery of an event it did not get to the server", async () => {
+    const postEvents = vi.fn<CreateEventSinkOptions["postEvents"]>(async () => {
+      throw new Error("server unreachable");
+    });
+    const onSettled = vi.fn();
+    const sink = createEventSink({
+      isSessionOpen: () => true,
+      logger: createLogger(),
+      postEvents,
+    });
+
+    sink.emit({
+      threadId: "thr_1",
+      event: systemErrorEvent("thr_1"),
+      delivery: { replayKey: "w1:8:0", onSettled },
+    });
+    await sink.flush();
+    await sink.dispose();
+
+    expect(postEvents).toHaveBeenCalledTimes(1);
+    expect(onSettled).not.toHaveBeenCalled();
+  });
 });

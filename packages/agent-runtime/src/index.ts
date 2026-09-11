@@ -1,5 +1,6 @@
 export { AgentRuntimeRecoveryError, createAgentRuntime } from "./runtime.js";
 export { bridgeLaunchProcessKey } from "./bridge-launch-process-key.js";
+export type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 export {
   type BridgeWorkerRegistryEntry,
   reapDeadBridgeWorkers,

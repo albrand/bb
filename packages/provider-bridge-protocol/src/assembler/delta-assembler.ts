@@ -160,6 +160,8 @@ export interface DeltaAssembler {
   getBbTurnId(threadId: string, providerTurnId: string): string | undefined;
   getProviderTurnId(threadId: string, bbTurnId: string): string | undefined;
   getOpenTurnId(threadId: string): string | undefined;
+  hasPendingOutput(): boolean;
+  flushPending(): { threadId: string; events: ThreadEvent[] }[];
 }
 
 const SEP = THREAD_DELTA_KEY_SEPARATOR;
@@ -2127,6 +2129,33 @@ export function createDeltaAssembler(
         handleDelta(stateFor(args.threadId), delta, sink);
       }
       return events;
+    },
+
+    hasPendingOutput() {
+      for (const state of states.values()) {
+        if (
+          state.pendingTextByStream.size > 0 ||
+          state.pendingProgressByKey.size > 0
+        ) {
+          return true;
+        }
+      }
+      return false;
+    },
+
+    flushPending() {
+      const flushed: { threadId: string; events: ThreadEvent[] }[] = [];
+      for (const [threadId, state] of states) {
+        const events: ThreadEvent[] = [];
+        flushPendingText(state, events);
+        for (const [key, pending] of state.pendingProgressByKey) {
+          events.push(pending.event);
+          state.progressLastEmitByKey.set(key, now());
+        }
+        state.pendingProgressByKey.clear();
+        if (events.length > 0) flushed.push({ threadId, events });
+      }
+      return flushed;
     },
 
     getBbItemId(threadId, providerItemId) {

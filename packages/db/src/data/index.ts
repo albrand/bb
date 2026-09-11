@@ -62,6 +62,10 @@ export type {
   QueuedMessageDispatchRetryRef,
 } from "./fork-queued-message-retries.js";
 export {
+  listStoredDaemonReplayKeys,
+  recordDaemonReplayKeys,
+} from "./fork-daemon-event-replay-keys.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,

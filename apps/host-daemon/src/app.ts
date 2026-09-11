@@ -495,11 +495,12 @@ export async function createHostDaemonApp(
     hostWatcher: options.hostWatcher,
     logger: options.logger,
     shellEnv: options.runtimeShellEnv,
-    onEvent: ({ environmentId, event }) => {
+    onEvent: ({ environmentId, event, delivery }) => {
       try {
         eventSink.emit({
           threadId: event.threadId,
           event,
+          ...(delivery === undefined ? {} : { delivery }),
         });
       } catch (error) {
         if (error instanceof EventSinkDisposedError) {

@@ -153,6 +153,7 @@ interface Session {
   messageCount: number;
   activeTurn: ActiveTurn | null;
   options: ScriptedEchoOptions;
+  openStream: { providerItemId: string; text: string } | null;
 }
 
 type PendingReply =
@@ -240,6 +241,7 @@ interface TurnPlan {
   recoverNowKind: ProviderRecoveryHint["kind"] | null;
   backgroundTask: boolean;
   settleBackgroundTasks: boolean;
+  streamChunks: number;
 }
 
 function promptText(input: readonly PromptInput[]): string {
@@ -284,6 +286,9 @@ function parseTurnPlan(inputText: string): TurnPlan {
     settleBackgroundTasks: /(?:^|\s)bg_task_done(?:\s|$)/u.test(inputText),
     approvalKind,
     delayMs: delayMatch?.[1] === undefined ? 0 : Number(delayMatch[1]),
+    streamChunks: Number(
+      /(?:^|\s)stream:(\d+)(?:\s|$)/u.exec(inputText)?.[1] ?? 0,
+    ),
     questionRequested: questionMatch !== null,
     responseText:
       inputText.length > 0 ? `Response to: ${inputText}` : "Response complete",
@@ -494,6 +499,9 @@ function scheduleCompletion(
     return;
   }
   session.activeTurn.timer = setTimeout(() => {
+    if (session.activeTurn !== null) {
+      closeOpenStream(session, session.activeTurn.providerTurnId);
+    }
     completeTurn(session, "completed", responseText);
     emitRecoveryHint(session.threadId, recoverKind);
   }, delayMs);
@@ -637,12 +645,52 @@ function beginTurn(args: {
     });
     return;
   }
+  if (plan.streamChunks > 0) {
+    streamText(session, providerTurnId, plan.streamChunks);
+  }
   scheduleCompletion(
     session,
     plan.responseText,
     plan.delayMs,
     plan.recoverKind,
   );
+}
+
+function streamText(
+  session: Session,
+  providerTurnId: string,
+  chunks: number,
+): void {
+  const providerItemId = `stream-${session.turnCount}`;
+  session.openStream = { providerItemId, text: "" };
+  for (let index = 1; index <= chunks; index += 1) {
+    const text = `chunk${index} `;
+    session.openStream.text += text;
+    emitDeltas(session.threadId, [
+      {
+        kind: "item.textDelta",
+        key: { providerItemId },
+        channel: "agentMessage",
+        text,
+        providerTurnId,
+      },
+    ]);
+  }
+}
+
+function closeOpenStream(session: Session, providerTurnId: string): void {
+  const stream = session.openStream;
+  if (stream === null) return;
+  session.openStream = null;
+  emitDeltas(session.threadId, [
+    {
+      kind: "item.close",
+      key: { providerItemId: stream.providerItemId },
+      status: "completed",
+      item: { type: "agentMessage", text: stream.text },
+      providerTurnId,
+    },
+  ]);
 }
 
 function describeAnswer(result: unknown): string {
@@ -776,6 +824,7 @@ function openSession(args: {
     providerThreadId: args.providerThreadId,
     turnCount: 0,
     messageCount: 0,
+    openStream: null,
     activeTurn: null,
     options: args.options,
   };
