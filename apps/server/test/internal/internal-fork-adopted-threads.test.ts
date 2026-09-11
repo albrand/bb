@@ -139,7 +139,7 @@ describe("a restarted daemon that adopted threads", () => {
     });
   });
 
-  it("does not interrupt an active thread whose adopted worker reports no turn, and does not count it as running", async () => {
+  it("interrupts a thread whose adopted worker reports no turn while the server still holds one, so it cannot stay active with no turn", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, adopted } = seedTwoActiveTurns(harness);
       handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
@@ -148,8 +148,11 @@ describe("a restarted daemon that adopted threads", () => {
         adoptedThreads: [{ threadId: adopted.id, activeTurnId: null }],
       });
 
-      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
-      expect(interruptionTypes(harness, adopted.id)).toEqual([]);
+      expect(getThread(harness.deps.db, adopted.id)?.status).not.toBe("active");
+      expect(getActiveStoredTurnId(harness.deps.db, adopted.id)).toBeNull();
+      expect(interruptionTypes(harness, adopted.id)).toContain(
+        "system/thread/interrupted",
+      );
     });
   });
 
