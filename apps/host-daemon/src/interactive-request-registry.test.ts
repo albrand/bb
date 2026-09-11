@@ -83,6 +83,56 @@ describe("InteractiveRequestRegistry", () => {
     await expect(pending).resolves.toEqual(resolution);
   });
 
+  it("settles only the requests of a turn the provider completed", async () => {
+    const request = createCommandApprovalRequest();
+    const registry = new InteractiveRequestRegistry({
+      registerRequest: async () => ({
+        outcome: "created",
+        interactionId: "pint_1",
+        status: "pending",
+      }),
+    });
+    const done = registry.registerAndWait({
+      ...request,
+      providerRequestId: "scope:1",
+      turnId: "turn-done",
+    });
+    const other = registry.registerAndWait({
+      ...request,
+      providerRequestId: "scope:2",
+      turnId: "turn-other",
+    });
+    const doneRejected = expect(done).rejects.toThrow("turn finished");
+
+    expect(
+      registry.settleCompletedTurn({
+        reason: "turn finished",
+        threadId: request.threadId,
+        turnId: "turn-done",
+      }),
+    ).toEqual([request.providerId]);
+    await doneRejected;
+    expect(
+      registry.settleCompletedTurn({
+        reason: "turn finished",
+        threadId: request.threadId,
+        turnId: "turn-done",
+      }),
+    ).toEqual([]);
+    registry.resolve({
+      interactionId: "pint_1",
+      providerId: request.providerId,
+      providerRequestId: "scope:2",
+      providerThreadId: request.providerThreadId,
+      resolution: { decision: "allow_once", grantedPermissions: null },
+      threadId: request.threadId,
+    });
+    await expect(other).resolves.toEqual({
+      decision: "allow_once",
+      grantedPermissions: null,
+    });
+  });
+
   it("deduplicates registration retries for the same live provider request", async () => {
     const request = createCommandApprovalRequest();
     const registration =
