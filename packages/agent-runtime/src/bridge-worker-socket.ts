@@ -39,6 +39,7 @@ import {
   readProcessIdentity,
   readProcessIdentityAsync,
   removeBridgeWorkerFiles,
+  retireBridgeWorker,
   socketDirectoryFor,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -178,6 +179,7 @@ export const BRIDGE_WORKER_CONNECT_TIMEOUT_MS = 15_000;
 const BRIDGE_WORKER_CONNECT_RETRY_MS = 25;
 const BRIDGE_WORKER_ACK_INTERVAL_MS = 25;
 const BRIDGE_WORKER_LOG_TAIL_BYTES = 4_000;
+const BRIDGE_WORKER_FORCE_STOP_GRACE_MS = 1_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === "darwin" ? 103 : 107;
 
 export function allocateBridgeWorkerPaths(
@@ -576,8 +578,36 @@ export class SocketBridgeWorker
       this.child.markGone();
       return;
     }
-    killProcessGroup({ child: this.child, signal: "SIGKILL" });
+    void this.stopUnreachableWorker();
     this.emit("error", error);
+  }
+
+  private async stopUnreachableWorker(): Promise<void> {
+    const outcome = await retireBridgeWorker({
+      dir: this.workerDir,
+      id: this.id,
+      socketPath: this.socketPath,
+      timeoutMs: BRIDGE_WORKER_FORCE_STOP_GRACE_MS,
+    });
+    if (outcome === "unreachable" && !this.exited) {
+      this.child.kill("SIGTERM");
+    }
+    await this.whenExited(BRIDGE_WORKER_FORCE_STOP_GRACE_MS);
+    if (this.exited) return;
+    killProcessGroup({ child: this.child, signal: "SIGKILL" });
+  }
+
+  private whenExited(timeoutMs: number): Promise<void> {
+    if (this.exited) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, timeoutMs);
+      timer.unref();
+      this.once("exit", done);
+      function done(): void {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
   }
 
   private handleExit(code: number | null, signal: NodeJS.Signals | null): void {

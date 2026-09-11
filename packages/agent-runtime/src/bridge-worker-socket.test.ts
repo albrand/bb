@@ -21,7 +21,10 @@ import {
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 import { readBridgeWorkerEntries } from "./bridge-worker-registry.js";
-import { privateSocketDirectory } from "./bridge-worker-socket.js";
+import {
+  privateSocketDirectory,
+  SocketBridgeWorker,
+} from "./bridge-worker-socket.js";
 import type { AgentRuntimeProcessExitInfo } from "./types.js";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
@@ -522,6 +525,49 @@ describe("socket bridge workers", () => {
       retire(registered);
     }
   }, 20_000);
+
+  it.skipIf(process.platform === "win32")(
+    "asks a worker that never opened its socket to stop before it kills it",
+    async () => {
+      const stopped = join(workspacePath, "stopped");
+      const worker = new SocketBridgeWorker({
+        kind: "spawn",
+        command: "/bin/sh",
+        args: [
+          "-c",
+          `trap 'echo stopped > ${stopped}; exit 0' TERM; sleep 30 & wait`,
+        ],
+        cwd: workspacePath,
+        env: {},
+        workerDir: bridgeWorkerDir,
+        connectTimeoutMs: 200,
+        registration: {
+          environmentId: "env-1",
+          pluginId: "provider-scripted-echo",
+          processKey: "fake#bridge:1",
+          providerId: "fake",
+        },
+        workspace: {
+          workspacePath,
+          workspaceProvisionType: "unmanaged",
+          personalWorkspaceRoot: null,
+        },
+      });
+      worker.on("error", () => undefined);
+      try {
+        await waitForRuntimeState({
+          label: "worker asked to stop before the kill",
+          predicate: () => existsSync(stopped),
+          timeoutMs: 10_000,
+        });
+      } finally {
+        if (worker.pid !== undefined && isPidAlive(worker.pid)) {
+          process.kill(worker.pid, "SIGKILL");
+        }
+      }
+    },
+    20_000,
+  );
 });
 
 describe.skipIf(process.platform === "win32")(
