@@ -31,6 +31,7 @@ async function startServer(options: StartServerOptions = {}): Promise<{
   received: string[];
   shutdowns: BridgeSocketShutdownReason[];
   backpressure: boolean[];
+  lifecycle: string[];
 }> {
   const dir = await createShortSocketDir();
   const socketPath = join(dir, "w.sock");
@@ -38,6 +39,7 @@ async function startServer(options: StartServerOptions = {}): Promise<{
   const received: string[] = [];
   const shutdowns: BridgeSocketShutdownReason[] = [];
   const backpressure: boolean[] = [];
+  const lifecycle: string[] = [];
   const server = createBridgeSocketServer({
     socketPath,
     spillPath,
@@ -45,7 +47,10 @@ async function startServer(options: StartServerOptions = {}): Promise<{
     memoryCapBytes: options.memoryCapBytes ?? 1024 * 1024,
     hardCapBytes: options.hardCapBytes ?? 16 * 1024 * 1024,
     onOverflow: () => undefined,
-    onBackpressure: (paused) => backpressure.push(paused),
+    onBackpressure: (paused, retainedBytes) => {
+      backpressure.push(paused);
+      lifecycle.push(`${paused ? "pause" : "resume"}:${retainedBytes > 0}`);
+    },
   });
   cleanups.push(async () => {
     server.close();
@@ -53,9 +58,20 @@ async function startServer(options: StartServerOptions = {}): Promise<{
   });
   await server.listen({
     onLine: (line) => received.push(line),
-    onShutdown: (reason) => shutdowns.push(reason),
+    onShutdown: (reason) => {
+      shutdowns.push(reason);
+      lifecycle.push(`shutdown:${reason}`);
+    },
   });
-  return { server, socketPath, spillPath, received, shutdowns, backpressure };
+  return {
+    server,
+    socketPath,
+    spillPath,
+    received,
+    shutdowns,
+    backpressure,
+    lifecycle,
+  };
 }
 
 function wait(ms: number): Promise<void> {
@@ -136,17 +152,61 @@ describe("createBridgeSocketServer", () => {
       memoryCapBytes: 16 * 1024,
       hardCapBytes: 128 * 1024,
     });
+    const client = await connectBridgeSocket(socketPath);
     for (let n = 1; n <= 200; n += 1) server.write(`${payload(n, 1_000)}\n`);
 
     expect(backpressure).toEqual([true]);
     expect(server.replayStats().frames).toBe(200);
 
-    const client = await connectBridgeSocket(socketPath);
     await client.waitForLine((line) => line === payload(200, 1_000));
     client.ack(200);
     await wait(50);
     expect(backpressure).toEqual([true, false]);
     client.socket.destroy();
+  });
+
+  it("never holds a detached worker paused, so the reattach window can still retire it", async () => {
+    const { server, socketPath, backpressure, lifecycle } = await startServer({
+      memoryCapBytes: 16 * 1024,
+      hardCapBytes: 128 * 1024,
+      reattachTtlMs: 150,
+    });
+    for (let n = 1; n <= 200; n += 1) server.write(`${payload(n, 1_000)}\n`);
+    expect(backpressure).toEqual([]);
+
+    const client = await connectBridgeSocket(socketPath);
+    await client.waitForLine((line) => line === payload(200, 1_000));
+    expect(backpressure).toEqual([true]);
+    client.socket.destroy();
+    await client.closed;
+    await wait(20);
+    expect(backpressure).toEqual([true, false]);
+
+    for (let n = 201; n <= 400; n += 1) server.write(`${payload(n, 1_000)}\n`);
+    await wait(250);
+    expect(lifecycle).toEqual([
+      "pause:true",
+      "resume:true",
+      "shutdown:abandoned",
+    ]);
+  });
+
+  it("continues a paused provider before it acts on bridge/shutdown", async () => {
+    const { server, socketPath, lifecycle } = await startServer({
+      memoryCapBytes: 16 * 1024,
+      hardCapBytes: 128 * 1024,
+    });
+    const client = await connectBridgeSocket(socketPath);
+    for (let n = 1; n <= 200; n += 1) server.write(`${payload(n, 1_000)}\n`);
+    expect(lifecycle).toEqual(["pause:true"]);
+
+    client.send({ method: "bridge/shutdown" });
+    await client.closed;
+    expect(lifecycle).toEqual([
+      "pause:true",
+      "resume:true",
+      "shutdown:requested",
+    ]);
   });
 
   it("lets the newest connection replace the previous one", async () => {

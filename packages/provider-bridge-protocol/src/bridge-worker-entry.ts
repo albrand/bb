@@ -7,7 +7,7 @@ import {
   createRecordingLineSplitter,
   getBridgeRecorder,
 } from "./bridge-kit/bridge-recorder.js";
-import { signalDescendantProcesses } from "./bridge-kit/bridge-descendants.js";
+import { createDescendantPauser } from "./bridge-kit/bridge-descendants.js";
 import {
   BRIDGE_REATTACH_TTL_MS,
   BRIDGE_REPLAY_HARD_CAP_BYTES,
@@ -62,6 +62,7 @@ function reportOversizedLine(bytes: number): void {
   );
 }
 
+const providerPauser = createDescendantPauser();
 const bridgeSocketPath = process.env[BRIDGE_SOCKET_ENV] ?? "";
 delete process.env[BRIDGE_SOCKET_ENV];
 const socketServer =
@@ -76,13 +77,11 @@ const socketServer =
         memoryCapBytes: BRIDGE_REPLAY_MEMORY_CAP_BYTES,
         hardCapBytes: BRIDGE_REPLAY_HARD_CAP_BYTES,
         onOverflow: reportOversizedLine,
-        onBackpressure: (paused) => {
+        onBackpressure: (paused, retainedBytes) => {
+          const pids = paused ? providerPauser.stop() : providerPauser.resume();
           process.stderr.write(
-            paused
-              ? "Pausing the provider: unacknowledged bridge output reached its cap.\n"
-              : "Resuming the provider: the runtime caught up.\n",
+            `${paused ? "Paused" : "Resumed"} provider processes [${pids.join(", ")}] with ${retainedBytes} unacknowledged bridge bytes.\n`,
           );
-          signalDescendantProcesses(paused ? "SIGSTOP" : "SIGCONT");
         },
       });
 if (socketServer !== null) {
@@ -141,11 +140,19 @@ try {
 
 entry.start?.({ pluginId, dataDir, tempDir });
 
+function resumeProviderBeforeSignal(handler: () => void): () => void {
+  if (socketServer === null) return handler;
+  return () => {
+    providerPauser.resume();
+    handler();
+  };
+}
+
 if (entry.onSigterm) {
-  process.once("SIGTERM", entry.onSigterm);
+  process.once("SIGTERM", resumeProviderBeforeSignal(entry.onSigterm));
 }
 if (entry.onSigint) {
-  process.once("SIGINT", entry.onSigint);
+  process.once("SIGINT", resumeProviderBeforeSignal(entry.onSigint));
 }
 
 const onRuntimeLine =
