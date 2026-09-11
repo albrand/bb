@@ -30,16 +30,18 @@ describe("BridgeLineAckTracker", () => {
     expect(acks).toEqual([2]);
   });
 
-  it("holds a request line until the runtime has answered it", () => {
+  it("acknowledges past an unanswered request line but keeps it for replay until the runtime answers it", () => {
     const { tracker, acks } = createTracker();
     tracker.beginLine(1, "req-7");
     tracker.endLine(false);
     tracker.beginLine(2, null);
     tracker.endLine(false);
 
-    expect(acks).toEqual([]);
+    expect(acks).toEqual([1, 2]);
+    expect(tracker.keptWseqs()).toEqual([1]);
     tracker.responded("req-7");
-    expect(acks).toEqual([2]);
+    expect(tracker.keptWseqs()).toEqual([]);
+    expect(acks).toEqual([1, 2, 2]);
   });
 
   it("never acknowledges past output still held in the assembler, until it is flushed", () => {

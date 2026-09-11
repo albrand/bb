@@ -22,6 +22,7 @@ export class BridgeLineAckTracker {
   private readonly lines: TrackedLine[] = [];
   private current: TrackedLine | null = null;
   private ackable = 0;
+  private readonly awaitingPastAck = new Map<number, string | number>();
   private readonly settledWaiters: (() => void)[] = [];
 
   constructor(args: BridgeLineAckTrackerArgs) {
@@ -104,11 +105,22 @@ export class BridgeLineAckTracker {
     for (const line of this.lines) {
       if (line.awaitingResponseId === id) line.awaitingResponseId = null;
     }
+    let keepChanged = false;
+    for (const [wseq, awaitingId] of this.awaitingPastAck) {
+      if (awaitingId !== id) continue;
+      this.awaitingPastAck.delete(wseq);
+      keepChanged = true;
+    }
+    if (keepChanged) this.args.onAckable(this.ackable);
     this.advance();
   }
 
   ackableThrough(): number {
     return this.ackable;
+  }
+
+  keptWseqs(): number[] {
+    return [...this.awaitingPastAck.keys()].sort((a, b) => a - b);
   }
 
   hasOutstandingEvents(): boolean {
@@ -131,20 +143,19 @@ export class BridgeLineAckTracker {
   private advance(): void {
     let through = this.ackable;
     for (const line of this.lines) {
-      if (
-        line === this.current ||
-        line.outstanding > 0 ||
-        line.awaitingResponseId !== null
-      ) {
-        break;
-      }
+      if (line === this.current || line.outstanding > 0) break;
       if (!line.heldByPendingOutput && line.blockedUntilWseq === null) {
         through = line.wseq;
       }
     }
     if (through > this.ackable) {
       this.ackable = through;
-      while ((this.lines[0]?.wseq ?? Infinity) <= through) this.lines.shift();
+      while ((this.lines[0]?.wseq ?? Infinity) <= through) {
+        const acked = this.lines.shift();
+        if (acked !== undefined && acked.awaitingResponseId !== null) {
+          this.awaitingPastAck.set(acked.wseq, acked.awaitingResponseId);
+        }
+      }
       this.args.onAckable(through);
     }
     if (!this.hasOutstandingEvents()) {
