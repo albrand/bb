@@ -887,6 +887,15 @@ function storeExecutionReports<
   return kept;
 }
 
+class ReplayedEventBatchRaceError extends Error {
+  constructor() {
+    super(
+      "A concurrent batch stored some of these replayed events first; retry to append the rest",
+    );
+    this.name = "ReplayedEventBatchRaceError";
+  }
+}
+
 function dropReplayedEntries(
   deps: Pick<AppDeps, "db">,
   entries: PostableEventBatchEntry[],
@@ -995,22 +1004,31 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       const postableEvents = labelledEntries.map((entry) => entry.envelope);
       let appendResult: AppendDaemonEventsResult;
       try {
+        const replayKeys = entries.flatMap((entry) =>
+          entry.envelope.replayKey === undefined
+            ? []
+            : [entry.envelope.replayKey],
+        );
         appendResult = deps.db.transaction(
           (tx) => {
+            if (listStoredDaemonReplayKeys(deps.db, replayKeys).size > 0) {
+              throw new ReplayedEventBatchRaceError();
+            }
             const result = appendDaemonEventsInTransaction(tx, eventInputs);
-            recordDaemonReplayKeys(deps.db, {
-              replayKeys: entries.flatMap((entry) =>
-                entry.envelope.replayKey === undefined
-                  ? []
-                  : [entry.envelope.replayKey],
-              ),
-              now: Date.now(),
-            });
+            recordDaemonReplayKeys(deps.db, { replayKeys, now: Date.now() });
             return result;
           },
           { behavior: "immediate" },
         );
       } catch (error) {
+        if (error instanceof ReplayedEventBatchRaceError) {
+          throw new ApiError(
+            503,
+            "replayed_event_batch_race",
+            error.message,
+            true,
+          );
+        }
         if (error instanceof MissingStoredTurnStartedError) {
           deps.logger.warn(
             {
