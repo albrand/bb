@@ -1431,6 +1431,14 @@ export function validatePluginProviderDeclaration(
     }
   }
   if (
+    capabilities.reportsTokenUsage !== undefined &&
+    typeof capabilities.reportsTokenUsage !== "boolean"
+  ) {
+    throw new Error(
+      `provider "${id}" capabilities.reportsTokenUsage must be a boolean when present`,
+    );
+  }
+  if (
     !(PROVIDER_FORK_VALUES as readonly string[]).includes(capabilities.fork)
   ) {
     throw new Error(
@@ -1444,6 +1452,9 @@ export function validatePluginProviderDeclaration(
     supportsManualCompaction: capabilities.supportsManualCompaction,
     supportsThreadArchive: capabilities.supportsThreadArchive,
     supportsThreadRename: capabilities.supportsThreadRename,
+    ...(capabilities.reportsTokenUsage === undefined
+      ? {}
+      : { reportsTokenUsage: capabilities.reportsTokenUsage }),
     permissionModes: validateProviderLiteralArray({
       providerId: id,
       field: "capabilities.permissionModes",

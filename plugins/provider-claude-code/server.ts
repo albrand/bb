@@ -62,6 +62,7 @@ export default function plugin(bb: BbPluginApi) {
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: true,
+      reportsTokenUsage: true,
       fork: "checkpoint",
       supportsManualCompaction: true,
       supportsThreadArchive: false,

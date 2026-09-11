@@ -182,6 +182,9 @@ export function buildPluginProviderRegistration(args: {
       supportsFork: capabilities.fork !== "none",
       supportsSessionRewind: capabilities.fork === "checkpoint",
       modelCatalogScope: declaration.models.scope,
+      ...(capabilities.reportsTokenUsage === undefined
+        ? {}
+        : { reportsTokenUsage: capabilities.reportsTokenUsage }),
     },
     composerActions,
     ...(strings === undefined

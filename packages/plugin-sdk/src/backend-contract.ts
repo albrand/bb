@@ -984,6 +984,13 @@ export interface PluginProviderCapabilities {
   /** Permission modes the provider can actually run in. Non-empty, no
    * duplicates. */
   permissionModes: readonly PluginProviderPermissionMode[];
+  /**
+   * Whether the provider emits token usage for its turns. Omitted means
+   * unknown, never "yes": a descriptor that says nothing has not established
+   * it. `false` lets consumers show "not reported" instead of reading a
+   * missing report as a measured zero.
+   */
+  reportsTokenUsage?: boolean;
   /** The provider's coarse fallback reasoning ladder (see
    * {@link PluginProviderReasoningLevel}). Non-empty, no duplicates. */
   reasoningLevels: readonly PluginProviderReasoningLevel[];
