@@ -1001,6 +1001,12 @@ KillMode=process
 [Install]
 WantedBy=$service_target
 EOF
+  killmode_drop_in=""
+  if [ "$systemd_scope" = --user ]; then
+    killmode_drop_in="$service_file.d/10-bb-killmode.conf"
+    mkdir -p "$service_file.d"
+    printf '[Service]\nKillMode=process\n' >"$killmode_drop_in"
+  fi
   systemctl "$systemd_scope" daemon-reload
   enable_unit="$service_name.service"
   if [ "$systemd_scope" = --system ]; then enable_unit="$service_file"; fi
@@ -1035,5 +1041,5 @@ EOF
   else
     detail "Starts with your systemd user session."
   fi
-  detail "Uninstall: systemctl $systemd_scope disable --now $service_name.service && rm '$service_file' && systemctl $systemd_scope daemon-reload"
+  detail "Uninstall: systemctl $systemd_scope disable --now $service_name.service && rm '$service_file'${killmode_drop_in:+ '$killmode_drop_in'} && systemctl $systemd_scope daemon-reload"
 fi
