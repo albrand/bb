@@ -218,6 +218,10 @@ This index lists every command path that the core CLI registers. Read the task-s
 - `bb plugin build`
 - `bb plugin dev`
 - `bb plugin reload`
+- `bb plugin rpc`
+- `bb plugin rpc list`
+- `bb plugin rpc inspect`
+- `bb plugin rpc call`
 - `bb plugin enable`
 - `bb plugin disable`
 - `bb plugin config`
