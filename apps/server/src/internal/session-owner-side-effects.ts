@@ -27,7 +27,10 @@ import {
 } from "../services/threads/thread-lifecycle.js";
 import { buildThreadStatusChangeMetadataByThreadId } from "../services/threads/thread-runtime-display.js";
 import { settleDanglingBackgroundTasks } from "../services/threads/background-task-reconciliation.js";
-import { closeItemsOrphanedByAdoption } from "./fork-adoption.js";
+import {
+  closeItemsOrphanedByAdoption,
+  scheduleAdoptedThreadTurnCheck,
+} from "./fork-adoption.js";
 
 const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
   "Host daemon restarted while awaiting user interaction; retry the thread to continue";
@@ -145,6 +148,11 @@ export async function handleHostSessionOpened(
     ],
     exceptThreadIds: adopted.excepted,
     hostId: args.hostId,
+  });
+
+  scheduleAdoptedThreadTurnCheck(deps, {
+    hostId: args.hostId,
+    threadIds: adopted.awaitingTurn,
   });
 }
 
@@ -289,10 +297,12 @@ function classifyAdoptedThreads(
   deps: Pick<AppDeps, "db">,
   args: Pick<HandleHostSessionOpenedArgs, "adoptedThreads">,
 ): {
+  awaitingTurn: Set<string>;
   excepted: Set<string>;
   running: Set<string>;
   runningTurnIds: Map<string, string>;
 } {
+  const awaitingTurn = new Set<string>();
   const excepted = new Set<string>();
   const running = new Set<string>();
   const runningTurnIds = new Map<string, string>();
@@ -308,8 +318,12 @@ function classifyAdoptedThreads(
     ) {
       excepted.add(thread.threadId);
     }
+    if (thread.activeTurnId === null && storedTurnId === null) {
+      excepted.add(thread.threadId);
+      awaitingTurn.add(thread.threadId);
+    }
   }
-  return { excepted, running, runningTurnIds };
+  return { awaitingTurn, excepted, running, runningTurnIds };
 }
 
 function notifyHostThreadRuntimeStatusChanged(

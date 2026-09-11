@@ -17,6 +17,7 @@ import { ApiError } from "../errors.js";
 import { requireThreadEnvironment } from "../services/lib/entity-lookup.js";
 import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "../services/threads/background-task-reconciliation.js";
 import { appendThreadEventsInTransaction } from "../services/threads/thread-events.js";
+import { interruptActiveThreadsForHost } from "../services/threads/thread-lifecycle.js";
 import type { AppDeps } from "../types.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
 
@@ -89,6 +90,52 @@ export function registerInternalForkAdoptionRoutes(
       return context.json({ recordedThreadIds, expectAdoptionUntil });
     },
   );
+}
+
+export const ADOPTED_THREAD_TURN_REPLAY_GRACE_MS = 60_000;
+
+const pendingAdoptedTurnChecks = new Map<string, NodeJS.Timeout>();
+
+export function scheduleAdoptedThreadTurnCheck(
+  deps: Pick<
+    AppDeps,
+    "db" | "hub" | "logger" | "pendingInteractions" | "providerRegistry"
+  >,
+  args: { hostId: string; threadIds: ReadonlySet<string> },
+): void {
+  for (const threadId of args.threadIds) {
+    const running = pendingAdoptedTurnChecks.get(threadId);
+    if (running !== undefined) clearTimeout(running);
+    const timer = setTimeout(() => {
+      pendingAdoptedTurnChecks.delete(threadId);
+      interruptAdoptedThreadWithoutTurn(deps, {
+        hostId: args.hostId,
+        threadId,
+      });
+    }, ADOPTED_THREAD_TURN_REPLAY_GRACE_MS);
+    timer.unref();
+    pendingAdoptedTurnChecks.set(threadId, timer);
+  }
+}
+
+function interruptAdoptedThreadWithoutTurn(
+  deps: Pick<
+    AppDeps,
+    "db" | "hub" | "logger" | "pendingInteractions" | "providerRegistry"
+  >,
+  args: { hostId: string; threadId: string },
+): void {
+  if (getThread(deps.db, args.threadId)?.status !== "active") return;
+  if (getActiveStoredTurnId(deps.db, args.threadId) !== null) return;
+  deps.logger.info(
+    { threadId: args.threadId },
+    "Interrupting an adopted thread whose turn never arrived",
+  );
+  interruptActiveThreadsForHost(deps, {
+    hostId: args.hostId,
+    onlyThreadIds: new Set([args.threadId]),
+    reason: "host-daemon-restarted",
+  });
 }
 
 export function closeItemsOrphanedByAdoption(
