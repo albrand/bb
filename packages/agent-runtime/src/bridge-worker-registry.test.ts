@@ -29,6 +29,7 @@ function entry(
     processKey: "codex#bridge:0123456789abcdef",
     environmentId: "env_1",
     bridgeProtocolVersion: 2,
+    transportVersion: 1,
     startedAt: "2026-09-11T00:00:00.000Z",
     ...overrides,
   };

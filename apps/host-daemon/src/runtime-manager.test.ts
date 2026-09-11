@@ -2334,6 +2334,7 @@ describe("RuntimeManager bridge workers", () => {
         processKey: "codex#bridge:0123456789abcdef",
         environmentId: "env-1",
         bridgeProtocolVersion: 2,
+        transportVersion: 1,
         startedAt: "2026-09-11T00:00:00.000Z",
       }),
     );
@@ -2417,9 +2418,12 @@ describe("RuntimeManager bridge workers", () => {
     const shutdowns: string[] = [];
     const worker = createBridgeSocketServer({
       socketPath: path.join(socketDir, "w.sock"),
+      spillPath: path.join(socketDir, "w.buf"),
       reattachTtlMs: 60_000,
+      memoryCapBytes: 1024 * 1024,
+      hardCapBytes: 16 * 1024 * 1024,
       onOverflow: () => undefined,
-      onDroppedOutput: () => undefined,
+      onBackpressure: () => undefined,
     });
     await worker.listen({
       onLine: () => undefined,
