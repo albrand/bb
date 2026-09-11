@@ -210,6 +210,26 @@ export class InteractiveRequestRegistry {
     }
   }
 
+  settleCompletedTurn(args: {
+    reason: string;
+    threadId: string;
+    turnId: string;
+  }): string[] {
+    const providerIds = new Set<string>();
+    for (const [key, entry] of this.pendingEntries) {
+      if (
+        entry.request.threadId !== args.threadId ||
+        entry.request.turnId !== args.turnId
+      ) {
+        continue;
+      }
+      this.pendingEntries.delete(key);
+      providerIds.add(entry.request.providerId);
+      entry.reject(new Error(args.reason));
+    }
+    return [...providerIds];
+  }
+
   private addDeliveredTombstone(key: string): void {
     const existing = this.deliveredTombstones.get(key);
     if (existing) {
