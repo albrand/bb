@@ -1,5 +1,7 @@
 import {
+  archiveThread,
   claimQueuedThreadMessageGroup,
+  getQueuedMessageDispatchRetry,
   getQueuedThreadMessage,
   listEvents,
   setQueuedThreadMessageFailureReason,
@@ -12,7 +14,10 @@ import {
   type PluginHookRegistration,
 } from "../../src/services/plugins/plugin-hook-registry.js";
 import { noteDispatchRequeued } from "../../src/services/threads/dispatch-hooks.js";
-import { recordQueuedMessageDrainFailure } from "../../src/services/threads/queue-drain-failure.js";
+import {
+  QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS,
+  recordQueuedMessageDrainFailure,
+} from "../../src/services/threads/queue-drain-failure.js";
 import {
   requestQueuedMessageDispatch,
   runQueuedMessageDispatch,
@@ -267,7 +272,35 @@ describe("recordQueuedMessageDrainFailure", () => {
     });
   });
 
-  it("records the reason and keeps the wait when the host is present", async () => {
+  it("records the reason and keeps the wait when the destination is gone", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread, row } = seedQueuedRow(harness, {
+        hostConnected: true,
+        hostName: "M4",
+      });
+      archiveThread(harness.db, harness.deps.hub, thread.id);
+
+      recordQueuedMessageDrainFailure(harness.deps, {
+        error: new ApiError(409, "thread_not_writable", "Thread is archived"),
+        row,
+        thread,
+      });
+
+      // Terminal because the world says so, not because the error was phrased
+      // a certain way: the thread this message was for is archived, and no
+      // number of re-attempts un-archives it.
+      const queued = reread(harness, row.id);
+      expect(queued.failureReason).toBe("Thread is archived");
+      expect(getQueuedMessageDispatchRetry(harness.db, row.id)).toBeNull();
+      // The row is still waiting on what queued it. A failure says what went
+      // wrong last time, not what the row is waiting for, and a queue would
+      // have erased it on the very next attempt.
+      expect(queued.waitingOn).toEqual({ kind: "thread-busy" });
+      expect(listEvents(harness.db, { threadId: thread.id })).toEqual([]);
+    });
+  });
+
+  it("retries the same error while the destination is still there", async () => {
     await withTestHarness(async (harness) => {
       const { thread, row } = seedQueuedRow(harness, {
         hostConnected: true,
@@ -280,13 +313,11 @@ describe("recordQueuedMessageDrainFailure", () => {
         thread,
       });
 
-      const queued = reread(harness, row.id);
-      expect(queued.failureReason).toBe("Thread is archived");
-      // The row is still waiting on what queued it. A failure says what went
-      // wrong last time, not what the row is waiting for, and a queue would
-      // have erased it on the very next attempt.
-      expect(queued.waitingOn).toEqual({ kind: "thread-busy" });
-      expect(listEvents(harness.db, { threadId: thread.id })).toEqual([]);
+      // The thread is writable, so whatever produced this is a fault rather
+      // than a fact about the destination, and the row keeps a NULL failure
+      // reason — the column every automatic drain reads as "never again".
+      expect(reread(harness, row.id).failureReason).toBeNull();
+      expect(getQueuedMessageDispatchRetry(harness.db, row.id)?.attempt).toBe(1);
     });
   });
 
@@ -297,11 +328,15 @@ describe("recordQueuedMessageDrainFailure", () => {
         hostName: "M4",
       });
 
-      recordQueuedMessageDrainFailure(harness.deps, {
-        error: new Error("Cannot read properties of undefined (reading 'id')"),
-        row,
-        thread,
-      });
+      for (let attempt = 1; attempt <= QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS; attempt += 1) {
+        recordQueuedMessageDrainFailure(harness.deps, {
+          error: new Error(
+            "Cannot read properties of undefined (reading 'id')",
+          ),
+          row,
+          thread,
+        });
+      }
 
       // `ApiError` messages are written for a caller; anything else was
       // written for a log and has no business on a queued row.

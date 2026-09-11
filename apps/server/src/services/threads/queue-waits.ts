@@ -1,4 +1,5 @@
 import {
+  clearQueuedMessageDispatchRetry,
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessageInTransaction,
   requeueClaimedQueuedThreadMessages,
@@ -144,8 +145,15 @@ export function clearQueuedMessageWait(
   deps: { db: DbConnection; hub: DbNotifier },
   args: { queuedMessageId: string; threadId: string },
 ): QueuedThreadMessageRow | null {
-  return clearQueuedThreadMessageWaitingOn(deps.db, deps.hub, {
+  const row = clearQueuedThreadMessageWaitingOn(deps.db, deps.hub, {
     id: args.queuedMessageId,
     threadId: args.threadId,
   });
+  // The condition this row was waiting on has been answered — its host came
+  // back, its workspace finished, its plugin went away. That is a fresh start,
+  // not a continuation of whatever the last attempt failed with.
+  if (row !== null) {
+    clearQueuedMessageDispatchRetry(deps.db, row.id);
+  }
+  return row;
 }

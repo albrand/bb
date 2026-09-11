@@ -572,6 +572,13 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
   {
     cadenceMs: 0,
     category: "durable-intent-retry",
+    name: "queued-message-dispatch-retry",
+    run: (deps, now) =>
+      runQueuedMessageDispatch(deps, { kind: "retry-due", now }),
+  },
+  {
+    cadenceMs: 0,
+    category: "durable-intent-retry",
     name: "orphaned-queue-wait-clear",
     run: (deps) =>
       runQueuedMessageDispatch(deps, {
