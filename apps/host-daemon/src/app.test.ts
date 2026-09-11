@@ -1010,6 +1010,7 @@ describe("createHostDaemonApp", () => {
       }
 
       options.onProcessExit({
+        bridgeWorker: null,
         providerId: "codex",
         threads: [
           {
@@ -1040,6 +1041,45 @@ describe("createHostDaemonApp", () => {
     }
   });
 
+  it("logs every provider bridge worker exit with its id, pid and whether the daemon stopped it", async () => {
+    const { app, logger, runtimeOptions } = await createAppFixture();
+    try {
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-worker-exit-log",
+        workspacePath: await makeTempDir("bb-host-daemon-app-worker-exit-"),
+      });
+      const options = runtimeOptions.current;
+      if (!options?.onProcessExit) {
+        throw new Error("Expected process exit callback to be captured");
+      }
+
+      options.onProcessExit({
+        bridgeWorker: { id: "0066d6fecfd9", pid: 4242 },
+        providerId: "claude-code",
+        threads: [],
+        code: 0,
+        expected: true,
+        signal: null,
+        stderr: null,
+      });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        {
+          bridgeWorkerId: "0066d6fecfd9",
+          pid: 4242,
+          providerId: "claude-code",
+          threadIds: [],
+          reason: "stopped-by-daemon",
+          code: 0,
+          signal: null,
+        },
+        "Provider bridge worker exited; its registry entry is removed",
+      );
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
   it("posts a failure event when a provider exits before turn/started", async () => {
     const { app, fetchRecorder, runtimeOptions } = await createAppFixture();
     try {
@@ -1057,6 +1097,7 @@ describe("createHostDaemonApp", () => {
       }
 
       options.onProcessExit({
+        bridgeWorker: null,
         providerId: "claude-code",
         threads: [
           {
@@ -1137,6 +1178,7 @@ describe("createHostDaemonApp", () => {
         'Provider "codex" exited while awaiting user interaction',
       );
       options.onProcessExit({
+        bridgeWorker: null,
         providerId: "codex",
         threads: [
           {

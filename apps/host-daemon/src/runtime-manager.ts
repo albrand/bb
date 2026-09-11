@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
   createAgentRuntime,
+  readBridgeWorkerEntries,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
   type BridgeWorkerRegistryEntry,
@@ -174,7 +175,7 @@ export interface RuntimeManagerOptions {
   dataDirSkillsRootPath?: string | null;
   fetchSkillTree?: FetchSkillTree;
   hostWatcher?: HostWatcher;
-  logger?: Pick<Logger, "debug" | "warn">;
+  logger?: Pick<Logger, "debug" | "info" | "warn">;
   provisionWorkspace?: (
     options: ProvisionWorkspaceArgs,
   ) => Promise<HostWorkspace>;
@@ -702,7 +703,7 @@ export class RuntimeManager {
     }
 
     this.entries.delete(args.entry.environmentId);
-    await args.entry.runtime.shutdown();
+    await this.stopRuntimeEntry(args.entry, "skill-catalog-replaced");
     await this.cleanupUnusedInjectedSkillStagingDirs([
       args.skillConfig.catalogHash,
     ]);
@@ -824,6 +825,27 @@ export class RuntimeManager {
     this.providerMaintenanceIdleTimer.unref();
   }
 
+  private async stopRuntimeEntry(
+    entry: RuntimeEntry,
+    reason: string,
+  ): Promise<void> {
+    const bridgeWorkers =
+      this.options.dataDir === undefined
+        ? []
+        : readBridgeWorkerEntries(
+            bridgeWorkerDirForDataDir(this.options.dataDir),
+          )
+            .entries.filter(
+              (worker) => worker.environmentId === entry.environmentId,
+            )
+            .map((worker) => ({ id: worker.id, pid: worker.pid }));
+    this.options.logger?.info(
+      { environmentId: entry.environmentId, reason, bridgeWorkers },
+      "Stopping environment runtime and its provider bridge workers",
+    );
+    await entry.runtime.shutdown();
+  }
+
   private async evictIdleRuntimeEntries(): Promise<void> {
     const idleEntries = [...this.entries.values()].filter(
       (entry) => !this.entryHasActiveEnvironmentWork(entry),
@@ -833,7 +855,11 @@ export class RuntimeManager {
       this.entries.delete(entry.environmentId);
     }
 
-    await Promise.all(idleEntries.map((entry) => entry.runtime.shutdown()));
+    await Promise.all(
+      idleEntries.map((entry) =>
+        this.stopRuntimeEntry(entry, "idle-after-shell-environment-change"),
+      ),
+    );
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
@@ -1054,7 +1080,7 @@ export class RuntimeManager {
     }
 
     this.entries.delete(environmentId);
-    await entry.runtime.shutdown();
+    await this.stopRuntimeEntry(entry, "environment-forgotten");
     return entry;
   }
 
@@ -1071,7 +1097,13 @@ export class RuntimeManager {
     const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
     const { live, reaped } = reapDeadBridgeWorkers(dir);
     const adoptable = live.filter(isAdoptableBridgeWorker);
-    const unadopted = live.filter((entry) => !adoptable.includes(entry));
+    const unadopted: { entry: BridgeWorkerRegistryEntry; reason: string }[] =
+      live
+        .filter((entry) => !adoptable.includes(entry))
+        .map((entry) => ({
+          entry,
+          reason: "incompatible-protocol-or-framing",
+        }));
     const byEnvironment = new Map<string, BridgeWorkerRegistryEntry[]>();
     for (const entry of adoptable) {
       const group = byEnvironment.get(entry.environmentId) ?? [];
@@ -1101,12 +1133,16 @@ export class RuntimeManager {
           { environmentId, err: error },
           "Could not adopt provider bridge workers; retiring them",
         );
-        unadopted.push(...entries);
+        unadopted.push(
+          ...entries.map((entry) => ({ entry, reason: "adoption-failed" })),
+        );
       }
     }
     const retired = await Promise.all(
-      unadopted.map(async (entry) => ({
+      unadopted.map(async ({ entry, reason }) => ({
         id: entry.id,
+        pid: entry.pid,
+        reason,
         outcome: await retireBridgeWorker({
           dir,
           entry,
@@ -1114,11 +1150,17 @@ export class RuntimeManager {
         }),
       })),
     );
-    if (reaped.length > 0 || retired.length > 0) {
-      this.options.logger?.debug(
+    if (adoptable.length > 0 || reaped.length > 0 || retired.length > 0) {
+      this.options.logger?.info(
         {
-          adopted: adoptable.map((entry) => entry.id),
-          reaped: reaped.map((entry) => entry.id),
+          adopted: adoptable
+            .filter((entry) => !retired.some((item) => item.id === entry.id))
+            .map((entry) => ({ id: entry.id, pid: entry.pid })),
+          reaped: reaped.map((entry) => ({
+            id: entry.id,
+            pid: entry.pid,
+            reason: "process-not-running",
+          })),
           retired,
         },
         "Reconciled provider bridge workers left by a previous host daemon",
@@ -1171,10 +1213,16 @@ export class RuntimeManager {
     this.entries.clear();
     this.pendingEntries.clear();
 
+    if (mode === "detach" && entries.length > 0) {
+      this.options.logger?.info(
+        { environmentIds: entries.map((entry) => entry.environmentId) },
+        "Detaching from environment runtimes; their provider bridge workers keep running",
+      );
+    }
     for (const entry of entries) {
       await (mode === "detach"
         ? entry.runtime.detach()
-        : entry.runtime.shutdown());
+        : this.stopRuntimeEntry(entry, "host-daemon-stopped"));
     }
     await this.shutdownProviderMaintenanceRuntime();
     await this.stopWatchingDataDirSkillsRoot();

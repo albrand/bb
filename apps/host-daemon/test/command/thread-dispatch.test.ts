@@ -2096,6 +2096,7 @@ describe("thread command dispatch", () => {
       providerThreadId: "provider-1",
     });
     onProcessExit?.({
+      bridgeWorker: null,
       providerId: "fake",
       threads: [
         {

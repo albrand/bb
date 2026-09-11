@@ -49,6 +49,7 @@ export interface AgentRuntimeProcessExitThreadState {
 }
 
 export interface AgentRuntimeProcessExitInfo {
+  bridgeWorker: { id: string; pid: number | null } | null;
   providerId: string;
   threads: AgentRuntimeProcessExitThreadState[];
   code: number | null;

@@ -585,6 +585,20 @@ export async function createHostDaemonApp(
     },
     onProcessExit: (info) => {
       const threadIds = info.threads.map((thread) => thread.threadId);
+      if (info.bridgeWorker !== null) {
+        options.logger.info(
+          {
+            bridgeWorkerId: info.bridgeWorker.id,
+            pid: info.bridgeWorker.pid,
+            providerId: info.providerId,
+            threadIds,
+            reason: info.expected ? "stopped-by-daemon" : "exited-on-its-own",
+            code: info.code,
+            signal: info.signal,
+          },
+          "Provider bridge worker exited; its registry entry is removed",
+        );
+      }
       if (!info.expected && info.stderr) {
         options.logger.warn(
           {
