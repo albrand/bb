@@ -300,6 +300,75 @@ describe("socket bridge workers", () => {
     }
   });
 
+  it("keeps only an unanswered request for replay, not the output other threads produced after it", async () => {
+    let requested = false;
+    const events: ThreadEvent[] = [];
+    const runtime = createScriptedEchoRuntime({
+      runtime: {
+        workspacePath,
+        bridgeWorkers: {
+          dir: bridgeWorkerDir,
+          environmentId: "env-1",
+          workspace: {
+            workspacePath,
+            workspaceProvisionType: "unmanaged",
+            personalWorkspaceRoot: null,
+          },
+        },
+        onEvent: (event, delivery) => {
+          events.push(event);
+          delivery?.onSettled();
+        },
+        onInteractiveRequest: () => {
+          requested = true;
+          return new Promise(() => undefined);
+        },
+      },
+    });
+    for (const threadId of ["t1", "t2"]) {
+      await runtime.startThread({
+        environmentId: "env-1",
+        threadId,
+        projectId: "p1",
+        providerId: "fake",
+        options: fullRuntimeOptions,
+      });
+    }
+    const [registered] = readBridgeWorkerEntries(bridgeWorkerDir).entries;
+    if (registered === undefined) throw new Error("no registered worker");
+    try {
+      await runtime.runTurn({
+        clientRequestId: "creq_555555555a",
+        threadId: "t1",
+        input: [promptTextInput({ text: "approve:command waiting" })],
+        options: fullRuntimeOptions,
+      });
+      await waitForRuntimeState({
+        label: "approval requested",
+        predicate: () => requested,
+      });
+      await runtime.runTurn({
+        clientRequestId: "creq_555555555b",
+        threadId: "t2",
+        input: [promptTextInput({ text: "stream:3 after the request" })],
+        options: fullRuntimeOptions,
+      });
+      await waitForThreadTurnCompleted({ events, threadId: "t2" });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      await runtime.detach();
+
+      const replayed = await framesReplayedAfterResume(
+        registered.socketPath,
+        0,
+      );
+      expect(replayed).toHaveLength(1);
+      expect(replayed[0]?.line).toContain("approval-");
+    } finally {
+      retire(registered);
+    }
+  }, 20_000);
+
   it("leaves lines unacknowledged, and so replayable, when the server never accepted their events", async () => {
     const { registered, runtime } = await startStreamingTurn({ settle: false });
     try {
