@@ -1940,6 +1940,14 @@ async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
   }
 }
 
+async function loadCachedConnectCredential(): Promise<void> {
+  const stored = (await connectCredentialCache?.read()) ?? null;
+  // A sign-in that finished while the keychain was being read wins.
+  if (cachedConnectCredential === null) {
+    cachedConnectCredential = stored;
+  }
+}
+
 async function runDesktopApp(): Promise<void> {
   ensurePackagedUserShellPath({
     env: process.env,
@@ -2088,7 +2096,6 @@ async function runDesktopApp(): Promise<void> {
     encryption: safeStorage,
     userDataPath,
   });
-  cachedConnectCredential = await connectCredentialCache.read();
   const logger = createDesktopLogger();
   connectServerSync = createConnectServerSync({
     getCredential: () => cachedConnectCredential,
@@ -2259,7 +2266,14 @@ async function runDesktopApp(): Promise<void> {
   }
   if (serverTargetStore.getTarget().kind === "builtin") {
     await initializeRuntime({ bridgePath, serverUrl, userDataPath });
+    // Fork (albrand/bb): read the keychain-backed credential only once the
+    // local server is up. Every rebuild carries a new signature, and macOS
+    // then holds `safeStorage` on an "allow access" prompt; read first, that
+    // prompt kept the server and every agent down until someone clicked it.
+    // The builtin target does not need the credential to start.
+    await loadCachedConnectCredential();
   } else {
+    await loadCachedConnectCredential();
     await applyServerTarget();
     connectServerSync.syncNow().catch(() => {});
   }
