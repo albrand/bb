@@ -131,6 +131,7 @@ function buildProviderProcessExitDetail(
 }
 
 export interface RuntimeEntry {
+  adoptionProtectedUntil: number | null;
   environmentId: string;
   runtime: AgentRuntime;
   skillCatalogHash: string | null;
@@ -620,9 +621,27 @@ export class RuntimeManager {
 
   private entryHasActiveRuntimeWork(entry: RuntimeEntry): boolean {
     return (
+      this.isAdoptionProtected(entry) ||
       entry.terminals.size > 0 ||
       entry.runtime.getLiveThreadIds().length > 0 ||
       entry.runtime.hasOpenBackgroundWork()
+    );
+  }
+
+  private isAdoptionProtected(entry: RuntimeEntry): boolean {
+    if (entry.adoptionProtectedUntil === null) return false;
+    if (Date.now() < entry.adoptionProtectedUntil) return true;
+    entry.adoptionProtectedUntil = null;
+    return false;
+  }
+
+  private releaseAdoptionProtection(environmentId: string): void {
+    const entry = this.entries.get(environmentId);
+    if (entry === undefined || entry.adoptionProtectedUntil === null) return;
+    entry.adoptionProtectedUntil = null;
+    this.options.logger?.info(
+      { environmentId },
+      "Adopted environment runtime is evictable again; it completed a turn under this daemon",
     );
   }
 
@@ -1161,7 +1180,15 @@ export class RuntimeManager {
             runtime: runtimeEntry.runtime,
           })),
         );
-        if (threads.length > 0) this.adoptionSettled = pendingAdoptionGate();
+        if (threads.length > 0) {
+          this.adoptionSettled = pendingAdoptionGate();
+          runtimeEntry.adoptionProtectedUntil =
+            Date.now() + ADOPTED_RUNTIME_PROTECTION_MS;
+          this.options.logger?.info(
+            { environmentId, protectedForMs: ADOPTED_RUNTIME_PROTECTION_MS },
+            "Adopted environment runtime is protected from eviction while its provider work is unknown",
+          );
+        }
       } catch (error) {
         this.options.logger?.warn(
           { environmentId, err: error },
@@ -1460,6 +1487,9 @@ export class RuntimeManager {
             },
           }),
       onEvent: (event, delivery) => {
+        if (event.type === "turn/completed") {
+          this.releaseAdoptionProtection(args.environmentId);
+        }
         this.options.onEvent?.({
           environmentId: args.environmentId,
           event,
@@ -1509,6 +1539,7 @@ export class RuntimeManager {
     });
 
     return {
+      adoptionProtectedUntil: null,
       environmentId: args.environmentId,
       runtime,
       skillCatalogHash: args.skillConfig?.catalogHash ?? null,
@@ -1577,6 +1608,7 @@ function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
 }
 
 const BRIDGE_WORKER_ADOPTION_WAIT_MS = 15_000;
+const ADOPTED_RUNTIME_PROTECTION_MS = 15 * 60_000;
 
 interface AdoptionGate {
   promise: Promise<void>;
