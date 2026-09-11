@@ -22,6 +22,7 @@ import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
 import {
   BRIDGE_ACK_METHOD,
   BRIDGE_RESUME_METHOD,
+  BRIDGE_SHUTDOWN_METHOD,
   BRIDGE_SOCKET_ENV,
   BRIDGE_SOCKET_TRANSPORT_VERSION,
   BRIDGE_SPILL_ENV,
@@ -39,7 +40,6 @@ import {
   readProcessIdentity,
   readProcessIdentityAsync,
   removeBridgeWorkerFiles,
-  retireBridgeWorker,
   socketDirectoryFor,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -294,6 +294,7 @@ export class SocketBridgeWorker
   private ackedKeepKey = "";
   private ackTimer: NodeJS.Timeout | null = null;
   private unconfirmedResponses: { id: string | number; wseq: number }[] = [];
+  private readonly restoredKeeps = new Set<number>();
   private lineHandler: ((line: string, wseq: number | null) => void) | null =
     null;
   readonly ackTracker: BridgeLineAckTracker;
@@ -482,6 +483,7 @@ export class SocketBridgeWorker
       }
       for (const unconfirmed of this.unconfirmedResponses.splice(0)) {
         this.ackTracker.restoreKept(unconfirmed.wseq, unconfirmed.id);
+        this.restoredKeeps.add(unconfirmed.wseq);
       }
       void this.connect(Date.now() + this.connectTimeoutMs);
     });
@@ -504,8 +506,11 @@ export class SocketBridgeWorker
       this.lineHandler?.(frame, null);
       return;
     }
-    if (decoded.wseq <= this.lastReceivedWseq) return;
-    this.lastReceivedWseq = decoded.wseq;
+    if (decoded.wseq <= this.lastReceivedWseq && !this.restoredKeeps.has(decoded.wseq)) {
+      return;
+    }
+    this.restoredKeeps.delete(decoded.wseq);
+    this.lastReceivedWseq = Math.max(this.lastReceivedWseq, decoded.wseq);
     this.lineHandler?.(decoded.line, decoded.wseq);
   }
 
@@ -594,13 +599,11 @@ export class SocketBridgeWorker
   }
 
   private async stopUnreachableWorker(): Promise<void> {
-    const outcome = await retireBridgeWorker({
-      dir: this.workerDir,
-      id: this.id,
-      socketPath: this.socketPath,
-      timeoutMs: BRIDGE_WORKER_FORCE_STOP_GRACE_MS,
-    });
-    if (outcome === "unreachable" && !this.exited) {
+    const asked = await requestBridgeWorkerShutdown(
+      this.socketPath,
+      BRIDGE_WORKER_FORCE_STOP_GRACE_MS,
+    );
+    if (!asked && !this.exited) {
       this.child.kill("SIGTERM");
     }
     await this.whenExited(BRIDGE_WORKER_FORCE_STOP_GRACE_MS);
@@ -611,13 +614,14 @@ export class SocketBridgeWorker
   private whenExited(timeoutMs: number): Promise<void> {
     if (this.exited) return Promise.resolve();
     return new Promise((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        this.off("exit", done);
+        resolve();
+      };
       const timer = setTimeout(done, timeoutMs);
       timer.unref();
       this.once("exit", done);
-      function done(): void {
-        clearTimeout(timer);
-        resolve();
-      }
     });
   }
 
@@ -654,6 +658,29 @@ function responseId(line: string): string | number | null {
   if (typeof parsed !== "object" || parsed === null) return null;
   const id: unknown = Reflect.get(parsed, "id");
   return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
+function requestBridgeWorkerShutdown(
+  socketPath: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(socketPath);
+    let asked = false;
+    const timer = setTimeout(() => socket.destroy(), timeoutMs);
+    timer.unref();
+    socket.once("connect", () => {
+      asked = true;
+      socket.write(
+        `${JSON.stringify({ jsonrpc: "2.0", method: BRIDGE_SHUTDOWN_METHOD })}\n`,
+      );
+    });
+    socket.on("error", () => undefined);
+    socket.once("close", () => {
+      clearTimeout(timer);
+      resolve(asked);
+    });
+  });
 }
 
 function connectSocket(socketPath: string): Promise<Socket> {

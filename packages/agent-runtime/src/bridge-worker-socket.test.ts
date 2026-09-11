@@ -585,6 +585,7 @@ describe("socket bridge workers", () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       expect(server.replayStats().frames).toBe(1);
+      expect(received.filter((wseq) => wseq === 1)).toHaveLength(2);
     } finally {
       worker.release();
       await server.close();
@@ -603,7 +604,7 @@ describe("socket bridge workers", () => {
         command: "/bin/sh",
         args: [
           "-c",
-          `trap 'echo stopped > ${stopped}; exit 0' TERM; sleep 30 & wait`,
+          `echo 'startup problem: no socket' >&2; trap 'echo stopped > ${stopped}; exit 0' TERM; sleep 30 & wait`,
         ],
         cwd: workspacePath,
         env: {},
@@ -622,10 +623,19 @@ describe("socket bridge workers", () => {
         },
       });
       worker.on("error", () => undefined);
+      let stderr = "";
+      worker.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
       try {
         await waitForRuntimeState({
           label: "worker asked to stop before the kill",
           predicate: () => existsSync(stopped),
+          timeoutMs: 10_000,
+        });
+        await waitForRuntimeState({
+          label: "the failed worker's log tail reported as stderr",
+          predicate: () => stderr.includes("startup problem"),
           timeoutMs: 10_000,
         });
       } finally {
