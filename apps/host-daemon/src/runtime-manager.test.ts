@@ -2605,7 +2605,10 @@ describe("RuntimeManager bridge workers", () => {
     permissionEscalation: null,
   } as const;
 
-  async function startTurnThenDetach(label: string) {
+  async function startTurnThenDetach(
+    label: string,
+    options: { idleAtDetach?: boolean } = {},
+  ) {
     const dataDir = await fs.mkdtemp(
       path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "bbw-"),
     );
@@ -2650,7 +2653,9 @@ describe("RuntimeManager bridge workers", () => {
       options: adoptionRuntimeOptions,
     });
     await waitFor(() =>
-      before.some((event) => JSON.stringify(event).includes("chunk1")),
+      options.idleAtDetach === true
+        ? before.some((event) => event.type === "turn/completed")
+        : before.some((event) => JSON.stringify(event).includes("chunk1")),
     );
     await new Promise((resolve) => setTimeout(resolve, 200));
     const turnStarted = before.find((event) => event.type === "turn/started");
@@ -2946,6 +2951,57 @@ describe("RuntimeManager bridge workers", () => {
       }
     }
     expect(isProcessAlive(registered.pid)).toBe(false);
+  }, 30_000);
+
+  it("keeps an adopted environment through a login-shell change while its provider work is still unknown", async () => {
+    const { createManager, registered } = await startTurnThenDetach(
+      "adopted-shell-env",
+      { idleAtDetach: true },
+    );
+    const after: ThreadEvent[] = [];
+    const adopting = createManager(after);
+    try {
+      await adopting.reconcileBridgeWorkers();
+      await adopting.completeBridgeWorkerAdoption(
+        async () => new Map([["t1", null]]),
+      );
+
+      await adopting.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+
+      expect(adopting.get("env-1")).toBeDefined();
+      expect(isProcessAlive(registered.pid)).toBe(true);
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
+
+  it("lets an adopted environment be evicted again once a turn completes under this daemon", async () => {
+    const { createManager, registered } = await startTurnThenDetach(
+      "adopted-shell-env-after-turn",
+    );
+    const after: ThreadEvent[] = [];
+    const adopting = createManager(after);
+    try {
+      await adopting.reconcileBridgeWorkers();
+      await adopting.completeBridgeWorkerAdoption(
+        async () => new Map([["t1", null]]),
+      );
+      await waitFor(() =>
+        after.some((event) => event.type === "turn/completed"),
+      );
+
+      await adopting.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+
+      expect(adopting.get("env-1")).toBeUndefined();
+    } finally {
+      await adopting.shutdownAll("stop");
+      if (isProcessAlive(registered.pid)) {
+        process.kill(registered.pid, "SIGKILL");
+      }
+    }
   }, 30_000);
 
   it("opens a new turn segment when the server already ended the seeded turn", async () => {
