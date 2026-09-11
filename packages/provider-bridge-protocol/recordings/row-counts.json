@@ -66,31 +66,31 @@
     "grammarDrops": 0
   },
   "claude-code/approval-allow": {
-    "events": 11,
-    "rows": 2,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "claude-code/approval-deny": {
     "events": 12,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
+  "claude-code/approval-deny": {
+    "events": 13,
+    "rows": 2,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
   "claude-code/auth-failure": {
-    "events": 7,
+    "events": 8,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "claude-code/compaction": {
-    "events": 59,
+    "events": 61,
     "rows": 3,
     "unhandled": 2,
     "grammarDrops": 0
   },
   "claude-code/fork": {
-    "events": 9,
+    "events": 10,
     "rows": 1,
     "unhandled": 0,
     "grammarDrops": 0
@@ -102,97 +102,97 @@
     "grammarDrops": 0
   },
   "claude-code/plan-mode": {
-    "events": 41,
+    "events": 42,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "claude-code/resume": {
-    "events": 18,
+    "events": 20,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "claude-code/steer": {
-    "events": 59,
+    "events": 61,
     "rows": 3,
     "unhandled": 2,
     "grammarDrops": 0
   },
   "claude-code/stop-interrupt": {
-    "events": 53,
+    "events": 55,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "claude-code/subagent": {
-    "events": 21,
+    "events": 22,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "claude-code/turn-tools": {
-    "events": 13,
-    "rows": 2,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "claude-code/user-question": {
-    "events": 12,
-    "rows": 1,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "claude-code/web-search": {
     "events": 14,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
-  "codex/approval-allow": {
-    "events": 27,
-    "rows": 2,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "codex/approval-deny": {
-    "events": 31,
-    "rows": 2,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "codex/archived-resume": {
-    "events": 22,
-    "rows": 2,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "codex/auth-failure": {
-    "events": 16,
-    "rows": 3,
-    "unhandled": 1,
-    "grammarDrops": 0
-  },
-  "codex/compaction": {
-    "events": 87,
-    "rows": 3,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "codex/empty-rollout": {
-    "events": 11,
-    "rows": 1,
-    "unhandled": 0,
-    "grammarDrops": 0
-  },
-  "codex/fork": {
+  "claude-code/user-question": {
     "events": 13,
     "rows": 1,
     "unhandled": 0,
     "grammarDrops": 0
   },
+  "claude-code/web-search": {
+    "events": 15,
+    "rows": 2,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/approval-allow": {
+    "events": 28,
+    "rows": 2,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/approval-deny": {
+    "events": 32,
+    "rows": 2,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/archived-resume": {
+    "events": 24,
+    "rows": 2,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/auth-failure": {
+    "events": 17,
+    "rows": 3,
+    "unhandled": 1,
+    "grammarDrops": 0
+  },
+  "codex/compaction": {
+    "events": 89,
+    "rows": 3,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/empty-rollout": {
+    "events": 12,
+    "rows": 1,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
+  "codex/fork": {
+    "events": 14,
+    "rows": 1,
+    "unhandled": 0,
+    "grammarDrops": 0
+  },
   "codex/missing-rollout": {
-    "events": 22,
+    "events": 24,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
@@ -204,49 +204,49 @@
     "grammarDrops": 0
   },
   "codex/plan-mode": {
-    "events": 46,
+    "events": 47,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/resume": {
-    "events": 22,
+    "events": 24,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/steer": {
-    "events": 87,
+    "events": 89,
     "rows": 3,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/stop-interrupt": {
-    "events": 28,
+    "events": 30,
     "rows": 3,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/subagent": {
-    "events": 42,
+    "events": 43,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/turn-tools": {
-    "events": 48,
+    "events": 49,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/user-question": {
-    "events": 18,
+    "events": 19,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0
   },
   "codex/web-search": {
-    "events": 17,
+    "events": 18,
     "rows": 2,
     "unhandled": 0,
     "grammarDrops": 0

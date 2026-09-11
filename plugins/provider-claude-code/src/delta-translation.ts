@@ -28,6 +28,7 @@ import {
   claudeBackgroundTasksChangedMessageSchema,
   claudeCompactBoundarySystemMessageSchema,
   claudeConversationResetMessageSchema,
+  claudeInitSystemMessageSchema,
   claudeModelFallbackSystemMessageSchema,
   claudeModelRefusalNoFallbackSystemMessageSchema,
   claudePermissionDeniedSystemMessageSchema,
@@ -44,6 +45,7 @@ import {
   type ClaudeResultMessage,
 } from "./schemas.js";
 import { buildClaudeProviderErrorInfo } from "./error-info.js";
+import { toClaudeExecutionDelta } from "./execution-report.js";
 import {
   foldClaudeTaskToolResult,
   type ClaudeTaskPlanState,
@@ -667,6 +669,11 @@ export function createClaudeDeltaTranslator(
           noTurnFallback: noTurnFallbackFor(event, context),
         },
       ];
+    }
+
+    const initMessage = claudeInitSystemMessageSchema.safeParse(event);
+    if (initMessage.success) {
+      return [toClaudeExecutionDelta(initMessage.data)];
     }
 
     const modelFallbackMessage =
