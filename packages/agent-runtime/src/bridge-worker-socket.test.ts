@@ -13,14 +13,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
+import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import { BRIDGE_SOCKET_TRANSPORT_VERSION } from "@bb/provider-bridge-protocol/bridge-kit";
 import {
+  createBridgeSocketServer,
   decodeBridgeFrame,
   readBoundedLines,
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
-import { readBridgeWorkerEntries } from "./bridge-worker-registry.js";
+import {
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+  readBridgeWorkerEntries,
+  readProcessIdentity,
+} from "./bridge-worker-registry.js";
 import {
   privateSocketDirectory,
   SocketBridgeWorker,
@@ -526,6 +533,67 @@ describe("socket bridge workers", () => {
     }
   }, 20_000);
 
+  it("keeps an answered request replayable when the socket dies before the acknowledgement", async () => {
+    const socketPath = join(bridgeWorkerDir, "answered.sock");
+    mkdirSync(bridgeWorkerDir, { recursive: true, mode: 0o700 });
+    const server = createBridgeSocketServer({
+      socketPath,
+      spillPath: join(bridgeWorkerDir, "answered.buf"),
+      reattachTtlMs: 60_000,
+      memoryCapBytes: 1024 * 1024,
+      hardCapBytes: 16 * 1024 * 1024,
+      onOverflow: () => undefined,
+      onBackpressure: () => undefined,
+    });
+    await server.listen({
+      onLine: () => undefined,
+      onShutdown: () => undefined,
+    });
+    const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    const worker = adoptedWorker({
+      dir: bridgeWorkerDir,
+      pid: standIn.pid ?? 0,
+      socketPath,
+      workspacePath,
+    });
+    const received: number[] = [];
+    worker.setLineHandler((_line, wseq) => {
+      if (wseq === null) return;
+      received.push(wseq);
+      worker.ackTracker.beginLine(wseq, wseq === 1 ? "req-1" : null);
+      worker.ackTracker.endLine(false);
+    });
+    try {
+      worker.resume();
+      server.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "req-1", method: "session/request_permission" })}\n`,
+      );
+      server.write(`${JSON.stringify({ chunk: "after the request" })}\n`);
+      await waitForRuntimeState({
+        label: "everything but the unanswered request acknowledged",
+        predicate: () =>
+          received.length === 2 && server.replayStats().frames === 1,
+      });
+
+      worker.stdin.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "req-1", result: {} })}\n`,
+      );
+      const rogue = connect(socketPath);
+      rogue.on("error", () => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      rogue.destroy();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      expect(server.replayStats().frames).toBe(1);
+    } finally {
+      worker.release();
+      await server.close();
+      if (standIn.pid !== undefined && isPidAlive(standIn.pid)) {
+        process.kill(standIn.pid, "SIGKILL");
+      }
+    }
+  }, 20_000);
+
   it.skipIf(process.platform === "win32")(
     "asks a worker that never opened its socket to stop before it kills it",
     async () => {
@@ -664,6 +732,39 @@ async function framesReplayedAfterResume(
   await new Promise((resolve) => setTimeout(resolve, 300));
   socket.destroy();
   return frames;
+}
+
+function adoptedWorker(args: {
+  dir: string;
+  pid: number;
+  socketPath: string;
+  workspacePath: string;
+}): SocketBridgeWorker {
+  return new SocketBridgeWorker({
+    kind: "adopt",
+    workerDir: args.dir,
+    connectTimeoutMs: 5_000,
+    entry: {
+      id: "abcdef012345",
+      formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+      pid: args.pid,
+      processIdentity: readProcessIdentity(args.pid) ?? "",
+      socketPath: args.socketPath,
+      pluginId: "provider-scripted-echo",
+      providerId: "fake",
+      processKey: "fake#bridge:1",
+      environmentId: "env-1",
+      bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+      transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+      startedAt: new Date().toISOString(),
+      workspace: {
+        workspacePath: args.workspacePath,
+        workspaceProvisionType: "unmanaged",
+        personalWorkspaceRoot: null,
+      },
+      threads: {},
+    },
+  });
 }
 
 function retire(entry: { pid: number; socketPath: string }): void {

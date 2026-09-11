@@ -293,6 +293,7 @@ export class SocketBridgeWorker
   private ackedWseq = 0;
   private ackedKeepKey = "";
   private ackTimer: NodeJS.Timeout | null = null;
+  private unconfirmedResponses: { id: string | number; wseq: number }[] = [];
   private lineHandler: ((line: string, wseq: number | null) => void) | null =
     null;
   readonly ackTracker: BridgeLineAckTracker;
@@ -479,6 +480,9 @@ export class SocketBridgeWorker
         this.stdout.end();
         return;
       }
+      for (const unconfirmed of this.unconfirmedResponses.splice(0)) {
+        this.ackTracker.restoreKept(unconfirmed.wseq, unconfirmed.id);
+      }
       void this.connect(Date.now() + this.connectTimeoutMs);
     });
     if (this.resumeRequested) this.sendResume(socket);
@@ -522,7 +526,13 @@ export class SocketBridgeWorker
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
         const id = responseId(line);
-        if (id !== null) this.ackTracker.responded(id);
+        if (id !== null) {
+          const kept = this.ackTracker.keptWseqFor(id);
+          if (kept !== null && this.socket !== null) {
+            this.unconfirmedResponses.push({ id, wseq: kept });
+          }
+          this.ackTracker.responded(id);
+        }
         newline = pending.indexOf("\n");
       }
     });
@@ -557,6 +567,7 @@ export class SocketBridgeWorker
         params: { through: this.ackedWseq, keep },
       })}\n`,
     );
+    this.unconfirmedResponses = [];
   }
 
   get stoppedByDaemon(): boolean {
