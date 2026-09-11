@@ -143,7 +143,7 @@ interface ProviderProcessExitedErrorArgs {
 
 const PROVIDER_STDERR_TAIL_MAX_BYTES = 4_000;
 const PROVIDER_PROCESS_CLOSE_GRACE_MS = 1_000;
-const BRIDGE_WORKER_DETACH_SETTLE_TIMEOUT_MS = 5_000;
+const BRIDGE_WORKER_DETACH_SETTLE_TIMEOUT_MS = 1_500;
 
 class ProviderProcessExitedError extends Error {
   constructor(args: ProviderProcessExitedErrorArgs) {

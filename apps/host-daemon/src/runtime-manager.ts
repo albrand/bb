@@ -1219,10 +1219,12 @@ export class RuntimeManager {
         "Detaching from environment runtimes; their provider bridge workers keep running",
       );
     }
-    for (const entry of entries) {
-      await (mode === "detach"
-        ? entry.runtime.detach()
-        : this.stopRuntimeEntry(entry, "host-daemon-stopped"));
+    if (mode === "detach") {
+      await Promise.all(entries.map((entry) => entry.runtime.detach()));
+    } else {
+      for (const entry of entries) {
+        await this.stopRuntimeEntry(entry, "host-daemon-stopped");
+      }
     }
     await this.shutdownProviderMaintenanceRuntime();
     await this.stopWatchingDataDirSkillsRoot();

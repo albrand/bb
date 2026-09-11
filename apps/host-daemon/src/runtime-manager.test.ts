@@ -2127,6 +2127,34 @@ describe("RuntimeManager bridge workers", () => {
     expect(stopped?.detach).not.toHaveBeenCalled();
   });
 
+  it("detaches every environment at once, so the detach fits the launcher's head start", async () => {
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const manager = new RuntimeManager({
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-parallel"),
+      createRuntime: () => {
+        const runtime = createFakeRuntime();
+        runtime.detach.mockImplementation(async () => {
+          concurrent += 1;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          concurrent -= 1;
+        });
+        return runtime;
+      },
+    });
+    for (const environmentId of ["env-1", "env-2", "env-3"]) {
+      await manager.ensureEnvironment({
+        environmentId,
+        workspacePath: "/tmp/env-parallel",
+      });
+    }
+
+    await manager.shutdownAll("detach");
+
+    expect(maxConcurrent).toBe(3);
+  });
+
   it("retires live workers a previous daemon left behind, since it cannot adopt them", async () => {
     const dataDir = await makeTempDir("bb-runtime-manager-retire-");
     const dir = path.join(dataDir, "bridge-workers");
