@@ -113,7 +113,12 @@ function formatCheckedAt(now: () => number): string {
 export function shouldEnableDesktopAutoUpdate(
   args: ShouldEnableDesktopAutoUpdateArgs,
 ): boolean {
-  return args.isPackaged || args.env.BB_DESKTOP_AUTO_UPDATE === "1";
+  // Fork build (albrand/bb): the official updater would replace this build
+  // with upstream's and drop our patches, and an unsigned app cannot use
+  // Squirrel.Mac anyway. Updates come from the fork's rebuild automation;
+  // the in-app updater runs only when explicitly asked for.
+  void args.isPackaged;
+  return args.env.BB_DESKTOP_AUTO_UPDATE === "1";
 }
 
 export function createElectronAutoUpdaterAdapter(
