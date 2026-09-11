@@ -4,6 +4,7 @@ export type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 export {
   type BridgeWorkerRegistryEntry,
   type BridgeWorkerWorkspace,
+  BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
   readProcessIdentity,
   reapDeadBridgeWorkers,
