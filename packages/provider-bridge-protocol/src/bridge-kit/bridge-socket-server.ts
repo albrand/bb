@@ -22,7 +22,7 @@ export interface BridgeSocketServerArgs {
   memoryCapBytes: number;
   hardCapBytes: number;
   onOverflow: (bytes: number) => void;
-  onBackpressure: (paused: boolean) => void;
+  onBackpressure: (paused: boolean, retainedBytes: number) => void;
 }
 
 export interface BridgeSocketListenArgs {
@@ -135,12 +135,13 @@ export function createBridgeSocketServer(
 
   function updateBackpressure(): void {
     const retained = buffer.retainedBytes();
-    if (!paused && retained > args.hardCapBytes) {
+    const attached = current !== null && !closed;
+    if (!paused && attached && retained > args.hardCapBytes) {
       paused = true;
-      args.onBackpressure(true);
-    } else if (paused && retained <= args.memoryCapBytes) {
+      args.onBackpressure(true, retained);
+    } else if (paused && (!attached || retained <= args.memoryCapBytes)) {
       paused = false;
-      args.onBackpressure(false);
+      args.onBackpressure(false, retained);
     }
   }
 
@@ -177,6 +178,7 @@ export function createBridgeSocketServer(
       if (current !== socket) return;
       current = null;
       resumed = false;
+      updateBackpressure();
       if (!closed) armReattachTimer();
     });
     const handlers = listenArgs;
@@ -247,10 +249,7 @@ export function createBridgeSocketServer(
     clearReattachTimer();
     current?.destroy();
     current = null;
-    if (paused) {
-      paused = false;
-      args.onBackpressure(false);
-    }
+    updateBackpressure();
     buffer.dispose();
     const listening = server;
     server = null;
