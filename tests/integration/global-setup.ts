@@ -1,13 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isNodeError, removePathWithRetry } from "./helpers/remove-path.js";
-import { integrationTmpBase } from "./helpers/tmp-base.js";
+import {
+  HARNESS_TMP_ROOT_PREFIX,
+  integrationTmpBase,
+} from "./helpers/tmp-base.js";
 import {
   isProcessAlive,
   killProcessesHoldingFilesUnder,
 } from "./helpers/tmp-root-processes.js";
 
-const INTEGRATION_TMP_PREFIX = "bb-integration-";
 const STALE_TMP_ROOT_AGE_MS = 60 * 60_000;
 
 async function readParentPid(tmpRoot: string): Promise<number | null> {
@@ -35,7 +37,7 @@ async function listIntegrationTmpRoots(): Promise<string[]> {
   return entries
     .filter(
       (entry) =>
-        entry.isDirectory() && entry.name.startsWith(INTEGRATION_TMP_PREFIX),
+        entry.isDirectory() && entry.name.startsWith(HARNESS_TMP_ROOT_PREFIX),
     )
     .map((entry) => path.join(integrationTmpBase(), entry.name));
 }
