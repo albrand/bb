@@ -73,7 +73,11 @@ export async function waitForAgentWorkToDrain(
     if (activeThreadCount === 0 && !backgroundWorkOpen) return "drained";
     if (now() >= deadline) {
       args.logger.warn(
-        { activeThreadCount, backgroundWorkOpen, drainTimeoutMs: args.timeoutMs },
+        {
+          activeThreadCount,
+          backgroundWorkOpen,
+          drainTimeoutMs: args.timeoutMs,
+        },
         "Restarting for a protocol self-update while agent work is still running; it will be interrupted.",
       );
       return "timed-out";
@@ -404,6 +408,7 @@ export class ServerConnection {
         localApiPort: this.options.localApiPort,
         activeThreads: this.options.getActiveThreads?.() ?? [],
         loadedEnvironments: this.options.getLoadedEnvironments?.() ?? [],
+        adoptedThreads: this.options.getAdoptedThreads?.() ?? [],
       });
       this.session = session;
       return session;

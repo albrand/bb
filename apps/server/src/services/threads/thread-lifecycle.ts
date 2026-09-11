@@ -252,6 +252,7 @@ interface InterruptActiveThreadsArgs {
 
 interface InterruptActiveThreadsForHostArgs {
   cause?: "host-connection-lost";
+  exceptThreadIds?: ReadonlySet<string>;
   hostId: string;
   reason: SystemThreadInterruptedReason;
 }
@@ -1667,7 +1668,9 @@ export function interruptActiveThreadsForHost(
     .all();
 
   return interruptActiveThreads(deps, {
-    threads: activeThreads,
+    threads: activeThreads.filter(
+      (thread) => args.exceptThreadIds?.has(thread.threadId) !== true,
+    ),
     reason: args.reason,
     ...(args.cause ? { cause: args.cause } : {}),
   });

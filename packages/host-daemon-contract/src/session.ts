@@ -1,6 +1,9 @@
-import type {
-  HostDaemonActiveTurnsRequest,
-  HostDaemonActiveTurnsResponse,
+import {
+  hostDaemonAdoptedThreadSchema,
+  type HostDaemonActiveTurnsRequest,
+  type HostDaemonActiveTurnsResponse,
+  type HostDaemonDetachNoticeRequest,
+  type HostDaemonDetachNoticeResponse,
 } from "./fork-adoption.js";
 import type { Hono } from "hono";
 import { hc } from "hono/client";
@@ -110,6 +113,7 @@ export const hostDaemonSessionOpenRequestSchema = z.object({
   protocolVersion: z.number().int().positive(),
   activeThreads: z.array(hostDaemonActiveThreadSchema),
   loadedEnvironments: z.array(hostDaemonLoadedEnvironmentSchema).default([]),
+  adoptedThreads: z.array(hostDaemonAdoptedThreadSchema).optional(),
 });
 export type HostDaemonSessionOpenRequest = z.output<
   typeof hostDaemonSessionOpenRequestSchema
@@ -878,6 +882,12 @@ export type HostDaemonInternalSchema = {
     $post: Endpoint<
       { json: HostDaemonActiveTurnsRequest },
       HostDaemonActiveTurnsResponse
+    >;
+  };
+  "/session/fork/detach-notice": {
+    $post: Endpoint<
+      { json: HostDaemonDetachNoticeRequest },
+      HostDaemonDetachNoticeResponse
     >;
   };
 };
