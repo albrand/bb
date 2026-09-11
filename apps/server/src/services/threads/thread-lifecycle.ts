@@ -1406,11 +1406,35 @@ async function releaseIdleThreadRuntime(
   if (environment === null) {
     return;
   }
-  await runAwaitedThreadStopCommand(deps, {
+  const released = await runAwaitedThreadStopCommand(deps, {
     command: buildThreadStopCommand({
       environmentId: environment.id,
       hostId: environment.hostId,
       intent: "release",
+      threadId,
+    }),
+    hostId: environment.hostId,
+    threadId,
+  });
+  if (released?.activeTurnRetained !== true) {
+    return;
+  }
+  // The server saw an idle thread, but the daemon still holds an active turn:
+  // a turn that never reported completion. Every later send is refused with
+  // "Refusing to start a competing turn", so a release that leaves it in place
+  // strands the thread. The only callers are explicit user stops, so interrupt.
+  deps.logger.warn(
+    { threadId },
+    "Release declined by an active daemon turn; interrupting",
+  );
+  // Not routed through markThreadStopRequested: `stop.requested` is not a valid
+  // transition from idle, and idle is exactly the server's (wrong) view here.
+  // The interrupt goes straight to the daemon, which owns the stray turn.
+  await runAwaitedThreadStopCommand(deps, {
+    command: buildThreadStopCommand({
+      environmentId: environment.id,
+      hostId: environment.hostId,
+      intent: "interrupt",
       threadId,
     }),
     hostId: environment.hostId,
@@ -1426,11 +1450,12 @@ async function runAwaitedThreadStopCommand(
     hostId: string;
     threadId: string;
   },
-): Promise<void> {
+): Promise<{ activeTurnRetained?: boolean } | null> {
+  let outcome: { activeTurnRetained?: boolean } | null = null;
   await threadStopRequestDeduper.run(args.threadId, async () => {
     inFlightThreadRpcGuard.claim(args.threadId, "thread.stop");
     try {
-      await runLiveHostCommand(deps, {
+      outcome = await runLiveHostCommand(deps, {
         command: args.command,
         hostId: args.hostId,
         timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
@@ -1451,6 +1476,9 @@ async function runAwaitedThreadStopCommand(
       inFlightThreadRpcGuard.release(args.threadId, "thread.stop");
     }
   });
+  // Assigned inside the deduped callback, which control-flow narrowing cannot
+  // see, so restate the declared type rather than let it narrow to `null`.
+  return outcome as { activeTurnRetained?: boolean } | null;
 }
 
 export function requestActiveRuntimeThreadStopIfNeeded(

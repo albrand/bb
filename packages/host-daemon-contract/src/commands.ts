@@ -1205,6 +1205,10 @@ const turnSubmitResultSchema = z.object({
 const threadStopResultSchema = z
   .object({
     providerCheckpointId: z.string().min(1).nullable(),
+    // A `release` stop leaves an active turn alone. Reporting that lets the
+    // caller tell "released" from "declined" instead of reporting success for
+    // a thread that is still wedged on a turn the server believes is over.
+    activeTurnRetained: z.boolean().optional(),
   })
   .strict();
 const emptyCommandResultSchema = z.object({});
