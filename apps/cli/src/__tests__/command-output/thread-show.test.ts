@@ -459,6 +459,7 @@ describe("bb thread show command output", () => {
         },
       },
       pendingTodos: null,
+      execution: null,
     });
   });
 
@@ -489,6 +490,7 @@ describe("bb thread show command output", () => {
       thread,
       environment: null,
       pendingTodos: null,
+      execution: null,
     });
   });
 });

@@ -377,6 +377,7 @@ type ExpectedThreadsKey =
   | "conversationOutline"
   | "count"
   | "defaultExecutionOptions"
+  | "executionProfile"
   | "delete"
   | "editMessage"
   | "events"

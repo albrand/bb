@@ -260,6 +260,7 @@ import type {
   WorkspaceFileListResponse,
   WorkspacePathListResponse,
 } from "./api-types.js";
+import type { ThreadExecutionProfileResponse } from "./api/threads.js";
 import type {
   ThreadTabsWireResponse,
   UpdateThreadTabsRequest,
@@ -1514,6 +1515,12 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest<PathId>(),
       response: jsonResponse<ResolvedThreadExecutionOptions | null>(),
+    }),
+    executionProfile: defineRoute({
+      path: "/threads/:id/execution-profile",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ThreadExecutionProfileResponse>(),
     }),
     storageFiles: defineRoute({
       path: "/threads/:id/thread-storage/files",
