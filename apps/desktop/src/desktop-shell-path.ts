@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 
 const MACOS_LOGIN_SHELL = "/bin/zsh";
 const SHELL_PATH_COMMAND = 'printf "%s" "$PATH"';
-const SHELL_PATH_TIMEOUT_MS = 2_000;
+// A real oh-my-zsh + completion setup takes seconds under load; at 2s it timed
+// out and the app launched with launchd's bare PATH (no codex, claude, node).
+const SHELL_PATH_TIMEOUT_MS = 10_000;
 
 export interface DesktopShellPathLogger {
   warn(message: string): void;
@@ -54,12 +56,19 @@ interface ShellPathUpdatedResult {
   path: string;
 }
 
-function defaultSpawnLoginShellPath(
+export function defaultSpawnLoginShellPath(
   args: SpawnLoginShellPathArgs,
 ): ShellPathSpawnResult {
   const result = spawnSync(args.command, args.args, {
     encoding: "utf8",
     timeout: args.timeoutMs,
+    // An INTERACTIVE shell (-i) ignores SIGTERM, which is spawnSync's default
+    // kill signal, so a timed-out probe was never killed and the app's main
+    // process stayed blocked in spawnSync: bb would not launch (2026-09-11).
+    killSignal: "SIGKILL",
+    // Nothing may wait on input. An inherited or open stdin lets any startup
+    // file that reads it (prompts, update checks) hang the probe.
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   return {
