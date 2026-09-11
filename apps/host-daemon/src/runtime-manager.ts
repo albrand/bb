@@ -1357,6 +1357,11 @@ export class RuntimeManager {
       shellEnv,
       threadStorageRootPath: this.options.threadStorageRootPath ?? undefined,
       bridgeBundleDir: this.options.bridgeBundleDir,
+      ...(this.options.dataDir === undefined
+        ? {}
+        : {
+            bridgeWorkerDir: path.join(this.options.dataDir, "bridge-workers"),
+          }),
       onEvent: (event) => {
         this.options.onEvent?.({
           environmentId: args.environmentId,

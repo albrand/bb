@@ -36,6 +36,7 @@ import type { AgentRuntimeBridgeLaunch, AgentRuntimeOptions } from "./types.js";
 
 interface CreateProviderProcessManagerArgs {
   adapterProcessEnv?: Record<string, string>;
+  bridgeWorkerDir?: string;
   createAdapter?: () => BridgeProtocolAdapter;
   env?: Record<string, string>;
   handleStdoutLine?: (line: string, childPid: number | undefined) => void;
@@ -104,6 +105,7 @@ describe("createAgentRuntime process lifecycle", () => {
       additionalWorkspaceWriteRoots: [],
       createAdapter: args.createAdapter ?? (() => adapter),
       bridgeBundleDir: undefined,
+      bridgeWorkerDir: args.bridgeWorkerDir,
       bridgeNodeExecutablePath: process.execPath,
       captureThreadExitState: (threadId) => ({
         activeTurnId: null,

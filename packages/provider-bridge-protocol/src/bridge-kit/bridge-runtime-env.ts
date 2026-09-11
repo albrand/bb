@@ -1,4 +1,5 @@
 import { PROVIDER_BRIDGE_RECORD_DIR_ENV } from "./bridge-recorder.js";
+import { BRIDGE_SOCKET_ENV } from "./bridge-socket-server.js";
 
 export function withoutBridgeRuntimeEnv(
   env: NodeJS.ProcessEnv,
@@ -6,5 +7,6 @@ export function withoutBridgeRuntimeEnv(
   const childEnv: NodeJS.ProcessEnv = { ...env };
   delete childEnv.ELECTRON_RUN_AS_NODE;
   delete childEnv[PROVIDER_BRIDGE_RECORD_DIR_ENV];
+  delete childEnv[BRIDGE_SOCKET_ENV];
   return childEnv;
 }

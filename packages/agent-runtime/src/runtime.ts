@@ -298,6 +298,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   const providerProcesses = new RuntimeProviderProcessManager({
     additionalWorkspaceWriteRoots,
     bridgeBundleDir: options.bridgeBundleDir,
+    bridgeWorkerDir: options.bridgeWorkerDir,
     ...(bridgeNodeEnv !== undefined ? { bridgeNodeEnv } : {}),
     bridgeNodeExecutablePath: process.execPath,
     captureThreadExitState: (threadId) => ({
