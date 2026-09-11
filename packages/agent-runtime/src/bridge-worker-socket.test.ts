@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
 import { spawn } from "node:child_process";
-import { connect } from "node:net";
+import { connect, createServer, type Socket } from "node:net";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
 import { BRIDGE_SOCKET_TRANSPORT_VERSION } from "@bb/provider-bridge-protocol/bridge-kit";
 import {
@@ -594,6 +594,80 @@ describe("socket bridge workers", () => {
       }
     }
   }, 20_000);
+
+  it("keeps a request kept for replay when the acknowledgement never reached the worker", async () => {
+    const socketPath = join(bridgeWorkerDir, "unread.sock");
+    mkdirSync(bridgeWorkerDir, { recursive: true, mode: 0o700 });
+    const acks: { through: number; keep: number[] }[] = [];
+    const connections: Socket[] = [];
+    const listener = createServer((socket) => {
+      connections.push(socket);
+      socket.on("error", () => undefined);
+      readBoundedLines({
+        input: socket,
+        onLine: (line) => {
+          const parsed: unknown = JSON.parse(line);
+          if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            Reflect.get(parsed, "method") === "bridge/ack"
+          ) {
+            const params = Reflect.get(parsed, "params");
+            acks.push({
+              through: Number(Reflect.get(params as object, "through")),
+              keep: [...(Reflect.get(params as object, "keep") as number[])],
+            });
+          }
+        },
+        onOverflow: () => undefined,
+      });
+      socket.write(`1\t${JSON.stringify({ jsonrpc: "2.0", id: "req-1", method: "session/request_permission" })}\n`);
+    });
+    await new Promise<void>((resolve) => listener.listen(socketPath, resolve));
+    const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    const worker = adoptedWorker({
+      dir: bridgeWorkerDir,
+      pid: standIn.pid ?? 0,
+      socketPath,
+      workspacePath,
+    });
+    worker.setLineHandler((_line, wseq) => {
+      if (wseq === null) return;
+      worker.ackTracker.beginLine(wseq, "req-1");
+      worker.ackTracker.endLine(false);
+    });
+    try {
+      worker.resume();
+      await waitForRuntimeState({
+        label: "the request acknowledged and kept",
+        predicate: () => acks.some((ack) => ack.keep.includes(1)),
+        timeoutMs: 5_000,
+      });
+
+      worker.stdin.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "req-1", result: {} })}\n`,
+      );
+      await waitForRuntimeState({
+        label: "the answering acknowledgement written",
+        predicate: () => acks.some((ack) => !ack.keep.includes(1)),
+        timeoutMs: 5_000,
+      }).catch(() => undefined);
+      for (const connection of connections.splice(0)) connection.destroy();
+
+      await waitForRuntimeState({
+        label: "the request kept again after the reconnect",
+        predicate: () => (acks.at(-1)?.keep ?? []).includes(1),
+        timeoutMs: 10_000,
+      });
+    } finally {
+      worker.release();
+      for (const connection of connections) connection.destroy();
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+      if (standIn.pid !== undefined && isPidAlive(standIn.pid)) {
+        process.kill(standIn.pid, "SIGKILL");
+      }
+    }
+  }, 30_000);
 
   it.skipIf(process.platform === "win32")(
     "asks a worker that never opened its socket to stop before it kills it",

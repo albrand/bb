@@ -295,6 +295,7 @@ export class SocketBridgeWorker
   private ackTimer: NodeJS.Timeout | null = null;
   private unconfirmedResponses: { id: string | number; wseq: number }[] = [];
   private readonly restoredKeeps = new Set<number>();
+  private confirmResponsesOnNextFrame = false;
   private lineHandler: ((line: string, wseq: number | null) => void) | null =
     null;
   readonly ackTracker: BridgeLineAckTracker;
@@ -481,6 +482,7 @@ export class SocketBridgeWorker
         this.stdout.end();
         return;
       }
+      this.confirmResponsesOnNextFrame = false;
       for (const unconfirmed of this.unconfirmedResponses.splice(0)) {
         this.ackTracker.restoreKept(unconfirmed.wseq, unconfirmed.id);
         this.restoredKeeps.add(unconfirmed.wseq);
@@ -488,6 +490,7 @@ export class SocketBridgeWorker
       void this.connect(Date.now() + this.connectTimeoutMs);
     });
     if (this.resumeRequested) this.sendResume(socket);
+    this.scheduleAck();
     this.stdin.pipe(socket);
     this.observeResponses();
     readBoundedLines({
@@ -501,6 +504,10 @@ export class SocketBridgeWorker
   }
 
   private receiveFrame(frame: string): void {
+    if (this.confirmResponsesOnNextFrame) {
+      this.confirmResponsesOnNextFrame = false;
+      this.unconfirmedResponses = [];
+    }
     const decoded = decodeBridgeFrame(frame);
     if (decoded === null) {
       this.lineHandler?.(frame, null);
@@ -572,7 +579,9 @@ export class SocketBridgeWorker
         params: { through: this.ackedWseq, keep },
       })}\n`,
     );
-    this.unconfirmedResponses = [];
+    if (this.unconfirmedResponses.length > 0) {
+      this.confirmResponsesOnNextFrame = true;
+    }
   }
 
   get stoppedByDaemon(): boolean {
