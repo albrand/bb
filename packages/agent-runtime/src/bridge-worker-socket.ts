@@ -419,7 +419,7 @@ export class SocketBridgeWorker
       `${JSON.stringify({
         jsonrpc: "2.0",
         method: BRIDGE_RESUME_METHOD,
-        params: { afterWseq: this.lastReceivedWseq },
+        params: { afterWseq: this.ackTracker.ackableThrough() },
       })}\n`,
     );
   }

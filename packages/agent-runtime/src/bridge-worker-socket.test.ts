@@ -408,6 +408,35 @@ describe("socket bridge workers", () => {
     }
   }, 20_000);
 
+  it("keeps output the server has not accepted when it reconnects after a dropped socket", async () => {
+    const { events, registered } = await startStreamingTurn({ settle: false });
+    try {
+      let unaccepted: { wseq: number; line: string } | undefined;
+      const deadline = Date.now() + 10_000;
+      while (unaccepted === undefined && Date.now() < deadline) {
+        unaccepted = (
+          await framesReplayedAfterResume(registered.socketPath, 0)
+        ).at(0);
+      }
+      if (unaccepted === undefined) throw new Error("no unaccepted frame");
+      await waitForRuntimeState({
+        label: "streamed output after the reconnect",
+        predicate: () => JSON.stringify(events).includes("chunk2"),
+        timeoutMs: 10_000,
+      });
+
+      const afterReconnect = await framesReplayedAfterResume(
+        registered.socketPath,
+        0,
+      );
+      expect(afterReconnect.map((frame) => frame.wseq)).toContain(
+        unaccepted.wseq,
+      );
+    } finally {
+      retire(registered);
+    }
+  }, 20_000);
+
   it("keeps only an unanswered request for replay, not the output other threads produced after it", async () => {
     let requested = false;
     const events: ThreadEvent[] = [];
