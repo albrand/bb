@@ -109,6 +109,21 @@ describe("daemon event replay keys", () => {
         "third",
         "from a stock daemon",
       ]);
+
+      const racing = [
+        warning("raced", "w1:7:0"),
+        warning("raced too", "w1:7:1"),
+      ];
+      const statuses = (
+        await Promise.all([post(racing), post(racing), post(racing)])
+      ).map((response) => response.status);
+      expect(statuses).toContain(200);
+      expect(statuses.every((status) => status === 200 || status === 503)).toBe(
+        true,
+      );
+      expect(
+        storedSummaries().filter((summary) => summary.startsWith("raced")),
+      ).toEqual(["raced", "raced too"]);
     });
   });
 });
