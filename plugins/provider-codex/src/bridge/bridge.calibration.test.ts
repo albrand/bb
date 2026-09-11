@@ -408,6 +408,7 @@ function firstTurnId(events: readonly ThreadEvent[]): string | undefined {
 const GOLDEN_EVENT_STREAM: string[] = [
   "thread/started",
   "thread/identity",
+  "thread/execution/reported",
   "turn/started",
   "turn/input/accepted",
   "item/started:agentMessage",
