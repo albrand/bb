@@ -74,12 +74,16 @@ export class BridgeReplayBuffer {
     }
   }
 
-  *framesAfter(wseq: number): Generator<BridgeReplayFrame> {
+  *framesAfter(
+    wseq: number,
+    keep: readonly number[] = [],
+  ): Generator<BridgeReplayFrame> {
+    const kept = new Set(keep);
     for (const frame of this.inMemory) {
-      if (frame.wseq > wseq) yield frame;
+      if (frame.wseq > wseq || kept.has(frame.wseq)) yield frame;
     }
     for (const spilled of [...this.spilled]) {
-      if (spilled.wseq <= wseq || this.spillFd === null) continue;
+      if ((spilled.wseq <= wseq && !kept.has(spilled.wseq)) || this.spillFd === null) continue;
       const bytes = Buffer.alloc(spilled.length);
       readSync(this.spillFd, bytes, 0, spilled.length, spilled.offset);
       yield { wseq: spilled.wseq, bytes };

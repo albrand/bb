@@ -177,7 +177,7 @@ export function createBridgeSocketServer(
       return;
     }
     buffer.ackThrough(message.afterWseq, kept);
-    for (const frame of buffer.framesAfter(message.afterWseq)) {
+    for (const frame of buffer.framesAfter(message.afterWseq, kept)) {
       socket.write(frame.bytes);
     }
     resumed = true;
