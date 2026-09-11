@@ -27,7 +27,10 @@ import type {
   NewThreadRequest,
   PluginEnvironmentProviderInputsProps,
 } from "@get-bb/plugin-sdk";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type {
+  SystemEnvironmentProvider,
+  SystemMachineProvider,
+} from "@bb/server-contract";
 import {
   NewThreadComposer,
   type NewThreadComposerState,
@@ -57,6 +60,7 @@ const mocks = vi.hoisted(() => ({
   environmentProviders: [] as unknown[],
   plugins: [] as unknown[],
   serverAccessReady: true,
+  machineProviders: [] as SystemMachineProvider[],
 }));
 
 vi.mock("@/components/promptbox/NewThreadPromptBox", () => ({
@@ -78,7 +82,7 @@ vi.mock("@/hooks/queries/environment-provider-queries", () => ({
 }));
 
 vi.mock("@/hooks/queries/machine-provider-queries", () => ({
-  useSystemMachineProviders: () => ({ providers: [] }),
+  useSystemMachineProviders: () => ({ providers: mocks.machineProviders }),
 }));
 
 vi.mock("@/hooks/queries/plugin-settings-queries", () => ({
@@ -598,6 +602,7 @@ describe("PluginNewThreadComposer seeding", () => {
     mocks.extraProjects = [];
     mocks.plugins = [];
     mocks.serverAccessReady = true;
+    mocks.machineProviders = [];
     mocks.environmentProviders = [
       CHECKOUT_PROVIDER,
       MANAGED_WORKTREE_SUGAR_PROVIDER,
@@ -1672,6 +1677,7 @@ describe("NewThreadComposer environment providers", () => {
     mocks.extraProjects = [];
     mocks.plugins = [];
     mocks.serverAccessReady = true;
+    mocks.machineProviders = [];
     mocks.environmentProviders = [CHECKOUT_PROVIDER];
     resetPluginSlotStoreForTest();
     registerCheckoutInputsControl();
@@ -1705,6 +1711,70 @@ describe("NewThreadComposer environment providers", () => {
       </MemoryRouter>,
     );
   }
+
+  it("updates the access banner for a composed machine without relying on plugin status", async () => {
+    const composition: SystemEnvironmentProvider = {
+      ...OPTIONAL_INPUTS_PROVIDER,
+      machineProviderId: "qa-machine",
+      machineInputs: null,
+      machineAcceptsEmptyInputs: true,
+    };
+    mocks.environmentProviders = [CHECKOUT_PROVIDER, composition];
+    mocks.machineProviders = [
+      {
+        id: "qa-machine",
+        displayName: "QA machine",
+        description: "Test machine",
+        icon: "Server",
+        logoUrl: null,
+        pluginId: "qa",
+        inputs: null,
+        acceptsEmptyInputs: true,
+        supportsSuspend: false,
+      },
+    ];
+    mocks.serverAccessReady = false;
+    const onSubmit = vi.fn();
+    const rendered = renderUnseeded(onSubmit, "live-access");
+    await act(async () => {
+      latestPromptBoxProps().modeConfig.environment.onSelectProvider(
+        composition,
+        null,
+      );
+    });
+    await screen.findByText("Pair with bb connect");
+    expect(latestPromptBoxProps().disabled).toBe(true);
+    mocks.serverAccessReady = true;
+    rendered.rerender(
+      <MemoryRouter>
+        <LocationProbe />
+        <PluginNewThreadComposer
+          draftKey="live-access"
+          defaultProjectId="proj_1"
+          initialPrompt="run in the sandbox"
+          onSubmit={onSubmit}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Pair with bb connect")).toBeNull(),
+    );
+    expect(latestPromptBoxProps().disabled).toBe(false);
+    mocks.serverAccessReady = false;
+    rendered.rerender(
+      <MemoryRouter>
+        <LocationProbe />
+        <PluginNewThreadComposer
+          draftKey="live-access"
+          defaultProjectId="proj_1"
+          initialPrompt="run in the sandbox"
+          onSubmit={onSubmit}
+        />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Pair with bb connect");
+    expect(latestPromptBoxProps().disabled).toBe(true);
+  });
 
   it("submits the value the provider's configuration slot produced", async () => {
     mocks.environmentProviders = [CHECKOUT_PROVIDER, SANDBOX_PROVIDER];
