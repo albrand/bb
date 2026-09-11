@@ -148,6 +148,16 @@ function reread(harness: TestAppHarness, queuedMessageId: string) {
   return row;
 }
 
+function pinClaimedAt(
+  harness: TestAppHarness,
+  queuedMessageId: string,
+  claimedAt: number,
+): void {
+  harness.db.$client
+    .prepare("UPDATE queued_thread_messages SET claimed_at = ? WHERE id = ?")
+    .run(claimedAt, queuedMessageId);
+}
+
 function retryOf(harness: TestAppHarness, queuedMessageId: string) {
   return getQueuedMessageDispatchRetry(harness.db, queuedMessageId);
 }
@@ -360,6 +370,11 @@ describe("queued message dispatch retry", () => {
         { kind: "explicit-send" },
       );
       expect(claimed).not.toBeNull();
+      // Pin the claim to the instant the sweep will run. A cutoff of "now" is
+      // an exclusive bound, so this is the case that survives it — and a warm
+      // worker reaches it on its own, which is how the full suite caught this
+      // while the file passed alone.
+      pinClaimedAt(harness, row.id, Date.now() + 60_000);
 
       // A claimed row is invisible everywhere a user or a drain would look for
       // it, which is exactly right while a dispatch holds it and exactly wrong
