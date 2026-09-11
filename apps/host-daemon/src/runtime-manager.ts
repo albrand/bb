@@ -294,6 +294,7 @@ export class RuntimeManager {
   private readonly threadControlTails = new Map<string, Promise<void>>();
   private providerMaintenanceRuntime: AgentRuntime | null = null;
   private runtimesClosed = false;
+  private readonly adoptingThreadIds = new Set<string>();
   private readonly adoptedBridgeThreads: {
     threadId: string;
     activeTurnId: string | null;
@@ -632,17 +633,11 @@ export class RuntimeManager {
     if (entry.adoptionProtectedUntil === null) return false;
     if (Date.now() < entry.adoptionProtectedUntil) return true;
     entry.adoptionProtectedUntil = null;
-    return false;
-  }
-
-  private releaseAdoptionProtection(environmentId: string): void {
-    const entry = this.entries.get(environmentId);
-    if (entry === undefined || entry.adoptionProtectedUntil === null) return;
-    entry.adoptionProtectedUntil = null;
     this.options.logger?.info(
-      { environmentId },
-      "Adopted environment runtime is evictable again; it completed a turn under this daemon",
+      { environmentId: entry.environmentId },
+      "Adopted environment runtime is evictable again; its adoption hold has expired",
     );
+    return false;
   }
 
   private hasInFlightThreadCommand(
@@ -1180,6 +1175,9 @@ export class RuntimeManager {
             runtime: runtimeEntry.runtime,
           })),
         );
+        for (const thread of threads) {
+          this.adoptingThreadIds.add(thread.threadId);
+        }
         if (threads.length > 0) {
           this.adoptionSettled = pendingAdoptionGate();
           runtimeEntry.adoptionProtectedUntil =
@@ -1267,17 +1265,20 @@ export class RuntimeManager {
     try {
       await this.continueAdoptedThreads(adopted, fetchActiveTurnIds);
     } finally {
+      this.adoptingThreadIds.clear();
       this.adoptionSettled.resolve();
     }
   }
 
-  async whenBridgeWorkerAdoptionSettled(): Promise<void> {
+  async whenBridgeWorkerAdoptionSettled(threadId?: string): Promise<void> {
     if (this.adoptionSettled.settled) return;
+    if (threadId !== undefined && !this.adoptingThreadIds.has(threadId)) return;
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([
       this.adoptionSettled.promise,
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, BRIDGE_WORKER_ADOPTION_WAIT_MS);
+        timer.unref();
       }),
     ]);
     clearTimeout(timer);
@@ -1487,9 +1488,6 @@ export class RuntimeManager {
             },
           }),
       onEvent: (event, delivery) => {
-        if (event.type === "turn/completed") {
-          this.releaseAdoptionProtection(args.environmentId);
-        }
         this.options.onEvent?.({
           environmentId: args.environmentId,
           event,

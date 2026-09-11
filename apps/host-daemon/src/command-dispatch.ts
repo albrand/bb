@@ -735,7 +735,9 @@ export async function dispatchCommand<
       command.type.startsWith("thread.") ||
       command.type.startsWith("turn.")
     ) {
-      await options.runtimeManager.whenBridgeWorkerAdoptionSettled();
+      await options.runtimeManager.whenBridgeWorkerAdoptionSettled(
+        "threadId" in command ? command.threadId : undefined,
+      );
     }
     return await commandHandlers[command.type](command, options);
   } catch (error) {

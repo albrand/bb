@@ -2669,9 +2669,9 @@ describe("RuntimeManager bridge workers", () => {
     }
   }, 30_000);
 
-  it("lets an adopted environment be evicted again once a turn completes under this daemon", async () => {
+  it("lets an adopted environment be evicted again once its hold has expired", async () => {
     const { createManager, registered } = await startTurnThenDetach(
-      "adopted-shell-env-after-turn",
+      "adopted-shell-env-after-hold",
     );
     const after: ThreadEvent[] = [];
     const adopting = createManager(after);
@@ -2684,7 +2684,13 @@ describe("RuntimeManager bridge workers", () => {
         after.some((event) => event.type === "turn/completed"),
       );
 
-      await adopting.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await adopting.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+      } finally {
+        vi.useRealTimers();
+      }
 
       expect(adopting.get("env-1")).toBeUndefined();
     } finally {
