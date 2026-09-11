@@ -1225,6 +1225,55 @@ describe("createHostDaemonApp", () => {
     }
   });
 
+  it("settles an interactive request whose turn the provider completed without waiting for it", async () => {
+    const { app, fetchRecorder, runtimeOptions } = await createAppFixture();
+    try {
+      await app.connection.start();
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-turn-done",
+        workspacePath: await makeTempDir("bb-host-daemon-app-turn-done-"),
+      });
+      const options = runtimeOptions.current;
+      if (!options?.onInteractiveRequest || !options.onEvent) {
+        throw new Error("Expected runtime callbacks to be captured");
+      }
+      const request = createCommandApprovalRequest();
+      const pending = options.onInteractiveRequest(request);
+      await vi.waitFor(() => {
+        expect(
+          fetchRecorder.requests.filter(
+            (record) =>
+              record.pathname === "/internal/session/interactive-request",
+          ),
+        ).toHaveLength(1);
+      });
+      const pendingRejection = expect(pending).rejects.toThrow(
+        "The provider completed the turn without waiting for this interaction",
+      );
+
+      options.onEvent({
+        type: "turn/completed",
+        threadId: request.threadId,
+        providerThreadId: request.providerThreadId,
+        scope: turnScope(request.turnId),
+        status: "completed",
+      });
+
+      await pendingRejection;
+      await vi.waitFor(() => {
+        expect(
+          fetchRecorder.requests.filter(
+            (record) =>
+              record.pathname ===
+              "/internal/session/interactive-request/interrupt",
+          ),
+        ).toHaveLength(1);
+      });
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
   it("logs stack-bearing fields for dynamic tool forwarding failures", async () => {
     const { app, logger, runtimeOptions } = await createAppFixture();
     try {

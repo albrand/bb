@@ -488,6 +488,23 @@ export async function createHostDaemonApp(
     applyMachineEnvironment: (shell) =>
       machineEnvironment.shellEnvironment(shell),
     onEvent: ({ environmentId, event, delivery }) => {
+      if (event.type === "turn/completed" && event.scope.kind === "turn") {
+        const reason =
+          "The provider completed the turn without waiting for this interaction";
+        for (const providerId of interactiveRequestRegistry.settleCompletedTurn(
+          {
+            reason,
+            threadId: event.threadId,
+            turnId: event.scope.turnId,
+          },
+        )) {
+          enqueueInteractiveInterrupt({
+            providerId,
+            threadIds: [event.threadId],
+            reason,
+          });
+        }
+      }
       try {
         eventSink.emit({
           threadId: event.threadId,
