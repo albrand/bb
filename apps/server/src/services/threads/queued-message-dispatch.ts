@@ -4,6 +4,7 @@ import { waitForMachineMaintenance } from "../machines/provider-orchestration.js
 import {
   getQueuedThreadMessage,
   getThread,
+  listDueQueuedMessageDispatchRetries,
   listDueScheduledQueuedThreadMessages,
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessagePluginWaitRefs,
@@ -26,10 +27,13 @@ import { recordQueuedMessageDrainFailure } from "./queue-drain-failure.js";
 import { clearQueuedMessageWait } from "./queue-waits.js";
 import {
   createAutomaticQueuedMessageGroupEligibility,
+  isQueuedMessageAutoSendPausedError,
+  isQueuedMessageClaimLostError,
   releaseStaleQueuedMessageDispatchClaims,
   sendNextQueuedMessageIfPresent,
   sendQueuedMessage,
 } from "./queued-messages.js";
+import { ThreadContextClearInProgressError } from "./thread-context-mutation-guard.js";
 
 export interface QueueWaitPluginDirectory {
   isPluginLoaded(pluginId: string): boolean;
@@ -43,6 +47,7 @@ export type QueuedMessageDispatchWake =
   | { kind: "interaction-settled"; threadId: string }
   | { kind: "host-connected"; hostId: string }
   | { kind: "time-reached"; now: number }
+  | { kind: "retry-due"; now: number }
   | { kind: "plugin-recheck" }
   | { kind: "plugin-unregistered"; pluginId: string }
   | { kind: "idle-recovery"; now: number }
@@ -119,6 +124,7 @@ function dispatchWakeContext(
     case "orphaned-plugin-recovery":
       return { wake: wake.kind };
     case "time-reached":
+    case "retry-due":
       return { now: wake.now, wake: wake.kind };
     case "plugin-recheck":
       return { wake: wake.kind };
@@ -249,6 +255,9 @@ async function executePreparedQueuedMessageDispatch(
     case "time-reached":
       await runDueScheduledDispatch(deps, wake.now);
       return;
+    case "retry-due":
+      await runDueRetryDispatch(deps, wake.now);
+      return;
     case "idle-recovery":
       releaseStaleQueuedMessageDispatchClaims(deps, wake.now);
       await runIdleThreadRecovery(deps);
@@ -354,6 +363,27 @@ async function runInteractionSettledDispatch(
   }
 }
 
+/**
+ * Outcomes that are not this row's attempt failing, and must never be written
+ * down as one.
+ *
+ * A host command that timed out is still in flight. A lost claim means another
+ * drain got there first, or the claim aged out — either way this attempt never
+ * ran. A paused auto-send and a context clear in progress are the queue
+ * deliberately holding the row. `sendNextQueuedMessageIfPresent` already
+ * swallows the last three on its own path; this is the same list for the
+ * wake-driven path, which used to record every one of them as a terminal
+ * failure and park the row.
+ */
+function isDeferredQueuedMessageDispatchOutcome(error: unknown): boolean {
+  return (
+    isCommandTimeoutError(error) ||
+    isQueuedMessageClaimLostError(error) ||
+    isQueuedMessageAutoSendPausedError(error) ||
+    error instanceof ThreadContextClearInProgressError
+  );
+}
+
 async function attemptAutomaticQueuedMessage(
   deps: QueueDispatchDeps,
   row: QueuedMessageDispatchRef,
@@ -378,14 +408,14 @@ async function attemptAutomaticQueuedMessage(
       threadId: row.threadId,
     });
   } catch (error) {
-    if (isCommandTimeoutError(error)) {
+    if (isDeferredQueuedMessageDispatchOutcome(error)) {
       deps.logger.debug(
         {
           queuedMessageId: row.id,
           threadId: row.threadId,
           ...runtimeErrorLogFields(deps.config, error),
         },
-        "Queued message dispatch deferred by host timeout",
+        "Queued message dispatch deferred",
       );
       return;
     }
@@ -439,6 +469,28 @@ async function runDueScheduledDispatch(
   now: number,
 ): Promise<void> {
   for (const row of listDueScheduledQueuedThreadMessages(deps.db, now)) {
+    await attemptAutomaticQueuedMessage(deps, row, {
+      now,
+      respectRequeuePacing: true,
+    });
+  }
+}
+
+/**
+ * Re-attempts every row whose retry backoff has elapsed.
+ *
+ * Its own sweep rather than a `sendAt` on the row, because the retry clock is
+ * core's and the row's schedule is the user's: overwriting `sendAt` would
+ * discard "send this at 9am" and, on a row with no schedule at all, invent a
+ * countdown the queue would render. The claim path still applies the row's
+ * ordinary eligibility, so a due retry into a busy thread waits for the turn
+ * to end exactly as the first attempt did.
+ */
+async function runDueRetryDispatch(
+  deps: QueueDispatchDeps,
+  now: number,
+): Promise<void> {
+  for (const row of listDueQueuedMessageDispatchRetries(deps.db, now)) {
     await attemptAutomaticQueuedMessage(deps, row, {
       now,
       respectRequeuePacing: true,

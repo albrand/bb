@@ -1,6 +1,7 @@
 import {
   claimQueuedThreadMessageGroup,
   claimNextQueuedThreadMessageGroup,
+  listDeferredQueuedMessageDispatchRetryIds,
   createQueuedThreadMessageInTransaction,
   deleteClaimedQueuedThreadMessageBatchInTransaction,
   getQueuedThreadMessage,
@@ -131,9 +132,18 @@ export function createAutomaticQueuedMessageGroupEligibility(
   args: { now: number; thread: Thread },
 ): QueuedThreadMessageGroupEligibility {
   const activeTurnId = getActiveTurnId(deps, args.thread.id);
+  // Read once here rather than per member inside the claim transaction. A
+  // backoff only the due sweep honoured would be no backoff at all: the idle
+  // drain re-claims a `thread-busy` row on every sweep tick without ever
+  // consulting a clock, so every automatic claim has to ask the same question.
+  const deferredRetryIds = listDeferredQueuedMessageDispatchRetryIds(deps.db, {
+    now: args.now,
+    threadId: args.thread.id,
+  });
   return (group) =>
     group.every((member) => {
       if (member.failureReason !== null) return false;
+      if (deferredRetryIds.has(member.id)) return false;
       const waitingOn = parseStoredQueuedThreadMessageWaitingOn(member);
       switch (waitingOn?.kind) {
         case undefined:
@@ -397,14 +407,14 @@ function claimQueuedThreadMessageForSend(
   );
 }
 
-function isQueuedMessageClaimLostError(error: unknown): boolean {
+export function isQueuedMessageClaimLostError(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.body.code === QUEUED_MESSAGE_CLAIM_LOST_CODE
   );
 }
 
-function isQueuedMessageAutoSendPausedError(error: unknown): boolean {
+export function isQueuedMessageAutoSendPausedError(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.body.code === QUEUED_MESSAGE_AUTO_SEND_PAUSED_CODE
@@ -888,3 +898,4 @@ export function releaseStaleQueuedMessageDispatchClaims(
     protectedClaimTokens: [...activeQueuedMessageClaimTokens],
   });
 }
+

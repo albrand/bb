@@ -4,6 +4,7 @@ import {
   isMachineWaitingForExecution,
 } from "../machines/lifecycle.js";
 import {
+  clearQueuedMessageDispatchRetry,
   deleteClaimedQueuedThreadMessageBatchInTransaction,
   getEnvironment,
   getThread,
@@ -369,6 +370,16 @@ async function runDispatchAttempt(
       sendAt,
       claimed,
     });
+    if (entry !== null && claimed !== null && claimed.length > 0) {
+      // A re-queue is a fresh, successful statement of why this row is
+      // waiting, so it supersedes the failed attempts behind it exactly as it
+      // supersedes `failureReason`: the row did not fail this time, it decided
+      // to wait. A budget carried across an unrelated blip would otherwise
+      // spend itself on the next real failure.
+      // `DISPATCH_REQUEUE_MIN_INTERVAL_MS` already paces a plugin that would
+      // clear and re-queue in a loop, so resetting here cannot spin.
+      clearQueuedMessageDispatchRetry(deps.db, entry.id);
+    }
     if (entry === null) {
       // The row vanished under a re-queue (the user deleted it). Nothing is
       // waiting and nothing dispatched; report it as dispatched-away so the
