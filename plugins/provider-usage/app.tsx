@@ -224,6 +224,20 @@ function formatReset(resetsAt: string | null): string | null {
   );
 }
 
+function formatResetCountdown(resetsAt: string | null): string | null {
+  if (resetsAt === null) return null;
+  const remaining = new Date(resetsAt).getTime() - Date.now();
+  if (!Number.isFinite(remaining)) return null;
+  if (remaining <= 0) return "now";
+  const minutes = Math.ceil(remaining / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24)
+    return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 === 0 ? `${days}d` : `${days}d ${hours % 24}h`;
+}
+
 function formatUsdCents(cents: number, alwaysShowCents: boolean): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -242,6 +256,7 @@ function UsageWindow({
 }) {
   const [showReset, setShowReset] = useState(false);
   const reset = formatReset(window.resetsAt);
+  const countdown = formatResetCountdown(window.resetsAt);
   const value =
     window.cost === null
       ? Math.round(window.usedPercent) + "% used"
@@ -278,6 +293,12 @@ function UsageWindow({
           </span>
           <span className="w-9 shrink-0 text-right tabular-nums text-sidebar-foreground">
             {Math.round(window.usedPercent)}%
+          </span>
+          <span
+            aria-hidden="true"
+            className="w-14 shrink-0 text-right tabular-nums text-subtle-foreground"
+          >
+            {countdown ?? "—"}
           </span>
         </span>
         {showReset ? (
@@ -446,6 +467,14 @@ function MachineSelector({
 function ProviderUsageStatus({
   dismiss,
 }: ExperimentalSidebarFooterDisclosureProps) {
+  const [, refreshCountdowns] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => refreshCountdowns((tick) => tick + 1),
+      60_000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
   const snapshot = useSyncExternalStore(
     subscribeStore,
     getStoreSnapshot,
