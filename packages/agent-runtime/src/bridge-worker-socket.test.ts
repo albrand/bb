@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
+import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import { readBridgeWorkerEntries } from "./bridge-worker-registry.js";
 import type { AgentRuntimeProcessExitInfo } from "./types.js";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
@@ -37,7 +39,7 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkerDir,
+        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
         onEvent: (event) => events.push(event),
       },
     });
@@ -52,6 +54,21 @@ describe("socket bridge workers", () => {
       expect(
         readdirSync(bridgeWorkerDir).some((name) => name.endsWith(".sock")),
       ).toBe(true);
+      const { entries } = readBridgeWorkerEntries(bridgeWorkerDir);
+      expect(entries).toEqual([
+        expect.objectContaining({
+          environmentId: "env-1",
+          pluginId: "provider-scripted-echo",
+          providerId: "fake",
+          bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+        }),
+      ]);
+      const [registered] = entries;
+      expect(registered?.processKey).toMatch(/^fake#bridge:/u);
+      expect(registered?.socketPath).toBe(
+        join(bridgeWorkerDir, `${registered?.id}.sock`),
+      );
+      expect(() => process.kill(registered?.pid ?? -1, 0)).not.toThrow();
 
       await runtime.runTurn({
         clientRequestId: "creq_555555554a",
@@ -84,7 +101,7 @@ describe("socket bridge workers", () => {
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
-        bridgeWorkerDir,
+        bridgeWorkers: { dir: bridgeWorkerDir, environmentId: "env-1" },
         onEvent: () => undefined,
         onProcessExit: (info) => exits.push(info),
       },
