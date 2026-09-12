@@ -3,7 +3,10 @@ import { eq } from "drizzle-orm";
 import type { DbConnection } from "../../src/connection.js";
 import { createEventId } from "../../src/ids.js";
 import { noopNotifier } from "../../src/notifier.js";
-import { prepareCompletedEventOutputData } from "../../src/data/retained-event-outputs.js";
+import {
+  getCompletedEventOutputMinTruncatableChars,
+  prepareCompletedEventOutputData,
+} from "../../src/data/retained-event-outputs.js";
 import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   getCompletedEventOutputTruncationLimits,
@@ -11,8 +14,11 @@ import {
 import {
   FILE_CHANGE_DIFF_RETAINED_HEAD_CHARS,
   FILE_CHANGE_DIFF_RETAINED_TAIL_CHARS,
+  FILE_CHANGE_DIFF_TRUNCATED_LENGTH,
   FILE_CHANGE_DIFF_TRUNCATION_MARKER,
   FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS,
+  isTruncatedFileChangeDiff,
+  truncateFileChangeDiff,
   truncateFileChangeDiffs,
 } from "../../src/data/fork-file-change-truncation.js";
 import { upsertHost } from "../../src/data/hosts.js";
@@ -325,5 +331,74 @@ describe("fork file-change diff truncation", () => {
       changes: { diff?: string }[];
     };
     expect(twice.changes[0]?.diff).toBe(afterFirst);
+  });
+});
+
+describe("truncation never grows a payload and never mistakes content for a marker", () => {
+  it("still truncates a diff that quotes the marker text as ordinary content", () => {
+    const quoted = `${"a".repeat(9_000)}${FILE_CHANGE_DIFF_TRUNCATION_MARKER}${"b".repeat(9_000)}`;
+    expect(isTruncatedFileChangeDiff(quoted)).toBe(false);
+    const truncated = truncateFileChangeDiff(quoted);
+    expect(truncated).not.toBeNull();
+    expect(truncated?.length).toBe(FILE_CHANGE_DIFF_TRUNCATED_LENGTH);
+  });
+
+  it("leaves a diff alone when truncating it would not save bytes", () => {
+    const justOver = "c".repeat(FILE_CHANGE_DIFF_TRUNCATED_LENGTH);
+    expect(justOver.length).toBeGreaterThan(
+      FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS,
+    );
+    expect(truncateFileChangeDiff(justOver)).toBeNull();
+
+    const worthIt = "c".repeat(FILE_CHANGE_DIFF_TRUNCATED_LENGTH + 1);
+    const truncated = truncateFileChangeDiff(worthIt);
+    expect(truncated).not.toBeNull();
+    expect(truncated!.length).toBeLessThan(worthIt.length);
+  });
+
+  it("recognises its own output structurally and does not truncate it twice", () => {
+    const big = "d".repeat(FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS + 50_000);
+    const once = truncateFileChangeDiff(big);
+    expect(once).not.toBeNull();
+    expect(isTruncatedFileChangeDiff(once!)).toBe(true);
+    expect(truncateFileChangeDiff(once!)).toBeNull();
+  });
+
+  it("leaves a command output alone when truncating it would not save bytes", () => {
+    const limits = getCompletedEventOutputTruncationLimits("commandExecution");
+    const minTruncatable = getCompletedEventOutputMinTruncatableChars(limits);
+    expect(minTruncatable).toBeGreaterThan(limits.thresholdChars);
+    const prepare = (aggregatedOutput: string) =>
+      prepareCompletedEventOutputData({
+        createdAt: 1_000,
+        itemKind: "commandExecution",
+        type: "item/completed",
+        data: JSON.stringify({
+          item: {
+            type: "commandExecution",
+            id: "item-cmd",
+            command: "echo",
+            cwd: "/tmp",
+            status: "completed",
+            approvalStatus: "approved",
+            aggregatedOutput,
+          },
+          providerThreadId: "provider-thread-1",
+          threadId: "thr_1",
+          type: "item/completed",
+        }),
+      });
+
+    const noGain = "n".repeat(minTruncatable);
+    const untouched = prepare(noGain);
+    expect(untouched.retainedOutput).toBeNull();
+    expect(JSON.parse(untouched.data).item.aggregatedOutput).toBe(noGain);
+
+    const worthIt = "w".repeat(minTruncatable + 500);
+    const shortened = prepare(worthIt);
+    expect(shortened.retainedOutput?.value).toBe(worthIt);
+    expect(
+      JSON.parse(shortened.data).item.aggregatedOutput.length,
+    ).toBeLessThan(worthIt.length);
   });
 });

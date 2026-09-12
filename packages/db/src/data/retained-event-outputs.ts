@@ -97,6 +97,17 @@ function targetForItemKind(
   );
 }
 
+export function getCompletedEventOutputMinTruncatableChars(
+  limits: CompletedEventOutputTruncationLimits,
+): number {
+  return Math.max(
+    limits.thresholdChars,
+    limits.retainedHeadChars +
+      limits.retainedTailChars +
+      COMPLETED_EVENT_OUTPUT_TRUNCATION_MARKER.length,
+  );
+}
+
 function truncateOutput(
   value: string,
   limits: CompletedEventOutputTruncationLimits,
@@ -124,7 +135,7 @@ function prepareRetainedOutputData(args: {
   const value = args.item[args.outputPath];
   if (
     typeof value !== "string" ||
-    value.length <= args.limits.thresholdChars
+    value.length <= getCompletedEventOutputMinTruncatableChars(args.limits)
   ) {
     return { data: args.data, retainedOutput: null };
   }

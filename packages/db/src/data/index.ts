@@ -350,6 +350,7 @@ export {
   deleteExpiredRetainedEventOutputs,
   hydrateRetainedEventOutputRows,
   hydrateRetainedEventOutputRowsWithinDataByteLimit,
+  getCompletedEventOutputMinTruncatableChars,
   prepareCompletedEventOutputData,
   insertPreparedRetainedEventOutput,
 } from "./retained-event-outputs.js";
@@ -471,7 +472,9 @@ export {
   FILE_CHANGE_DIFF_RETAINED_TAIL_CHARS,
   FILE_CHANGE_DIFF_TRUNCATION_MARKER,
   FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS,
+  FILE_CHANGE_DIFF_TRUNCATED_LENGTH,
   FILE_CHANGE_SCAN_INDEX,
+  isTruncatedFileChangeDiff,
   truncateFileChangeDiff,
   truncateFileChangeDiffs,
   truncateFileChangeDiffsInPayload,
