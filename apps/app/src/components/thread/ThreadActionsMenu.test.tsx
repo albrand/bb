@@ -232,6 +232,33 @@ describe("ThreadActionsMenu", () => {
       screen.queryByRole("menuitem", { name: /Open beside/ }),
     ).not.toBeNull();
   });
+
+  it("reaches the directions through the right-click context menu surface", () => {
+    const onOpenInSplit = vi.fn();
+    const store = createStore();
+    store.set(splitLayoutAtom, null);
+    render(
+      <Provider store={store}>
+        <ThreadActionsContextMenu
+          thread={thread}
+          onOpenInSplit={onOpenInSplit}
+        >
+          <button type="button">Row</button>
+        </ThreadActionsContextMenu>
+      </Provider>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Open beside/ }));
+    expect(onOpenInSplit).toHaveBeenCalledWith("right");
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Open above or below/ }),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open below" }));
+    expect(onOpenInSplit).toHaveBeenCalledWith("bottom");
+  });
 });
 
 describe("ThreadActionsMenu section moves", () => {

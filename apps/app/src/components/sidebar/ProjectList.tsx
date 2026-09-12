@@ -502,7 +502,7 @@ export function ProjectListNewThreadAction({
 
   return (
     <NewThreadPaneContextMenu
-      enabled={newThreadSplit !== undefined}
+      enabled={newThreadSplit?.onPointerDown !== undefined}
       onOpenInPane={(side) => {
         newThreadSplit?.openInSplit(side);
       }}

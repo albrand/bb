@@ -17,7 +17,7 @@ import { notifyPaneLimit } from "@/lib/split-layout/notifyPaneLimit";
 import { openPaneContentInSplit } from "@/lib/split-layout/openPaneContentInSplit";
 import {
   countPanes,
-  findPaneByContent,
+  findReusablePaneByContent,
   listPanes,
   MAX_PANES,
   replacePaneContent,
@@ -172,14 +172,14 @@ export function beginSidebarPaneContentSplitDrag({
       if (layout === null) return null;
       return decideThreadDrop({
         zone,
-        threadAlreadyOpen: findPaneByContent(layout.root, content) !== null,
+        threadAlreadyOpen: findReusablePaneByContent(layout.root, content) !== null,
         atMaxPanes: countPanes(layout.root) >= MAX_PANES,
       });
     },
     onDrop: (target) => {
       const layout = store.get(splitLayoutAtom);
       if (layout === null) return;
-      const existing = findPaneByContent(layout.root, content);
+      const existing = findReusablePaneByContent(layout.root, content);
       const next =
         existing !== null
           ? setFocus(layout, existing.paneId)

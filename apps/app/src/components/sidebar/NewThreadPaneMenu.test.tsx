@@ -41,7 +41,10 @@ function eightPanes(): SplitLayout {
   };
 }
 
-function renderNewThreadAction(layout: SplitLayout | null) {
+function renderNewThreadAction(
+  layout: SplitLayout | null,
+  { splitDraggable = true }: { splitDraggable?: boolean } = {},
+) {
   const openInSplit = vi.fn();
   const onNewChat = vi.fn();
   const store = createStore();
@@ -52,7 +55,10 @@ function renderNewThreadAction(layout: SplitLayout | null) {
   render(
     <ProjectListNewThreadAction
       splitEnabled
-      newThreadSplit={{ openInSplit, onPointerDown: vi.fn() }}
+      newThreadSplit={{
+        openInSplit,
+        ...(splitDraggable ? { onPointerDown: vi.fn() } : {}),
+      }}
       onNewChat={onNewChat}
     />,
     { wrapper },
@@ -89,5 +95,15 @@ describe("New thread pane affordances", () => {
     ).toBeNull();
     expect(screen.getByText(/8 of 8 open/)).not.toBeNull();
     expect(screen.getByText(/Close a pane/)).not.toBeNull();
+  });
+
+  it("offers no pane actions on a surface that cannot split", () => {
+    renderNewThreadAction(null, { splitDraggable: false });
+    expect(
+      screen.queryByRole("menuitem", { name: "New thread beside" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: /New thread above or below/ }),
+    ).toBeNull();
   });
 });

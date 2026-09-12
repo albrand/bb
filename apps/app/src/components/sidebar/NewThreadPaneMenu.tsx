@@ -12,15 +12,11 @@ import {
 } from "@/components/ui/action-menu-items";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import {
-  findPaneByContent,
   isAtPaneLimit,
   PANE_LIMIT_DESCRIPTION,
   PANE_LIMIT_TITLE,
-  type PaneContent,
   type SplitSide,
 } from "@/lib/split-layout";
-
-const NEW_THREAD_CONTENT: PaneContent = { kind: "new-thread" };
 
 interface NewThreadPaneContextMenuProps {
   children: ReactNode;
@@ -37,10 +33,7 @@ export function NewThreadPaneContextMenu({
   if (!enabled) {
     return <>{children}</>;
   }
-  const paneLimitBlocksOpen =
-    isAtPaneLimit(splitLayout) &&
-    (splitLayout === null ||
-      findPaneByContent(splitLayout.root, NEW_THREAD_CONTENT) === null);
+  const paneLimitBlocksOpen = isAtPaneLimit(splitLayout);
 
   return (
     <ContextMenu>
