@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { useAtomValue } from "jotai";
 import { EditorContent, type Editor } from "@tiptap/react";
 import { COARSE_POINTER_TEXT_BASE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { cn } from "@bb/shared-ui/lib/utils";
@@ -6,16 +7,13 @@ import {
   PromptMentionLinkContext,
   type PromptMentionLinkResolver,
 } from "./editor/prompt-mention-link";
-
-type ComposerEditorLayout = "thread" | "root-compose";
-
-const COMPOSER_EDITOR_MAX_HEIGHT_BY_LAYOUT: Record<
-  ComposerEditorLayout,
-  string
-> = {
-  thread: "calc(50dvh - 3rem)",
-  "root-compose": "calc(70dvh - 3rem)",
-};
+import {
+  composerEditorHeightAtom,
+  COMPOSER_EDITOR_PREVIEW_HEIGHT_CSS_VARIABLE,
+  getComposerEditorMaxHeightCss,
+  resolveComposerEditorMinHeightCss,
+  type ComposerEditorLayout,
+} from "./composerHeightAtoms";
 
 function blurComposerEditor(editor: Editor): void {
   editor.view.dom.blur();
@@ -39,6 +37,7 @@ export function ComposerEditorSlot({
   layout: ComposerEditorLayout;
   resolveMentionLink: PromptMentionLinkResolver | undefined;
 }) {
+  const userHeightPx = useAtomValue(composerEditorHeightAtom);
   return (
     <div
       ref={scrollContainerRef}
@@ -51,11 +50,19 @@ export function ComposerEditorSlot({
         isCompactLayout && "h-12 overflow-hidden pb-0 pr-14 pt-0",
       )}
       style={{
-        minHeight: isCompactLayout ? "48px" : `${minHeight}px`,
+        minHeight: isCompactLayout
+          ? "48px"
+          : `var(${COMPOSER_EDITOR_PREVIEW_HEIGHT_CSS_VARIABLE}, ${resolveComposerEditorMinHeightCss(
+              {
+                floorPx: minHeight,
+                userHeightPx,
+                layout,
+              },
+            )})`,
         height: isCompactLayout ? "48px" : undefined,
         maxHeight: isCompactLayout
           ? "48px"
-          : COMPOSER_EDITOR_MAX_HEIGHT_BY_LAYOUT[layout],
+          : getComposerEditorMaxHeightCss(layout),
       }}
     >
       <PromptMentionLinkContext.Provider value={resolveMentionLink ?? null}>

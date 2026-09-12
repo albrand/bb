@@ -128,6 +128,7 @@ import {
 } from "./mentions/MentionMenu";
 import { parsePromptMentionClipboardElement } from "./mentions/prompt-mention-clipboard";
 import { ComposerEditorSlot } from "./ComposerEditorSlot";
+import { ComposerResizeHandle } from "./ComposerResizeHandle";
 import { QueuedEditorTypeaheadLayoutContext } from "./queued-editor-typeahead-layout";
 
 const PROMPTBOX_MIN_HEIGHT = 68;
@@ -3058,6 +3059,13 @@ export function PromptBoxInternal({
                   </div>
                 ) : null}
               </>
+            ) : null}
+            {!showCompactLayout ? (
+              <ComposerResizeHandle
+                scrollContainerRef={editorScrollContainerRef}
+                layout={editorLayout}
+                floorPx={minHeight}
+              />
             ) : null}
             <ComposerEditorSlot
               editor={editor}
