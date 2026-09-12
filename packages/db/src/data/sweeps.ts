@@ -90,6 +90,17 @@ export function getCompletedEventOutputTruncationLimits(
   return COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS[itemKind];
 }
 
+export function getCompletedEventOutputMinTruncatableChars(
+  limits: CompletedEventOutputTruncationLimits,
+): number {
+  return Math.max(
+    limits.thresholdChars,
+    limits.retainedHeadChars +
+      limits.retainedTailChars +
+      COMPLETED_EVENT_OUTPUT_TRUNCATION_MARKER.length,
+  );
+}
+
 interface CompletedEventOutputScanCursor {
   lastCreatedAt: number;
   lastEventId: string;
@@ -265,7 +276,7 @@ function updateCompletedEventOutputScanRows(
     valuePath,
     truncationPath,
     valuePath,
-    limits.thresholdChars,
+    getCompletedEventOutputMinTruncatableChars(limits),
   ];
 
   const result = db.$client

@@ -18,6 +18,14 @@ import { maintenanceScanCursors } from "../schema.js";
  * Both item/started and item/completed carry the same array, so both are
  * scanned: leaving one side whole re-inflates what the other side dropped.
  *
+ * The already-truncated test is structural, not a substring search. A diff can
+ * legitimately contain the marker text — a diff of this very file does, and on
+ * the live database twelve command events quote it in their command line or
+ * their output without having been truncated at all. A substring test would
+ * exempt those from truncation forever. A truncated diff instead has an exact
+ * shape: its length is head + marker + tail and the marker sits at exactly
+ * `head`, which ordinary content cannot reach by accident.
+ *
  * The cursor is seeded at the time of its first scan, so introducing this
  * target never rewrites the rows already on disk. Compacting those is a
  * separate, scheduled, backed-up pass.
@@ -125,10 +133,26 @@ function writeCursor(
     .run();
 }
 
+export const FILE_CHANGE_DIFF_TRUNCATED_LENGTH =
+  FILE_CHANGE_DIFF_RETAINED_HEAD_CHARS +
+  FILE_CHANGE_DIFF_TRUNCATION_MARKER.length +
+  FILE_CHANGE_DIFF_RETAINED_TAIL_CHARS;
+
+export function isTruncatedFileChangeDiff(diff: string): boolean {
+  return (
+    diff.length === FILE_CHANGE_DIFF_TRUNCATED_LENGTH &&
+    diff.startsWith(
+      FILE_CHANGE_DIFF_TRUNCATION_MARKER,
+      FILE_CHANGE_DIFF_RETAINED_HEAD_CHARS,
+    )
+  );
+}
+
 export function truncateFileChangeDiff(diff: string): string | null {
   if (
     diff.length <= FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS ||
-    diff.includes(FILE_CHANGE_DIFF_TRUNCATION_MARKER)
+    diff.length <= FILE_CHANGE_DIFF_TRUNCATED_LENGTH ||
+    isTruncatedFileChangeDiff(diff)
   ) {
     return null;
   }

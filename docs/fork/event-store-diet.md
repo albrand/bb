@@ -66,6 +66,16 @@ entry's `diff` is shortened. The marker is left inline in the diff text because
 `ThreadEventFileChange` has nowhere to record a truncation descriptor, and
 adding one would change a contract shared with the daemon and the plugin SDK.
 
+Two rules keep that honest. **Truncation never grows a payload**: a payload only
+just over its threshold would come back longer once the marker is added, so
+nothing is touched unless shortening it actually saves bytes. And **the
+already-truncated test is structural, not a substring search**. Content can
+quote the marker — a diff of the file defining it does, and on the live database
+twelve command events quote it in their command line or output without having
+been truncated at all. A substring test would exempt those from truncation
+forever. A truncated diff instead has an exact shape: length equal to
+head + marker + tail, with the marker at exactly `head`.
+
 Both `item/started` and `item/completed` are scanned for file changes. They
 carry the same array, and the timeline's output merge keeps whichever payload
 is longer, so truncating one side alone would let the other re-inflate it.
@@ -88,6 +98,21 @@ Nothing else is affected, and this was checked rather than assumed:
   `$.execution.model`, and item metadata — never an output payload.
 - **The timeline read path** already caps inline output at 32,000 characters
   before it can reach a client, so anything stored beyond that was unreachable.
+
+## Why these types and not others
+
+bb already prunes. The pruner keeps at most two `thread/tokenUsage/updated` and
+two `thread/contextWindowUsage/updated` rows per thread below its cutoff,
+deletes `turn/diff/updated` wholesale below the cutoff, keeps only the earliest
+delta per item, and keeps only the latest background-task progress per open
+item. On a one-month database those types had collapsed to 2.0-2.5 rows per
+thread, and background-task progress to five rows in total.
+
+Every type at the top of the byte table is one the pruner never touches —
+`item/completed`, `item/started`, `provider/unhandled`,
+`provider/rateLimits/updated`, `client/turn/requested`. That is *why* they are
+at the top, and it is the justification for this whole change: nothing here
+re-solves a problem the pruner already solves.
 
 ## What retention does not do
 
