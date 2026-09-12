@@ -55,7 +55,10 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     fork: "none",
     supportsManualCompaction: false,
     supportsUsage: true,
-    visibility: "always",
+    // Installed-only since the fork stopped advertising a provider whose CLI is
+    // absent: an always-visible Cursor is what made bb offer a thread it could
+    // not start. Every sibling ACP agent already declares installed.
+    visibility: "installed",
     hasLogo: true,
   },
   {
