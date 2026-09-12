@@ -191,6 +191,7 @@ export interface ThreadSecondaryPanelProps {
     activeBrowserTabId: string | null,
     pane: SecondaryPanelPaneRenderContext,
   ) => ReactNode;
+  onCreateTerminalInNewPane?: () => Promise<string | null>;
   splitPanelStateId?: string;
   isOpen: boolean;
   showConversationCollapseControl?: boolean;
@@ -224,6 +225,7 @@ export function ThreadSecondaryPanel({
   fixedTabs,
   onTabReorder,
   renderBrowserDeck,
+  onCreateTerminalInNewPane,
   splitPanelStateId,
   isOpen,
   showConversationCollapseControl = true,
@@ -446,6 +448,7 @@ export function ThreadSecondaryPanel({
       event: ReactPointerEvent<HTMLElement>,
     ) => void;
     onMoveActiveTabToSide?: (side: SplitSide) => void;
+    onSplitWithNewTerminal?: (side: SplitSide) => void;
     onRemoveSplit?: () => void;
     onToggleFullScreen?: () => void;
     onFocusPane: () => void;
@@ -522,11 +525,13 @@ export function ThreadSecondaryPanel({
   const renderConversationCollapseButton = ({
     isFullScreen,
     onMoveActiveTabToSide,
+    onSplitWithNewTerminal,
     onToggleFullScreen,
     usesPaneArrangementControl,
   }: {
     isFullScreen?: boolean;
     onMoveActiveTabToSide?: (side: SplitSide) => void;
+    onSplitWithNewTerminal?: (side: SplitSide) => void;
     onToggleFullScreen?: () => void;
     usesPaneArrangementControl: boolean;
   }) => {
@@ -540,6 +545,7 @@ export function ThreadSecondaryPanel({
           )}
           isFullScreen={isFullScreen ?? false}
           onMoveToSide={onMoveActiveTabToSide}
+          onSplitWithNewTerminal={onSplitWithNewTerminal}
           onToggleFullScreen={onToggleFullScreen}
         />
       );
@@ -662,6 +668,7 @@ export function ThreadSecondaryPanel({
     onBeginTabDrag,
     onFocusPane,
     onMoveActiveTabToSide,
+    onSplitWithNewTerminal,
     onRemoveSplit,
     onToggleFullScreen,
     onSurfaceTabReorder,
@@ -759,6 +766,7 @@ export function ThreadSecondaryPanel({
                   ? renderConversationCollapseButton({
                       isFullScreen,
                       onMoveActiveTabToSide,
+                      onSplitWithNewTerminal,
                       onToggleFullScreen,
                       usesPaneArrangementControl,
                     })
@@ -922,6 +930,7 @@ export function ThreadSecondaryPanel({
       }}
       onGlobalTabReorder={onTabReorder}
       onToggleFullScreen={onToggleConversationCollapse}
+      onCreateTerminalInNewPane={onCreateTerminalInNewPane}
       panelStateId={splitPanelStateId}
       tabs={splitTabs}
       renderPane={(pane: SidebarSplitPaneRenderArgs) => {
@@ -951,6 +960,7 @@ export function ThreadSecondaryPanel({
           onBeginTabDrag: pane.onBeginTabDrag,
           onFocusPane: pane.onFocusPane,
           onMoveActiveTabToSide: pane.onMoveActiveTabToSide,
+          onSplitWithNewTerminal: pane.onSplitWithNewTerminal,
           onRemoveSplit: pane.onRemoveSplit,
           onToggleFullScreen: pane.onToggleMaximize,
           onSurfaceTabReorder: pane.onReorderTab,

@@ -25,6 +25,16 @@ const ARRANGEMENT_ACTIONS: ReadonlyArray<{
   { label: "Move bottom", side: "bottom" },
 ];
 
+const NEW_TERMINAL_ACTIONS: ReadonlyArray<{
+  label: string;
+  side: SplitSide;
+}> = [
+  { label: "New terminal left", side: "left" },
+  { label: "New terminal right", side: "right" },
+  { label: "New terminal above", side: "top" },
+  { label: "New terminal below", side: "bottom" },
+];
+
 const MENU_ITEM_CLASS =
   "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-foreground outline-none transition-colors hover:bg-state-hover focus-visible:bg-state-hover focus-visible:outline-none [&>svg]:size-4 [&>svg]:shrink-0";
 
@@ -85,12 +95,14 @@ export function PaneArrangementButton({
   className,
   isFullScreen,
   onMoveToSide,
+  onSplitWithNewTerminal,
   onToggleFullScreen,
   shortcut,
 }: {
   className?: string;
   isFullScreen: boolean;
   onMoveToSide?: (side: SplitSide) => void;
+  onSplitWithNewTerminal?: (side: SplitSide) => void;
   onToggleFullScreen: () => void;
   shortcut?: AppShortcutPresentation;
 }) {
@@ -188,6 +200,34 @@ export function PaneArrangementButton({
             <span className="text-subtle-foreground">{shortcut.label}</span>
           ) : null}
         </button>
+        {onSplitWithNewTerminal ? (
+          <div className="border-t border-border-hairline pt-1.5">
+            <div className="px-2 pb-0.5 text-2xs font-medium text-subtle-foreground">
+              New terminal
+            </div>
+            <div className="grid grid-cols-4 gap-1" aria-label="New terminal">
+              {NEW_TERMINAL_ACTIONS.map((action) => (
+                <Tooltip key={action.side}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-label={action.label}
+                      className="flex h-11 cursor-pointer items-center justify-center rounded-md text-subtle-foreground outline-none transition-colors hover:bg-state-hover hover:text-foreground focus-visible:bg-state-hover focus-visible:text-foreground focus-visible:outline-none"
+                      onClick={() => {
+                        handleOpenChange(false);
+                        onSplitWithNewTerminal(action.side);
+                      }}
+                    >
+                      <ArrangementGlyph side={action.side} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{action.label}</TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {onMoveToSide ? (
           <div className="border-t border-border-hairline pt-1.5">
             <div className="px-2 pb-0.5 text-2xs font-medium text-subtle-foreground">

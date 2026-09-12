@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAtomValue } from "jotai";
+import { createTerminalFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { beginSplitDrag, type SplitDropTarget } from "@/lib/split-drag";
 import {
@@ -81,6 +82,7 @@ export interface SidebarSplitPaneRenderArgs {
   onFocusPane: () => void;
   onRemoveSplit?: () => void;
   onMoveActiveTabToSide?: (side: SplitSide) => void;
+  onSplitWithNewTerminal?: (side: SplitSide) => void;
   onSelectTab: (tabId: string) => void;
   onToggleMaximize: () => void;
   paneId: string;
@@ -91,6 +93,7 @@ interface SidebarSplitContainerProps {
   activeTabId: string;
   isFullScreen: boolean;
   onActivateTab: (tabId: string) => void;
+  onCreateTerminalInNewPane?: () => Promise<string | null>;
   onGlobalTabReorder: (request: SecondaryPanelTabReorderRequest) => void;
   onToggleFullScreen: () => void;
   panelStateId: string;
@@ -98,10 +101,20 @@ interface SidebarSplitContainerProps {
   tabs: readonly SidebarSplitTabDescriptor[];
 }
 
+interface PendingTerminalSplit {
+  expiresAt: number;
+  side: SplitSide;
+  tabId: string;
+  targetPaneId: string;
+}
+
+const PENDING_TERMINAL_SPLIT_TIMEOUT_MS = 30_000;
+
 export function SidebarSplitContainer({
   activeTabId,
   isFullScreen,
   onActivateTab,
+  onCreateTerminalInNewPane,
   onGlobalTabReorder,
   onToggleFullScreen,
   panelStateId,
@@ -442,6 +455,51 @@ export function SidebarSplitContainer({
     [moveTab, state, tabs],
   );
 
+  const pendingTerminalSplitRef = useRef<PendingTerminalSplit | null>(null);
+
+  const applyPendingTerminalSplit = useCallback(() => {
+    const pending = pendingTerminalSplitRef.current;
+    if (pending === null) return;
+    if (Date.now() > pending.expiresAt) {
+      pendingTerminalSplitRef.current = null;
+      return;
+    }
+    const current = stateRef.current;
+    const holder = listPanes(current.layout.root).find((pane) => {
+      const group = getSidebarGroupForPane(current, pane.paneId);
+      return group !== null && group.tabIds.includes(pending.tabId);
+    });
+    if (holder === undefined) return;
+    pendingTerminalSplitRef.current = null;
+    if (countPanes(current.layout.root) >= MAX_PANES) return;
+    moveTab(holder.paneId, pending.tabId, {
+      paneId: pending.targetPaneId,
+      zone: pending.side,
+    });
+  }, [moveTab]);
+
+  const splitWithNewTerminal = useCallback(
+    (targetPaneId: string, side: SplitSide) => {
+      if (onCreateTerminalInNewPane === undefined) return;
+      if (countPanes(stateRef.current.layout.root) >= MAX_PANES) return;
+      void onCreateTerminalInNewPane().then((terminalId) => {
+        if (terminalId === null) return;
+        pendingTerminalSplitRef.current = {
+          expiresAt: Date.now() + PENDING_TERMINAL_SPLIT_TIMEOUT_MS,
+          side,
+          tabId: createTerminalFixedPanelTab({ terminalId }).id,
+          targetPaneId,
+        };
+        applyPendingTerminalSplit();
+      });
+    },
+    [applyPendingTerminalSplit, onCreateTerminalInNewPane],
+  );
+
+  useEffect(() => {
+    applyPendingTerminalSplit();
+  }, [applyPendingTerminalSplit, availableTabIds, state]);
+
   const reorderTab = useCallback(
     (paneId: string, request: SecondaryPanelTabReorderRequest) => {
       commitState((current) =>
@@ -503,6 +561,10 @@ export function SidebarSplitContainer({
       onFocusPane: () => focusPane(firstPane.paneId),
       onRemoveSplit: undefined,
       onMoveActiveTabToSide: moveActiveTabHandler(firstPane.paneId),
+      onSplitWithNewTerminal:
+        onCreateTerminalInNewPane === undefined
+          ? undefined
+          : (side: SplitSide) => splitWithNewTerminal(firstPane.paneId, side),
       onSelectTab: (tabId) => selectTab(firstPane.paneId, tabId),
       onToggleMaximize: onToggleFullScreen,
       paneId: firstPane.paneId,
@@ -549,6 +611,11 @@ export function SidebarSplitContainer({
             onFocusPane={focusPane}
             onRemoveSplit={removeSplit}
             onMoveActiveTabToSide={moveActiveTabToSide}
+            onSplitWithNewTerminal={
+              onCreateTerminalInNewPane === undefined
+                ? null
+                : splitWithNewTerminal
+            }
             onReorderTab={reorderTab}
             onSelectTab={selectTab}
             onToggleMaximize={toggleMaximizePane}
@@ -636,6 +703,7 @@ interface SidebarSplitLeafProps {
   ) => void;
   onFocusPane: (paneId: string) => void;
   onMoveActiveTabToSide: (paneId: string, side: SplitSide) => void;
+  onSplitWithNewTerminal: ((paneId: string, side: SplitSide) => void) | null;
   onRemoveSplit: (paneId: string) => void;
   onReorderTab: (
     paneId: string,
@@ -716,6 +784,12 @@ function SidebarSplitLeaf(props: SidebarSplitLeafProps) {
             onReorderTab: (request) => props.onReorderTab(pane.paneId, request),
             onFocusPane: () => props.onFocusPane(pane.paneId),
             onRemoveSplit: () => props.onRemoveSplit(pane.paneId),
+            onSplitWithNewTerminal:
+              props.onSplitWithNewTerminal === null ||
+              countPanes(props.state.layout.root) >= MAX_PANES
+                ? undefined
+                : (side: SplitSide) =>
+                    props.onSplitWithNewTerminal?.(pane.paneId, side),
             onMoveActiveTabToSide: canMoveActiveTabToSide
               ? (side) => props.onMoveActiveTabToSide(pane.paneId, side)
               : undefined,
