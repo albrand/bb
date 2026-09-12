@@ -78,6 +78,8 @@ export interface SpendRollupRow {
   turns: number;
   firstEventAt: number;
   lastEventAt: number;
+  /** Null unless `fork_spend_prices` holds a rate for this provider+model. */
+  costUsd: number | null;
 }
 
 export interface SpendCoverage {
@@ -266,6 +268,61 @@ export function foldTokenUsageObservation(
   };
 }
 
+/**
+ * The pruner's smallest keep-recent window.
+ *
+ * It prunes with `sequenceCutoff = latestSequence - keepRecent` and does
+ * nothing when that is not positive, so a thread whose latest sequence is at or
+ * below the smallest window (archived threads, 120) provably cannot have had a
+ * usage event deleted. Anything above it might have.
+ */
+export const SPEND_PRUNE_SAFE_SEQUENCE = 120;
+
+export interface SpendThreadSequenceBounds {
+  earliestTokenUsageSequence: number | null;
+  latestSequence: number | null;
+}
+
+/**
+ * The two sequences that decide whether a thread's usage history is intact.
+ *
+ * There is no way to see a deleted row, so completeness is inferred from the
+ * pruner's own rule rather than asserted. Two proofs are available and they
+ * belong to different callers:
+ *
+ *   * `latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE` - the pruner cannot have
+ *     run at all. Good for either path.
+ *   * `earliestTokenUsageSequence` equal to the sequence being recorded LIVE -
+ *     the rollup saw the thread's first ever usage event, so nothing preceded
+ *     it. Only the live path may use this: during a backfill the first row read
+ *     is always the earliest surviving one, pruned or not, so the same
+ *     comparison would call every thread complete.
+ *
+ * Everything else is reported as partial, which is the honest answer: its total
+ * is a floor.
+ */
+export function getSpendThreadSequenceBounds(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): SpendThreadSequenceBounds {
+  const row = db.get<{
+    earliestTokenUsageSequence: number | null;
+    latestSequence: number | null;
+  }>(
+    sql`SELECT
+          (SELECT MIN(sequence) FROM events
+            WHERE thread_id = ${args.threadId}
+              AND type = 'thread/tokenUsage/updated')
+            AS earliestTokenUsageSequence,
+          (SELECT MAX(sequence) FROM events
+            WHERE thread_id = ${args.threadId}) AS latestSequence`,
+  );
+  return {
+    earliestTokenUsageSequence: row?.earliestTokenUsageSequence ?? null,
+    latestSequence: row?.latestSequence ?? null,
+  };
+}
+
 const spendTablesReady = new WeakSet<object>();
 
 export function ensureSpendTables(db: DbConnection): void {
@@ -410,33 +467,73 @@ export function getSpendCursor(
   return row ?? null;
 }
 
+/**
+ * `historyComplete` is three-valued on purpose: true, false, or not known now.
+ *
+ * Every live append saves a cursor, and most of them have no opinion about
+ * whether the thread's early history survived - that is settled once, when the
+ * cursor row is created. Writing `0` for "no opinion" reset every thread the
+ * backfill had marked complete on its very next usage event, so coverage
+ * converged on "every thread is partial" and both `bb spend` and the Hermes
+ * payload reported it. An unknown is COALESCEd away instead.
+ */
 export function saveSpendCursor(
   db: DbQueryConnection,
   args: {
     threadId: string;
     providerThreadId: string;
     state: SpendCursorState;
-    historyComplete?: boolean;
+    historyComplete?: boolean | undefined;
   },
 ): void {
-  const historyComplete = args.historyComplete === true ? 1 : 0;
+  const historyComplete =
+    args.historyComplete === undefined ? null : args.historyComplete ? 1 : 0;
   db.run(
     sql`INSERT INTO ${sql.raw(CURSOR_TABLE)} (thread_id, provider_thread_id,
           last_sequence, last_total_tokens, first_sequence, history_complete,
           last_turn_id, last_model)
         VALUES (${args.threadId}, ${args.providerThreadId},
           ${args.state.lastSequence}, ${args.state.lastTotalTokens},
-          ${args.state.firstSequence}, ${historyComplete},
+          ${args.state.firstSequence}, COALESCE(${historyComplete}, 0),
           ${args.state.lastTurnId}, ${args.state.lastModel})
         ON CONFLICT (thread_id, provider_thread_id) DO UPDATE SET
           last_sequence = excluded.last_sequence,
           last_total_tokens = excluded.last_total_tokens,
           first_sequence = MIN(${sql.raw(CURSOR_TABLE)}.first_sequence,
             excluded.first_sequence),
-          history_complete = excluded.history_complete,
+          history_complete = COALESCE(${historyComplete},
+            ${sql.raw(CURSOR_TABLE)}.history_complete),
           last_turn_id = excluded.last_turn_id,
           last_model = excluded.last_model`,
   );
+}
+
+/**
+ * Whether a thread's usage history survived intact, by the same rule the
+ * backfill uses: its earliest surviving usage event is also its earliest
+ * surviving event, so nothing was pruned out from under it.
+ *
+ * Asked once per thread, when its cursor row is created, not per event.
+ */
+export function isSpendHistoryComplete(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): boolean {
+  const row = db.get<{
+    earliestUsage: number | null;
+    earliest: number | null;
+  }>(
+    sql`SELECT
+          (SELECT MIN(sequence) FROM events
+            WHERE thread_id = ${args.threadId}
+              AND type = 'thread/tokenUsage/updated') AS earliestUsage,
+          (SELECT MIN(sequence) FROM events
+            WHERE thread_id = ${args.threadId}) AS earliest`,
+  );
+  if (row?.earliestUsage == null || row.earliest == null) {
+    return false;
+  }
+  return row.earliestUsage <= row.earliest;
 }
 
 export function applySpendContribution(
@@ -481,46 +578,86 @@ export interface ListSpendRollupArgs {
   providerId?: string;
 }
 
+/**
+ * Rows for a window, with dollars applied only where a price exists.
+ *
+ * `fork_spend_prices` ships empty, so `costUsd` is null everywhere until
+ * somebody puts a rate in it. That is the point: both providers here are on
+ * flat subscriptions, and a figure derived from a guessed rate reads as fact.
+ * A null is visibly absent; a wrong number is not.
+ */
 export function listSpendRollupRows(
   db: DbQueryConnection,
   args: ListSpendRollupArgs,
 ): SpendRollupRow[] {
   const conditions = [sql`1 = 1`];
   if (args.from !== undefined) {
-    conditions.push(sql` AND day >= ${args.from}`);
+    conditions.push(sql` AND rollup.day >= ${args.from}`);
   }
   if (args.to !== undefined) {
-    conditions.push(sql` AND day <= ${args.to}`);
+    conditions.push(sql` AND rollup.day <= ${args.to}`);
   }
   if (args.threadId !== undefined) {
-    conditions.push(sql` AND thread_id = ${args.threadId}`);
+    conditions.push(sql` AND rollup.thread_id = ${args.threadId}`);
   }
   if (args.providerId !== undefined) {
-    conditions.push(sql` AND provider_id = ${args.providerId}`);
+    conditions.push(sql` AND rollup.provider_id = ${args.providerId}`);
   }
   return db.all<SpendRollupRow>(
-    sql`SELECT day, thread_id AS threadId, provider_id AS providerId, model,
-               input_tokens AS inputTokens,
-               cached_input_tokens AS cachedInputTokens,
-               output_tokens AS outputTokens,
-               reasoning_output_tokens AS reasoningOutputTokens,
-               total_tokens AS totalTokens,
-               weighted_units AS weightedUnits,
-               turns,
-               first_event_at AS firstEventAt,
-               last_event_at AS lastEventAt
-        FROM ${sql.raw(DAILY_TABLE)}
+    sql`SELECT rollup.day AS day,
+               rollup.thread_id AS threadId,
+               rollup.provider_id AS providerId,
+               rollup.model AS model,
+               rollup.input_tokens AS inputTokens,
+               rollup.cached_input_tokens AS cachedInputTokens,
+               rollup.output_tokens AS outputTokens,
+               rollup.reasoning_output_tokens AS reasoningOutputTokens,
+               rollup.total_tokens AS totalTokens,
+               rollup.weighted_units AS weightedUnits,
+               rollup.turns AS turns,
+               rollup.first_event_at AS firstEventAt,
+               rollup.last_event_at AS lastEventAt,
+               CASE WHEN price.provider_id IS NULL THEN NULL ELSE
+                 (rollup.input_tokens * price.input_usd_per_mtok
+                  + rollup.cached_input_tokens * price.cached_input_usd_per_mtok
+                  + rollup.output_tokens * price.output_usd_per_mtok) / 1000000.0
+               END AS costUsd
+        FROM ${sql.raw(DAILY_TABLE)} rollup
+        LEFT JOIN ${sql.raw(PRICES_TABLE)} price
+          ON price.provider_id = rollup.provider_id
+          AND price.model = rollup.model
         WHERE ${sql.join(conditions, sql``)}
-        ORDER BY day DESC, total_tokens DESC`,
+        ORDER BY rollup.day DESC, rollup.total_tokens DESC`,
   );
 }
 
-export function getSpendCoverage(db: DbQueryConnection): SpendCoverage {
+/**
+ * Coverage for the same window the rows describe.
+ *
+ * Reported unscoped it described all history beside fourteen days of rows, and
+ * the analysis payload carried that mismatch into its window header.
+ */
+export function getSpendCoverage(
+  db: DbQueryConnection,
+  args: { from?: string; to?: string } = {},
+): SpendCoverage {
+  const windowConditions = [sql`1 = 1`];
+  if (args.from !== undefined) {
+    windowConditions.push(sql` AND rollup.day >= ${args.from}`);
+  }
+  if (args.to !== undefined) {
+    windowConditions.push(sql` AND rollup.day <= ${args.to}`);
+  }
   const row = db.get<{ threads: number; historyComplete: number }>(
-    sql`SELECT COUNT(DISTINCT thread_id) AS threads,
-               COUNT(DISTINCT CASE WHEN history_complete = 1 THEN thread_id END)
-                 AS historyComplete
-        FROM ${sql.raw(CURSOR_TABLE)}`,
+    sql`SELECT COUNT(DISTINCT cursor.thread_id) AS threads,
+               COUNT(DISTINCT CASE WHEN cursor.history_complete = 1
+                 THEN cursor.thread_id END) AS historyComplete
+        FROM ${sql.raw(CURSOR_TABLE)} cursor
+        WHERE EXISTS (
+          SELECT 1 FROM ${sql.raw(DAILY_TABLE)} rollup
+          WHERE rollup.thread_id = cursor.thread_id
+            AND ${sql.join(windowConditions, sql``)}
+        )`,
   );
   const threads = row?.threads ?? 0;
   const historyComplete = row?.historyComplete ?? 0;
@@ -596,20 +733,16 @@ export function listStoredTokenUsageEvents(
 export interface SpendBackfillThreadRow {
   threadId: string;
   providerId: string;
-  earliestUsageSequence: number;
-  earliestSequence: number;
+  latestSequence: number;
 }
 
 /**
- * Threads with usage events still in the store, and how much of their history
- * the pruner left behind.
+ * Threads with usage events still in the store, and how far each has run.
  *
- * `earliestUsageSequence > earliestSequence` means usage events were deleted out
- * from under this thread, so whatever the backfill records for it is a floor and
- * not a total. That is reported rather than papered over: a partial figure that
- * says it is partial is worth having, and the alternative — banking the one
- * surviving cumulative `total` — invents a per-day bucket from a single
- * timestamp and double counts at the seam the moment the thread emits again.
+ * `latestSequence` is what decides whether a backfilled thread can be called
+ * complete: below the pruner's smallest window it cannot have lost a usage
+ * event, and above it there is no way to tell from here, so the thread is
+ * reported as partial and its total read as a floor.
  */
 export function listSpendBackfillThreads(
   db: DbQueryConnection,
@@ -617,9 +750,8 @@ export function listSpendBackfillThreads(
   return db.all<SpendBackfillThreadRow>(
     sql`SELECT usage.thread_id AS threadId,
                threads.provider_id AS providerId,
-               MIN(usage.sequence) AS earliestUsageSequence,
-               (SELECT MIN(any_event.sequence) FROM events any_event
-                 WHERE any_event.thread_id = usage.thread_id) AS earliestSequence
+               (SELECT MAX(any_event.sequence) FROM events any_event
+                 WHERE any_event.thread_id = usage.thread_id) AS latestSequence
         FROM events usage
         JOIN threads ON threads.id = usage.thread_id
         WHERE usage.type = 'thread/tokenUsage/updated'

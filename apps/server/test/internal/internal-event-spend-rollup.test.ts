@@ -1,8 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import { events, listSpendRollupRows, type SpendRollupRow } from "@bb/db";
-import { turnScope } from "@bb/domain";
+import {
+  encodeClientTurnRequestIdNumber,
+  threadScope,
+  turnScope,
+} from "@bb/domain";
 import {
   groupHostDaemonEvents,
+  hostDaemonEventBatchResponseSchema,
   type HostDaemonEventEnvelope,
 } from "@bb/host-daemon-contract";
 import { describe, expect, it } from "vitest";
@@ -10,6 +15,7 @@ import { backfillSpend } from "../../src/services/system/spend-rollup.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import {
   seedEnvironment,
+  seedEvent,
   seedHostSession,
   seedProjectWithSource,
   seedThread,
@@ -291,6 +297,22 @@ describe("daemon event spend rollup", () => {
         )
         .all();
       expect(stored).toHaveLength(1);
+
+      // The rollup needed the stored row's timestamp, so `AcceptedDaemonEvent`
+      // gained a `createdAt`. That type is server-internal and must stay that
+      // way: a stock upstream daemon parses this body against a strict schema,
+      // so an extra field would fail it and HOST_DAEMON_PROTOCOL_VERSION is
+      // deliberately still 180.
+      const body = hostDaemonEventBatchResponseSchema.parse(
+        await response.json(),
+      );
+      for (const accepted of body.acceptedEvents) {
+        expect(Object.keys(accepted).sort()).toEqual([
+          "eventIndex",
+          "sequence",
+          "threadId",
+        ]);
+      }
     });
   });
 
@@ -383,6 +405,84 @@ describe("daemon event spend rollup", () => {
     });
   });
 
+  it("keeps a complete thread complete when it spends again", async () => {
+    // Every live append saves a cursor, and most have no opinion about whether
+    // the thread's early history survived. Writing "not complete" for "no
+    // opinion" reset the flag on the next usage event, so coverage converged on
+    // "every thread is partial" and said so in the CLI and to Hermes.
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-spend-keeps",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "codex",
+        status: "active",
+      });
+      const usage = (reading: Reading): HostDaemonEventEnvelope => ({
+        threadId: thread.id,
+        event: {
+          type: "thread/tokenUsage/updated",
+          threadId: thread.id,
+          providerThreadId: PROVIDER_THREAD_ID,
+          scope: turnScope(TURN_ID),
+          tokenUsage: {
+            total: breakdown(reading.total, {}),
+            last: breakdown(reading.last, {}),
+            modelContextWindow: 258_400,
+          },
+        },
+      });
+      const post = (envelopes: HostDaemonEventEnvelope[]) =>
+        harness.app.request("/internal/session/events", {
+          method: "POST",
+          headers: internalAuthHeaders(harness, { hostId: host.id }),
+          body: JSON.stringify({
+            sessionId: session.id,
+            eventGroups: groupHostDaemonEvents(envelopes),
+          }),
+        });
+      const historyComplete = () =>
+        harness.db.get<{ historyComplete: number }>(
+          sql`SELECT history_complete AS historyComplete
+              FROM fork_thread_spend_cursor WHERE thread_id = ${thread.id}`,
+        )?.historyComplete;
+
+      expect(
+        (
+          await post([
+            {
+              threadId: thread.id,
+              event: {
+                type: "turn/started",
+                threadId: thread.id,
+                providerThreadId: PROVIDER_THREAD_ID,
+                scope: turnScope(TURN_ID),
+              },
+            },
+            usage({ total: 100, last: 100 }),
+          ])
+        ).status,
+      ).toBe(200);
+      // The thread has not reached the pruner's smallest window, so no usage
+      // event can have been taken from it and the backfill agrees.
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      backfillSpend(harness.db);
+      expect(historyComplete()).toBe(1);
+
+      expect((await post([usage({ total: 250, last: 150 })])).status).toBe(200);
+      expect(historyComplete()).toBe(1);
+    });
+  });
+
   it("marks a thread whose usage history was pruned as incomplete", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
@@ -435,8 +535,34 @@ describe("daemon event spend rollup", () => {
       });
       expect(response.status).toBe(200);
 
-      // The thread's usage event is not its first event, which is exactly what
-      // a pruned history looks like from here.
+      // Push the thread past the pruner's smallest keep-recent window. Below it
+      // the pruner provably never ran; above it there is no way to tell from
+      // here whether a usage event was taken, so the thread is partial and its
+      // total is a floor.
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 500,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: {
+          direction: "outbound",
+          requestId: encodeClientTurnRequestIdNumber({ value: 500 }),
+          input: [{ type: "text", text: "more" }],
+          target: { kind: "new-turn" },
+          execution: {
+            model: "gpt-5",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            serviceTier: "default",
+            source: "client/turn/requested",
+          },
+          initiator: "user",
+          senderThreadId: null,
+          request: { method: "turn/start", params: {} },
+          source: "tell",
+        },
+      });
       harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
       backfillSpend(harness.db);
       const complete = harness.db.get<{ historyComplete: number }>(

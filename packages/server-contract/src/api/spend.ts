@@ -55,6 +55,15 @@ export const spendRollupRowSchema = z.object({
   turns: z.number(),
   firstEventAt: z.number(),
   lastEventAt: z.number(),
+  /**
+   * Dollars, when `fork_spend_prices` holds a rate for this provider and model.
+   *
+   * That table ships empty, so this is normally null. bb does not guess a rate:
+   * the providers here are on flat subscriptions, and a null is visibly absent
+   * where a wrong number would read as fact. A grouped row is null if any row
+   * behind it is, rather than quietly reporting a partial sum as a total.
+   */
+  costUsd: z.number().nullable(),
 });
 export type SpendRollupRowResponse = z.infer<typeof spendRollupRowSchema>;
 
