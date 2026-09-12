@@ -61,6 +61,8 @@ export {
   listSpendBackfillThreads,
   listSpendRollupRows,
   listStoredTokenUsageEvents,
+  listSpendAssessments,
+  recordSpendAssessment,
   normalizeSpendUsage,
   resolveSpendModel,
   saveSpendCursor,
@@ -70,6 +72,7 @@ export {
 } from "./thread-spend.js";
 export type {
   ListSpendRollupArgs,
+  SpendAssessmentRow,
   SpendBackfillThreadRow,
   SpendContribution,
   SpendCoverage,
