@@ -113,6 +113,16 @@ describe("app keybindings", () => {
           config.keybindings.some((binding) => binding.command === command),
         ).toBe(false);
       }
+      expect(
+        config.defaultKeybindings.find(
+          (binding) => binding.command === "thread.openBeside",
+        ),
+      ).toMatchObject({
+        desktopOnly: false,
+        shortcut: { key: "b", mod: true, shift: true },
+        when: { all: ["mainSurface"], none: ["modalOpen"] },
+      });
+
       for (const command of [
         "pane.focus.previous",
         "pane.focus.next",
