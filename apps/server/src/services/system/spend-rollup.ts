@@ -4,7 +4,9 @@ import {
   ensureSpendTables,
   foldTokenUsageObservation,
   getSpendCursor,
+  getSpendThreadSequenceBounds,
   listSpendBackfillThreads,
+  SPEND_PRUNE_SAFE_SEQUENCE,
   listStoredTokenUsageEvents,
   resolveSpendModel,
   saveSpendCursor,
@@ -34,6 +36,11 @@ export interface SpendBackfillResult {
 }
 
 interface TrackedCursorEntry {
+  /**
+   * Whether this thread's early history survived, or undefined when the cursor
+   * already existed and nothing here has a better answer than the stored one.
+   */
+  historyComplete: boolean | undefined;
   providerThreadId: string;
   state: SpendCursorState;
   threadId: string;
@@ -151,25 +158,67 @@ function mergeContributions(
   return [...merged.values()];
 }
 
+/**
+ * Whether the rollup can prove this thread's usage history is intact.
+ *
+ * `live` distinguishes the two proofs: only an append that just stored the
+ * thread's first ever usage event has seen the beginning. A backfill reads the
+ * earliest SURVIVING row, which looks identical whether or not the pruner took
+ * anything before it, so it may only rely on the thread being too short for the
+ * pruner to have run.
+ */
+function resolveHistoryComplete(
+  db: DbQueryConnection,
+  args: { live: boolean; sequence: number; threadId: string },
+): boolean {
+  const bounds = getSpendThreadSequenceBounds(db, {
+    threadId: args.threadId,
+  });
+  if (bounds.latestSequence === null) {
+    return false;
+  }
+  if (bounds.latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE) {
+    return true;
+  }
+  return (
+    args.live && bounds.earliestTokenUsageSequence === args.sequence
+  );
+}
+
 function rollUpObservations(
   db: DbQueryConnection,
   observations: readonly TokenUsageObservation[],
-  historyCompleteByThreadId: ReadonlyMap<string, boolean> | null,
+  options: { live: boolean },
 ): number {
   const tracked = new Map<string, TrackedCursorEntry>();
   const contributions: SpendContribution[] = [];
 
   for (const observation of observations) {
     const key = cursorKey(observation.threadId, observation.providerThreadId);
-    const entry: TrackedCursorEntry = tracked.get(key) ?? {
-      providerThreadId: observation.providerThreadId,
-      threadId: observation.threadId,
-      state:
-        getSpendCursor(db, {
-          threadId: observation.threadId,
-          providerThreadId: observation.providerThreadId,
-        }) ?? emptySpendCursorState(observation.sequence),
-    };
+    let entry = tracked.get(key);
+    if (entry === undefined) {
+      const stored = getSpendCursor(db, {
+        threadId: observation.threadId,
+        providerThreadId: observation.providerThreadId,
+      });
+      // Completeness is settled once, when the cursor row is created. An
+      // existing row already carries the answer and later appends must not
+      // overwrite it with a guess.
+      const historyComplete =
+        stored === null
+          ? resolveHistoryComplete(db, {
+              live: options.live,
+              sequence: observation.sequence,
+              threadId: observation.threadId,
+            })
+          : undefined;
+      entry = {
+        historyComplete,
+        providerThreadId: observation.providerThreadId,
+        threadId: observation.threadId,
+        state: stored ?? emptySpendCursorState(observation.sequence),
+      };
+    }
     const model = modelForObservation(db, entry.state, observation);
     const { next, contribution } = foldTokenUsageObservation(
       entry.state,
@@ -192,7 +241,7 @@ function rollUpObservations(
       threadId: entry.threadId,
       providerThreadId: entry.providerThreadId,
       state: entry.state,
-      historyComplete: historyCompleteByThreadId?.get(entry.threadId),
+      historyComplete: entry.historyComplete,
     });
   }
 
@@ -243,7 +292,7 @@ export function recordSpendForInsertedEvents(
     turnId: source.turnId,
   }));
   ensureSpendTables(db);
-  return rollUpObservations(db, observations, null);
+  return rollUpObservations(db, observations, { live: true });
 }
 
 /**
@@ -271,11 +320,6 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
   let threadsHistoryComplete = 0;
 
   for (const thread of threads) {
-    const historyComplete =
-      thread.earliestUsageSequence <= thread.earliestSequence;
-    if (historyComplete) {
-      threadsHistoryComplete += 1;
-    }
     const rows = listStoredTokenUsageEvents(db, { threadId: thread.threadId });
     const observations: TokenUsageObservation[] = [];
     for (const row of rows) {
@@ -297,11 +341,18 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
         turnId: row.turnId,
       });
     }
-    contributionsApplied += rollUpObservations(
-      db,
-      observations,
-      new Map([[thread.threadId, historyComplete]]),
-    );
+    contributionsApplied += rollUpObservations(db, observations, {
+      live: false,
+    });
+    if (
+      getSpendCursor(db, {
+        threadId: thread.threadId,
+        providerThreadId: observations[0]?.providerThreadId ?? thread.threadId,
+      }) !== null &&
+      thread.latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE
+    ) {
+      threadsHistoryComplete += 1;
+    }
   }
 
   return {

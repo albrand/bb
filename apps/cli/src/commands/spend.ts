@@ -263,11 +263,24 @@ export function registerSpendCommands(
           );
           return;
         }
+        // The cost column appears only when a price exists for something in the
+        // window. bb ships no prices, so normally it does not, and a column of
+        // dashes would read as "free" rather than "not priced".
+        const priced = result.rows.some((row) => row.costUsd !== null);
         console.log(
           renderBorderlessTable(
             {
-              head: [groupBy, "total", "fresh in", "cached", "out", "weighted", "turns"],
-              colWidths: [34, 10, 10, 10, 10, 12, 7],
+              head: [
+                groupBy,
+                "total",
+                "fresh in",
+                "cached",
+                "out",
+                "weighted",
+                "turns",
+                ...(priced ? ["usd"] : []),
+              ],
+              colWidths: [34, 10, 10, 10, 10, 12, 7, ...(priced ? [10] : [])],
             },
             result.rows.map((row) => [
               labelFor(groupBy, row),
@@ -277,6 +290,9 @@ export function registerSpendCommands(
               compact(row.outputTokens),
               compact(Math.round(row.weightedUnits)),
               `${row.turns}`,
+              ...(priced
+                ? [row.costUsd === null ? "no price" : row.costUsd.toFixed(2)]
+                : []),
             ]),
           ),
         );
@@ -284,6 +300,11 @@ export function registerSpendCommands(
         console.log(
           "weighted = fresh input x1 + cached x0.1 + output x5. A cost proxy, not money.",
         );
+        if (!priced) {
+          console.log(
+            "No dollar figure: fork_spend_prices is empty and bb does not guess a rate.",
+          );
+        }
         if (result.coverage.historyPartial > 0) {
           console.log(
             `${result.coverage.historyPartial} of ${result.coverage.threads} threads had usage events pruned before the rollup existed; their totals are floors.`,

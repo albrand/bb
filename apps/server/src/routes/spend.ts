@@ -67,6 +67,7 @@ function groupRows(
         turns: row.turns,
         firstEventAt: row.firstEventAt,
         lastEventAt: row.lastEventAt,
+        costUsd: row.costUsd,
       });
       continue;
     }
@@ -79,6 +80,12 @@ function groupRows(
     existing.turns += row.turns;
     existing.firstEventAt = Math.min(existing.firstEventAt, row.firstEventAt);
     existing.lastEventAt = Math.max(existing.lastEventAt, row.lastEventAt);
+    // One unpriced row makes the group unpriced. A partial sum presented as a
+    // total is the failure mode an absent price exists to avoid.
+    existing.costUsd =
+      existing.costUsd === null || row.costUsd === null
+        ? null
+        : existing.costUsd + row.costUsd;
   }
   return [...grouped.values()].sort((a, b) => b.totalTokens - a.totalTokens);
 }
@@ -110,7 +117,10 @@ export function registerSpendRoutes(app: Hono, deps: AppDeps): void {
     const response: SpendRollupResponse = {
       rows:
         query.groupBy === undefined ? rows : groupRows(rows, query.groupBy),
-      coverage: getSpendCoverage(deps.db),
+      coverage: getSpendCoverage(deps.db, {
+        from: query.from,
+        to: query.to,
+      }),
     };
     return context.json(response);
   });
@@ -125,7 +135,7 @@ export function registerSpendRoutes(app: Hono, deps: AppDeps): void {
     const from = query.from ?? window.from;
     const to = query.to ?? window.to;
     const response: SpendAnalysisPayloadResponse = buildSpendAnalysisPayload({
-      coverage: getSpendCoverage(deps.db),
+      coverage: getSpendCoverage(deps.db, { from, to }),
       from,
       rows: listSpendRollupRows(deps.db, { from, to }),
       to,

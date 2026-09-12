@@ -19,6 +19,7 @@ const ROW: SpendRollupRow = {
   turns: 3,
   firstEventAt: 1_789_000_000_000,
   lastEventAt: 1_789_000_900_000,
+  costUsd: null,
 };
 
 const COVERAGE = { threads: 12, historyComplete: 5, historyPartial: 7 };
