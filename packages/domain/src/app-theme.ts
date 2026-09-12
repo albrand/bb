@@ -11,6 +11,8 @@ const builtInThemeIdSchema = z.enum([
   "solarized",
   "gruvbox",
   "catppuccin",
+  "conductor",
+  "conductor-black",
 ]);
 export type BuiltInThemeId = z.infer<typeof builtInThemeIdSchema>;
 
@@ -38,6 +40,16 @@ export const builtInThemes: readonly BuiltInThemeMeta[] = [
     id: "catppuccin",
     name: "Catppuccin",
     description: "Soothing pastel — Latte light, Mocha dark",
+  },
+  {
+    id: "conductor",
+    name: "Conductor",
+    description: "Espresso canvas, warm brown cards, bone ink, emerald actions",
+  },
+  {
+    id: "conductor-black",
+    name: "Conductor Pitch Black",
+    description: "Conductor on a true black canvas for OLED displays",
   },
 ];
 

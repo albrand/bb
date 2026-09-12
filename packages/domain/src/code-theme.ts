@@ -64,6 +64,11 @@ export const builtInPaletteCodeThemes = {
   solarized: { dark: "solarized-dark", light: "solarized-light" },
   gruvbox: { dark: "gruvbox-dark-medium", light: "gruvbox-light-medium" },
   catppuccin: { dark: "catppuccin-mocha", light: "catppuccin-latte" },
+  conductor: { dark: DEFAULT_CODE_THEME_DARK, light: DEFAULT_CODE_THEME_LIGHT },
+  "conductor-black": {
+    dark: DEFAULT_CODE_THEME_DARK,
+    light: DEFAULT_CODE_THEME_LIGHT,
+  },
 } as const satisfies Record<string, CodeThemePair>;
 
 export interface DeclaredCodeThemeSlot {
