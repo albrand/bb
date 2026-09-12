@@ -34,6 +34,26 @@ describe("built-in themes", () => {
     }
   });
 
+  it("never paints a fill with the surface it sits on: muted, secondary and recessed differ from card and popover", () => {
+    const blocks = (css: string) =>
+      [...css.matchAll(/(?::root,\s*\.light|\.dark)\s*\{([^}]*)\}/gu)].map((m) => m[1]);
+    const read = (block: string, token: string) =>
+      block.match(new RegExp(`--${token}:\\s*([^;]+);`, "u"))?.[1].trim() ?? null;
+    for (const id of BUILTIN_THEME_IDS) {
+      for (const block of blocks(cssFor(id))) {
+        for (const surface of ["card", "popover"]) {
+          const surfaceValue = read(block, surface);
+          if (surfaceValue === null) continue;
+          for (const fill of ["muted", "secondary", "surface-recessed", "surface-recessed-solid", "surface-selected"]) {
+            const fillValue = read(block, fill);
+            if (fillValue === null) continue;
+            expect(fillValue, `${id}: --${fill} equals --${surface}`).not.toBe(surfaceValue);
+          }
+        }
+      }
+    }
+  });
+
   it("names only font families the app bundles, and app.css imports each of them", () => {
     const appCss = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
     for (const id of ["conductor", "conductor-black"]) {

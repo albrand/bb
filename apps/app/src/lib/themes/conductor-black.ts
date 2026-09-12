@@ -27,56 +27,53 @@ export const conductorBlackThemeCss = `
   --foreground: #2c2826;
   --card: #ffffff;
   --popover: #ffffff;
-  --secondary: #fafaf9;
-  --accent: #f5f3f0;
-  --muted: #fafaf9;
-  --input: #d8d4cf;
-
-  --surface-recessed: #2c28260a;
-  --surface-recessed-solid: #f8f7f6;
+  --secondary: color-mix(in oklch, var(--ink) 8%, var(--canvas));
+  --accent: color-mix(in oklch, var(--ink) 8%, var(--canvas));
+  --muted: color-mix(in oklch, var(--ink) 11%, var(--canvas));
+  --input: color-mix(in oklch, var(--ink) 29.5%, var(--canvas));
+  --surface-recessed: color-mix(in oklab, var(--ink) 6%, transparent);
+  --surface-recessed-solid: color-mix(in oklab, var(--ink) 6%, var(--canvas));
   --surface-recessed-soft-solid: #fdfcfc;
   --surface-raised: #2c282608;
   --surface-raised-solid: #ffffff;
   --surface-scrim: #ffffffeb;
-
-  --state-hover: #2c28260a;
-  --state-active: #2c282614;
+  --state-hover: color-mix(in oklab, var(--ink) 5.9%, transparent);
+  --state-active: color-mix(in oklab, var(--ink) 11.8%, transparent);
   --surface-selected: #faf7f5;
   --surface-selected-border: #ece4df;
-
-  --border-seam: #f3ece7;
-  --border-seam-vertical: #f3ece7;
-  --border: #eae8e6;
-  --border-hairline: #f0edea;
+  --border-seam: color-mix(in oklch, var(--ink) 9.5%, var(--canvas));
+  --border-seam-vertical: var(--border-seam);
+  --border: color-mix(in oklch, var(--ink) 14%, var(--canvas));
+  --border-hairline: color-mix(in oklch, var(--ink) 14.7%, var(--canvas));
 
   /* Inks */
-  --muted-foreground: #756f6c;
+  --muted-foreground: #625c59;
   --readback-foreground: #7d5e59;
-  --subtle-foreground: #99918c;
+  --subtle-foreground: #6f6a68;
   --accent-foreground: #2c2826;
   --secondary-foreground: #2c2826;
 
   /* Accents & Brand */
-  --primary: #1aa14a;
+  --primary: #15803d;
   --primary-foreground: #ffffff;
   --timeline-accent: #0284c7;
   --file-accent: #b45309;
-  --ring: #1aa14a;
-  --sidebar-ring: #1aa14a;
+  --ring: #15803d;
+  --sidebar-ring: #15803d;
   --sidebar-search-match: #1aa14a26;
   --sidebar-search-match-border: #1aa14a80;
 
   /* Status */
-  --destructive: #fb2c36;
+  --destructive: #c81e27;
   --destructive-foreground: #ffffff;
-  --destructive-text: #e02424;
+  --destructive-text: #b91c22;
   --warning: #f99c00;
-  --warning-text: #d97706;
+  --warning-text: #a3480a;
   --attention: #f99c00;
   --success: #16a249;
-  --success-foreground: #16a249;
-  --diff-added: #16a249;
-  --diff-removed: #fb2c36;
+  --success-foreground: #0f7a37;
+  --diff-added: #0f7a37;
+  --diff-removed: #b91c22;
   --pr-merged: #0d9488;
   --surface-destructive: #fb2c3614;
   --surface-destructive-border: #fb2c3640;
@@ -84,8 +81,8 @@ export const conductorBlackThemeCss = `
 
   /* Sidebar */
   --sidebar: #fcfbfa;
-  --sidebar-foreground: #756f6c;
-  --sidebar-accent: #f0edea;
+  --sidebar-foreground: #57514f;
+  --sidebar-accent: color-mix(in oklch, var(--ink) 8%, var(--sidebar));
   --sidebar-accent-foreground: #2c2826;
   --sidebar-border: #eae8e6;
 
@@ -113,25 +110,24 @@ export const conductorBlackThemeCss = `
   --foreground: #ece9e7;
   --card: #2a1e1d;
   --popover: #201e1c;
-  --secondary: #2a1e1d;
-  --accent: #241b1a;
-  --muted: #2a1e1d;
-  --input: #4a4240;
-  --surface-recessed-solid: #2a1e1d;
+  --secondary: color-mix(in oklch, var(--ink) 13%, var(--card));
+  --accent: color-mix(in oklch, var(--ink) 13%, var(--card));
+  --muted: color-mix(in oklch, var(--ink) 16%, var(--card));
+  --input: color-mix(in oklch, var(--ink) 32.6%, var(--card));
+  --surface-recessed: color-mix(in oklab, var(--ink) 6%, transparent);
+  --surface-recessed-solid: color-mix(in oklab, var(--ink) 6%, var(--canvas));
   --surface-recessed-soft-solid: #221817;
   --surface-raised: #ffffff0f;
   --surface-raised-solid: #2c2726;
   --surface-scrim: #000000eb;
-
-  --state-hover: #ece9e70f;
-  --state-active: #ece9e718;
-  --surface-selected: #2a1e1d;
-  --surface-selected-border: #3c3635;
-
-  --border-seam: #3c3635;
-  --border-seam-vertical: #3c3635;
-  --border: #262220;
-  --border-hairline: #1c1817;
+  --state-hover: color-mix(in oklab, var(--ink) 13.8%, transparent);
+  --state-active: color-mix(in oklab, var(--ink) 22.5%, transparent);
+  --surface-selected: color-mix(in oklab, var(--primary) 14%, transparent);
+  --surface-selected-border: color-mix(in oklab, var(--primary) 35%, transparent);
+  --border-seam: color-mix(in oklch, var(--ink) 11%, var(--card));
+  --border-seam-vertical: var(--border-seam);
+  --border: color-mix(in oklch, var(--ink) 19.4%, var(--card));
+  --border-hairline: color-mix(in oklch, var(--ink) 21%, var(--card));
 
   /* Inks (lightened for strong contrast on brown/dark surfaces) */
   --muted-foreground: #c2bcba;
@@ -168,7 +164,7 @@ export const conductorBlackThemeCss = `
   /* Sidebar (native black with white text and icons) */
   --sidebar: #000000;
   --sidebar-foreground: #ece9e7;
-  --sidebar-accent: #151110;
+  --sidebar-accent: color-mix(in oklch, var(--ink) 12%, var(--card));
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #1a1716;
   /* Controls */
