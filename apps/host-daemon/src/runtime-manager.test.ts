@@ -2747,3 +2747,134 @@ function isProcessAlive(pid: number): boolean {
     return false;
   }
 }
+
+describe("RuntimeManager provider sign-in renewal", () => {
+  async function renewalLock(): Promise<{
+    configDir: string;
+    lockPath: string;
+  }> {
+    const configDir = await makeTempDir("bb-sign-in-renewal-");
+    const lockPath = path.join(configDir, ".oauth_refresh.lock");
+    await fs.mkdir(lockPath);
+    return { configDir, lockPath };
+  }
+
+  it("does not evict an idle environment while a sign-in renewal lock is held", async () => {
+    const { configDir, lockPath } = await renewalLock();
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-renewal"),
+      shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-renewal",
+      workspacePath: "/tmp/env-renewal",
+    });
+
+    const eviction = manager.replaceBaseShellEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      SHELL_ENVIRONMENT_CHANGED: "1",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(runtime.shutdown).not.toHaveBeenCalled();
+
+    await fs.rm(lockPath, { recursive: true });
+    await eviction;
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("does not reap idle provider sessions while a sign-in renewal lock is held", async () => {
+    const { configDir, lockPath } = await renewalLock();
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-reap"),
+      shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-reap",
+      workspacePath: "/tmp/env-reap",
+    });
+
+    const reaping = manager.reapIdleProviderSessions({
+      idleForMs: 1_000,
+      nowMs: 5_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(runtime.reapIdleProviderSessions).not.toHaveBeenCalled();
+
+    await fs.rm(lockPath, { recursive: true });
+    await reaping;
+    expect(runtime.reapIdleProviderSessions).toHaveBeenCalledOnce();
+  });
+
+  it("holds the idle provider maintenance shutdown until the renewal lock clears, and gives up after the bound", async () => {
+    const { configDir, lockPath } = await renewalLock();
+    vi.useFakeTimers();
+    try {
+      const dataDir = await makeTempDir("bb-provider-maintenance-renewal-");
+      const runtime = createFakeRuntime();
+      const manager = new RuntimeManager({
+        createRuntime: () => runtime,
+        providerMaintenanceIdleTimeoutMs: 100,
+        shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+      });
+
+      await manager.withProviderMaintenanceRuntime(
+        { dataDir },
+        async () => undefined,
+      );
+      await vi.advanceTimersByTimeAsync(100 + 20_000);
+      expect(runtime.shutdown).not.toHaveBeenCalled();
+
+      const now = new Date();
+      await fs.utimes(lockPath, now, now);
+      await vi.advanceTimersByTimeAsync(10_500);
+      expect(runtime.shutdown).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a renewal lock abandoned by a process that exited mid-renewal", async () => {
+    const { configDir, lockPath } = await renewalLock();
+    const abandonedAt = new Date(Date.now() - 120_000);
+    await fs.utimes(lockPath, abandonedAt, abandonedAt);
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-abandoned"),
+      shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-abandoned",
+      workspacePath: "/tmp/env-abandoned",
+    });
+
+    await manager.replaceBaseShellEnv({
+      CLAUDE_CONFIG_DIR: configDir,
+      SHELL_ENVIRONMENT_CHANGED: "1",
+    });
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("stops runtimes at host daemon shutdown without waiting for a renewal", async () => {
+    const { configDir } = await renewalLock();
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-quit"),
+      shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-quit",
+      workspacePath: "/tmp/env-quit",
+    });
+
+    const started = Date.now();
+    await manager.shutdownAll("stop");
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+});

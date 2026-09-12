@@ -55,6 +55,7 @@ import type { FetchSkillTree } from "./skill-trees.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
 import { runSetupScript } from "./environment-lifecycle-script.js";
 import { runInSerialLane } from "./serial-lane.js";
+import { waitWhileProviderSignInRenews } from "./provider-sign-in-renewal.js";
 
 type StopWatching = () => void | Promise<void>;
 
@@ -548,6 +549,7 @@ export class RuntimeManager {
   async reapIdleProviderSessions(
     args: RuntimeManagerReapIdleProviderSessionsArgs,
   ): Promise<RuntimeManagerReapIdleProviderSessionsResult> {
+    await this.deferWhileProviderSignInRenews("idle-provider-session-reaped");
     const reapedSessions: RuntimeManagerReapedIdleProviderSession[] = [];
     for (const entry of this.entries.values()) {
       const result = await entry.runtime.reapIdleProviderSessions({
@@ -707,6 +709,7 @@ export class RuntimeManager {
   private async replaceEntryForSkillCatalog(
     args: ReplaceEntryForSkillCatalogArgs,
   ): Promise<void> {
+    await this.deferWhileProviderSignInRenews("skill-catalog-replaced");
     if (
       this.entryHasActiveRuntimeWork(args.entry) ||
       this.hasInFlightThreadCommand(args.entry, args.targetThreadId)
@@ -831,14 +834,34 @@ export class RuntimeManager {
     this.providerMaintenanceIdleTimer = setTimeout(() => {
       this.providerMaintenanceIdleTimer = null;
       if (this.providerMaintenanceActiveRequests > 0) return;
-      void this.shutdownProviderMaintenanceRuntime().catch((error) => {
-        this.options.logger?.warn(
-          { err: error },
-          "Failed to shut down idle provider maintenance runtime",
-        );
-      });
+      void this.deferWhileProviderSignInRenews("provider-maintenance-idle")
+        .then(() => {
+          if (
+            this.providerMaintenanceActiveRequests > 0 ||
+            this.providerMaintenanceIdleTimer !== null
+          ) {
+            return;
+          }
+          return this.shutdownProviderMaintenanceRuntime();
+        })
+        .catch((error) => {
+          this.options.logger?.warn(
+            { err: error },
+            "Failed to shut down idle provider maintenance runtime",
+          );
+        });
     }, timeoutMs);
     this.providerMaintenanceIdleTimer.unref();
+  }
+
+  private async deferWhileProviderSignInRenews(reason: string): Promise<void> {
+    const outcome = await waitWhileProviderSignInRenews(this.baseShellEnv);
+    if (outcome !== "clear") {
+      this.options.logger?.info(
+        { reason, outcome },
+        "Deferred stopping provider work while a provider sign-in renewal was in progress",
+      );
+    }
   }
 
   private async stopRuntimeEntry(
@@ -863,6 +886,9 @@ export class RuntimeManager {
   }
 
   private async evictIdleRuntimeEntries(): Promise<void> {
+    await this.deferWhileProviderSignInRenews(
+      "idle-after-shell-environment-change",
+    );
     const idleEntries = [...this.entries.values()].filter(
       (entry) => !this.entryHasActiveEnvironmentWork(entry),
     );
