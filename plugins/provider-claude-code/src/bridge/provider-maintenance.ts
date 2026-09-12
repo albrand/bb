@@ -31,10 +31,19 @@ const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
 const CLAUDE_INSTALL_SCRIPT_URL = "https://claude.ai/install.sh";
+const CLAUDE_LOGIN_COMMAND = "claude auth login";
+const KEYCHAIN_ITEM_NOT_FOUND_EXIT_CODE = 44;
+const KEYCHAIN_READ_ATTEMPTS = 2;
+const CLAUDE_KEYCHAIN_UNREADABLE_MESSAGE =
+  "Could not read the Claude Code sign-in from the macOS Keychain.";
+const CLAUDE_KEYCHAIN_UNPARSABLE_MESSAGE =
+  "The Claude Code sign-in in the macOS Keychain is not in a recognized format.";
+const CLAUDE_RENEWAL_REJECTED_MESSAGE =
+  "Claude Code could not renew its sign-in and needs a new one.";
 
 const claudeCredentialsSchema = z.object({
   claudeAiOauth: z.object({
-    accessToken: z.string().min(1),
+    accessToken: z.string(),
     expiresAt: z.number().nullish(),
     subscriptionType: z.string().nullish(),
     rateLimitTier: z.string().nullish(),
@@ -233,8 +242,39 @@ function buildClaudeProviderInstallationRun(
   };
 }
 
-async function readKeychainCredentials(): Promise<string | null> {
-  if (process.platform !== "darwin") return null;
+type KeychainRead =
+  | { kind: "found"; value: string }
+  | { kind: "missing" }
+  | { kind: "unreadable" };
+
+type CredentialsRead =
+  | { kind: "signed_in"; credentials: ClaudeCredentials }
+  | { kind: "signed_out" }
+  | { kind: "renewal_rejected" }
+  | { kind: "unreadable"; message: string };
+
+function isKeychainItemNotFound(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === KEYCHAIN_ITEM_NOT_FOUND_EXIT_CODE
+  );
+}
+
+async function readKeychainCredentials(): Promise<KeychainRead> {
+  if (process.platform !== "darwin") return { kind: "missing" };
+  let read: KeychainRead = { kind: "unreadable" };
+  for (
+    let attempt = 0;
+    attempt < KEYCHAIN_READ_ATTEMPTS && read.kind === "unreadable";
+    attempt += 1
+  ) {
+    read = await readKeychainCredentialsOnce();
+  }
+  return read;
+}
+
+async function readKeychainCredentialsOnce(): Promise<KeychainRead> {
   const argumentSets = [
     [
       "find-generic-password",
@@ -246,15 +286,18 @@ async function readKeychainCredentials(): Promise<string | null> {
     ],
     ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
   ];
+  let unreadable = false;
   for (const args of argumentSets) {
     try {
       const { stdout } = await execFileAsync("security", args, {
         timeout: 10_000,
       });
-      if (stdout.trim()) return stdout.trim();
-    } catch {}
+      if (stdout.trim()) return { kind: "found", value: stdout.trim() };
+    } catch (error) {
+      if (!isKeychainItemNotFound(error)) unreadable = true;
+    }
   }
-  return null;
+  return unreadable ? { kind: "unreadable" } : { kind: "missing" };
 }
 
 function parseCredentials(raw: string): ClaudeCredentials | null {
@@ -272,22 +315,35 @@ function parseCredentials(raw: string): ClaudeCredentials | null {
   return null;
 }
 
-async function readCredentials(): Promise<ClaudeCredentials | null> {
-  const keychainCredentials = await readKeychainCredentials();
-  if (keychainCredentials !== null) {
-    const parsed = parseCredentials(keychainCredentials);
-    if (parsed !== null) return parsed;
+function credentialsRead(credentials: ClaudeCredentials): CredentialsRead {
+  return credentials.accessToken === ""
+    ? { kind: "renewal_rejected" }
+    : { kind: "signed_in", credentials };
+}
+
+async function readCredentials(): Promise<CredentialsRead> {
+  const keychain = await readKeychainCredentials();
+  if (keychain.kind === "unreadable") {
+    return { kind: "unreadable", message: CLAUDE_KEYCHAIN_UNREADABLE_MESSAGE };
   }
+  if (keychain.kind === "found") {
+    const parsed = parseCredentials(keychain.value);
+    return parsed === null
+      ? { kind: "unreadable", message: CLAUDE_KEYCHAIN_UNPARSABLE_MESSAGE }
+      : credentialsRead(parsed);
+  }
+  let parsed: ClaudeCredentials | null;
   try {
-    return parseCredentials(
+    parsed = parseCredentials(
       await fs.readFile(
         path.join(os.homedir(), ".claude", ".credentials.json"),
         "utf8",
       ),
     );
   } catch {
-    return null;
+    return { kind: "signed_out" };
   }
+  return parsed === null ? { kind: "signed_out" } : credentialsRead(parsed);
 }
 
 async function readAccountEmail(): Promise<string | null> {
@@ -334,7 +390,7 @@ function healthResult(
       minimumSupportedVersion: null,
       canInstall: true,
       canUpdate: status !== "not_installed",
-      loginCommand: "claude /login",
+      loginCommand: CLAUDE_LOGIN_COMMAND,
     },
   };
 }
@@ -346,13 +402,26 @@ export async function getClaudeProviderHealth(): Promise<ProviderHealthResult> {
   }
   const version = await readCliVersion(command);
   try {
-    const [credentials, email] = await Promise.all([
+    const [read, email] = await Promise.all([
       readCredentials(),
       readAccountEmail(),
     ]);
-    if (!credentials) {
+    if (read.kind === "unreadable") {
+      return healthResult("unknown", {
+        installedVersion: version,
+        statusMessage: read.message,
+      });
+    }
+    if (read.kind === "signed_out") {
       return healthResult("unauthenticated", { installedVersion: version });
     }
+    if (read.kind === "renewal_rejected") {
+      return healthResult("unauthenticated", {
+        installedVersion: version,
+        statusMessage: CLAUDE_RENEWAL_REJECTED_MESSAGE,
+      });
+    }
+    const { credentials } = read;
     const known = {
       accountEmail: email,
       planLabel: planLabel(credentials),
@@ -480,13 +549,25 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
   if ((await resolveExecutablePath(command)) === null) {
     return { supported: true, usage: { status: "not_installed" } };
   }
-  const [credentials, email] = await Promise.all([
+  const [read, email] = await Promise.all([
     readCredentials(),
     readAccountEmail(),
   ]);
-  if (!credentials) {
+  if (read.kind === "unreadable") {
+    return {
+      supported: true,
+      usage: {
+        status: "error",
+        message: read.message,
+        planLabel: null,
+        accountEmail: email,
+      },
+    };
+  }
+  if (read.kind !== "signed_in") {
     return { supported: true, usage: { status: "unauthenticated" } };
   }
+  const { credentials } = read;
   if (credentials.expiresAt != null && Date.now() >= credentials.expiresAt) {
     return { supported: true, usage: { status: "expired" } };
   }
