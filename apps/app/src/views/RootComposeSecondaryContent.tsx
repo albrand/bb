@@ -8,6 +8,7 @@ import { usePluginComposerHost } from "@/components/plugin/plugin-composer-host"
 import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
 import { LazyThreadSecondaryPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
 import { PAGE_SHELL_CONTENT_STYLE } from "@/components/ui/page-shell-content-style.js";
+import { CONTENT_MEASURE_MAX_WIDTH_CLASS } from "@/lib/content-measure";
 import {
   CHROME_ROW_HEIGHT_CLASS,
   getBbDesktopInfo,
@@ -19,7 +20,7 @@ import { RootComposeCompactHome } from "./RootComposeCompactHome";
 import { useOptionalPaneContext } from "./thread-detail/PaneContext";
 import { getCompactPanelPresentation } from "@/components/secondary-panel/panelToggleControlState";
 
-const ROOT_COMPOSE_MAX_WIDTH_CLASS = "max-w-[760px]";
+const ROOT_COMPOSE_MAX_WIDTH_CLASS = CONTENT_MEASURE_MAX_WIDTH_CLASS;
 
 export const ROOT_COMPOSE_PINNED_PANEL_TOGGLE_POSITION_CLASS =
   "right-[calc(1rem+env(safe-area-inset-right))] top-[calc(0.625rem+env(safe-area-inset-top))] max-md:pointer-coarse:top-[calc(0.375rem+env(safe-area-inset-top))]";

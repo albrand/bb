@@ -8,6 +8,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { AppToaster } from "./components/AppToaster";
 import { registerProviderCliInstallQueryClient } from "./components/provider-cli/provider-cli-install-store";
 import { initializePreferredTheme } from "./hooks/useTheme";
+import { initializeContentMeasure } from "./lib/content-measure";
 import { initializeFavicon } from "./lib/favicon-color-preference";
 import { installForeignDomMutationGuard } from "./lib/foreign-dom-mutation-guard";
 import { installAppQueryClientBrowserEvents } from "./lib/query-client";
@@ -23,6 +24,7 @@ installAppQueryClientBrowserEvents(appQueryClient);
 registerProviderCliInstallQueryClient(appQueryClient);
 
 initializePreferredTheme();
+initializeContentMeasure();
 applyCachedAppThemeCss();
 initializeFavicon();
 disableGlobalCursorStyles();
