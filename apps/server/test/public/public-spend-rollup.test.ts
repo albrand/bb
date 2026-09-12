@@ -137,6 +137,54 @@ describe("spend rollup route", () => {
     });
   });
 
+  it("flags totals as a lower bound rather than a deficiency", async () => {
+    // A floor is not a shortfall. bb deletes usage events and leaves no trace of
+    // what it deleted, so there is no missing amount to report - and a consumer
+    // that reads `historyPartial` as "threads missing data" will render a gap
+    // bb never measured. `totalsAreLowerBound` is the flag to branch on.
+    await withTestHarness(async (harness) => {
+      ensureSpendTables(harness.db);
+      applySpendContribution(harness.db, {
+        day: "2026-09-11",
+        model: "gpt-5",
+        providerId: "codex",
+        threadId: "thr_floor",
+        usage: USAGE,
+        weightedUnits: spendWeightedUnits(USAGE),
+        at: Date.parse("2026-09-11T12:00:00Z"),
+      });
+      const read = async () =>
+        spendRollupResponseSchema.parse(
+          await readJson(
+            await harness.app.request("/api/v1/spend/rollup?from=2026-09-01"),
+          ),
+        );
+
+      harness.db.run(
+        sql`INSERT INTO fork_thread_spend_cursor (thread_id,
+              provider_thread_id, last_sequence, last_total_tokens,
+              first_sequence, history_complete)
+            VALUES ('thr_floor', 'pt', 1, 1, 1, 1)`,
+      );
+      expect((await read()).coverage).toEqual({
+        threads: 1,
+        historyComplete: 1,
+        historyPartial: 0,
+        totalsAreLowerBound: false,
+      });
+
+      harness.db.run(
+        sql`UPDATE fork_thread_spend_cursor SET history_complete = 0`,
+      );
+      expect((await read()).coverage).toEqual({
+        threads: 1,
+        historyComplete: 0,
+        historyPartial: 1,
+        totalsAreLowerBound: true,
+      });
+    });
+  });
+
   it("rejects a day that is not a calendar day", async () => {
     await withTestHarness(async (harness) => {
       const response = await harness.app.request(
