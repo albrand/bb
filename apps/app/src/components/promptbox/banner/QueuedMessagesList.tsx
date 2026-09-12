@@ -178,6 +178,8 @@ const WORKSPACE_CHROME_HEIGHT = 56;
 const WORKSPACE_ROW_HEIGHT = 40;
 const TYPEAHEAD_MENU_GAP = 8;
 const SURFACE_DRAG_THRESHOLD = 72;
+export const SIDE_CHAT_ALWAYS_VISIBLE_CLASS =
+  "in-[[data-thread-window]]:pointer-events-auto in-[[data-thread-window]]:opacity-100";
 type QueueSurfaceMode = "collapsed" | "drawer" | "workspace";
 
 function getDrawerHeight({
@@ -939,6 +941,7 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                     : "hidden",
                   "group-hover/dispatch-row:pointer-events-auto group-hover/dispatch-row:opacity-100",
                   "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
+                  SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
                 )}
               >
                 {sendAllowed ? (
@@ -1025,6 +1028,7 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                 "group-hover/dispatch-row:pointer-events-auto group-hover/dispatch-row:opacity-100",
                 "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
                 "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
+                SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
                 compact ? "size-7" : "size-8",
                 mobileActionsExpanded && "hidden",
               )}
