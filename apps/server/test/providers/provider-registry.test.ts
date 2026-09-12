@@ -327,7 +327,7 @@ describe("provider registry", () => {
   });
 });
 
-describe("installed-state cache", () => {
+describe("discovered provider-health cache", () => {
   it("serves a remembered answer and dedupes concurrent probes", async () => {
     const registry = createProviderRegistryService({});
     registerProvider(registry, "codex", "provider-codex");
@@ -336,18 +336,18 @@ describe("installed-state cache", () => {
       providerId: "codex",
     };
 
-    expect(registry.lookupInstalled(key)).toBeUndefined();
+    expect(registry.lookupProviderHealthStatus(key)).toBeUndefined();
 
     let probes = 0;
     const probe = () => {
       probes += 1;
-      return Promise.resolve(true);
+      return Promise.resolve("ready" as const);
     };
     const inFlight = probe();
-    registry.rememberInstalled(key, inFlight);
+    registry.rememberProviderHealthStatus(key, inFlight);
 
-    expect(await registry.lookupInstalled(key)).toBe(true);
-    expect(await registry.lookupInstalled(key)).toBe(true);
+    expect(await registry.lookupProviderHealthStatus(key)).toBe("ready");
+    expect(await registry.lookupProviderHealthStatus(key)).toBe("ready");
     expect(probes).toBe(1);
   });
 
@@ -358,12 +358,12 @@ describe("installed-state cache", () => {
       hostId: "host_1",
       providerId: "codex",
     };
-    registry.rememberInstalled(key, Promise.resolve(true));
-    expect(await registry.lookupInstalled(key)).toBe(true);
+    registry.rememberProviderHealthStatus(key, Promise.resolve("ready" as const));
+    expect(await registry.lookupProviderHealthStatus(key)).toBe("ready");
 
     registerProvider(registry, "claude-code", "provider-claude-code");
 
-    expect(registry.lookupInstalled(key)).toBeUndefined();
+    expect(registry.lookupProviderHealthStatus(key)).toBeUndefined();
   });
 
   it("forgets one host-provider answer or all answers", async () => {
@@ -381,16 +381,16 @@ describe("installed-state cache", () => {
       hostId: "host_1",
       providerId: "pi",
     };
-    registry.rememberInstalled(hostOneCodex, Promise.resolve(true));
-    registry.rememberInstalled(hostTwoCodex, Promise.resolve(false));
-    registry.rememberInstalled(hostOnePi, Promise.resolve(false));
+    registry.rememberProviderHealthStatus(hostOneCodex, Promise.resolve("ready" as const));
+    registry.rememberProviderHealthStatus(hostTwoCodex, Promise.resolve("not_installed" as const));
+    registry.rememberProviderHealthStatus(hostOnePi, Promise.resolve("not_installed" as const));
 
     registry.forgetInstalledKey(hostOneCodex);
-    expect(registry.lookupInstalled(hostOneCodex)).toBeUndefined();
-    expect(await registry.lookupInstalled(hostTwoCodex)).toBe(false);
-    expect(await registry.lookupInstalled(hostOnePi)).toBe(false);
+    expect(registry.lookupProviderHealthStatus(hostOneCodex)).toBeUndefined();
+    expect(await registry.lookupProviderHealthStatus(hostTwoCodex)).toBe("not_installed");
+    expect(await registry.lookupProviderHealthStatus(hostOnePi)).toBe("not_installed");
 
     registry.forgetAllInstalled();
-    expect(registry.lookupInstalled(hostOnePi)).toBeUndefined();
+    expect(registry.lookupProviderHealthStatus(hostOnePi)).toBeUndefined();
   });
 });

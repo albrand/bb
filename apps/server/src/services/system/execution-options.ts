@@ -31,6 +31,7 @@ import type {
   ProviderRegistryService,
 } from "../providers/provider-registry.js";
 import { getSupportedReasoningLevelsForProvider } from "../threads/thread-reasoning-policy.js";
+import { resolvePluginProviderEnvHealth } from "../plugins/plugin-agent-contributions.js";
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import {
   requireBridgeLaunchForProviderId,
@@ -166,6 +167,30 @@ function expectedFallbackErrorLogFields(
   return fields;
 }
 
+async function omitProvidersThatCannotStartAThread(
+  deps: LoggedWorkSessionDeps,
+  hostId: string | null,
+  providers: ProviderInfo[],
+): Promise<ProviderInfo[]> {
+  if (hostId === null) return providers;
+  const usable = await Promise.all(
+    providers.map(async (provider) => {
+      const status = await deps.providerRegistry.lookupProviderHealthStatus({
+        hostId,
+        providerId: provider.id,
+      });
+      if (status !== "unauthenticated") return true;
+      const contributed = await resolvePluginProviderEnvHealth({
+        providerId: provider.id,
+        hostId,
+      });
+      return contributed !== null;
+    }),
+  );
+  const offered = providers.filter((_, index) => usable[index]);
+  return offered.length > 0 ? offered : providers;
+}
+
 async function listInstalledPluginProviderInfos(
   deps: LoggedWorkSessionDeps,
   hostId: string,
@@ -191,9 +216,9 @@ async function listInstalledPluginProviderInfos(
         hostId,
         providerId: registration.info.id,
       };
-      const cached = deps.providerRegistry.lookupInstalled(cacheKey);
+      const cached = deps.providerRegistry.lookupProviderHealthStatus(cacheKey);
       try {
-        const installed =
+        const status =
           cached ??
           (async () => {
             const result = await callHostRetryableOnlineRpc(deps, {
@@ -205,12 +230,15 @@ async function listInstalledPluginProviderInfos(
                 bridgeLaunch,
               },
             });
-            return result.supported && result.health.status !== "not_installed";
+            return result.supported ? result.health.status : null;
           })();
         if (cached === undefined) {
-          deps.providerRegistry.rememberInstalled(cacheKey, installed);
+          deps.providerRegistry.rememberProviderHealthStatus(cacheKey, status);
         }
-        return (await installed) ? registration.info : null;
+        const discovered = await status;
+        return discovered !== null && discovered !== "not_installed"
+          ? registration.info
+          : null;
       } catch (error) {
         deps.providerRegistry.forgetInstalledKey(cacheKey);
         if (!canOmitProviderDiscoveryForError(error)) {
@@ -449,6 +477,11 @@ export async function resolveSystemExecutionOptions(
     await earlyModelResultPromise?.catch(() => undefined);
     throw error;
   }
+  providers = await omitProvidersThatCannotStartAThread(
+    deps,
+    hostId,
+    providers,
+  );
   providers = includeRequestedRegisteredProvider(
     deps,
     providers,

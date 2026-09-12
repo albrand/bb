@@ -76,6 +76,25 @@ function providerDiscoveryHealth(installed: boolean) {
   };
 }
 
+function providerHealthStatus(
+  status: "ready" | "unauthenticated" | "expired" | "not_installed",
+) {
+  return {
+    supported: true as const,
+    health: {
+      status,
+      statusMessage: null,
+      accountEmail: null,
+      planLabel: null,
+      installedVersion: null,
+      minimumSupportedVersion: null,
+      canInstall: false,
+      canUpdate: false,
+      loginCommand: null,
+    },
+  };
+}
+
 const EXAMPLE_AGENT_SETTING = {
   id: "example-agent",
   displayName: "Example Agent",
@@ -369,7 +388,7 @@ describe("resolveSystemExecutionOptions", () => {
         responder.requests.filter(
           (request) => request.command.type === "provider.health",
         ),
-      ).toHaveLength(4);
+      ).toHaveLength(5);
       const modelRequest = responder.requests.find(
         (request) => request.command.type === "provider.list_models",
       );
@@ -750,7 +769,7 @@ describe("resolveSystemExecutionOptions", () => {
             responder.requests.filter(
               (request) => request.command.type === "provider.health",
             ),
-          ).toHaveLength(failStatusRequest ? 0 : 4);
+          ).toHaveLength(failStatusRequest ? 0 : 5);
           expect(
             responder.requests.filter(
               (request) => request.command.type === "provider.list_models",
@@ -1255,7 +1274,7 @@ describe("resolveSystemExecutionOptions", () => {
           responder.requests.filter(
             (request) => request.command.type === "provider.health",
           ),
-        ).toHaveLength(4);
+        ).toHaveLength(5);
         const modelRequest = responder.requests.find(
           (request) => request.command.type === "provider.list_models",
         );
@@ -1304,7 +1323,7 @@ describe("resolveSystemExecutionOptions", () => {
         registry.markRegistrationsSettled();
 
         expect((await providersPromise).map((provider) => provider.id)).toEqual(
-          ["codex", "claude-code", "pi", "acp-cursor"],
+          ["codex", "claude-code", "pi"],
         );
       },
     );
@@ -1379,7 +1398,7 @@ describe("resolveSystemExecutionOptions", () => {
         responder.requests.filter(
           (request) => request.command.type === "provider.health",
         ),
-      ).toHaveLength(4);
+      ).toHaveLength(5);
       const modelRequest = responder.requests.find(
         (request) => request.command.type === "provider.list_models",
       );
@@ -1724,6 +1743,70 @@ describe("resolveSystemExecutionOptions model probe memo", () => {
           (request) => request.command.type === "provider.list_models",
         ),
       ).toHaveLength(1);
+    });
+  });
+});
+
+describe("providers a thread can actually start on", () => {
+  function respondWithSignedOutCursor(
+    harness: TestAppHarness,
+    hostId: string,
+    sessionId: string,
+  ) {
+    return registerHostRpcResponder(harness, {
+      hostId,
+      sessionId,
+      handle: (request) => {
+        if (request.command.type === "provider.health") {
+          const providerId = request.command.providerId;
+          if (providerId === "acp-cursor") {
+            return { ok: true, result: providerHealthStatus("unauthenticated") };
+          }
+          if (providerId === "acp-opencode") {
+            return { ok: true, result: providerHealthStatus("ready") };
+          }
+          return { ok: true, result: providerHealthStatus("not_installed") };
+        }
+        if (request.command.type === "provider.list_models") {
+          return { ok: true, result: { models: [], selectedOnlyModels: [] } };
+        }
+        throw new Error(`Unexpected RPC command ${request.command.type}`);
+      },
+    });
+  }
+
+  it("omits a provider whose CLI is installed but not signed in", async () => {
+    await withTestHarness({}, async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-execution-options-signed-out",
+      });
+      respondWithSignedOutCursor(harness, host.id, session.id);
+
+      const response = await resolveSystemExecutionOptions(harness.deps, {
+        hostId: host.id,
+      });
+
+      const offered = response.providers.map((provider) => provider.id);
+      expect(offered).toContain("acp-opencode");
+      expect(offered).not.toContain("acp-cursor");
+    });
+  });
+
+  it("still resolves a provider the caller explicitly asked for", async () => {
+    await withTestHarness({}, async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-execution-options-signed-out-pinned",
+      });
+      respondWithSignedOutCursor(harness, host.id, session.id);
+
+      const response = await resolveSystemExecutionOptions(harness.deps, {
+        hostId: host.id,
+        providerId: "acp-cursor",
+      });
+
+      expect(response.providers.map((provider) => provider.id)).toContain(
+        "acp-cursor",
+      );
     });
   });
 });

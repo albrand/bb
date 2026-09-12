@@ -9,6 +9,7 @@ import type {
   ReasoningLevel,
 } from "@bb/domain";
 import { parseExtensionKind } from "@bb/domain";
+import type { ProviderHealth } from "@bb/host-daemon-contract";
 import type {
   PluginProviderExtensionKindDeclaration,
   PluginProviderOptionsContext,
@@ -19,6 +20,8 @@ export interface ProviderHealthCacheKey {
   hostId: string;
   providerId: string;
 }
+
+export type ProviderDiscoveredHealthStatus = ProviderHealth["status"] | null;
 
 export interface ProviderServerCapabilities {
   reasoningLevels: readonly ReasoningLevel[];
@@ -61,10 +64,12 @@ export interface ProviderRegistryService {
   getUserDefaultProviderId(): string | null;
   get(providerId: string): ProviderRegistration | null;
   getRegistrationRevision(): number;
-  lookupInstalled(key: ProviderHealthCacheKey): Promise<boolean> | undefined;
-  rememberInstalled(
+  lookupProviderHealthStatus(
     key: ProviderHealthCacheKey,
-    value: Promise<boolean>,
+  ): Promise<ProviderDiscoveredHealthStatus> | undefined;
+  rememberProviderHealthStatus(
+    key: ProviderHealthCacheKey,
+    value: Promise<ProviderDiscoveredHealthStatus>,
   ): void;
   forgetInstalledKey(key: ProviderHealthCacheKey): void;
   forgetAllInstalled(): void;
@@ -115,7 +120,7 @@ export function createProviderRegistryService(
       {
         registrationRevision: number;
         expiresAt: number;
-        value: Promise<boolean>;
+        value: Promise<ProviderDiscoveredHealthStatus>;
       }
     >
   >();
@@ -222,7 +227,7 @@ export function createProviderRegistryService(
       return registrationRevision;
     },
 
-    lookupInstalled(key) {
+    lookupProviderHealthStatus(key) {
       const hostEntries = installedByHostId.get(key.hostId);
       if (hostEntries === undefined) return undefined;
       const entry = hostEntries.get(key.providerId);
@@ -238,7 +243,7 @@ export function createProviderRegistryService(
       return entry.value;
     },
 
-    rememberInstalled(key, value) {
+    rememberProviderHealthStatus(key, value) {
       let hostEntries = installedByHostId.get(key.hostId);
       if (hostEntries === undefined) {
         hostEntries = new Map();

@@ -316,7 +316,7 @@ describe("getProviderStates", () => {
 
       expect(result.providers[0]?.providerId).toBe("codex");
       expect(primaryCalls).toBe(0);
-      expect(healthCwds.filter((cwd) => cwd === undefined)).toHaveLength(4);
+      expect(healthCwds.filter((cwd) => cwd === undefined)).toHaveLength(5);
       expect(healthCwds.filter((cwd) => cwd !== undefined)).toEqual(
         Array(4).fill(environment.path),
       );

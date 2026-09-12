@@ -39,7 +39,7 @@ describe("parseCustomAcpAgents", () => {
         { id: "amp", displayName: "Amp", command: "amp" },
         { id: "amp", displayName: "Amp again", command: "amp" },
       ],
-      reservedProviderIds: reserved,
+      reservedProviderIds: new Set(["acp-cursor"]),
     });
 
     expect(parsed.agents.map((agent) => agent.id)).toEqual(["amp"]);
@@ -48,6 +48,17 @@ describe("parseCustomAcpAgents", () => {
       'resolves to built-in provider "acp-cursor"',
     );
     expect(parsed.problems[2]).toContain("configured more than once");
+  });
+
+  it("lets a configured agent replace an installed-only built-in", () => {
+    expect(reserved.has("acp-opencode")).toBe(false);
+    const parsed = parseCustomAcpAgents({
+      entries: [{ id: "opencode", displayName: "OpenCode (GLM)", command: "opencode" }],
+      reservedProviderIds: reserved,
+    });
+
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.agents.map((agent) => agent.id)).toEqual(["opencode"]);
   });
 
   it("rejects the legacy logo field the setting never had", () => {
@@ -281,7 +292,7 @@ describe("acpProviderDeclaration", () => {
       "xhigh",
       "max",
     ]);
-    expect(cursor.experimental_visibility).toBeUndefined();
+    expect(cursor.experimental_visibility).toBe("installed");
     expect(cursor.maintenance?.usage).toBe(true);
     expect(cursor.maintenance?.installation).toBe(true);
   });
