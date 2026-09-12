@@ -366,6 +366,17 @@ async function readCredentials(): Promise<CredentialsRead> {
   return parsed === null ? { kind: "signed_out" } : credentialsRead(parsed);
 }
 
+export async function isClaudeSignInRenewalDue(
+  windowMs: number,
+): Promise<boolean> {
+  const read = await readCredentials();
+  if (read.kind !== "signed_in" && read.kind !== "access_expired") {
+    return false;
+  }
+  const { expiresAt } = read.credentials;
+  return expiresAt != null && Date.now() + windowMs >= expiresAt;
+}
+
 async function readAccountEmail(): Promise<string | null> {
   try {
     const parsed = claudeAccountSchema.safeParse(
