@@ -3,6 +3,7 @@ import {
   emptySpendCursorState,
   ensureSpendTables,
   foldTokenUsageObservation,
+  getSpendCoverage,
   getSpendCursor,
   getSpendThreadSequenceBounds,
   listSpendBackfillThreads,
@@ -317,7 +318,6 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
   const threads = listSpendBackfillThreads(db);
   let usageEventsScanned = 0;
   let contributionsApplied = 0;
-  let threadsHistoryComplete = 0;
 
   for (const thread of threads) {
     const rows = listStoredTokenUsageEvents(db, { threadId: thread.threadId });
@@ -344,22 +344,19 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
     contributionsApplied += rollUpObservations(db, observations, {
       live: false,
     });
-    if (
-      getSpendCursor(db, {
-        threadId: thread.threadId,
-        providerThreadId: observations[0]?.providerThreadId ?? thread.threadId,
-      }) !== null &&
-      thread.latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE
-    ) {
-      threadsHistoryComplete += 1;
-    }
   }
+
+  // Counted from what the cursors actually hold, not from the backfill's own
+  // rule applied a second time. A thread the LIVE path proved complete has a
+  // latest sequence well past the pruner's window, so re-deriving here would
+  // have reported it as partial and the summary would contradict the table.
+  const coverage = getSpendCoverage(db);
 
   return {
     threadsScanned: threads.length,
     usageEventsScanned,
     contributionsApplied,
-    threadsHistoryComplete,
-    threadsHistoryPartial: threads.length - threadsHistoryComplete,
+    threadsHistoryComplete: coverage.historyComplete,
+    threadsHistoryPartial: coverage.historyPartial,
   };
 }

@@ -118,10 +118,9 @@ async function findHermesWorkspace(
 ): Promise<{ path: string; projectId: string } | null> {
   const sourceOn = async (projectId: string): Promise<string | null> => {
     const project = await sdk.projects.get({ projectId }).catch(() => null);
-    const sources = (project as { sources?: Array<{ hostId?: string; path?: string }> } | null)
-      ?.sources;
     return (
-      sources?.find((source) => source.hostId === args.hostId)?.path ?? null
+      project?.sources.find((source) => source.hostId === args.hostId)?.path ??
+      null
     );
   };
   const own = await sourceOn(args.projectId);
@@ -176,6 +175,10 @@ async function consultHermes(
       providerId: HERMES_PROVIDER,
       visibility: "hidden",
       prompt: args.payload,
+      // `ThreadSpawnArgs` does not type `environment`, and a review thread has
+      // to open in a checkout on the reviewer's machine rather than the
+      // caller's. This is the boundary, so the cast stays here and narrows
+      // immediately into a thread id.
     } as never);
     const threadId = spawned.id;
     await sdk.threads.wait({
@@ -194,6 +197,9 @@ async function consultHermes(
 
   const threadId = args.threadId;
   const before = await readThreadOutput(sdk, threadId);
+  // `mode` is required by the route and absent from `ThreadSendArgs`. Omitting
+  // it makes every send fail, which is how the plugin this follows ended up
+  // spawning a fresh reviewer each round while believing it continued one.
   await sdk.threads.send({
     threadId,
     mode: "auto",
