@@ -176,4 +176,92 @@ describe("a thread whose rows retention already truncated still renders", () => 
       timeline.rows.some((row) => JSON.stringify(row).includes("done")),
     ).toBe(true);
   });
+
+  it("renders the truncated completed payload, not the longer started one", () => {
+    const { db, thread } = setup();
+    const longStartedOutput = "L".repeat(200_000);
+    const truncatedOutput = `${"h".repeat(4096)}\n\n[... output truncated by retention policy; showing beginning and end ...]\n\n${"t".repeat(4096)}`;
+
+    insertEvents(db, noopNotifier, [
+      {
+        threadId: thread.id,
+        sequence: 1,
+        type: "turn/started",
+        scope: turnScope("turn-1"),
+        providerThreadId,
+        itemId: null,
+        itemKind: null,
+        parentToolCallId: null,
+        data: JSON.stringify({ providerThreadId }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 2,
+        type: "item/started",
+        scope: turnScope("turn-1"),
+        providerThreadId,
+        itemId: "cmd-pair",
+        itemKind: "commandExecution",
+        parentToolCallId: null,
+        data: JSON.stringify({
+          item: {
+            type: "commandExecution",
+            id: "cmd-pair",
+            command: "pnpm test",
+            cwd: "/tmp/test",
+            status: "pending",
+            approvalStatus: null,
+            aggregatedOutput: longStartedOutput,
+          },
+        }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 3,
+        type: "item/completed",
+        scope: turnScope("turn-1"),
+        providerThreadId,
+        itemId: "cmd-pair",
+        itemKind: "commandExecution",
+        parentToolCallId: null,
+        data: JSON.stringify({
+          item: {
+            type: "commandExecution",
+            id: "cmd-pair",
+            command: "pnpm test",
+            cwd: "/tmp/test",
+            status: "completed",
+            approvalStatus: null,
+            exitCode: 0,
+            aggregatedOutput: truncatedOutput,
+            truncation: {
+              aggregatedOutput: {
+                originalLength: 200_000,
+                retainedHeadLength: 4096,
+                retainedTailLength: 4096,
+                truncatedAt: 1,
+              },
+            },
+          },
+        }),
+      },
+    ]);
+
+    const timeline = buildThreadTimeline(db, thread, {
+      eventBudget: 1_000_000,
+      includeProviderUnhandledOperations: false,
+      includeNestedRows: true,
+      maxInlineOutputChars: 32_000,
+      maxSeq: 0,
+      page: { kind: "latest", segmentLimit: 20 },
+    });
+
+    const row = timeline.rows.find((candidate) =>
+      candidate.id.includes("cmd-pair"),
+    );
+    expect(row).toBeDefined();
+    const rendered = JSON.stringify(row);
+    expect(rendered).toContain("output truncated by retention policy");
+    expect(rendered).not.toContain("L".repeat(100));
+  });
 });
