@@ -14,6 +14,20 @@ Providers are agent backends (e.g., codex, claude-code). Each supports different
   bb provider models [providerId] [--machine <id-or-name> | --environment <id>]
                                           List models for a provider
 
+`bb provider list` reports each provider's readiness, so an unusable provider
+is visible as such rather than silently failing at spawn time: `ready`, `not
+signed in`, `sign-in expired`, `not installed`, or `unknown` when readiness
+could not be read. When a provider needs signing in, the Sign in column names
+the exact command to run on that machine (for example `cursor-agent login`).
+The Usage column says whether the provider publishes quota at all, so "no
+quota published" is never confused with bb having no usage data for it. The
+same fields are on `--json` as `status`, `statusMessage`, `loginCommand`, and
+`publishesUsage`, alongside everything the command printed before.
+
+A provider whose CLI is not installed on the target machine is not listed at
+all. Providers that are only shown once their CLI is present include the ACP
+agents (Cursor, opencode, omp, Grok, Hermes).
+
 Use these before spawning threads if you are unsure which provider or model to use.
 `--host` is an alias for `--machine`. Machine and environment selectors are
 mutually exclusive because an environment already selects its machine. When no

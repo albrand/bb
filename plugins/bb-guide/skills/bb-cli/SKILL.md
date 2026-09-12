@@ -87,6 +87,11 @@ BB_HOST_DAEMON_PORT only for an intentional non-default target.
   mode, section order, collapsed rows, navigation entries): `bb settings ui
 list`, `get`, `set`, and `reset`.
 - Query provider models on the machine that will run the thread.
+- Check `bb provider list` before blaming a provider for failing to start: it
+  reports readiness (`status`), and for a provider that is merely not signed in
+  it names the command to run (`loginCommand`). A provider whose CLI is absent
+  is not listed at all. `publishesUsage` says whether the provider publishes
+  quota, which is not the same as bb having no usage data for it.
 - Prefer non-interactive commands and machine-readable output for automation.
 - Pass `--yes` for a confirmed destructive command in a non-interactive shell.
 - Treat plugin commands as normal top-level commands after installation.
