@@ -13,6 +13,7 @@ import {
   getPluginDetailRoutePath,
 } from "@/lib/route-paths";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import { notifyPaneLimit } from "@/lib/split-layout/notifyPaneLimit";
 import { openPaneContentInSplit } from "@/lib/split-layout/openPaneContentInSplit";
 import {
   countPanes,
@@ -24,6 +25,7 @@ import {
   splitPane,
   type PaneContent,
   type SplitLayout,
+  type SplitSide,
 } from "@/lib/split-layout";
 import {
   beginSplitDrag,
@@ -51,7 +53,7 @@ function routeForContent(content: PaneContent): string {
 export function usePaneContentSplitDrag(options: PaneContentSplitOptions) {
   const actions = usePaneContentSplitActions();
   const openInSplit = useCallback(
-    () => actions.openInSplit(options),
+    (side: SplitSide = "right") => actions.openInSplit({ ...options, side }),
     [actions, options],
   );
   const onPointerDown = useCallback(
@@ -80,15 +82,23 @@ export function usePaneContentSplitActions() {
   const isCompact = useIsCompactViewport();
 
   const openInSplit = useCallback(
-    ({ content, enabled, onNavigate }: PaneContentSplitOptions) => {
+    ({
+      content,
+      enabled,
+      onNavigate,
+      side = "right",
+    }: PaneContentSplitOptions & { side?: SplitSide }) => {
       onNavigate?.();
-      openPaneContentInSplit({
-        store,
-        navigate,
-        content,
-        route: routeForContent(content),
-        enabled: enabled && !isCompact,
-      });
+      notifyPaneLimit(
+        openPaneContentInSplit({
+          store,
+          navigate,
+          content,
+          route: routeForContent(content),
+          enabled: enabled && !isCompact,
+          side,
+        }),
+      );
     },
     [isCompact, navigate, store],
   );

@@ -139,6 +139,8 @@ import {
   useAppCommandRunner,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
+import type { SplitSide } from "@/lib/split-layout";
+import { NewThreadPaneContextMenu } from "./NewThreadPaneMenu";
 import { usePaneContentSplitIndicator } from "./paneContentSplitIndicator";
 import { SplitPaneMiniMap } from "./SplitPaneMiniMap";
 import {
@@ -165,7 +167,7 @@ interface ProjectListNewThreadActionProps {
   splitEnabled?: boolean;
   newThreadSplit?: {
     onPointerDown?: PointerEventHandler<HTMLElement>;
-    openInSplit(): void;
+    openInSplit(side?: SplitSide): void;
   };
   onNewChat?: () => void;
 }
@@ -773,6 +775,12 @@ export function ProjectListNewThreadAction({
   );
 
   return (
+    <NewThreadPaneContextMenu
+      enabled={newThreadSplit !== undefined}
+      onOpenInPane={(side) => {
+        newThreadSplit?.openInSplit(side);
+      }}
+    >
     <Button
       type="button"
       size="sm"
@@ -806,6 +814,7 @@ export function ProjectListNewThreadAction({
         <AppCommandShortcutHint shortcut={newThreadShortcut} />
       </span>
     </Button>
+    </NewThreadPaneContextMenu>
   );
 }
 

@@ -1,6 +1,8 @@
 import {
   ActionMenuItem,
+  ActionMenuNotice,
   ActionMenuSeparator,
+  ActionMenuSub,
 } from "@/components/ui/action-menu-items";
 import type { Thread } from "@bb/domain";
 import type { ReactNode } from "react";
@@ -26,10 +28,19 @@ import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { getThreadRoutePath } from "@/lib/route-paths";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { useThreadActions } from "./ThreadActionsProvider";
+import { useAtomValue } from "jotai";
+import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import {
+  findPaneByThread,
+  isAtPaneLimit,
+  PANE_LIMIT_DESCRIPTION,
+  PANE_LIMIT_TITLE,
+  type SplitSide,
+} from "@/lib/split-layout";
 
 interface ThreadActionsMenuBaseProps {
   thread: Thread;
-  onOpenInSplit?: () => void;
+  onOpenInSplit?: (side?: SplitSide) => void;
 }
 
 export interface ThreadActionsMenuResponsiveAction {
@@ -72,6 +83,11 @@ function ThreadActionsMenuItems({
   } = useThreadActions();
   const isCompactViewport = useIsCompactViewport();
   const openBesideShortcut = useAppCommandShortcut("thread.openBeside");
+  const splitLayout = useAtomValue(splitLayoutAtom);
+  const paneLimitBlocksOpen =
+    isAtPaneLimit(splitLayout) &&
+    (splitLayout === null ||
+      findPaneByThread(splitLayout.root, thread.projectId, thread.id) === null);
   const isDrawer = surface === "dropdown" && isCompactViewport;
   const showSeparators = !isDrawer;
   const isRead = isThreadRead(thread);
@@ -105,16 +121,48 @@ function ThreadActionsMenuItems({
       ) : null}
       {onOpenInSplit ? (
         <>
-          <ActionMenuItem
-            surface={surface}
-            icon="Columns2"
-            onSelect={() => {
-              onOpenInSplit();
-            }}
-            shortcut={openBesideShortcut?.label}
-          >
-            Open beside
-          </ActionMenuItem>
+          {paneLimitBlocksOpen ? (
+            <ActionMenuNotice surface={surface}>
+              {PANE_LIMIT_TITLE}. {PANE_LIMIT_DESCRIPTION}
+            </ActionMenuNotice>
+          ) : (
+            <>
+              <ActionMenuItem
+                surface={surface}
+                icon="Columns2"
+                onSelect={() => {
+                  onOpenInSplit("right");
+                }}
+                shortcut={openBesideShortcut?.label}
+              >
+                Open beside
+              </ActionMenuItem>
+              <ActionMenuSub
+                surface={surface}
+                icon="Rows2"
+                label="Open above or below"
+              >
+                <ActionMenuItem
+                  surface={surface}
+                  icon="ArrowUp"
+                  onSelect={() => {
+                    onOpenInSplit("top");
+                  }}
+                >
+                  Open above
+                </ActionMenuItem>
+                <ActionMenuItem
+                  surface={surface}
+                  icon="ArrowDown"
+                  onSelect={() => {
+                    onOpenInSplit("bottom");
+                  }}
+                >
+                  Open below
+                </ActionMenuItem>
+              </ActionMenuSub>
+            </>
+          )}
           {showSeparators ? (
             <ActionMenuSeparator surface={surface} />
           ) : null}

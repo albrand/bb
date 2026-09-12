@@ -1,13 +1,12 @@
 import { splitLayoutAtom } from "./atoms";
+import { isAtPaneLimit, type SplitOpenResult } from "./paneLimit";
 import {
-  countPanes,
   findPaneByContent,
-  MAX_PANES,
-  replacePaneContent,
   setFocus,
   splitPane,
   type PaneContent,
   type SplitLayout,
+  type SplitSide,
 } from "./index";
 
 interface SplitLayoutStore {
@@ -24,6 +23,7 @@ export interface OpenPaneContentInSplitArgs {
   content: PaneContent;
   route: string;
   enabled: boolean;
+  side?: SplitSide;
 }
 
 export function openPaneContentInSplit({
@@ -32,21 +32,27 @@ export function openPaneContentInSplit({
   content,
   route,
   enabled,
-}: OpenPaneContentInSplitArgs): void {
+  side = "right",
+}: OpenPaneContentInSplitArgs): SplitOpenResult {
   const layout = store.get(splitLayoutAtom);
   if (!enabled || layout === null) {
     void navigate(route);
-    return;
+    return "navigated";
   }
   const existing = findPaneByContent(layout.root, content);
-  const next =
-    existing !== null
-      ? setFocus(layout, existing.paneId)
-      : countPanes(layout.root) >= MAX_PANES
-        ? replacePaneContent(layout, layout.focusedPaneId, content)
-        : splitPane(layout, layout.focusedPaneId, "right", content);
+  if (existing !== null) {
+    const next = setFocus(layout, existing.paneId);
+    if (next !== layout) store.set(splitLayoutAtom, next);
+    void navigate(route, { replace: true });
+    return "focused-existing";
+  }
+  if (isAtPaneLimit(layout)) {
+    return "at-pane-limit";
+  }
+  const next = splitPane(layout, layout.focusedPaneId, side, content);
   if (next !== layout) store.set(splitLayoutAtom, next);
-  void navigate(route, existing !== null ? { replace: true } : undefined);
+  void navigate(route);
+  return "opened";
 }
 
 export function holdsPluginDetailPane(

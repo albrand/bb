@@ -2,11 +2,19 @@ import type { ReactNode } from "react";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import {
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
 } from "@bb/shared-ui/context-menu";
 import {
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@bb/shared-ui/dropdown-menu";
 import { cn } from "@bb/shared-ui/lib/utils";
 
@@ -76,5 +84,56 @@ export function ActionMenuSeparator({ surface }: ActionMenuSeparatorProps) {
     <ContextMenuSeparator />
   ) : (
     <DropdownMenuSeparator />
+  );
+}
+
+interface ActionMenuSubProps {
+  children: ReactNode;
+  icon: IconName;
+  label: ReactNode;
+  surface: ActionMenuSurface;
+}
+
+export function ActionMenuSub({
+  children,
+  icon,
+  label,
+  surface,
+}: ActionMenuSubProps) {
+  const trigger = (
+    <>
+      <Icon name={icon} aria-hidden="true" />
+      {label}
+    </>
+  );
+
+  if (surface === "context") {
+    return (
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>{trigger}</ContextMenuSubTrigger>
+        <ContextMenuSubContent>{children}</ContextMenuSubContent>
+      </ContextMenuSub>
+    );
+  }
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>{trigger}</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>{children}</DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
+interface ActionMenuNoticeProps {
+  children: ReactNode;
+  surface: ActionMenuSurface;
+}
+
+export function ActionMenuNotice({ children, surface }: ActionMenuNoticeProps) {
+  const className = "max-w-56 font-normal text-subtle-foreground text-wrap";
+  return surface === "context" ? (
+    <ContextMenuLabel className={className}>{children}</ContextMenuLabel>
+  ) : (
+    <DropdownMenuLabel className={className}>{children}</DropdownMenuLabel>
   );
 }
