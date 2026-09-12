@@ -12,11 +12,32 @@ import {
 
 const mocks = vi.hoisted(() => ({
   providers: [] as ProviderInfo[],
+  providerStates: [] as {
+    providerId: string;
+    displayName: string;
+    status: string;
+    statusMessage: string | null;
+    loginCommand: string | null;
+  }[],
 }));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemProviders: () => ({ data: mocks.providers, isPending: false }),
+  useSystemProviderStates: () => ({
+    data: { providers: mocks.providerStates },
+    isPending: false,
+  }),
 }));
+
+function signInState(providerId: string, loginCommand: string | null) {
+  return {
+    providerId,
+    displayName: providerId,
+    status: "unauthenticated",
+    statusMessage: null,
+    loginCommand,
+  };
+}
 
 function provider(id: string, displayName: string): ProviderInfo {
   return makeProviderInfo({
@@ -38,7 +59,56 @@ function provider(id: string, displayName: string): ProviderInfo {
 
 afterEach(cleanup);
 
+afterEach(() => {
+  mocks.providerStates = [];
+});
+
 describe("ProvidersSettingsSection", () => {
+  it("names the sign-in command for a provider that is not signed in", () => {
+    mocks.providers = [provider("acp-cursor", "Cursor")];
+    mocks.providerStates = [signInState("acp-cursor", "cursor-agent login")];
+    render(
+      <ProvidersSettingsSection
+        disabled={false}
+        generalSettings={defaultAppSettings}
+        onGeneralSettingsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Not signed in")).toBeTruthy();
+    expect(screen.getByText(/cursor-agent login/)).toBeTruthy();
+  });
+
+  it("says a provider is not signed in even when it names no command", () => {
+    mocks.providers = [provider("acp-other", "Other")];
+    mocks.providerStates = [signInState("acp-other", null)];
+    render(
+      <ProvidersSettingsSection
+        disabled={false}
+        generalSettings={defaultAppSettings}
+        onGeneralSettingsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Not signed in")).toBeTruthy();
+  });
+
+  it("leaves a ready provider unlabelled", () => {
+    mocks.providers = [provider("codex", "Codex")];
+    mocks.providerStates = [
+      { ...signInState("codex", null), status: "ready" },
+    ];
+    render(
+      <ProvidersSettingsSection
+        disabled={false}
+        generalSettings={defaultAppSettings}
+        onGeneralSettingsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Not signed in")).toBeNull();
+  });
+
   it("shows reorder handles and writes the default as a user setting", () => {
     mocks.providers = [
       provider("alpha", "Alpha"),

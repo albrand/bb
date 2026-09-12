@@ -10,7 +10,10 @@ import {
   SettingsRow,
   SettingsSection,
 } from "@/components/ui/settings-section";
-import { useSystemProviders } from "@/hooks/queries/system-queries";
+import {
+  useSystemProviderStates,
+  useSystemProviders,
+} from "@/hooks/queries/system-queries";
 import { getProviderIconInfo } from "@/lib/provider-icon";
 import { ProviderIconMark } from "./ProviderIconMark";
 import {
@@ -22,6 +25,26 @@ interface ProvidersSettingsSectionProps {
   disabled: boolean;
   generalSettings: AppSettings;
   onGeneralSettingsChange: (next: AppSettings) => Promise<unknown> | void;
+}
+
+interface ProviderSignIn {
+  badge: string;
+  command: string | null;
+}
+
+function resolveProviderSignIn(
+  provider: ProviderInfo,
+  state: { status: string; loginCommand: string | null } | undefined,
+): ProviderSignIn | null {
+  if (state === undefined) return null;
+  const command = state.loginCommand ?? provider.strings?.signInHint ?? null;
+  if (state.status === "unauthenticated") {
+    return { badge: "Not signed in", command };
+  }
+  if (state.status === "expired") {
+    return { badge: "Sign-in expired", command };
+  }
+  return null;
 }
 
 function applyProviderOrder(
@@ -63,6 +86,7 @@ interface SortableProviderRowProps {
   index: number;
   onGeneralSettingsChange: ProvidersSettingsSectionProps["onGeneralSettingsChange"];
   provider: ProviderInfo;
+  signIn: ProviderSignIn | null;
 }
 
 function SortableProviderRow({
@@ -71,6 +95,7 @@ function SortableProviderRow({
   index,
   onGeneralSettingsChange,
   provider,
+  signIn,
 }: SortableProviderRowProps) {
   const { setNodeRef, style, isDragging, handle } = useSortableSettingsRow({
     id: provider.id,
@@ -110,6 +135,16 @@ function SortableProviderRow({
       <span className="min-w-0 flex-1 truncate font-medium">
         {provider.displayName}
       </span>
+      {signIn === null ? null : (
+        <>
+          <SettingsBadge>{signIn.badge}</SettingsBadge>
+          {signIn.command === null ? null : (
+            <code className="min-w-0 truncate text-2xs text-muted-foreground">
+              {signIn.command}
+            </code>
+          )}
+        </>
+      )}
       {!provider.available ? <SettingsBadge>Unavailable</SettingsBadge> : null}
       {isDefault ? (
         <SettingsBadge>Default</SettingsBadge>
@@ -138,7 +173,14 @@ export function ProvidersSettingsSection({
   onGeneralSettingsChange,
 }: ProvidersSettingsSectionProps) {
   const providersQuery = useSystemProviders();
+  const providerStatesQuery = useSystemProviderStates();
   const serverProviders: ProviderInfo[] = providersQuery.data ?? [];
+  const providerStateById = new Map(
+    (providerStatesQuery.data?.providers ?? []).map((state) => [
+      state.providerId,
+      state,
+    ]),
+  );
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
   const providers = applyProviderOrder(serverProviders, optimisticOrder);
   const ids = providers.map((provider) => provider.id);
@@ -187,6 +229,10 @@ export function ProvidersSettingsSection({
               index={index}
               onGeneralSettingsChange={onGeneralSettingsChange}
               provider={provider}
+              signIn={resolveProviderSignIn(
+                provider,
+                providerStateById.get(provider.id),
+              )}
             />
           ))}
         </SortableSettingsRowList>
