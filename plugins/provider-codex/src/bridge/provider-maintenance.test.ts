@@ -177,7 +177,9 @@ describe("Codex credential health and usage", () => {
     });
   });
 
-  it("reports expired when the ChatGPT access token has passed its exp", async () => {
+  it("reports a lapsed ChatGPT access token that Codex can renew as ready, without fetching usage", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     await writeChatGptAuth(
       createAccessToken({
         accountId: "account-123",
@@ -188,10 +190,42 @@ describe("Codex credential health and usage", () => {
 
     await expect(getCodexProviderHealth()).resolves.toMatchObject({
       health: {
-        status: "expired",
+        status: "ready",
+        statusMessage: null,
         accountEmail: "codex@example.com",
         installedVersion: "0.150.0",
       },
+    });
+    await expect(getCodexProviderUsage()).resolves.toEqual({
+      supported: true,
+      usage: {
+        status: "error",
+        message:
+          "Codex usage appears after Codex renews its sign-in on next use.",
+        planLabel: null,
+        accountEmail: "codex@example.com",
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports expired when a lapsed ChatGPT access token has no refresh token", async () => {
+    await writeAuthJson(
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: {
+          access_token: createAccessToken({
+            accountId: "account-123",
+            email: "codex@example.com",
+            expSeconds: Math.floor(Date.now() / 1000) - 60,
+          }),
+          refresh_token: "",
+        },
+      }),
+    );
+
+    await expect(getCodexProviderHealth()).resolves.toMatchObject({
+      health: { status: "expired", accountEmail: "codex@example.com" },
     });
     await expect(getCodexProviderUsage()).resolves.toEqual({
       supported: true,

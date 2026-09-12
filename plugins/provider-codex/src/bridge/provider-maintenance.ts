@@ -30,6 +30,8 @@ const CODEX_REWIND_MINIMUM_SUPPORTED_VERSION = "0.143.0";
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const USAGE_FETCH_TIMEOUT_MS = 15_000;
 const CODEX_NPM_PACKAGE = "@openai/codex";
+const CODEX_USAGE_AFTER_RENEWAL_MESSAGE =
+  "Codex usage appears after Codex renews its sign-in on next use.";
 
 function fetchCodexUsage(headers: Headers): Promise<Response> {
   return fetchChatGpt({
@@ -215,7 +217,11 @@ export async function getCodexProviderHealth(): Promise<ProviderHealthResult> {
     if (credentials === null) {
       return healthResult("unauthenticated", { installedVersion: version });
     }
-    if (credentials.type === "chatgpt" && credentials.expired) {
+    if (
+      credentials.type === "chatgpt" &&
+      credentials.expired &&
+      !credentials.renewable
+    ) {
       return healthResult("expired", {
         accountEmail: credentials.accountEmail,
         installedVersion: version,
@@ -337,8 +343,19 @@ export async function getCodexProviderUsage(): Promise<ProviderUsageResult> {
       },
     };
   }
-  if (credentials.expired) {
+  if (credentials.expired && !credentials.renewable) {
     return { supported: true, usage: { status: "expired" } };
+  }
+  if (credentials.expired) {
+    return {
+      supported: true,
+      usage: {
+        status: "error",
+        message: CODEX_USAGE_AFTER_RENEWAL_MESSAGE,
+        planLabel: null,
+        accountEmail: credentials.accountEmail,
+      },
+    };
   }
   try {
     const headers = new Headers({
