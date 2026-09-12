@@ -26,6 +26,7 @@ import {
   type HostDaemonRejectedEvent,
 } from "@bb/host-daemon-contract";
 import {
+  getThreadEventScopeTurnId,
   requireThreadEventScopeTurnId,
   type ThreadEventType,
   type ThreadEventTurnStatus,
@@ -41,6 +42,10 @@ import {
   isActivePruneTriggerThreadEventType,
   maybePruneActiveThreadEventHistory,
 } from "../services/system/event-pruning.js";
+import {
+  recordSpendForInsertedEvents,
+  type SpendRollupObservationSource,
+} from "../services/system/spend-rollup.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../services/threads/child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "../services/threads/thread-parent.js";
 import {
@@ -888,6 +893,61 @@ function storeExecutionReports<
   return kept;
 }
 
+/**
+ * The usage events in a batch that were actually stored, paired with the
+ * sequence and timestamp the append gave them.
+ *
+ * `acceptedEvents[k]` and `insertedInputIndexes[k]` are pushed together by the
+ * append, so they index each other. Reading the event from `labelledEntries`
+ * rather than from the stored `data` keeps it typed and validated.
+ *
+ * Nothing here removes an entry from the batch. The fleet plugin reads usage by
+ * polling `events.list`, and it keeps working only while this stays an
+ * observation.
+ */
+function collectSpendObservationSources(
+  deps: AppDeps,
+  args: {
+    acceptedEvents: readonly AcceptedDaemonEvent[];
+    entries: readonly { envelope: HostDaemonEventEnvelope }[];
+    insertedInputIndexes: readonly number[];
+  },
+): SpendRollupObservationSource[] {
+  const sources: SpendRollupObservationSource[] = [];
+  const providerIdByThreadId = new Map<string, string | null>();
+  for (const [position, inputIndex] of args.insertedInputIndexes.entries()) {
+    const entry = args.entries[inputIndex];
+    const accepted = args.acceptedEvents[position];
+    if (entry === undefined || accepted === undefined) {
+      continue;
+    }
+    const event = entry.envelope.event;
+    if (event.type !== "thread/tokenUsage/updated") {
+      continue;
+    }
+    const threadId = entry.envelope.threadId;
+    if (!providerIdByThreadId.has(threadId)) {
+      providerIdByThreadId.set(
+        threadId,
+        getThread(deps.db, threadId)?.providerId ?? null,
+      );
+    }
+    const providerId = providerIdByThreadId.get(threadId) ?? null;
+    if (providerId === null) {
+      continue;
+    }
+    sources.push({
+      createdAt: accepted.createdAt,
+      event,
+      providerId,
+      sequence: accepted.sequence,
+      threadId,
+      turnId: getThreadEventScopeTurnId(event.scope) ?? null,
+    });
+  }
+  return sources;
+}
+
 class ReplayedEventBatchRaceError extends Error {
   constructor() {
     super(
@@ -1019,6 +1079,14 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
             }
             const result = appendDaemonEventsInTransaction(tx, eventInputs);
             recordDaemonReplayKeys(deps.db, { replayKeys, now: Date.now() });
+            recordSpendForInsertedEvents(
+              deps.db,
+              collectSpendObservationSources(deps, {
+                acceptedEvents: result.acceptedEvents,
+                entries: labelledEntries,
+                insertedInputIndexes: result.insertedInputIndexes,
+              }),
+            );
             return result;
           },
           { behavior: "immediate" },

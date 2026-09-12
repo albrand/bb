@@ -184,6 +184,8 @@ export interface AppendDaemonEventInput {
 }
 
 export interface AcceptedDaemonEvent {
+  /** The stored row's `created_at`, so a caller need not re-read the row. */
+  createdAt: number;
   sequence: number;
   threadId: string;
 }
@@ -824,6 +826,7 @@ export function appendDaemonEventsInTransaction(
     }
 
     const acceptedEvent: AcceptedDaemonEvent = {
+      createdAt: now,
       sequence,
       threadId: input.threadId,
     };

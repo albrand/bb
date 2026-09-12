@@ -44,6 +44,36 @@ export {
   upsertThreadExecutionReport,
 } from "./thread-execution-reports.js";
 export {
+  applySpendContribution,
+  countSpendCursors,
+  emptySpendCursorState,
+  ensureSpendTables,
+  foldTokenUsageObservation,
+  getSpendCoverage,
+  getSpendCursor,
+  listSpendBackfillThreads,
+  listSpendRollupRows,
+  listStoredTokenUsageEvents,
+  normalizeSpendUsage,
+  resolveSpendModel,
+  saveSpendCursor,
+  spendLocalDay,
+  spendWeightedUnits,
+  SPEND_WEIGHTS,
+} from "./thread-spend.js";
+export type {
+  ListSpendRollupArgs,
+  SpendBackfillThreadRow,
+  SpendContribution,
+  SpendCoverage,
+  SpendCursorState,
+  SpendGroupBy,
+  SpendRollupRow,
+  SpendUsageBreakdown,
+  StoredTokenUsageEventRow,
+  TokenUsageObservation,
+} from "./thread-spend.js";
+export {
   clearQueuedMessageDispatchRetry,
   getQueuedMessageDispatchRetry,
   listDeferredQueuedMessageDispatchRetryIds,
