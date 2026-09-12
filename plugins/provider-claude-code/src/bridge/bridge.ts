@@ -54,6 +54,7 @@ import {
 } from "../session-params.js";
 import { SdkSession, type SdkSessionOptions } from "./sdk-session.js";
 import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
+import { runAfterClaudeRenewalSettles } from "./claude-refresh-lock.js";
 import {
   claudeThreadForkParamsSchema,
   claudeThreadResumeParamsSchema,
@@ -472,10 +473,28 @@ function scheduleIdleQueryRelease(
       scheduleIdleQueryRelease(threadSession, threadId);
       return;
     }
-    threadSession.closing = true;
-    attachment.residentSession = null;
-    attachment.residencyGeneration += 1;
-    threadSession.session.stop();
+    runAfterClaudeRenewalSettles({
+      env: process.env,
+      action: () => {
+        if (
+          attachment.closing ||
+          attachment.residencyGeneration !== generation ||
+          threadAttachments.get(threadId) !== attachment ||
+          attachment.residentSession !== threadSession ||
+          threadSession.closing
+        ) {
+          return;
+        }
+        if (!isThreadSessionQuiescent(threadSession, threadId)) {
+          scheduleIdleQueryRelease(threadSession, threadId);
+          return;
+        }
+        threadSession.closing = true;
+        attachment.residentSession = null;
+        attachment.residencyGeneration += 1;
+        threadSession.session.stop();
+      },
+    });
   }, CLAUDE_IDLE_QUERY_GRACE_MS);
 }
 
