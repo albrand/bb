@@ -40,11 +40,15 @@ const CLAUDE_KEYCHAIN_UNPARSABLE_MESSAGE =
   "The Claude Code sign-in in the macOS Keychain is not in a recognized format.";
 const CLAUDE_RENEWAL_REJECTED_MESSAGE =
   "Claude Code could not renew its sign-in and needs a new one.";
+const CLAUDE_USAGE_AFTER_RENEWAL_MESSAGE =
+  "Claude usage appears after Claude Code renews its sign-in on next use.";
 
 const claudeCredentialsSchema = z.object({
   claudeAiOauth: z.object({
     accessToken: z.string(),
+    refreshToken: z.string().nullish(),
     expiresAt: z.number().nullish(),
+    refreshTokenExpiresAt: z.number().nullish(),
     subscriptionType: z.string().nullish(),
     rateLimitTier: z.string().nullish(),
   }),
@@ -248,7 +252,12 @@ type KeychainRead =
   | { kind: "unreadable" };
 
 type CredentialsRead =
-  | { kind: "signed_in"; credentials: ClaudeCredentials }
+  | {
+      kind: "signed_in";
+      credentials: ClaudeCredentials;
+      renewsOnNextUse: boolean;
+    }
+  | { kind: "access_expired"; credentials: ClaudeCredentials }
   | { kind: "signed_out" }
   | { kind: "renewal_rejected" }
   | { kind: "unreadable"; message: string };
@@ -316,9 +325,20 @@ function parseCredentials(raw: string): ClaudeCredentials | null {
 }
 
 function credentialsRead(credentials: ClaudeCredentials): CredentialsRead {
-  return credentials.accessToken === ""
-    ? { kind: "renewal_rejected" }
-    : { kind: "signed_in", credentials };
+  const now = Date.now();
+  if (credentials.accessToken === "") return { kind: "renewal_rejected" };
+  if (
+    credentials.refreshTokenExpiresAt != null &&
+    now >= credentials.refreshTokenExpiresAt
+  ) {
+    return { kind: "renewal_rejected" };
+  }
+  if (credentials.expiresAt == null || now < credentials.expiresAt) {
+    return { kind: "signed_in", credentials, renewsOnNextUse: false };
+  }
+  return credentials.refreshToken
+    ? { kind: "signed_in", credentials, renewsOnNextUse: true }
+    : { kind: "access_expired", credentials };
 }
 
 async function readCredentials(): Promise<CredentialsRead> {
@@ -421,13 +441,12 @@ export async function getClaudeProviderHealth(): Promise<ProviderHealthResult> {
         statusMessage: CLAUDE_RENEWAL_REJECTED_MESSAGE,
       });
     }
-    const { credentials } = read;
     const known = {
       accountEmail: email,
-      planLabel: planLabel(credentials),
+      planLabel: planLabel(read.credentials),
       installedVersion: version,
     };
-    return credentials.expiresAt != null && Date.now() >= credentials.expiresAt
+    return read.kind === "access_expired"
       ? healthResult("expired", known)
       : healthResult("ready", known);
   } catch (error) {
@@ -564,14 +583,24 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
       },
     };
   }
+  if (read.kind === "access_expired") {
+    return { supported: true, usage: { status: "expired" } };
+  }
   if (read.kind !== "signed_in") {
     return { supported: true, usage: { status: "unauthenticated" } };
   }
   const { credentials } = read;
-  if (credentials.expiresAt != null && Date.now() >= credentials.expiresAt) {
-    return { supported: true, usage: { status: "expired" } };
-  }
   const known = { planLabel: planLabel(credentials), accountEmail: email };
+  if (read.renewsOnNextUse) {
+    return {
+      supported: true,
+      usage: {
+        status: "error",
+        message: CLAUDE_USAGE_AFTER_RENEWAL_MESSAGE,
+        ...known,
+      },
+    };
+  }
   try {
     const response = await fetch(CLAUDE_USAGE_URL, {
       headers: {
