@@ -63,14 +63,9 @@ const ACTIVE_THREAD_EVENT_PRUNE_MIN_SEQUENCE_DELTA = 250;
 const ACTIVE_THREAD_EVENT_PRUNE_MIN_INTERVAL_MS = 30_000;
 const SLOW_THREAD_EVENT_PRUNE_LOG_THRESHOLD_MS = 1_000;
 
-const AGE_PRUNABLE_THREAD_EVENT_TYPES: readonly ThreadEventType[] = [
+const ACTIVE_PRUNE_TRIGGER_THREAD_EVENT_TYPES: readonly ThreadEventType[] = [
   "thread/contextWindowUsage/updated",
   "thread/tokenUsage/updated",
-  "turn/diff/updated",
-] as const;
-
-const ACTIVE_PRUNE_TRIGGER_THREAD_EVENT_TYPES: readonly ThreadEventType[] = [
-  ...AGE_PRUNABLE_THREAD_EVENT_TYPES,
   "item/backgroundTask/progress",
 ] as const;
 

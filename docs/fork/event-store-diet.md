@@ -39,6 +39,13 @@ stored under it are what model fallback detection reads.
 timeline's own exclusion list, and no route, projection, CLI command, plugin or
 automation reads it. It was produced only to be pruned.
 
+Dropping `turn/diff/updated` also removes it as an in-turn prune trigger, since
+the pruner only sees events that were stored, so it is removed from that trigger
+set too rather than left as an entry that can never match. Three triggers remain.
+Nothing depends on it: every root turn completion that moves a thread to idle
+prunes unconditionally, as does archiving, and the in-turn path is only an
+optimisation for long turns.
+
 Dropping at ingest needs no protocol change. The daemon dequeues a batch on any
 2xx and never reconciles which events came back in `acceptedEvents`, so a
 shorter list causes no redelivery; upstream already drops events on this path
