@@ -355,8 +355,10 @@ export {
 } from "./retained-event-outputs.js";
 export {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
+  getCompletedEventOutputTruncationLimits,
   RETAINED_EVENT_OUTPUT_TARGETS,
 } from "../retained-event-output.js";
+export type { CompletedEventOutputTruncationLimits } from "../retained-event-output.js";
 export type {
   AcceptedDaemonEvent,
   AppendDaemonEventInput,
@@ -463,6 +465,21 @@ export {
   pruneClosedSessions,
   pruneDestroyedEnvironments,
 } from "./sweeps.js";
+export {
+  DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
+  FILE_CHANGE_DIFF_RETAINED_HEAD_CHARS,
+  FILE_CHANGE_DIFF_RETAINED_TAIL_CHARS,
+  FILE_CHANGE_DIFF_TRUNCATION_MARKER,
+  FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS,
+  FILE_CHANGE_SCAN_INDEX,
+  truncateFileChangeDiff,
+  truncateFileChangeDiffs,
+  truncateFileChangeDiffsInPayload,
+} from "./fork-file-change-truncation.js";
+export type {
+  TruncateFileChangeDiffsArgs,
+  TruncateFileChangeDiffsResult,
+} from "./fork-file-change-truncation.js";
 export {
   compactDatabase,
   dropDeferredLegacyTables,

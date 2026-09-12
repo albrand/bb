@@ -32,6 +32,9 @@ import {
   threads,
   DEFAULT_COMPLETED_EVENT_OUTPUT_MIGRATION_SCAN_LIMIT,
   DEFAULT_LEGACY_IMAGE_GENERATION_MIGRATION_SCAN_LIMIT,
+  COMPLETED_EVENT_OUTPUT_RETENTION_MS,
+  truncateFileChangeDiffs,
+  DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
 } from "@bb/db";
 import type {
   AppDeps,
@@ -428,6 +431,17 @@ async function runRetainedEventOutputExpirySweep(
   }
 }
 
+function runFileChangeDiffTruncationSweep(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  now: number,
+): void {
+  truncateFileChangeDiffs(deps.db, {
+    createdBefore: now - COMPLETED_EVENT_OUTPUT_RETENTION_MS,
+    limit: DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
+    truncatedAt: now,
+  });
+}
+
 function runClosedSessionPruneSweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
   now: number,
@@ -493,6 +507,12 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
     category: "retention",
     name: "retained-event-output-expiry",
     run: runRetainedEventOutputExpirySweep,
+  },
+  {
+    cadenceMs: 0,
+    category: "retention",
+    name: "file-change-diff-truncation",
+    run: runFileChangeDiffTruncationSweep,
   },
   {
     cadenceMs: 0,

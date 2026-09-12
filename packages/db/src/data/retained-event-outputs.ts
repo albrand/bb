@@ -7,11 +7,10 @@ import {
 import { sliceUtf16HeadAndTail } from "@bb/domain/utf16";
 import type { DbQueryConnection } from "../connection.js";
 import {
-  COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-  COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
-  COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+  getCompletedEventOutputTruncationLimits,
   RETAINED_EVENT_OUTPUT_TARGETS,
+  type CompletedEventOutputTruncationLimits,
   type RetainedEventOutputPath,
   type RetainedEventOutputTarget,
 } from "../retained-event-output.js";
@@ -98,11 +97,14 @@ function targetForItemKind(
   );
 }
 
-function truncateOutput(value: string): TruncatedOutput {
+function truncateOutput(
+  value: string,
+  limits: CompletedEventOutputTruncationLimits,
+): TruncatedOutput {
   const { head, tail } = sliceUtf16HeadAndTail(
     value,
-    COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-    COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+    limits.retainedHeadChars,
+    limits.retainedTailChars,
   );
   return {
     retainedHeadLength: head.length,
@@ -115,13 +117,14 @@ function prepareRetainedOutputData(args: {
   createdAt: number;
   data: string;
   item: Record<string, unknown>;
+  limits: CompletedEventOutputTruncationLimits;
   outputPath: RetainedEventOutputPath;
   payload: Record<string, unknown>;
 }): PreparedCompletedEventOutputData {
   const value = args.item[args.outputPath];
   if (
     typeof value !== "string" ||
-    value.length <= COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS
+    value.length <= args.limits.thresholdChars
   ) {
     return { data: args.data, retainedOutput: null };
   }
@@ -137,7 +140,7 @@ function prepareRetainedOutputData(args: {
   const truncation = isJsonObject(existingTruncation)
     ? existingTruncation
     : {};
-  const preview = truncateOutput(value);
+  const preview = truncateOutput(value, args.limits);
   args.item[args.outputPath] = preview.value;
   truncation[args.outputPath] = {
     originalLength: value.length,
@@ -162,10 +165,11 @@ export function prepareCompletedEventOutputData(
 ): PreparedCompletedEventOutputData {
   const target =
     args.type === "item/completed" ? targetForItemKind(args.itemKind) : null;
-  if (
-    target === null ||
-    args.data.length <= COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS
-  ) {
+  if (target === null) {
+    return { data: args.data, retainedOutput: null };
+  }
+  const limits = getCompletedEventOutputTruncationLimits(target.itemKind);
+  if (args.data.length <= limits.thresholdChars) {
     return { data: args.data, retainedOutput: null };
   }
 
@@ -186,6 +190,7 @@ export function prepareCompletedEventOutputData(
     createdAt: args.createdAt,
     data: args.data,
     item,
+    limits,
     outputPath: target.outputPath,
     payload,
   });
@@ -209,6 +214,7 @@ export function prepareLegacyImageGenerationOutputData(args: {
     createdAt: args.createdAt,
     data: args.data,
     item: imageGeneration.item,
+    limits: getCompletedEventOutputTruncationLimits("imageGeneration"),
     outputPath: "result",
     payload,
   });
