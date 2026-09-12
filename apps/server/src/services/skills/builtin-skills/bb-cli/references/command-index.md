@@ -241,6 +241,13 @@ This index lists every command path that the core CLI registers. Read the task-s
 - `bb skill cli-skills-status`
 - `bb skill install-cli-skills`
 
+## spend
+
+- `bb spend`
+- `bb spend list`
+- `bb spend backfill`
+- `bb spend analyze`
+
 ## guide
 
 - `bb guide`
