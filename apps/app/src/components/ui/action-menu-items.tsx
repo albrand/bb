@@ -18,6 +18,7 @@ interface ActionMenuItemProps {
   variant?: "default" | "destructive";
   icon: IconName;
   onSelect?: (event: Event) => void;
+  shortcut?: string;
   surface: ActionMenuSurface;
 }
 
@@ -31,12 +32,16 @@ export function ActionMenuItem({
   variant,
   icon,
   onSelect,
+  shortcut,
   surface,
 }: ActionMenuItemProps) {
   const content = (
     <>
       <Icon name={icon} aria-hidden="true" />
       {children}
+      {shortcut === undefined ? null : (
+        <span className="ml-auto pl-3 text-subtle-foreground">{shortcut}</span>
+      )}
     </>
   );
 

@@ -107,6 +107,23 @@ export function getSidebarThreadNavigationTargets(
   return collectSidebarThreadTargets(root, Number.POSITIVE_INFINITY, true);
 }
 
+export interface FocusedSidebarThread {
+  projectId: string;
+  threadId: string;
+}
+
+export function findFocusedSidebarThread(
+  active: Element | null,
+): FocusedSidebarThread | null {
+  const anchor = active?.closest<HTMLAnchorElement>(
+    "a[data-sidebar-thread-id][data-sidebar-project-id]",
+  );
+  if (!anchor) return null;
+  const { sidebarProjectId, sidebarThreadId } = anchor.dataset;
+  if (!sidebarProjectId || !sidebarThreadId) return null;
+  return { projectId: sidebarProjectId, threadId: sidebarThreadId };
+}
+
 export function useSidebarThreadShortcut(
   threadId: string,
 ): SidebarThreadShortcutPresentation | undefined {

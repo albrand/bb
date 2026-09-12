@@ -180,6 +180,7 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
       desktopOnly: true,
     },
   ),
+  binding("thread.openBeside", "b", { mod: true, shift: true }, mainWithoutModal),
   ...numberedChatBindings(THREAD_JUMP_APP_COMMAND_IDS, mainWithoutModal),
   unassignedBinding("pane.focus.previous", splitWithoutModal),
   unassignedBinding("pane.focus.next", splitWithoutModal),

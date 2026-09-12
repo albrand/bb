@@ -59,6 +59,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Open the previous visible sidebar thread.",
       ),
       command(
+        "thread.openBeside",
+        "Open thread beside",
+        "Open the focused sidebar thread in a pane beside the current one.",
+      ),
+      command(
         "thread.next",
         "Next thread",
         "Open the next visible sidebar thread.",

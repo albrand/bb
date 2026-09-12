@@ -315,6 +315,7 @@ delayed shortcut badges without disabling any shortcuts.
 | Threads   | Rename focused thread                     | Unassigned                        | Thread view              |
 | Threads   | Archive focused thread                    | Unassigned                        | Thread view              |
 | Threads   | Previous / next thread                    | Surface defaults above            | Desktop / web            |
+| Threads   | Open thread beside                        | `Mod+Shift+B`                     | Focused sidebar thread   |
 | Threads   | Open visible thread 1–9                   | Platform defaults above           | Web / desktop            |
 | Layout    | Previous / next chat pane                 | Unassigned                        | While split              |
 | Layout    | Focus chat pane 1–8                       | Platform defaults above           | Split (web / desktop)    |
