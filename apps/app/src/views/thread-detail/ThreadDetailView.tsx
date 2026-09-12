@@ -1623,24 +1623,25 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     }
     return desktopInfo.onOpenNewTab(handleOpenNewTab);
   }, [handleOpenNewTab, isFocused]);
-  const handleStartTerminal = useCallback(() => {
+  const startTerminalSession = useCallback(async (): Promise<string | null> => {
     if (!canCreateTerminal || createTerminal.isPending || !threadId) {
-      return;
+      return null;
     }
     const newTab = createNewTabFixedPanelTab();
-    void createTerminal
-      .mutateAsync({
+    try {
+      const session = await createTerminal.mutateAsync({
         threadId,
         cols: DEFAULT_TERMINAL_COLS,
         rows: DEFAULT_TERMINAL_ROWS,
-      })
-      .then((session) => {
-        closeTab(newTab.id);
-        setShouldAutoFocusTerminal(true);
-        setActiveFixedTerminal(session.id);
-        openCompactDrawer();
-      })
-      .catch(() => undefined);
+      });
+      closeTab(newTab.id);
+      setShouldAutoFocusTerminal(true);
+      setActiveFixedTerminal(session.id);
+      openCompactDrawer();
+      return session.id;
+    } catch {
+      return null;
+    }
   }, [
     canCreateTerminal,
     closeTab,
@@ -1649,6 +1650,9 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     setActiveFixedTerminal,
     threadId,
   ]);
+  const handleStartTerminal = useCallback(() => {
+    void startTerminalSession();
+  }, [startTerminalSession]);
   useAppCommandHandler("terminal.open", () => {
     if (
       !isFocused ||
@@ -2949,6 +2953,9 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
               tabs: panelTabs,
               fixedTabs: secondaryPanelFixedTabs,
               splitPanelStateId: thread.id,
+              onCreateTerminalInNewPane: canCreateTerminal
+                ? startTerminalSession
+                : undefined,
               renderBrowserDeck,
               isOpen: isSecondaryPanelOpen,
               onClose: closeSecondaryPanel,
