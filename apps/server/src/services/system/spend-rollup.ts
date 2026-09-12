@@ -5,7 +5,7 @@ import {
   foldTokenUsageObservation,
   getSpendCoverage,
   getSpendCursor,
-  getSpendThreadSequenceBounds,
+  getSpendThreadLatestSequence,
   hasThreadRewind,
   listSpendBackfillThreads,
   SPEND_PRUNE_SAFE_SEQUENCE,
@@ -163,45 +163,37 @@ function mergeContributions(
 /**
  * Whether the rollup can prove this thread's usage history is intact.
  *
- * `live` distinguishes the two proofs: only an append that just stored the
- * thread's first ever usage event has seen the beginning. A backfill reads the
- * earliest SURVIVING row, which looks identical whether or not the pruner took
- * anything before it, so it may only rely on the thread being too short for the
- * pruner to have run.
+ * Only two things delete a usage event, and each has to be ruled out.
  *
- * Both proofs are void on a thread an edited message has rewound, because that
- * deletes usage events outright and neither the sequence bounds nor the
- * earliest surviving row show it.
+ * The pruner deletes at `sequence <= latestSequence - keepRecent`, so a thread
+ * whose latest sequence is at or below the smallest keep-recent window cannot
+ * have lost one. That is the whole of the positive proof. "The rollup just
+ * stored the earliest surviving usage event" reads like a second proof and is
+ * not one: once the pruner has run, earliest-surviving stops meaning first, and
+ * ruling out a deletion at sequence 1 needs `latestSequence < 121` regardless -
+ * so it collapsed into the rule above while granting certainty over threads
+ * whose history was already gone. A resumed thread with 900 pruned tokens and
+ * 500 new ones was badged complete while holding 36% of what it had spent.
+ *
+ * An edited message deletes a range outright and can do it long before the
+ * pruner's window, so the marker it leaves is checked too.
  */
 function resolveHistoryComplete(
   db: DbQueryConnection,
-  args: { live: boolean; sequence: number; threadId: string },
+  args: { threadId: string },
 ): boolean {
-  // An edited message deletes a range of events, usage events included, and it
-  // can happen long before the thread reaches the pruner's window. Neither
-  // proof below survives it, so a rewound thread is partial whichever path is
-  // opening its cursor.
   if (hasThreadRewind(db, { threadId: args.threadId })) {
     return false;
   }
-  const bounds = getSpendThreadSequenceBounds(db, {
+  const latestSequence = getSpendThreadLatestSequence(db, {
     threadId: args.threadId,
   });
-  if (bounds.latestSequence === null) {
-    return false;
-  }
-  if (bounds.latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE) {
-    return true;
-  }
-  return (
-    args.live && bounds.earliestTokenUsageSequence === args.sequence
-  );
+  return latestSequence !== null && latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE;
 }
 
 function rollUpObservations(
   db: DbQueryConnection,
   observations: readonly TokenUsageObservation[],
-  options: { live: boolean },
 ): number {
   const tracked = new Map<string, TrackedCursorEntry>();
   const contributions: SpendContribution[] = [];
@@ -219,11 +211,7 @@ function rollUpObservations(
       // overwrite it with a guess.
       const historyComplete =
         stored === null
-          ? resolveHistoryComplete(db, {
-              live: options.live,
-              sequence: observation.sequence,
-              threadId: observation.threadId,
-            })
+          ? resolveHistoryComplete(db, { threadId: observation.threadId })
           : undefined;
       entry = {
         historyComplete,
@@ -305,7 +293,7 @@ export function recordSpendForInsertedEvents(
     turnId: source.turnId,
   }));
   ensureSpendTables(db);
-  return rollUpObservations(db, observations, { live: true });
+  return rollUpObservations(db, observations);
 }
 
 /**
@@ -317,13 +305,13 @@ export function recordSpendForInsertedEvents(
  * second run is a no-op and the order of backfill and live traffic does not
  * matter.
  *
- * A thread whose earliest surviving usage event is not its earliest surviving
- * event had usage pruned out from under it, and is marked incomplete rather
- * than topped up from the one cumulative `total` the pruner left behind. That
- * snapshot carries a single timestamp, so any per-day bucket derived from it is
- * invented; codex resets mean a final `total` is not the session's truth; and
- * mixing `total`-derived rows with `last`-derived deltas double counts the
- * moment the thread emits again.
+ * It never tops a thread up from the one cumulative `total` the pruner left
+ * behind. That snapshot carries a single timestamp, so any per-day bucket
+ * derived from it is invented; codex resets mean a final `total` is not the
+ * session's truth; and mixing `total`-derived rows with `last`-derived deltas
+ * double counts the moment the thread emits again. A thread it cannot prove
+ * intact is recorded as partial and its total read as a floor - see
+ * `resolveHistoryComplete` for what "prove" means here.
  */
 export function backfillSpend(db: DbConnection): SpendBackfillResult {
   ensureSpendTables(db);
@@ -353,9 +341,7 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
         turnId: row.turnId,
       });
     }
-    contributionsApplied += rollUpObservations(db, observations, {
-      live: false,
-    });
+    contributionsApplied += rollUpObservations(db, observations);
   }
 
   // Counted from what the cursors actually hold, not from the backfill's own

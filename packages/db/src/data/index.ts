@@ -51,7 +51,7 @@ export {
   foldTokenUsageObservation,
   getSpendCoverage,
   getSpendCursor,
-  getSpendThreadSequenceBounds,
+  getSpendThreadLatestSequence,
   hasThreadRewind,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listSpendBackfillThreads,
@@ -69,7 +69,6 @@ export {
 export type {
   ListSpendRollupArgs,
   SpendAssessmentRow,
-  SpendThreadSequenceBounds,
   SpendBackfillThreadRow,
   SpendContribution,
   SpendCoverage,

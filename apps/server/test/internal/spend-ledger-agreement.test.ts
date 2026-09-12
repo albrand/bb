@@ -67,21 +67,33 @@ describe.skipIf(!ENABLED)("spend rollup versus fleet ledger", () => {
           GROUP BY turns.thread_id, turns.provider_id`,
     );
 
-    const rollupByThread = new Map<string, number>();
+    // Keyed by thread AND provider, because the fleet side groups that way. A
+    // rollup total summed per thread across providers would make every
+    // multi-provider thread a guaranteed disagreement, in the same direction as
+    // a real one, and the cause would be the comparison rather than the code.
+    const rollupByKey = new Map<string, number>();
     for (const row of listSpendRollupRows(db, {})) {
-      rollupByThread.set(
-        row.threadId,
-        (rollupByThread.get(row.threadId) ?? 0) + row.totalTokens,
-      );
+      const key = `${row.threadId}:${row.providerId}`;
+      rollupByKey.set(key, (rollupByKey.get(key) ?? 0) + row.totalTokens);
     }
 
     const compared: string[] = [];
+    const missing: string[] = [];
     let agreed = 0;
     let disagreed = 0;
     let comparedTokens = 0;
     for (const fleetRow of fleetTotals) {
-      const mine = rollupByThread.get(fleetRow.threadId);
+      const mine = rollupByKey.get(
+        `${fleetRow.threadId}:${fleetRow.providerId}`,
+      );
       if (mine === undefined) {
+        // The ledger has this pair and the rollup produced nothing for it.
+        // Counted rather than skipped: silently dropping it would inflate the
+        // agreement rate by hiding the cases with most to disagree about.
+        missing.push(
+          `MISSING thread=${fleetRow.threadId} provider=${fleetRow.providerId} ` +
+            `fleet=${fleetRow.totalTokens}`,
+        );
         continue;
       }
       comparedTokens += fleetRow.totalTokens;
@@ -105,10 +117,12 @@ describe.skipIf(!ENABLED)("spend rollup versus fleet ledger", () => {
           `contributions=${result.contributionsApplied} ` +
           `complete=${result.threadsHistoryComplete} ` +
           `partial=${result.threadsHistoryPartial}`,
-        `fleet rows restricted to surviving events: threads=${fleetTotals.length}`,
-        `compared threads=${agreed + disagreed} agreed=${agreed} ` +
-          `disagreed=${disagreed} tokensCompared=${comparedTokens}`,
+        `fleet rows restricted to surviving events: pairs=${fleetTotals.length}`,
+        `compared pairs=${agreed + disagreed} agreed=${agreed} ` +
+          `disagreed=${disagreed} missingFromRollup=${missing.length} ` +
+          `tokensCompared=${comparedTokens}`,
         ...compared.slice(0, 50),
+        ...missing.slice(0, 50),
         "",
       ].join("\n"),
     );

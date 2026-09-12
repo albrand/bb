@@ -44,8 +44,12 @@ import { migrate } from "@bb/db";
  *   EVENTS=1  FILLER=19   the realistic mix
  *   EVENTS=0  FILLER=20   no usage at all, which is most event traffic
  *
- * The last one is the number that describes the common case, because the hook
- * finds nothing to record and returns before it touches the database.
+ * The last one needs no number. `recordSpendForInsertedEvents` returns at
+ * `sources.length === 0` before `ensureSpendTables` and before a statement is
+ * prepared, so a batch with no usage events does no work beyond the type check
+ * already walking it. The benchmark agrees, but the gap it reports is smaller
+ * than its own run-to-run variance, so the code is the evidence and the number
+ * is only a sanity check.
  */
 const ENABLED = process.env.BB_SPEND_BENCH === "1";
 const ON_DISK = process.env.BB_SPEND_BENCH_FILE === "1";
