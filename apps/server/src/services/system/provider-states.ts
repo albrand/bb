@@ -75,6 +75,12 @@ async function getProviderState(
         "Provider readiness was not reported.",
       );
     }
+    if (args.cwd === undefined) {
+      deps.providerRegistry.rememberProviderHealthStatus(
+        { hostId: args.hostId, providerId: args.provider.id },
+        Promise.resolve(result.health.status),
+      );
+    }
     const health = {
       providerId: args.provider.id,
       displayName: args.provider.displayName,
