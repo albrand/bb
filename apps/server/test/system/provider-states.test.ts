@@ -288,4 +288,62 @@ describe("getProviderStates", () => {
       );
     });
   });
+
+  it("does not cache a health answer that was probed with a cwd", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-provider-states-cwd-cache",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const cwdProbedProviderIds: string[] = [];
+
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          if (request.command.type === "provider.health") {
+            const carriedCwd = request.command.cwd !== undefined;
+            if (carriedCwd) {
+              cwdProbedProviderIds.push(request.command.providerId);
+            }
+            return {
+              ok: true,
+              result: {
+                supported: true,
+                health: carriedCwd
+                  ? {
+                      ...readyHealth(request.command.providerId),
+                      status: "expired" as const,
+                    }
+                  : readyHealth(request.command.providerId),
+              },
+            };
+          }
+          throw new Error(`Unexpected command ${request.command.type}`);
+        },
+      });
+
+      await getProviderStates(harness.deps, { environmentId: environment.id });
+
+      expect(cwdProbedProviderIds.length).toBeGreaterThan(0);
+      const cached = await Promise.all(
+        cwdProbedProviderIds.map(async (providerId) => ({
+          providerId,
+          status:
+            await harness.deps.providerRegistry.lookupProviderHealthStatus({
+              hostId: host.id,
+              providerId,
+            }),
+        })),
+      );
+
+      expect(cached.filter((entry) => entry.status === "expired")).toEqual([]);
+    });
+  });
 });
