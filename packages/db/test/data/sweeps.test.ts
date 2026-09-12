@@ -8,6 +8,7 @@ import {
   COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
   COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
   COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+  getCompletedEventOutputTruncationLimits,
   DEFAULT_DESTROYED_ENVIRONMENT_EVENT_DETACH_BATCH_SIZE,
   DESTROYED_ENVIRONMENT_TTL_MS,
   pruneClosedSessions,
@@ -224,6 +225,8 @@ describe("truncateCompletedEventItemOutputs", () => {
       webSearchResultTexts: 1,
     });
 
+    const commandLimits = getCompletedEventOutputTruncationLimits("commandExecution");
+    const toolLimits = getCompletedEventOutputTruncationLimits("toolCall");
     const commandData = JSON.parse(
       db.select().from(events).where(eq(events.id, commandEventId)).get()
         ?.data ?? "{}",
@@ -232,12 +235,12 @@ describe("truncateCompletedEventItemOutputs", () => {
     expect(commandData.item.aggregatedOutput).toContain(
       "output truncated by retention policy",
     );
-    expect(commandData.item.aggregatedOutput.startsWith(commandOutput.slice(0, COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS))).toBe(true);
-    expect(commandData.item.aggregatedOutput.endsWith(commandOutput.slice(-COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS))).toBe(true);
+    expect(commandData.item.aggregatedOutput.startsWith(commandOutput.slice(0, commandLimits.retainedHeadChars))).toBe(true);
+    expect(commandData.item.aggregatedOutput.endsWith(commandOutput.slice(-commandLimits.retainedTailChars))).toBe(true);
     expect(commandData.item.truncation.aggregatedOutput).toEqual({
       originalLength: commandOutput.length,
-      retainedHeadLength: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-      retainedTailLength: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+      retainedHeadLength: commandLimits.retainedHeadChars,
+      retainedTailLength: commandLimits.retainedTailChars,
       truncatedAt: now,
     });
 
@@ -249,12 +252,12 @@ describe("truncateCompletedEventItemOutputs", () => {
     expect(toolData.item.result).toContain(
       "output truncated by retention policy",
     );
-    expect(toolData.item.result.startsWith(toolResult.slice(0, COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS))).toBe(true);
-    expect(toolData.item.result.endsWith(toolResult.slice(-COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS))).toBe(true);
+    expect(toolData.item.result.startsWith(toolResult.slice(0, toolLimits.retainedHeadChars))).toBe(true);
+    expect(toolData.item.result.endsWith(toolResult.slice(-toolLimits.retainedTailChars))).toBe(true);
     expect(toolData.item.truncation.result).toEqual({
       originalLength: toolResult.length,
-      retainedHeadLength: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-      retainedTailLength: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+      retainedHeadLength: toolLimits.retainedHeadChars,
+      retainedTailLength: toolLimits.retainedTailChars,
       truncatedAt: now,
     });
 
@@ -407,8 +410,12 @@ describe("truncateCompletedEventItemOutputs", () => {
     );
     expect(largeData.item.truncation.aggregatedOutput).toEqual({
       originalLength: largeOutput.length,
-      retainedHeadLength: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-      retainedTailLength: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+      retainedHeadLength:
+        getCompletedEventOutputTruncationLimits("commandExecution")
+          .retainedHeadChars,
+      retainedTailLength:
+        getCompletedEventOutputTruncationLimits("commandExecution")
+          .retainedTailChars,
       truncatedAt: now,
     });
   });

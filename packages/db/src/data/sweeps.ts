@@ -19,6 +19,12 @@ export const COMPLETED_EVENT_OUTPUT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export const COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS = 32 * 1024;
 export const COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS = 2 * 1024;
 export const COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS = 2 * 1024;
+
+export interface CompletedEventOutputTruncationLimits {
+  retainedHeadChars: number;
+  retainedTailChars: number;
+  thresholdChars: number;
+}
 const COMPLETED_EVENT_OUTPUT_TRUNCATION_CURSOR_VERSION = 1;
 export const DEFAULT_CLOSED_SESSION_PRUNE_BATCH_SIZE = 1_000;
 export const DEFAULT_COMPLETED_EVENT_OUTPUT_TRUNCATION_BATCH_SIZE = 250;
@@ -50,6 +56,38 @@ type SqliteParameter = string | number | bigint | Buffer | null;
 interface CompletedEventOutputPathTarget {
   itemKind: CompletedEventOutputItemKind;
   outputPath: CompletedEventOutputPath;
+}
+
+const COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS: Record<
+  CompletedEventOutputItemKind,
+  CompletedEventOutputTruncationLimits
+> = {
+  commandExecution: {
+    retainedHeadChars: 4 * 1024,
+    retainedTailChars: 4 * 1024,
+    thresholdChars: 8 * 1024,
+  },
+  toolCall: {
+    retainedHeadChars: 2 * 1024,
+    retainedTailChars: 2 * 1024,
+    thresholdChars: 4 * 1024,
+  },
+  webFetch: {
+    retainedHeadChars: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
+    retainedTailChars: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+    thresholdChars: COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+  },
+  webSearch: {
+    retainedHeadChars: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
+    retainedTailChars: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+    thresholdChars: COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+  },
+};
+
+export function getCompletedEventOutputTruncationLimits(
+  itemKind: CompletedEventOutputItemKind,
+): CompletedEventOutputTruncationLimits {
+  return COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS[itemKind];
 }
 
 interface CompletedEventOutputScanCursor {
@@ -204,29 +242,30 @@ function updateCompletedEventOutputScanRows(
     return 0;
   }
 
+  const limits = getCompletedEventOutputTruncationLimits(args.itemKind);
   const valuePath = `$.item.${args.outputPath}`;
   const truncationPath = `$.item.truncation.${args.outputPath}`;
   const rowPlaceholders = args.rows.map(() => "?").join(",");
   const parameters: SqliteParameter[] = [
     valuePath,
     valuePath,
-    COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
+    limits.retainedHeadChars,
     COMPLETED_EVENT_OUTPUT_TRUNCATION_MARKER,
     valuePath,
-    COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+    limits.retainedTailChars,
     `${truncationPath}.originalLength`,
     valuePath,
     `${truncationPath}.retainedHeadLength`,
-    COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
+    limits.retainedHeadChars,
     `${truncationPath}.retainedTailLength`,
-    COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
+    limits.retainedTailChars,
     `${truncationPath}.truncatedAt`,
     args.truncatedAt,
     ...args.rows.map((row) => row.id),
     valuePath,
     truncationPath,
     valuePath,
-    COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+    limits.thresholdChars,
   ];
 
   const result = db.$client

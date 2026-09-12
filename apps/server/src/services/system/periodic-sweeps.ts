@@ -28,6 +28,8 @@ import {
   sweepManagedEnvironments,
   threads,
   truncateCompletedEventItemOutputs,
+  truncateFileChangeDiffs,
+  DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
 } from "@bb/db";
 import type {
   AppDeps,
@@ -481,6 +483,17 @@ function runCompletedEventOutputTruncationSweep(
   });
 }
 
+function runFileChangeDiffTruncationSweep(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  now: number,
+): void {
+  truncateFileChangeDiffs(deps.db, {
+    createdBefore: now - COMPLETED_EVENT_OUTPUT_RETENTION_MS,
+    limit: DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
+    truncatedAt: now,
+  });
+}
+
 function runClosedSessionPruneSweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
   now: number,
@@ -528,6 +541,12 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
     category: "retention",
     name: "completed-event-output-truncation",
     run: runCompletedEventOutputTruncationSweep,
+  },
+  {
+    cadenceMs: 0,
+    category: "retention",
+    name: "file-change-diff-truncation",
+    run: runFileChangeDiffTruncationSweep,
   },
   {
     cadenceMs: 0,

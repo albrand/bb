@@ -448,9 +448,26 @@ export {
   DESTROYED_ENVIRONMENT_TTL_MS,
   pruneClosedSessions,
   pruneDestroyedEnvironments,
+  getCompletedEventOutputTruncationLimits,
   truncateCompletedEventItemOutputs,
   sweepManagedEnvironments,
 } from "./sweeps.js";
+export type { CompletedEventOutputTruncationLimits } from "./sweeps.js";
+export {
+  DEFAULT_FILE_CHANGE_DIFF_TRUNCATION_BATCH_SIZE,
+  FILE_CHANGE_DIFF_RETAINED_HEAD_CHARS,
+  FILE_CHANGE_DIFF_RETAINED_TAIL_CHARS,
+  FILE_CHANGE_DIFF_TRUNCATION_MARKER,
+  FILE_CHANGE_DIFF_TRUNCATION_THRESHOLD_CHARS,
+  FILE_CHANGE_SCAN_INDEX,
+  truncateFileChangeDiff,
+  truncateFileChangeDiffs,
+  truncateFileChangeDiffsInPayload,
+} from "./fork-file-change-truncation.js";
+export type {
+  TruncateFileChangeDiffsArgs,
+  TruncateFileChangeDiffsResult,
+} from "./fork-file-change-truncation.js";
 export {
   compactDatabase,
   dropDeferredLegacyTables,
