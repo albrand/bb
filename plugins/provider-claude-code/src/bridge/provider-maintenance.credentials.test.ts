@@ -71,6 +71,7 @@ vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => ({
 import {
   getClaudeProviderHealth,
   getClaudeProviderUsage,
+  isClaudeSignInRenewalDue,
 } from "./provider-maintenance.js";
 
 const originalPlatform = process.platform;
@@ -292,6 +293,35 @@ describe("Claude Code credential loading", () => {
       health: expect.objectContaining({ status: "expired" }),
     });
     expect(usage).toEqual({ supported: true, usage: { status: "expired" } });
+  });
+
+  it("says a sign-in is due for renewal only when its access token lapses within the window", async () => {
+    const renewal = { refreshToken: "keychain-refresh-token" };
+    const windowMs = 5 * 60_000;
+
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() + 10 * 60_000, renewal),
+      ),
+    ];
+    await expect(isClaudeSignInRenewalDue(windowMs)).resolves.toBe(false);
+
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() + 3 * 60_000, renewal),
+      ),
+    ];
+    await expect(isClaudeSignInRenewalDue(windowMs)).resolves.toBe(true);
+
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() - 60_000, renewal),
+      ),
+    ];
+    await expect(isClaudeSignInRenewalDue(windowMs)).resolves.toBe(true);
+
+    state.keychain = [keychainValue(credentialsJson("", 0))];
+    await expect(isClaudeSignInRenewalDue(windowMs)).resolves.toBe(false);
   });
 
   it("does not fall back to the credential file when the Keychain value is invalid", async () => {

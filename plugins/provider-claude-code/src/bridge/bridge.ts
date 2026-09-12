@@ -54,7 +54,12 @@ import {
   type ClaudeCodeSkillRoot,
 } from "../session-params.js";
 import { SdkSession, type SdkSessionOptions } from "./sdk-session.js";
-import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
+import {
+  UNSHARED_CLAUDE_CODE_MODEL_CATALOG,
+  createClaudeCodeBridgeModelListMemo,
+  createSharedClaudeCodeModelCatalogFile,
+  probeClaudeCodeDiscoveredModels,
+} from "./model-list.js";
 import {
   claudeThreadForkParamsSchema,
   claudeThreadResumeParamsSchema,
@@ -75,6 +80,7 @@ import {
   getClaudeProviderInstallationRun,
   getClaudeProviderInstallationStatus,
   getClaudeProviderUsage,
+  isClaudeSignInRenewalDue,
 } from "./provider-maintenance.js";
 import {
   buildChromeExtraArgs,
@@ -339,6 +345,7 @@ function nextInteractiveRequestId(): string {
 let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
 let skillPluginsRoot: string | null = null;
 let bridgeTempDir: string | null = null;
+let bridgeDataDir: string | null = null;
 
 function assembleSkillPlugins(
   roots: readonly { id: string; path: string }[],
@@ -631,8 +638,19 @@ async function applyLiveSessionSettings(
 }
 
 const MODEL_LIST_MEMO_TTL_MS = 2 * 60_000;
+const MODEL_PROBE_RENEWAL_WINDOW_MS = 5 * 60_000;
+const MODEL_CATALOG_FILE_NAME = "claude-code-model-catalog.json";
 const listModelsMemoized = createClaudeCodeBridgeModelListMemo({
+  probe: () => probeClaudeCodeDiscoveredModels(),
+  now: Date.now,
   ttlMs: MODEL_LIST_MEMO_TTL_MS,
+  shared: () =>
+    bridgeDataDir === null
+      ? UNSHARED_CLAUDE_CODE_MODEL_CATALOG
+      : createSharedClaudeCodeModelCatalogFile(
+          joinPath(bridgeDataDir, MODEL_CATALOG_FILE_NAME),
+        ),
+  renewalDue: () => isClaudeSignInRenewalDue(MODEL_PROBE_RENEWAL_WINDOW_MS),
 });
 
 function sendThreadDeltas(
@@ -2501,6 +2519,7 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
   handleLine,
   start: (context) => {
     bridgeTempDir = context.tempDir;
+    bridgeDataDir = context.dataDir;
   },
   onSigterm: () => {
     shutdownGracefully(
