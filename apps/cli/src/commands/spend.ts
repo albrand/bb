@@ -265,7 +265,7 @@ export function registerSpendCommands(
         if (result.rows.length === 0) {
           console.log("No spend recorded for this window.");
           console.log(
-            "If the rollup is new, run `bb spend backfill` to replay the usage events still in the store.",
+            "If the rollup is new, run 'bb spend backfill' to replay the usage events still in the store.",
           );
           return;
         }
@@ -311,9 +311,19 @@ export function registerSpendCommands(
             "No dollar figure: fork_spend_prices is empty and bb does not guess a rate.",
           );
         }
-        if (result.coverage.historyPartial > 0) {
+        // A floor is not a shortfall, and the difference matters: bb deletes
+        // usage events and leaves no trace of what it deleted, so there is no
+        // missing amount to report. Saying "N threads are incomplete" invites
+        // the reader to imagine a gap bb could have measured and did not.
+        if (result.coverage.totalsAreLowerBound) {
           console.log(
-            `${result.coverage.historyPartial} of ${result.coverage.threads} threads had usage events pruned before the rollup existed; their totals are floors.`,
+            `These are at-least figures. ${result.coverage.historyPartial} of ${result.coverage.threads} threads spent tokens before this rollup existed, and bb had already deleted that usage history.`,
+          );
+          console.log(
+            "Deletion leaves no trace, so bb cannot say how much and will not guess.",
+          );
+          console.log(
+            "Threads started from now are counted from their first turn, so the share of at-least figures falls on its own.",
           );
         }
       }),
@@ -328,15 +338,18 @@ export function registerSpendCommands(
         const sdk = createCliBbSdk(getUrl());
         const result = await sdk.spend.backfill();
         if (outputJson(opts, result)) return;
-        console.log(`Threads scanned:        ${result.threadsScanned}`);
-        console.log(`Usage events scanned:   ${result.usageEventsScanned}`);
-        console.log(`Contributions applied:  ${result.contributionsApplied}`);
-        console.log(`History complete:       ${result.threadsHistoryComplete}`);
-        console.log(`History partial:        ${result.threadsHistoryPartial}`);
+        console.log(`Threads scanned:         ${result.threadsScanned}`);
+        console.log(`Usage events scanned:    ${result.usageEventsScanned}`);
+        console.log(`Contributions applied:   ${result.contributionsApplied}`);
+        console.log(`Counted from the start:  ${result.threadsHistoryComplete}`);
+        console.log(`At-least figures:        ${result.threadsHistoryPartial}`);
         if (result.threadsHistoryPartial > 0) {
           console.log("");
           console.log(
-            "A partial thread had usage events pruned before this existed. Its recorded total is a floor.",
+            "An at-least figure belongs to a thread that spent tokens before this rollup existed, whose usage history bb had already deleted.",
+          );
+          console.log(
+            "Deletion leaves no trace, so there is nothing missing to report - only a floor. Threads started from now are counted from their first turn.",
           );
         }
       }),

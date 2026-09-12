@@ -84,8 +84,16 @@ export interface SpendRollupRow {
 
 export interface SpendCoverage {
   threads: number;
+  /** Threads counted from their first turn, so their totals are exact. */
   historyComplete: number;
+  /**
+   * Threads whose usage events bb had already deleted before the rollup
+   * existed. Their totals are lower bounds, not shortfalls: deletion leaves no
+   * trace, so there is no missing amount to report, only a floor.
+   */
   historyPartial: number;
+  /** True when any thread in the window contributes a floor rather than a total. */
+  totalsAreLowerBound: boolean;
 }
 
 const ZERO_USAGE: SpendUsageBreakdown = {
@@ -694,6 +702,7 @@ export function getSpendCoverage(
     threads,
     historyComplete,
     historyPartial: threads - historyComplete,
+    totalsAreLowerBound: threads - historyComplete > 0,
   };
 }
 

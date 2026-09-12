@@ -176,7 +176,13 @@ bb spend analyze --topic weekly --dry-run
 ```
 
 Weighted units are a cost proxy (fresh input x1, cached x0.1, output x5), not
-money; bb ships no prices. Threads whose usage events were pruned before the
-rollup existed report a floor, and `bb spend` says how many. `bb spend analyze`
-sends a rollup to a machine running `acp-hermes-agent` and is never automatic;
-`--dry-run` prints exactly what would be sent.
+money; bb ships no prices.
+
+A thread that spent tokens before this rollup existed reports an at-least
+figure, because bb had already deleted its usage events and deletion leaves no
+trace. Report it as a lower bound, never as a shortfall or a gap, and never
+subtract to imply what is absent. It heals on its own: threads started from now
+are counted from their first turn.
+
+`bb spend analyze` sends a rollup to a machine running `acp-hermes-agent` and is
+never automatic; `--dry-run` prints exactly what would be sent.

@@ -68,9 +68,21 @@ export const spendRollupRowSchema = z.object({
 export type SpendRollupRowResponse = z.infer<typeof spendRollupRowSchema>;
 
 /**
- * `historyPartial` counts threads whose usage events were pruned before the
- * rollup existed. Their totals are floors, not totals, and saying so is the
- * point of reporting it beside the rows.
+ * Coverage, and why it is not a deficiency report.
+ *
+ * `historyPartial` counts threads that spent tokens before this rollup existed,
+ * whose usage events bb had already deleted. Deletion leaves no trace, so there
+ * is no missing amount to compute and bb will not guess one: those threads
+ * contribute a LOWER BOUND. Render them as "at least", never as a shortfall or
+ * a gap, and never subtract one figure from another to imply what is absent.
+ *
+ * It heals without intervention. A thread started after this rollup ships is
+ * counted from its first turn, so the share of lower bounds falls on its own as
+ * old threads stop being used. A high count is a statement about history, not
+ * about the tracker.
+ *
+ * `totalsAreLowerBound` is the flag to branch a renderer on; it is true exactly
+ * when `historyPartial` is above zero.
  */
 export const spendRollupResponseSchema = z.object({
   rows: z.array(spendRollupRowSchema),
@@ -78,10 +90,15 @@ export const spendRollupResponseSchema = z.object({
     threads: z.number(),
     historyComplete: z.number(),
     historyPartial: z.number(),
+    totalsAreLowerBound: z.boolean(),
   }),
 });
 export type SpendRollupResponse = z.infer<typeof spendRollupResponseSchema>;
 
+/**
+ * `threadsHistoryPartial` carries the same meaning as `historyPartial` above: a
+ * lower bound, not a shortfall.
+ */
 export const spendBackfillResponseSchema = z.object({
   threadsScanned: z.number(),
   usageEventsScanned: z.number(),

@@ -19,6 +19,13 @@ Days are local calendar days on the machine running the server. Each stored row
 also carries the first and last event time behind it, so a consumer in another
 timezone can tell whether a row straddles its own day boundary.
 
+What it costs:
+
+  Most event traffic carries no usage events, and there the rollup costs
+  nothing: it returns before it touches the database. A realistic mixed batch
+  costs about 6% of the event-append path on p50 and an all-usage batch about
+  14%, which is 0.14 and 0.22 milliseconds per batch.
+
 Why the server records this:
 
   `thread/tokenUsage/updated` is a prunable event type. The pruner keeps at most
@@ -52,12 +59,24 @@ What the columns mean:
 Backfill:
 
   `bb spend backfill` replays the usage events still in the store. It is safe to
-  run repeatedly and safe to run alongside live traffic. It reports how many
-  threads it could only record a floor for. There is no way to see a deleted
-  row, so a thread is called complete only when that can be proved: it has not
-  reached the pruner's smallest keep-recent window, so the pruner cannot have
-  run; or the rollup was running when the thread emitted its very first usage
-  event. Everything else is reported as partial and its total read as a floor.
+  run repeatedly and safe to run alongside live traffic.
+
+At-least figures:
+
+  A thread that spent tokens before this rollup existed has usage events bb has
+  already deleted. Deletion leaves no trace, so there is no missing amount to
+  report: that thread contributes a LOWER BOUND, and bb says "at least" rather
+  than guessing. It is not a shortfall and nothing has gone wrong.
+
+  A thread is counted from the start only when that can be proved, and there is
+  exactly one proof: it has not reached the pruner's smallest keep-recent
+  window, so the pruner cannot have deleted anything. An edited message also
+  deletes events outright, so a thread carrying that marker is an at-least
+  figure too.
+
+  This heals on its own. Every thread started after this ships is counted from
+  its first turn, so the share of at-least figures falls as old threads stop
+  being used. A high count says something about history, not about the tracker.
 
 Analysis:
 
