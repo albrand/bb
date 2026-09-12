@@ -278,29 +278,6 @@ export function foldTokenUsageObservation(
  */
 export const SPEND_PRUNE_SAFE_SEQUENCE = 120;
 
-export interface SpendThreadSequenceBounds {
-  earliestTokenUsageSequence: number | null;
-  latestSequence: number | null;
-}
-
-/**
- * The two sequences that decide whether a thread's usage history is intact.
- *
- * There is no way to see a deleted row, so completeness is inferred from the
- * pruner's own rule rather than asserted. Two proofs are available and they
- * belong to different callers:
- *
- *   * `latestSequence <= SPEND_PRUNE_SAFE_SEQUENCE` - the pruner cannot have
- *     run at all. Good for either path.
- *   * `earliestTokenUsageSequence` equal to the sequence being recorded LIVE -
- *     the rollup saw the thread's first ever usage event, so nothing preceded
- *     it. Only the live path may use this: during a backfill the first row read
- *     is always the earliest surviving one, pruned or not, so the same
- *     comparison would call every thread complete.
- *
- * Everything else is reported as partial, which is the honest answer: its total
- * is a floor.
- */
 /**
  * Whether a thread has been rewound by an edited message.
  *
@@ -336,26 +313,35 @@ export function hasThreadRewind(
   return row?.found === 1;
 }
 
-export function getSpendThreadSequenceBounds(
+/**
+ * The thread's latest sequence, which is what decides whether the pruner can
+ * have taken a usage event from it.
+ *
+ * There is no way to see a deleted row, so completeness is inferred from the
+ * pruner's own rule rather than asserted, and only one inference is sound: a
+ * usage event at sequence `s` can only be deleted by a prune whose cutoff
+ * reached it, which needs the thread's latest sequence to have been at least
+ * `s + keepRecent`. Sequences only grow, so `latestSequence <= 120` proves no
+ * usage event has ever been deleted from this thread.
+ *
+ * An earlier version also accepted "the rollup just stored the earliest
+ * surviving usage event", which is not the same claim once the pruner has run
+ * and is unsound exactly where it is the only thing firing. Ruling out the
+ * deletion of an event at sequence 1 requires `latestSequence < 121` anyway, so
+ * it collapsed into the rule above and only ever added false certainty.
+ * Measured on a live database: all 14 threads the pruner had never run on had
+ * their first usage event at sequence <= 120, so the sound rule already covers
+ * every thread the unsound one would have.
+ */
+export function getSpendThreadLatestSequence(
   db: DbQueryConnection,
   args: { threadId: string },
-): SpendThreadSequenceBounds {
-  const row = db.get<{
-    earliestTokenUsageSequence: number | null;
-    latestSequence: number | null;
-  }>(
-    sql`SELECT
-          (SELECT MIN(sequence) FROM events
-            WHERE thread_id = ${args.threadId}
-              AND type = 'thread/tokenUsage/updated')
-            AS earliestTokenUsageSequence,
-          (SELECT MAX(sequence) FROM events
-            WHERE thread_id = ${args.threadId}) AS latestSequence`,
+): number | null {
+  const row = db.get<{ latestSequence: number | null }>(
+    sql`SELECT MAX(sequence) AS latestSequence FROM events
+        WHERE thread_id = ${args.threadId}`,
   );
-  return {
-    earliestTokenUsageSequence: row?.earliestTokenUsageSequence ?? null,
-    latestSequence: row?.latestSequence ?? null,
-  };
+  return row?.latestSequence ?? null;
 }
 
 const spendTablesReady = new WeakSet<object>();

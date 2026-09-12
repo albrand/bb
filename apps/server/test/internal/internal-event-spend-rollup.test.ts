@@ -493,6 +493,110 @@ describe("daemon event spend rollup", () => {
     });
   });
 
+  it("refuses to call a resumed thread complete when its history is gone", async () => {
+    // The case that broke the earlier rule. A long thread spent 900 tokens
+    // before the rollup existed, the pruner has since taken its usage events,
+    // and the user resumes it. The new usage event is then the EARLIEST
+    // SURVIVING one, which is not the same claim as being the first - and
+    // reading it as the first badged the thread complete while its total held
+    // 500 of the 1,400 it had spent. Certainty over a 36% shortfall.
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-spend-resume",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "codex",
+        status: "active",
+      });
+      const spend = (
+        turnId: string,
+        total: number,
+      ): HostDaemonEventEnvelope[] => [
+        {
+          threadId: thread.id,
+          event: {
+            type: "turn/started",
+            threadId: thread.id,
+            providerThreadId: PROVIDER_THREAD_ID,
+            scope: turnScope(turnId),
+          },
+        },
+        {
+          threadId: thread.id,
+          event: {
+            type: "thread/tokenUsage/updated",
+            threadId: thread.id,
+            providerThreadId: PROVIDER_THREAD_ID,
+            scope: turnScope(turnId),
+            tokenUsage: {
+              total: breakdown(total, {}),
+              last: breakdown(total, {}),
+              modelContextWindow: 258_400,
+            },
+          },
+        },
+      ];
+      const post = (envelopes: HostDaemonEventEnvelope[]) =>
+        harness.app.request("/internal/session/events", {
+          method: "POST",
+          headers: internalAuthHeaders(harness, { hostId: host.id }),
+          body: JSON.stringify({
+            sessionId: session.id,
+            eventGroups: groupHostDaemonEvents(envelopes),
+          }),
+        });
+
+      expect((await post(spend("turn-old", 900))).status).toBe(200);
+
+      // The world this thread actually lives in: the rollup was not running
+      // when those tokens were spent, so there is no cursor and nothing was
+      // counted, and the pruner has since taken the usage events. The thread is
+      // long, so it is far past the prune-safe window.
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      harness.db.run(sql`DELETE FROM fork_thread_spend_daily`);
+      harness.db.run(
+        sql`DELETE FROM events WHERE thread_id = ${thread.id}
+              AND type = 'thread/tokenUsage/updated'`,
+      );
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 2000,
+        type: "provider/warning",
+        scope: threadScope(),
+        data: {
+          providerThreadId: PROVIDER_THREAD_ID,
+          category: "general",
+          summary: "length",
+        },
+      });
+
+      expect((await post(spend("turn-new", 500))).status).toBe(200);
+
+      const cursor = harness.db.get<{ historyComplete: number }>(
+        sql`SELECT history_complete AS historyComplete
+            FROM fork_thread_spend_cursor WHERE thread_id = ${thread.id}`,
+      );
+      const rolledUp = listSpendRollupRows(harness.db, {
+        threadId: thread.id,
+      }).reduce((sum, row) => sum + row.totalTokens, 0);
+
+      // The 500 is right - it is what the rollup saw. Calling it complete was
+      // the defect, because 1,400 was spent.
+      expect(rolledUp).toBe(500);
+      expect(cursor?.historyComplete).toBe(0);
+    });
+  });
+
   it("refuses to call a rewound thread complete", async () => {
     // The pruner is not the only thing that deletes usage events. Editing an
     // earlier message deletes the range after it, and that can happen while the
