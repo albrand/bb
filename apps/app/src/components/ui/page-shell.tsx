@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BottomAnchoredScrollBody } from "./bottom-anchored-scroll-body.js";
 import { PAGE_SHELL_CONTENT_STYLE } from "./page-shell-content-style.js";
+import { CONTENT_MEASURE_MAX_WIDTH_CLASS } from "@/lib/content-measure";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { OverflowFade } from "./overflow-fade.js";
 
@@ -29,7 +30,7 @@ interface FooterRenderOptions {
 
 const SHELL_BLEED_CLASS =
   "-mx-4 -mt-4 flex h-full min-h-0 flex-1 flex-col overflow-hidden md:-mx-5 md:-mt-5";
-const DEFAULT_MAX_WIDTH_CLASS = "max-w-[760px]";
+const DEFAULT_MAX_WIDTH_CLASS = CONTENT_MEASURE_MAX_WIDTH_CLASS;
 
 function renderStaticFooter(
   footer: ReactNode,

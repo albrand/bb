@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { OverflowFade } from "@/components/ui/overflow-fade";
+import { CONTENT_MEASURE_MAX_WIDTH_CLASS } from "@/lib/content-measure";
 import {
   MOBILE_RECENT_LABEL_HEIGHT_PX,
   MOBILE_RECENT_ROW_HEIGHT_PX,
 } from "./RootComposeMobileRecents";
 
 const COMPACT_HOME_CHROME_OFFSET_PX = 56;
-const COMPACT_HOME_COLUMN_CLASS = "mx-auto w-full max-w-[760px] px-4";
+const COMPACT_HOME_COLUMN_CLASS = `mx-auto w-full ${CONTENT_MEASURE_MAX_WIDTH_CLASS} px-4`;
 const COMPACT_HOME_REST_VISIBLE_ROWS = 4.5;
 const COMPACT_HOME_SCROLLED_VISIBLE_ROWS = 5.5;
 const COMPACT_HOME_SCROLLED_BAND_PX =

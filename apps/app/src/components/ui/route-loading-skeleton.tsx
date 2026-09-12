@@ -2,6 +2,7 @@ import { HEADER_SEAM_CLASS } from "@/components/layout/AppPageHeader";
 import { CHROME_ROW_CLASS } from "@/lib/bb-desktop";
 import { Skeleton } from "@bb/shared-ui/skeleton";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { CONTENT_MEASURE_MAX_WIDTH_CLASS } from "@/lib/content-measure";
 
 interface RouteLoadingSkeletonProps {
   isBoundedPane: boolean;
@@ -35,7 +36,12 @@ export function RouteLoadingSkeleton({
         <Skeleton className="h-4 w-40 max-w-[50%]" />
       </div>
       <div className="min-h-0 flex-1" />
-      <div className="mx-auto w-full max-w-[760px] shrink-0 px-4 pb-4">
+      <div
+        className={cn(
+          "mx-auto w-full shrink-0 px-4 pb-4",
+          CONTENT_MEASURE_MAX_WIDTH_CLASS,
+        )}
+      >
         <Skeleton className="h-24 w-full rounded-xl" />
       </div>
     </div>

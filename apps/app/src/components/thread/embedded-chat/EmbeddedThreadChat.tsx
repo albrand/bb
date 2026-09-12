@@ -15,6 +15,7 @@ import type {
 } from "@/components/promptbox/PromptBoxInternal";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { CONTENT_MEASURE_MAX_WIDTH_CLASS } from "@/lib/content-measure";
 import { Button } from "@bb/shared-ui/button";
 import { BottomAnchoredScrollBody } from "@/components/ui/bottom-anchored-scroll-body";
 import { PageShell } from "@/components/ui/page-shell.js";
@@ -1158,7 +1159,8 @@ function EmbeddedThreadChatWithComposer({
     </div>
   );
 
-  const maxWidthClassName = measure === "page" ? "max-w-[760px]" : "max-w-none";
+  const maxWidthClassName =
+    measure === "page" ? CONTENT_MEASURE_MAX_WIDTH_CLASS : "max-w-none";
   const timelineBody = (
     <ThreadTimelinePanelContent
       isTurnSubmitting={isTurnSubmitting}
