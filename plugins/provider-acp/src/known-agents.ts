@@ -41,6 +41,7 @@ export const KNOWN_ACP_AGENTS: readonly AcpAgentDefinition[] = [
     iconTint: { light: "#111827", dark: "#F5F5F5" },
     signInCommand: "cursor-agent login",
     installUrl: "https://cursor.com/docs/cli/installation",
+    visibility: "installed",
     dialect: "cursor",
     providerUsage: true,
     providerInstallation: true,
