@@ -24,6 +24,7 @@ import { useUpdateThread } from "@/hooks/mutations/thread-state-mutations";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
 import { toPluginSidebarThread } from "./plugin-sidebar-threads";
 import { useSetRootComposeProjectId } from "./root-compose-selection";
+import { notifyPaneLimit } from "./split-layout/notifyPaneLimit";
 import { openThreadInSplit } from "./split-layout/openThreadInSplit";
 import { getRootComposeRoutePath, getThreadRoutePath } from "./route-paths";
 
@@ -142,13 +143,15 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
         if (entry === undefined) return;
         const { projectId } = entry;
         if (options?.split) {
-          openThreadInSplit({
-            store,
-            navigate,
-            projectId,
-            threadId,
-            isCompact,
-          });
+          notifyPaneLimit(
+            openThreadInSplit({
+              store,
+              navigate,
+              projectId,
+              threadId,
+              isCompact,
+            }),
+          );
           return;
         }
         navigate(getThreadRoutePath({ projectId, threadId }));
