@@ -21,6 +21,7 @@ import {
   resolveQueuedMessageDrag,
   snapGroupBoundaryDragTransform,
   type QueuedMessagesListProps,
+  SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
 } from "./QueuedMessagesList";
 import {
   QueuedEditorTypeaheadLayoutContext,
@@ -158,6 +159,22 @@ afterEach(() => {
 });
 
 describe("QueuedMessagesList", () => {
+  it("keeps row actions visible inside an embedded side chat", () => {
+    const { container } = renderQueuedMessages(makeGroupedQueuedMessages());
+    const actions = container.querySelectorAll("[data-queued-message-actions]");
+    const menus = container.querySelectorAll(
+      'button[aria-label^="Queued message "][aria-label$=" actions"]',
+    );
+    expect(actions.length).toBeGreaterThan(0);
+    expect(menus.length).toBeGreaterThan(0);
+    for (const element of [...actions, ...menus]) {
+      expect(element.className).toContain(SIDE_CHAT_ALWAYS_VISIBLE_CLASS);
+    }
+    expect(SIDE_CHAT_ALWAYS_VISIBLE_CLASS).toBe(
+      "in-[[data-thread-window]]:pointer-events-auto in-[[data-thread-window]]:opacity-100",
+    );
+  });
+
   it("renders as a standalone card when it is not attached to the composer", () => {
     const { container } = renderQueuedMessages(
       [makeQueuedMessage("q_one", "First queued message")],

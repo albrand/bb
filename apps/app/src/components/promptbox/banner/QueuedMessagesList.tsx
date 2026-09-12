@@ -179,6 +179,11 @@ const TYPEAHEAD_MENU_GAP = 8;
 const SURFACE_DRAG_THRESHOLD = 72;
 const QUEUED_MESSAGE_ACTION_TAKEOVER_CLASS =
   PROMPT_STACK_ROW_ACTION_TAKEOVER_CLASS;
+// Inside an embedded side chat ([data-thread-window]) the row actions stay
+// visible instead of waiting for hover. This used to live in a custom theme
+// stylesheet, which occupied bb's single theme slot and kept palettes off.
+export const SIDE_CHAT_ALWAYS_VISIBLE_CLASS =
+  "in-[[data-thread-window]]:pointer-events-auto in-[[data-thread-window]]:opacity-100";
 type QueueSurfaceMode = "collapsed" | "drawer" | "workspace";
 
 function getDrawerHeight({
@@ -881,6 +886,9 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                   "pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md opacity-0 transition-opacity duration-[120ms] ease-out md:flex",
                   "group-hover/dispatch-row:pointer-events-auto group-hover/dispatch-row:opacity-100",
                   "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
+                  // Side chats are narrow and often unhovered while you type
+                  // elsewhere; hover-only controls there read as missing.
+                  SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
                 )}
               >
                 {sendAllowed ? (
@@ -964,6 +972,7 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                     "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
                     "data-[state=open]:pointer-events-auto data-[state=open]:opacity-100",
                     "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
+                    SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
                     compact ? "size-7" : "size-8",
                   )}
                   disabled={actionDisabled}
