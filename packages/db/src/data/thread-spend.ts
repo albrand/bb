@@ -301,6 +301,41 @@ export interface SpendThreadSequenceBounds {
  * Everything else is reported as partial, which is the honest answer: its total
  * is a floor.
  */
+/**
+ * Whether a thread has been rewound by an edited message.
+ *
+ * The pruner is not the only thing that deletes usage events.
+ * `deleteThreadEventSuffixInTransaction` removes every event in
+ * [cutoffSequence, oldMaxSequence] when an earlier message is edited, usage
+ * events with them, and a thread can be rewound while still far short of the
+ * pruner's window - so the prune-safe proof would call it complete while its
+ * recorded total was missing whatever the rewind took.
+ *
+ * The rewind leaves evidence that survives its own deletion: a
+ * `system/operation` event with `operation: "edit_message"`, appended BEFORE
+ * the range below it is removed and at a sequence above that range, because
+ * sequences are allocated as max-per-thread. Seeing one is enough to refuse the
+ * certainty; it is not enough to say how much was lost, which is exactly what
+ * "partial" means.
+ *
+ * A thread whose cursor already exists is unaffected: those tokens were spent
+ * and the rollup counted them as they arrived, so a later rewind does not make
+ * the recorded total wrong.
+ */
+export function hasThreadRewind(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): boolean {
+  const row = db.get<{ found: number }>(
+    sql`SELECT 1 AS found FROM events
+        WHERE thread_id = ${args.threadId}
+          AND type = 'system/operation'
+          AND json_extract(data, '$.operation') = 'edit_message'
+        LIMIT 1`,
+  );
+  return row?.found === 1;
+}
+
 export function getSpendThreadSequenceBounds(
   db: DbQueryConnection,
   args: { threadId: string },

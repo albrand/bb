@@ -71,6 +71,15 @@ export async function installTestBuiltinPlugin(
 
 export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   appVersionService?: AppVersionService;
+  /**
+   * A migrated connection to use instead of the shared in-memory template.
+   *
+   * The only caller is the spend append benchmark, which needs a real file in
+   * WAL mode: an in-memory database has no WAL commit and no fsync, so it
+   * makes every append look faster than a running bb's and overstates anything
+   * measured as a fraction of one.
+   */
+  db?: DbConnection;
   terminalCloseTimeoutMs?: number;
   nativeRootsClock?: () => number;
   seedFirstPartyProviders?: boolean;
@@ -131,13 +140,14 @@ export async function createTestAppHarness(
 ): Promise<TestAppHarness> {
   const {
     appVersionService,
+    db: providedDb,
     terminalCloseTimeoutMs,
     nativeRootsClock,
     seedFirstPartyProviders = true,
     ...configOverrides
   } = overrides;
   const dataDir = await mkdtemp(join(tmpdir(), "bb-server-test-"));
-  const db = createTestDb();
+  const db = providedDb ?? createTestDb();
   const hub = new NotificationHubImpl();
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });

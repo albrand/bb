@@ -6,6 +6,7 @@ import {
   getSpendCoverage,
   getSpendCursor,
   getSpendThreadSequenceBounds,
+  hasThreadRewind,
   listSpendBackfillThreads,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listStoredTokenUsageEvents,
@@ -167,11 +168,22 @@ function mergeContributions(
  * earliest SURVIVING row, which looks identical whether or not the pruner took
  * anything before it, so it may only rely on the thread being too short for the
  * pruner to have run.
+ *
+ * Both proofs are void on a thread an edited message has rewound, because that
+ * deletes usage events outright and neither the sequence bounds nor the
+ * earliest surviving row show it.
  */
 function resolveHistoryComplete(
   db: DbQueryConnection,
   args: { live: boolean; sequence: number; threadId: string },
 ): boolean {
+  // An edited message deletes a range of events, usage events included, and it
+  // can happen long before the thread reaches the pruner's window. Neither
+  // proof below survives it, so a rewound thread is partial whichever path is
+  // opening its cursor.
+  if (hasThreadRewind(db, { threadId: args.threadId })) {
+    return false;
+  }
   const bounds = getSpendThreadSequenceBounds(db, {
     threadId: args.threadId,
   });
