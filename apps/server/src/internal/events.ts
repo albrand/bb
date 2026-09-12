@@ -32,6 +32,7 @@ import {
 } from "@bb/domain";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
+import { dropForkUnreadEvents } from "./fork-unread-events.js";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -866,30 +867,6 @@ function dropInteractionLifecycleEvents(entries: PostableEventBatchEntry[]): {
     });
   }
   return { entries: kept, droppedLifecycleEvents };
-}
-
-const FORK_UNREAD_CODEX_HOOK_RAW_TYPES = new Set<string>([
-  "hook/completed",
-  "hook/started",
-]);
-
-function isForkUnreadStoredEvent(
-  event: HostDaemonEventEnvelope["event"],
-): boolean {
-  if (event.type === "turn/diff/updated") {
-    return true;
-  }
-  return (
-    event.type === "provider/unhandled" &&
-    event.providerId === "codex" &&
-    FORK_UNREAD_CODEX_HOOK_RAW_TYPES.has(event.rawType)
-  );
-}
-
-function dropForkUnreadEvents<
-  TEntry extends { envelope: HostDaemonEventEnvelope },
->(entries: TEntry[]): TEntry[] {
-  return entries.filter((entry) => !isForkUnreadStoredEvent(entry.envelope.event));
 }
 
 function storeExecutionReports<
