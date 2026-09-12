@@ -261,6 +261,20 @@ import type {
   WorkspacePathListResponse,
 } from "./api-types.js";
 import type { ThreadExecutionProfileResponse } from "./api/threads.js";
+import {
+  spendAnalysisPayloadQuerySchema,
+  spendAssessmentListQuerySchema,
+  spendAssessmentSchema,
+  spendRollupQuerySchema,
+  type SpendAnalysisPayloadQuery,
+  type SpendAnalysisPayloadResponse,
+  type SpendAssessment,
+  type SpendAssessmentListQuery,
+  type SpendAssessmentListResponse,
+  type SpendBackfillResponse,
+  type SpendRollupQuery,
+  type SpendRollupResponse,
+} from "./api/spend.js";
 import type {
   ThreadTabsWireResponse,
   UpdateThreadTabsRequest,
@@ -1600,6 +1614,49 @@ export const publicApiRoutes = {
     }),
   },
 
+  /**
+   * Fork (albrand/bb): per-thread, per-provider, per-model, per-day token
+   * totals, maintained by the server because the events they come from are
+   * pruned out from under anything that polls for them.
+   */
+  spend: {
+    rollup: defineRoute({
+      path: "/spend/rollup",
+      method: "get",
+      request: optionalQueryRequest<EmptyInput, SpendRollupQuery>(
+        spendRollupQuerySchema,
+      ),
+      response: jsonResponse<SpendRollupResponse>(),
+    }),
+    backfill: defineRoute({
+      path: "/spend/backfill",
+      method: "post",
+      request: noRequest(),
+      response: jsonResponse<SpendBackfillResponse>(),
+    }),
+    analysisPayload: defineRoute({
+      path: "/spend/analysis-payload",
+      method: "get",
+      request: optionalQueryRequest<EmptyInput, SpendAnalysisPayloadQuery>(
+        spendAnalysisPayloadQuerySchema,
+      ),
+      response: jsonResponse<SpendAnalysisPayloadResponse>(),
+    }),
+    assessments: defineRoute({
+      path: "/spend/assessments",
+      method: "get",
+      request: optionalQueryRequest<EmptyInput, SpendAssessmentListQuery>(
+        spendAssessmentListQuerySchema,
+      ),
+      response: jsonResponse<SpendAssessmentListResponse>(),
+    }),
+    recordAssessment: defineRoute({
+      path: "/spend/assessments",
+      method: "post",
+      request: jsonRequest<EmptyInput, SpendAssessment>(spendAssessmentSchema),
+      response: jsonResponse<SpendAssessment>(),
+    }),
+  },
   system: {
     machineEnvironment: defineRoute({
       path: "/settings/machine-environment",

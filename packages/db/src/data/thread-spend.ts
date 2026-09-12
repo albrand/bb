@@ -25,6 +25,7 @@ import type { DbConnection, DbQueryConnection } from "../connection.js";
 const DAILY_TABLE = "fork_thread_spend_daily";
 const CURSOR_TABLE = "fork_thread_spend_cursor";
 const PRICES_TABLE = "fork_spend_prices";
+const ASSESSMENTS_TABLE = "fork_spend_assessments";
 
 export interface SpendUsageBreakdown {
   inputTokens: number;
@@ -316,7 +317,74 @@ export function ensureSpendTables(db: DbConnection): void {
       PRIMARY KEY (provider_id, model)
     )
   `);
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS ${ASSESSMENTS_TABLE} (
+      topic TEXT PRIMARY KEY NOT NULL,
+      requested_at INTEGER NOT NULL,
+      window_from TEXT NOT NULL,
+      window_to TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL,
+      response TEXT NOT NULL,
+      host TEXT NOT NULL,
+      thread_id TEXT NOT NULL
+    )
+  `);
   spendTablesReady.add(db.$client);
+}
+
+export interface SpendAssessmentRow {
+  topic: string;
+  requestedAt: number;
+  windowFrom: string;
+  windowTo: string;
+  payloadSha256: string;
+  response: string;
+  host: string;
+  threadId: string;
+}
+
+/**
+ * The answer to one analysis request, keyed by topic so a follow-up round
+ * replaces the round it follows rather than accumulating.
+ *
+ * `payload_sha256` is the digest of exactly what was sent, so an assessment can
+ * be checked against the numbers it was given rather than the numbers now.
+ */
+export function recordSpendAssessment(
+  db: DbQueryConnection,
+  row: SpendAssessmentRow,
+): void {
+  db.run(
+    sql`INSERT INTO ${sql.raw(ASSESSMENTS_TABLE)} (topic, requested_at,
+          window_from, window_to, payload_sha256, response, host, thread_id)
+        VALUES (${row.topic}, ${row.requestedAt}, ${row.windowFrom},
+          ${row.windowTo}, ${row.payloadSha256}, ${row.response}, ${row.host},
+          ${row.threadId})
+        ON CONFLICT (topic) DO UPDATE SET
+          requested_at = excluded.requested_at,
+          window_from = excluded.window_from,
+          window_to = excluded.window_to,
+          payload_sha256 = excluded.payload_sha256,
+          response = excluded.response,
+          host = excluded.host,
+          thread_id = excluded.thread_id`,
+  );
+}
+
+export function listSpendAssessments(
+  db: DbQueryConnection,
+  args: { topic?: string },
+): SpendAssessmentRow[] {
+  const filter =
+    args.topic === undefined ? sql`` : sql` AND topic = ${args.topic}`;
+  return db.all<SpendAssessmentRow>(
+    sql`SELECT topic, requested_at AS requestedAt, window_from AS windowFrom,
+               window_to AS windowTo, payload_sha256 AS payloadSha256,
+               response, host, thread_id AS threadId
+        FROM ${sql.raw(ASSESSMENTS_TABLE)}
+        WHERE 1 = 1${filter}
+        ORDER BY requested_at DESC`,
+  );
 }
 
 export function getSpendCursor(
