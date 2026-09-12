@@ -10,59 +10,45 @@ import { shouldShowRetainedTerminalSession } from "@/lib/terminal-session-visibi
 
 interface BuildTerminalSyncedSecondaryFileTabsArgs {
   orderedTabs: readonly SecondaryFileFixedPanelTab[];
-  retainedTerminalId: string | null;
+  retainedTerminalIds: ReadonlySet<string>;
   terminalSessions: readonly TerminalSession[];
 }
 
 interface SyncTerminalTabsInFixedPanelStateArgs {
-  retainedTerminalId: string | null;
+  retainedTerminalIds: ReadonlySet<string>;
   state: FixedPanelTabsState;
   terminalSessions: readonly TerminalSession[];
 }
 
-interface GetRetainedTerminalTabIdArgs {
-  activeTab: SecondaryFixedPanelTab | null;
-  isPanelOpen: boolean;
-}
-
 interface PruneTerminalTabsForSessionsArgs {
-  retainedTerminalId: string | null;
+  retainedTerminalIds: ReadonlySet<string>;
   tabs: readonly FixedPanelTab[];
   terminalSessions: readonly TerminalSession[];
 }
 
 function getTerminalSessionTabIds({
-  retainedTerminalId,
+  retainedTerminalIds,
   terminalSessions,
 }: {
-  retainedTerminalId: string | null;
+  retainedTerminalIds: ReadonlySet<string>;
   terminalSessions: readonly TerminalSession[];
 }): ReadonlySet<string> {
   return new Set(
     terminalSessions
       .filter((session) =>
-        shouldShowRetainedTerminalSession({ retainedTerminalId, session }),
+        shouldShowRetainedTerminalSession({ retainedTerminalIds, session }),
       )
       .map((session) => session.id),
   );
 }
 
-export function getRetainedTerminalTabId({
-  activeTab,
-  isPanelOpen,
-}: GetRetainedTerminalTabIdArgs): string | null {
-  return isPanelOpen && activeTab?.kind === "terminal"
-    ? activeTab.terminalId
-    : null;
-}
-
 export function pruneTerminalTabsForSessions({
-  retainedTerminalId,
+  retainedTerminalIds,
   tabs,
   terminalSessions,
 }: PruneTerminalTabsForSessionsArgs): readonly FixedPanelTab[] {
   const terminalSessionIds = getTerminalSessionTabIds({
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
   });
   const nextTabs = tabs.filter(
@@ -73,11 +59,11 @@ export function pruneTerminalTabsForSessions({
 
 export function buildTerminalSyncedSecondaryFileTabs({
   orderedTabs,
-  retainedTerminalId,
+  retainedTerminalIds,
   terminalSessions,
 }: BuildTerminalSyncedSecondaryFileTabsArgs): readonly SecondaryFileFixedPanelTab[] {
   const terminalSessionIds = getTerminalSessionTabIds({
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
   });
   const seenTerminalIds = new Set<string>();
@@ -99,7 +85,7 @@ export function buildTerminalSyncedSecondaryFileTabs({
   }
 
   for (const session of terminalSessions) {
-    if (!shouldShowRetainedTerminalSession({ retainedTerminalId, session })) {
+    if (!shouldShowRetainedTerminalSession({ retainedTerminalIds, session })) {
       continue;
     }
     if (seenTerminalIds.has(session.id)) {
@@ -113,12 +99,12 @@ export function buildTerminalSyncedSecondaryFileTabs({
 }
 
 export function syncTerminalTabsInFixedPanelState({
-  retainedTerminalId,
+  retainedTerminalIds,
   state,
   terminalSessions,
 }: SyncTerminalTabsInFixedPanelStateArgs): FixedPanelTabsState {
   const terminalSessionIds = getTerminalSessionTabIds({
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
   });
   const seenTerminalIds = new Set<string>();
@@ -140,7 +126,7 @@ export function syncTerminalTabsInFixedPanelState({
   }
 
   for (const session of terminalSessions) {
-    if (!shouldShowRetainedTerminalSession({ retainedTerminalId, session })) {
+    if (!shouldShowRetainedTerminalSession({ retainedTerminalIds, session })) {
       continue;
     }
     if (seenTerminalIds.has(session.id)) {

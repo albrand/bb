@@ -6,7 +6,6 @@ import {
 } from "@/lib/fixed-panel-tabs-state";
 import {
   buildTerminalSyncedSecondaryFileTabs,
-  getRetainedTerminalTabId,
   pruneTerminalTabsForSessions,
   syncTerminalTabsInFixedPanelState,
 } from "./terminalPanelTabs";
@@ -21,37 +20,6 @@ function tabIds(tabs: readonly TabIdentity[]): string[] {
 }
 
 describe("terminalPanelTabs", () => {
-  it("resolves a retained terminal id only from the open active terminal tab", () => {
-    const terminalTab = createTerminalFixedPanelTab({ terminalId: "term_1" });
-    const fileTab = createHostFilePreviewFixedPanelTab({
-      environmentId: "env_1",
-      tab: {
-        lineRange: null,
-        path: "/workspace/file.ts",
-      },
-      threadId: "thr_1",
-    });
-
-    expect(
-      getRetainedTerminalTabId({
-        activeTab: terminalTab,
-        isPanelOpen: true,
-      }),
-    ).toBe("term_1");
-    expect(
-      getRetainedTerminalTabId({
-        activeTab: terminalTab,
-        isPanelOpen: false,
-      }),
-    ).toBeNull();
-    expect(
-      getRetainedTerminalTabId({
-        activeTab: fileTab,
-        isPanelOpen: true,
-      }),
-    ).toBeNull();
-  });
-
   it("prunes terminal tabs against active or retained terminal sessions", () => {
     const infoTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env_1",
@@ -73,7 +41,7 @@ describe("terminalPanelTabs", () => {
 
     expect(
       pruneTerminalTabsForSessions({
-        retainedTerminalId: "term_retained",
+        retainedTerminalIds: new Set(["term_retained"]),
         tabs: [infoTab, retainedTerminal, unretainedTerminal, runningTerminal],
         terminalSessions: [
           terminalSession({
@@ -93,7 +61,7 @@ describe("terminalPanelTabs", () => {
   it("adds server terminal sessions missing from local tabs", () => {
     const tabs = buildTerminalSyncedSecondaryFileTabs({
       orderedTabs: [],
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       terminalSessions: [
         terminalSession({ id: "term_1" }),
         terminalSession({ id: "term_2" }),
@@ -123,7 +91,7 @@ describe("terminalPanelTabs", () => {
     });
     const tabs = buildTerminalSyncedSecondaryFileTabs({
       orderedTabs: [localTerminal2, localFile, localTerminal1],
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       terminalSessions: [
         terminalSession({ id: "term_1" }),
         terminalSession({ id: "term_2" }),
@@ -145,7 +113,7 @@ describe("terminalPanelTabs", () => {
         createTerminalFixedPanelTab({ terminalId: "term_stale" }),
         createTerminalFixedPanelTab({ terminalId: "term_1" }),
       ],
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       terminalSessions: [terminalSession({ id: "term_1" })],
     });
 
@@ -171,7 +139,7 @@ describe("terminalPanelTabs", () => {
       tabIds(
         buildTerminalSyncedSecondaryFileTabs({
           orderedTabs: [disconnectedTerminal, runningTerminal],
-          retainedTerminalId: null,
+          retainedTerminalIds: new Set<string>(),
           terminalSessions: sessions,
         }),
       ),
@@ -181,7 +149,7 @@ describe("terminalPanelTabs", () => {
       tabIds(
         buildTerminalSyncedSecondaryFileTabs({
           orderedTabs: [disconnectedTerminal, runningTerminal],
-          retainedTerminalId: "term_disconnected",
+          retainedTerminalIds: new Set(["term_disconnected"]),
           terminalSessions: sessions,
         }),
       ),
@@ -208,7 +176,7 @@ describe("terminalPanelTabs", () => {
       },
     });
     const nextState = syncTerminalTabsInFixedPanelState({
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       state,
       terminalSessions: [
         terminalSession({ id: "term_1" }),
@@ -239,7 +207,7 @@ describe("terminalPanelTabs", () => {
       },
     });
     const nextState = syncTerminalTabsInFixedPanelState({
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       state,
       terminalSessions: [terminalSession({ id: "term_1" })],
     });
@@ -269,7 +237,7 @@ describe("terminalPanelTabs", () => {
     });
 
     const nextState = syncTerminalTabsInFixedPanelState({
-      retainedTerminalId: null,
+      retainedTerminalIds: new Set<string>(),
       state,
       terminalSessions: [
         terminalSession({
@@ -296,7 +264,7 @@ describe("terminalPanelTabs", () => {
 
     expect(
       syncTerminalTabsInFixedPanelState({
-        retainedTerminalId: null,
+        retainedTerminalIds: new Set<string>(),
         state,
         terminalSessions: [terminalSession({ id: "term_1" })],
       }),
@@ -318,7 +286,7 @@ describe("terminalPanelTabs", () => {
       },
     });
     const nextState = syncTerminalTabsInFixedPanelState({
-      retainedTerminalId: "term_disconnected",
+      retainedTerminalIds: new Set(["term_disconnected"]),
       state,
       terminalSessions: [
         terminalSession({

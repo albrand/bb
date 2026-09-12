@@ -38,6 +38,8 @@ import {
   LazyThreadTerminalPanel,
   LazyWorkspaceFilePreviewTabContent,
 } from "@/components/secondary-panel/lazySecondaryPanelComponents";
+import { useMountedTerminalIds } from "@/components/thread/terminal/mounted-terminals";
+import { resolveTerminalScopeKey } from "@/components/thread/terminal/terminal-scope";
 import type {
   SecondaryPanelFixedTab,
   SecondaryPanelRenderableTab,
@@ -363,6 +365,11 @@ export function PluginPanelRightPanelHost({
       new Map((terminalSessions ?? []).map((session) => [session.id, session])),
     [terminalSessions],
   );
+  const retainedTerminalIds = useMountedTerminalIds(
+    activeTerminalTarget === null
+      ? null
+      : resolveTerminalScopeKey(activeTerminalTarget),
+  );
   const {
     activateTab,
     activeBrowserTab,
@@ -375,6 +382,7 @@ export function PluginPanelRightPanelHost({
     updateBrowserTab,
   } = useThreadFileTabs({
     panelStateId,
+    retainedTerminalIds,
     syncThreadId: null,
     environmentId: null,
     fileOwnerThreadId: null,

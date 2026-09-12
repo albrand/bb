@@ -77,7 +77,7 @@ interface UseThreadFileTabsParams {
   preserveWorkspaceTabsAcrossContexts?: boolean;
   projectHostId?: string | null;
   projectId?: string | null;
-  retainedTerminalId?: string | null;
+  retainedTerminalIds: ReadonlySet<string>;
   storageFileExists?: (path: string) => Promise<boolean>;
   storageFiles:
     | Pick<ThreadStorageFileListResponse, "files" | "truncated">
@@ -437,7 +437,7 @@ export function useThreadFileTabs({
   preserveWorkspaceTabsAcrossContexts = false,
   projectHostId = null,
   projectId = null,
-  retainedTerminalId = null,
+  retainedTerminalIds,
   storageFileExists,
   storageFiles,
   terminalSessions,
@@ -646,7 +646,7 @@ export function useThreadFileTabs({
       const pruned = setPrunedSecondaryTabs({
         activeTabId: state.secondary.activeTabId,
         tabs: pruneTerminalTabsForSessions({
-          retainedTerminalId,
+          retainedTerminalIds,
           tabs: state.secondary.tabs,
           terminalSessions,
         }),
@@ -660,7 +660,7 @@ export function useThreadFileTabs({
     });
   }, [
     isPanelStateResolved,
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
     updateFixedPanelTabsState,
   ]);

@@ -85,6 +85,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed",
         syncThreadId: null,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -138,6 +139,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-launcher",
         syncThreadId: null,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -182,6 +184,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-storage",
         syncThreadId: "thr_current",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles,
         terminalSessions: undefined,
@@ -243,6 +246,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-storage-loading",
         syncThreadId: "thr_current",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFileExists,
         storageFiles: undefined,
@@ -282,6 +286,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-storage-truncated",
         syncThreadId: "thr_current",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFileExists,
         storageFiles: { files: [], truncated: true },
@@ -324,6 +329,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-storage-truncated-valid",
         syncThreadId: "thr_current",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFileExists,
         storageFiles: { files: [], truncated: true },
@@ -375,6 +381,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: { files: [], truncated: true },
         terminalSessions: undefined,
@@ -434,6 +441,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
         useThreadFileTabs({
           panelStateId: `recently-closed-${dimension}`,
           syncThreadId: null,
+          retainedTerminalIds: new Set<string>(),
           environmentId: context.environmentId,
           fileOwnerThreadId: context.fileOwnerThreadId,
           projectHostId: context.projectHostId,
@@ -477,6 +485,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       useThreadFileTabs({
         panelStateId: "recently-closed-context-order",
         syncThreadId: null,
+        retainedTerminalIds: new Set<string>(),
         environmentId,
         fileOwnerThreadId: "thr_1",
         projectHostId: "host_1",
@@ -544,6 +553,7 @@ describe("useThreadFileTabs terminal pruning", () => {
       useThreadFileTabs({
         panelStateId: "root-compose",
         syncThreadId: null,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_root",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -586,6 +596,7 @@ describe("useThreadFileTabs terminal pruning", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_current",
         storageFiles: undefined,
         terminalSessions: [
@@ -632,7 +643,7 @@ describe("useThreadFileTabs terminal pruning", () => {
         panelStateId: threadId,
         syncThreadId: threadId,
         environmentId: "env_current",
-        retainedTerminalId: "term_disconnected",
+        retainedTerminalIds: new Set(["term_disconnected"]),
         storageFiles: undefined,
         terminalSessions: [
           terminalSession({
@@ -698,6 +709,7 @@ describe("useThreadFileTabs active owners", () => {
       useThreadFileTabs({
         panelStateId,
         syncThreadId: null,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_selected",
         preserveWorkspaceTabsAcrossContexts: true,
         projectHostId: "host_selected",
@@ -751,6 +763,7 @@ describe("useThreadFileTabs active owners", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_current",
         fileOwnerThreadId: "thr_current",
         preserveWorkspaceTabsAcrossContexts: true,
@@ -790,6 +803,7 @@ describe("useThreadFileTabs active owners", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_root",
         fileOwnerThreadId: "thr_root",
         preserveWorkspaceTabsAcrossContexts: true,
@@ -833,6 +847,7 @@ describe("useThreadFileTabs active owners", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_current",
         fileOwnerThreadId: "thr_current",
         preserveWorkspaceTabsAcrossContexts: true,
@@ -854,6 +869,7 @@ describe("useThreadFileTabs plugin panel tabs", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -910,6 +926,7 @@ describe("useThreadFileTabs plugin panel tabs", () => {
       useThreadFileTabs({
         panelStateId: threadId,
         syncThreadId: threadId,
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -959,6 +976,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-divert",
         syncThreadId: "opener-divert",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1034,6 +1052,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-owner-context",
         syncThreadId: "thr_owner",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1096,6 +1115,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-skip",
         syncThreadId: "opener-skip",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1137,6 +1157,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-search",
         syncThreadId: "opener-search",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1180,6 +1201,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-storage-search",
         syncThreadId: "thr_storage_search",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: {
           files: [{ name: "notes.md", path: "artifacts/notes.md" }],
@@ -1221,6 +1243,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-search-unmatched",
         syncThreadId: "opener-search-unmatched",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1249,6 +1272,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-search-pinned",
         syncThreadId: "opener-search-pinned",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1272,6 +1296,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-gone",
         syncThreadId: "opener-gone",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1303,6 +1328,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-built-in",
         syncThreadId: "opener-built-in",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1331,6 +1357,7 @@ describe("useThreadFileTabs file opener diversion", () => {
       useThreadFileTabs({
         panelStateId: "opener-override",
         syncThreadId: "opener-override",
+        retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
         storageFiles: undefined,
         terminalSessions: undefined,
@@ -1411,6 +1438,7 @@ describe("useThreadFileTabs legacy side-chat tabs", () => {
         useThreadFileTabs({
           panelStateId: threadId,
           syncThreadId: threadId,
+          retainedTerminalIds: new Set<string>(),
           environmentId: "env_current",
           storageFiles: undefined,
           terminalSessions: undefined,
