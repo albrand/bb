@@ -36,6 +36,16 @@ import { migrate } from "@bb/db";
  * rollup's own work but overstates it as a fraction of a real append.
  * `BB_SPEND_BENCH_FILE=1` puts the harness database on disk in WAL mode, which
  * is what a running bb does, and is the number to quote as a production cost.
+ *
+ * Batch SHAPE matters more than either. `BB_SPEND_BENCH_EVENTS` usage events
+ * and `BB_SPEND_BENCH_FILLER` other events per batch:
+ *
+ *   EVENTS=10 FILLER=0    the worst case, an all-usage batch
+ *   EVENTS=1  FILLER=19   the realistic mix
+ *   EVENTS=0  FILLER=20   no usage at all, which is most event traffic
+ *
+ * The last one is the number that describes the common case, because the hook
+ * finds nothing to record and returns before it touches the database.
  */
 const ENABLED = process.env.BB_SPEND_BENCH === "1";
 const ON_DISK = process.env.BB_SPEND_BENCH_FILE === "1";
@@ -43,6 +53,10 @@ const OUT = process.env.BB_SPEND_BENCH_OUT ?? "/tmp/spend-bench.txt";
 const BATCHES = Number.parseInt(process.env.BB_SPEND_BENCH_BATCHES ?? "200", 10);
 const EVENTS_PER_BATCH = Number.parseInt(
   process.env.BB_SPEND_BENCH_EVENTS ?? "10",
+  10,
+);
+const FILLER_PER_BATCH = Number.parseInt(
+  process.env.BB_SPEND_BENCH_FILLER ?? "0",
   10,
 );
 
@@ -131,6 +145,21 @@ describe.skipIf(!ENABLED)("spend append latency", () => {
                 },
               });
             }
+            for (let n = 0; n < FILLER_PER_BATCH; n += 1) {
+              // A thread-scoped event the rollup ignores, so a batch can be
+              // given a realistic shape rather than only its worst one.
+              envelopes.push({
+                threadId: thread.id,
+                event: {
+                  type: "provider/warning",
+                  threadId: thread.id,
+                  providerThreadId: "pt-bench",
+                  category: "general",
+                  summary: `filler ${batch}:${n}`,
+                  scope: turnScope(turnId),
+                },
+              });
+            }
             const started = performance.now();
             await post(envelopes);
             durations.push(performance.now() - started);
@@ -142,7 +171,8 @@ describe.skipIf(!ENABLED)("spend append latency", () => {
           appendFileSync(
             OUT,
             `BENCH db=${ON_DISK ? "file-wal" : "memory"} batches=${BATCHES} ` +
-              `eventsPerBatch=${EVENTS_PER_BATCH} ` +
+              `usagePerBatch=${EVENTS_PER_BATCH} ` +
+              `fillerPerBatch=${FILLER_PER_BATCH} ` +
               `meanMs=${(total / BATCHES).toFixed(3)} p50Ms=${at(0.5)} ` +
               `p95Ms=${at(0.95)} ` +
               `maxMs=${(durations[durations.length - 1] ?? 0).toFixed(2)}\n`,
