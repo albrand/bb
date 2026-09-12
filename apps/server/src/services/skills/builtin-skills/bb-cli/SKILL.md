@@ -161,3 +161,22 @@ Use `bb plugin config <id>` to inspect the plugin’s configuration and
 guidance for its delivery commands and supported clients. A server-side
 notification switch does not grant browser or operating system permission;
 that permission is granted from the target client’s settings.
+
+## Spend and usage
+
+bb records per-thread, per-provider, per-model, per-day token totals as events
+are stored, because `thread/tokenUsage/updated` is pruned and anything polling
+the event log for spend races deletion.
+
+```sh
+bb spend --by provider
+bb spend --by thread --from 2026-09-01 --json
+bb spend backfill
+bb spend analyze --topic weekly --dry-run
+```
+
+Weighted units are a cost proxy (fresh input x1, cached x0.1, output x5), not
+money; bb ships no prices. Threads whose usage events were pruned before the
+rollup existed report a floor, and `bb spend` says how many. `bb spend analyze`
+sends a rollup to a machine running `acp-hermes-agent` and is never automatic;
+`--dry-run` prints exactly what would be sent.
