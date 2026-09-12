@@ -124,6 +124,22 @@ describe("generate-native-theme", () => {
           expect(tokens.popover).toBe(tokens.canvas);
         });
 
+        it("keeps every fill a visible step off the surface it sits on", () => {
+          for (const fill of ["secondary", "accent", "muted"] as const) {
+            for (const surface of ["card", "popover"] as const) {
+              expect(
+                Math.abs(lightness(tokens[fill]) - lightness(tokens[surface])),
+                `${fill} on ${surface}`,
+              ).toBeGreaterThanOrEqual(0.015);
+            }
+          }
+          expect(
+            Math.abs(
+              lightness(tokens.surfaceRecessedSolid) - lightness(tokens.canvas),
+            ),
+          ).toBeGreaterThanOrEqual(0.015);
+        });
+
         it("orders the ink ramp: sidebar < fills < border <= input", () => {
           const sidebar = contrastFromCanvas(tokens, "sidebar");
           const border = contrastFromCanvas(tokens, "border");
