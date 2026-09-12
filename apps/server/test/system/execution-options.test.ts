@@ -10,6 +10,7 @@ import {
   resolveSystemExecutionOptions,
   resolveSystemProviderModels,
 } from "../../src/services/system/execution-options.js";
+import { getProviderStates } from "../../src/services/system/provider-states.js";
 import { ApiError } from "../../src/errors.js";
 import { availableModelFixture } from "../helpers/available-models.js";
 import {
@@ -1723,6 +1724,52 @@ describe("providers a thread can actually start on", () => {
       const offered = response.providers.map((provider) => provider.id);
       expect(offered).toContain("acp-opencode");
       expect(offered).not.toContain("acp-cursor");
+    });
+  });
+
+  it("offers a provider again once Settings has seen it signed in", async () => {
+    await withTestHarness({}, async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-execution-options-signed-in-again",
+      });
+      let cursorStatus: "unauthenticated" | "ready" = "unauthenticated";
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          if (request.command.type === "provider.health") {
+            const providerId = request.command.providerId;
+            if (providerId === "acp-cursor") {
+              return { ok: true, result: providerHealthStatus(cursorStatus) };
+            }
+            if (providerId === "acp-opencode") {
+              return { ok: true, result: providerHealthStatus("ready") };
+            }
+            return { ok: true, result: providerHealthStatus("not_installed") };
+          }
+          if (request.command.type === "provider.list_models") {
+            return { ok: true, result: { models: [], selectedOnlyModels: [] } };
+          }
+          throw new Error(`Unexpected RPC command ${request.command.type}`);
+        },
+      });
+
+      const before = await resolveSystemExecutionOptions(harness.deps, {
+        hostId: host.id,
+      });
+      expect(before.providers.map((provider) => provider.id)).not.toContain(
+        "acp-cursor",
+      );
+
+      cursorStatus = "ready";
+      await getProviderStates(harness.deps, {});
+
+      const after = await resolveSystemExecutionOptions(harness.deps, {
+        hostId: host.id,
+      });
+      expect(after.providers.map((provider) => provider.id)).toContain(
+        "acp-cursor",
+      );
     });
   });
 
