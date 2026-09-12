@@ -5,7 +5,7 @@ import { act, renderHook } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
 import type { ReactNode } from "react";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
-import { countPanes, findPaneByContent } from "@/lib/split-layout";
+import { countPanes, findPaneByContent, listPanes } from "@/lib/split-layout";
 import type { LayoutNode, PaneContent, SplitLayout } from "@/lib/split-layout";
 import { usePaneContentSplitDrag } from "./usePaneContentSplitDrag";
 
@@ -111,5 +111,29 @@ describe("usePaneContentSplitDrag — the sidebar New thread control", () => {
     expect(findPaneByContent(seeded.root, NEW_THREAD_CONTENT)).toBeNull();
     expect(navigateSpy).not.toHaveBeenCalled();
     expect(warnToastSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a SECOND new-thread pane instead of refocusing the first", () => {
+    const layout: SplitLayout = {
+      root: {
+        type: "split",
+        dir: "row",
+        sizes: [0.5, 0.5],
+        children: [
+          pane("pane-1", "t1"),
+          { type: "pane", paneId: "pane-2", content: NEW_THREAD_CONTENT },
+        ],
+      },
+      focusedPaneId: "pane-1",
+    };
+    const { store, openInSplit } = renderNewThreadSplit(layout);
+    openInSplit("bottom");
+    const next = store.get(splitLayoutAtom);
+    expect(countPanes(next!.root)).toBe(3);
+    expect(
+      listPanes(next!.root).filter(
+        (candidate) => candidate.content.kind === "new-thread",
+      ),
+    ).toHaveLength(2);
   });
 });

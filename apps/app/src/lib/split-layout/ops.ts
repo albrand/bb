@@ -60,6 +60,15 @@ export function findPaneByThread(
   );
 }
 
+export function findReusablePaneByContent(
+  root: LayoutNode,
+  content: PaneContent,
+): PaneNode | null {
+  return content.kind === "new-thread"
+    ? null
+    : findPaneByContent(root, content);
+}
+
 export function findPaneByContent(
   root: LayoutNode,
   content: PaneContent,

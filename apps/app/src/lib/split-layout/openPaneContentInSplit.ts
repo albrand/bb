@@ -2,6 +2,7 @@ import { splitLayoutAtom } from "./atoms";
 import { isAtPaneLimit, type SplitOpenResult } from "./paneLimit";
 import {
   findPaneByContent,
+  findReusablePaneByContent,
   setFocus,
   splitPane,
   type PaneContent,
@@ -39,7 +40,7 @@ export function openPaneContentInSplit({
     void navigate(route);
     return "navigated";
   }
-  const existing = findPaneByContent(layout.root, content);
+  const existing = findReusablePaneByContent(layout.root, content);
   if (existing !== null) {
     const next = setFocus(layout, existing.paneId);
     if (next !== layout) store.set(splitLayoutAtom, next);

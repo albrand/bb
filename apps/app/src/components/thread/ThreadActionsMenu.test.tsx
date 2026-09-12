@@ -7,7 +7,10 @@ import { createStore, Provider } from "jotai";
 import type { ReactNode } from "react";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import type { LayoutNode, SplitLayout } from "@/lib/split-layout";
-import { ThreadActionsMenu } from "./ThreadActionsMenu";
+import {
+  ThreadActionsContextMenu,
+  ThreadActionsMenu,
+} from "./ThreadActionsMenu";
 
 const mocks = vi.hoisted(() => ({
   copyToClipboardWithToast: vi.fn(),
@@ -170,5 +173,32 @@ describe("ThreadActionsMenu", () => {
     expect(
       screen.queryByRole("menuitem", { name: /Open beside/ }),
     ).not.toBeNull();
+  });
+
+  it("reaches the directions through the right-click context menu surface", () => {
+    const onOpenInSplit = vi.fn();
+    const store = createStore();
+    store.set(splitLayoutAtom, null);
+    render(
+      <Provider store={store}>
+        <ThreadActionsContextMenu
+          thread={makeThread()}
+          onOpenInSplit={onOpenInSplit}
+        >
+          <button type="button">Row</button>
+        </ThreadActionsContextMenu>
+      </Provider>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Open beside/ }));
+    expect(onOpenInSplit).toHaveBeenCalledWith("right");
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Open above or below/ }),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open below" }));
+    expect(onOpenInSplit).toHaveBeenCalledWith("bottom");
   });
 });
