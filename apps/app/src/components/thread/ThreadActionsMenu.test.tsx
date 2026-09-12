@@ -4,7 +4,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createStore, Provider } from "jotai";
 import { makeThreadListEntry } from "../../../.ladle/story-fixtures";
+import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import type { LayoutNode, SplitLayout } from "@/lib/split-layout";
 import {
   ThreadActionsContextMenu,
   ThreadActionsMenu,
@@ -117,7 +120,7 @@ describe("ThreadActionsMenu", () => {
   it("offers Open beside with its shortcut, and only when a split is available", () => {
     const onOpenInSplit = vi.fn();
     render(
-      <ThreadActionsMenu thread={makeThread()} onOpenInSplit={onOpenInSplit} />,
+      <ThreadActionsMenu thread={thread} onOpenInSplit={onOpenInSplit} />,
     );
 
     fireEvent.pointerDown(
@@ -132,7 +135,7 @@ describe("ThreadActionsMenu", () => {
   });
 
   it("hides Open beside when the surface cannot split", () => {
-    render(<ThreadActionsMenu thread={makeThread()} />);
+    render(<ThreadActionsMenu thread={thread} />);
 
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Thread actions" }),
@@ -140,6 +143,94 @@ describe("ThreadActionsMenu", () => {
     );
 
     expect(screen.queryByRole("menuitem", { name: /Open beside/ })).toBeNull();
+  });
+
+  function pane(paneId: string, threadId: string): LayoutNode {
+    return {
+      type: "pane",
+      paneId,
+      content: { kind: "thread", projectId: "proj_test", threadId },
+    };
+  }
+
+  function eightPanes(occupantPrefix: string): SplitLayout {
+    return {
+      root: {
+        type: "split",
+        dir: "row",
+        sizes: Array.from({ length: 8 }, () => 0.125),
+        children: Array.from({ length: 8 }, (_, index) =>
+          pane(`pane-${index + 1}`, `${occupantPrefix}${index + 1}`),
+        ),
+      },
+      focusedPaneId: "pane-1",
+    };
+  }
+
+  function renderMenu(layout: SplitLayout | null, onOpenInSplit: () => void) {
+    const store = createStore();
+    store.set(splitLayoutAtom, layout);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <Provider store={store}>{children}</Provider>
+    );
+    render(
+      <ThreadActionsMenu thread={thread} onOpenInSplit={onOpenInSplit} />,
+      { wrapper },
+    );
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Thread actions" }),
+      { button: 0 },
+    );
+  }
+
+  it("asks for a right split from Open beside", () => {
+    const onOpenInSplit = vi.fn();
+    renderMenu(null, onOpenInSplit);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Open beside/ }));
+    expect(onOpenInSplit).toHaveBeenCalledWith("right");
+  });
+
+  it.each([
+    ["Open above", "top"],
+    ["Open below", "bottom"],
+  ])("asks for a %s split from the submenu", (label, side) => {
+    const onOpenInSplit = vi.fn();
+    renderMenu(null, onOpenInSplit);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Open above or below/ }),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+    expect(onOpenInSplit).toHaveBeenCalledWith(side);
+  });
+
+  it("explains the pane limit instead of offering an open that would replace a pane", () => {
+    const onOpenInSplit = vi.fn();
+    renderMenu(eightPanes("other"), onOpenInSplit);
+
+    expect(screen.queryByRole("menuitem", { name: /Open beside/ })).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: /Open above or below/ }),
+    ).toBeNull();
+    expect(screen.getByText(/8 of 8 open/)).not.toBeNull();
+    expect(screen.getByText(/Close a pane/)).not.toBeNull();
+  });
+
+  it("keeps the open actions at the pane limit when the thread is already in a pane", () => {
+    const onOpenInSplit = vi.fn();
+    const layout = eightPanes("other");
+    layout.root = {
+      type: "split",
+      dir: "row",
+      sizes: Array.from({ length: 8 }, () => 0.125),
+      children: Array.from({ length: 8 }, (_, index) =>
+        pane(`pane-${index + 1}`, index === 4 ? "thr_test" : `other${index}`),
+      ),
+    };
+    renderMenu(layout, onOpenInSplit);
+
+    expect(
+      screen.queryByRole("menuitem", { name: /Open beside/ }),
+    ).not.toBeNull();
   });
 });
 

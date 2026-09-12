@@ -1,15 +1,13 @@
 import { getThreadRoutePath } from "@/lib/route-paths";
-import { decideThreadDrop } from "@/lib/split-drag";
 import { splitLayoutAtom } from "./atoms";
+import { isAtPaneLimit, type SplitOpenResult } from "./paneLimit";
 import {
-  countPanes,
   findPaneByThread,
-  MAX_PANES,
-  replacePaneContent,
   setFocus,
   splitPane,
   type PaneContent,
   type SplitLayout,
+  type SplitSide,
 } from "./index";
 
 interface SplitLayoutStore {
@@ -23,6 +21,7 @@ interface OpenThreadInSplitArgs {
   projectId: string;
   threadId: string;
   isCompact: boolean;
+  side?: SplitSide;
 }
 
 export function openThreadInSplit({
@@ -31,12 +30,13 @@ export function openThreadInSplit({
   projectId,
   threadId,
   isCompact,
-}: OpenThreadInSplitArgs): void {
+  side = "right",
+}: OpenThreadInSplitArgs): SplitOpenResult {
   const route = getThreadRoutePath({ projectId, threadId });
   const layout = store.get(splitLayoutAtom);
   if (isCompact || layout === null) {
     navigate(route);
-    return;
+    return "navigated";
   }
   const existing = findPaneByThread(layout.root, projectId, threadId);
   if (existing !== null) {
@@ -45,20 +45,16 @@ export function openThreadInSplit({
       store.set(splitLayoutAtom, next);
     }
     navigate(route, { replace: true });
-    return;
+    return "focused-existing";
   }
-  const decision = decideThreadDrop({
-    zone: "right",
-    threadAlreadyOpen: false,
-    atMaxPanes: countPanes(layout.root) >= MAX_PANES,
-  });
+  if (isAtPaneLimit(layout)) {
+    return "at-pane-limit";
+  }
   const content: PaneContent = { kind: "thread", projectId, threadId };
-  const next =
-    decision.zone === "center"
-      ? replacePaneContent(layout, layout.focusedPaneId, content)
-      : splitPane(layout, layout.focusedPaneId, "right", content);
+  const next = splitPane(layout, layout.focusedPaneId, side, content);
   if (next !== layout) {
     store.set(splitLayoutAtom, next);
   }
   navigate(route);
+  return "opened";
 }

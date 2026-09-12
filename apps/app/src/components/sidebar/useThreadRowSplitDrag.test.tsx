@@ -3,16 +3,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
-import type { ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { countPanes, findPaneByThread, listPanes } from "@/lib/split-layout";
 import type { LayoutNode, PaneContent, SplitLayout } from "@/lib/split-layout";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { useThreadRowSplitDrag } from "./useThreadRowSplitDrag";
 
-const { navigateSpy, compactState } = vi.hoisted(() => ({
+const { navigateSpy, compactState, warnToastSpy } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
   compactState: { value: false },
+  warnToastSpy: vi.fn(),
+}));
+
+vi.mock("@/components/ui/app-toast", () => ({
+  appToast: { warning: warnToastSpy },
+}));
+
+const { beginSplitDragSpy } = vi.hoisted(() => ({
+  beginSplitDragSpy: vi.fn(),
+}));
+
+vi.mock("@/lib/split-drag", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/split-drag")>()),
+  beginSplitDrag: beginSplitDragSpy,
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => ({
@@ -77,13 +91,16 @@ function renderOpenInSplit(threadId: string, layout: SplitLayout | null) {
   return {
     store,
     getOnPointerDown: () => result.current.onPointerDown,
-    openInSplit: () => act(() => result.current.openInSplit()),
+    openInSplit: (side?: "left" | "right" | "top" | "bottom") =>
+      act(() => result.current.openInSplit(side)),
   };
 }
 
 describe("useThreadRowSplitDrag — openInSplit (cmd-click / context-menu entry)", () => {
   beforeEach(() => {
     navigateSpy.mockClear();
+    warnToastSpy.mockClear();
+    beginSplitDragSpy.mockClear();
     compactState.value = false;
   });
 
@@ -111,15 +128,43 @@ describe("useThreadRowSplitDrag — openInSplit (cmd-click / context-menu entry)
     });
   });
 
-  it("coerces to a replace of the focused pane at the eight-pane cap", () => {
-    const { store, openInSplit } = renderOpenInSplit("t9", eightPanes());
+  it("refuses at the eight-pane cap instead of replacing the focused pane", () => {
+    const seeded = eightPanes();
+    const { store, openInSplit } = renderOpenInSplit("t9", seeded);
+    openInSplit();
+    expect(store.get(splitLayoutAtom)).toBe(seeded);
+    expect(findPaneByThread(seeded.root, "p1", "t1")).not.toBeNull();
+    expect(findPaneByThread(seeded.root, "p1", "t9")).toBeNull();
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(warnToastSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("still focuses an already-open thread at the eight-pane cap", () => {
+    const { store, openInSplit } = renderOpenInSplit("t5", eightPanes());
     openInSplit();
     const layout = store.get(splitLayoutAtom);
     expect(countPanes(layout!.root)).toBe(8);
-    const opened = findPaneByThread(layout!.root, "p1", "t9");
-    expect(opened?.paneId).toBe("pane-1");
-    expect(findPaneByThread(layout!.root, "p1", "t1")).toBeNull();
-    expect(navigateSpy).toHaveBeenCalledWith("/projects/p1/threads/t9");
+    expect(layout!.focusedPaneId).toBe("pane-5");
+    expect(warnToastSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["top", "col"],
+    ["bottom", "col"],
+    ["left", "row"],
+  ] as const)("splits %s as a %s split", (side, dir) => {
+    const { store, openInSplit } = renderOpenInSplit("t9", singlePane());
+    openInSplit(side);
+    const layout = store.get(splitLayoutAtom);
+    expect(countPanes(layout!.root)).toBe(2);
+    const root = layout!.root;
+    expect(root.type).toBe("split");
+    expect(root.type === "split" ? root.dir : null).toBe(dir);
+    const opened = findPaneByThread(root, "p1", "t9");
+    const index = listPanes(root).findIndex(
+      (candidate) => candidate.paneId === opened?.paneId,
+    );
+    expect(index).toBe(side === "bottom" ? 1 : 0);
   });
 
   it("plain-navigates without touching the layout on compact viewports", () => {
@@ -136,5 +181,48 @@ describe("useThreadRowSplitDrag — openInSplit (cmd-click / context-menu entry)
     openInSplit();
     expect(store.get(splitLayoutAtom)).toBeNull();
     expect(navigateSpy).toHaveBeenCalledWith("/projects/p1/threads/t9");
+  });
+});
+
+describe("useThreadRowSplitDrag — drag drop (the aimed-at gesture)", () => {
+  beforeEach(() => {
+    navigateSpy.mockClear();
+    warnToastSpy.mockClear();
+    beginSplitDragSpy.mockClear();
+    compactState.value = false;
+  });
+
+  function startDrag(threadId: string, layout: SplitLayout) {
+    const harness = renderOpenInSplit(threadId, layout);
+    const rowEl = document.createElement("div");
+    document.body.append(rowEl);
+    act(() => {
+      harness.getOnPointerDown()?.({
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        currentTarget: rowEl,
+        pointerType: "mouse",
+      } as unknown as ReactPointerEvent<HTMLElement>);
+    });
+    const config = beginSplitDragSpy.mock.calls.at(-1)?.[0];
+    expect(config).toBeDefined();
+    return { ...harness, config };
+  }
+
+  it("still replaces on a centre drop at the eight-pane cap", () => {
+    const { store, config } = startDrag("t9", eightPanes());
+    expect(config.decide("pane-1", "center")).toMatchObject({
+      zone: "center",
+      label: "Replace this chat",
+    });
+    act(() => {
+      config.onDrop({ paneId: "pane-1", zone: "center" });
+    });
+    const layout = store.get(splitLayoutAtom);
+    expect(countPanes(layout!.root)).toBe(8);
+    expect(findPaneByThread(layout!.root, "p1", "t9")?.paneId).toBe("pane-1");
+    expect(findPaneByThread(layout!.root, "p1", "t1")).toBeNull();
+    expect(warnToastSpy).not.toHaveBeenCalled();
   });
 });
