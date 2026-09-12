@@ -35,6 +35,7 @@ import {
   type SidebarThreadShortcutPresentation,
   type SidebarThreadShortcutTarget,
 } from "./sidebarThreadShortcuts";
+import { SidebarOpenBesideCommandHandler } from "./SidebarOpenBesideCommandHandler";
 import {
   useAppCommandHandler,
   useAppCommandShortcut,
@@ -285,6 +286,7 @@ export function AppSidebar({
 
   return (
     <SidebarThreadShortcutKeysContext.Provider value={threadShortcutKeysById}>
+      <SidebarOpenBesideCommandHandler />
       {mobileHosted ? (
         <div
           ref={sidebarRef}

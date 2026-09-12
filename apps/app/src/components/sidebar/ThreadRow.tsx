@@ -660,6 +660,7 @@ function ThreadRowComponent({
         to={getThreadRoutePath({ projectId, threadId: thread.id })}
         data-sidebar-thread-shortcut-target=""
         data-sidebar-thread-id={thread.id}
+        data-sidebar-project-id={projectId}
         onClick={(event) => {
           if (isEditing) {
             event.preventDefault();

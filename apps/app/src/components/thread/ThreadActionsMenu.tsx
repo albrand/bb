@@ -34,6 +34,7 @@ import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
 import { isThreadRead } from "@bb/client-core";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { getThreadRoutePath } from "@/lib/route-paths";
+import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { useThreadActions } from "./ThreadActionsProvider";
 import { useThreadSectionMove } from "./ThreadSectionMoveProvider";
 
@@ -188,6 +189,7 @@ function ThreadActionsMenuItems({
     unarchiveThread,
   } = useThreadActions();
   const isCompactViewport = useIsCompactViewport();
+  const openBesideShortcut = useAppCommandShortcut("thread.openBeside");
   const isDrawer = surface === "dropdown" && isCompactViewport;
   const showSeparators = !isDrawer;
   const isRead = isThreadRead(thread);
@@ -237,8 +239,9 @@ function ThreadActionsMenuItems({
             onSelect={() => {
               onOpenInSplit();
             }}
+            shortcut={openBesideShortcut?.label}
           >
-            Open in split
+            Open beside
           </ActionMenuItem>
           {showSeparators ? <ActionMenuSeparator surface={surface} /> : null}
         </>

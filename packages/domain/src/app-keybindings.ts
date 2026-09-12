@@ -43,6 +43,7 @@ export const APP_COMMAND_IDS = [
   "thread.archive",
   "thread.previous",
   "thread.next",
+  "thread.openBeside",
   ...THREAD_JUMP_APP_COMMAND_IDS,
   "pane.focus.previous",
   "pane.focus.next",
