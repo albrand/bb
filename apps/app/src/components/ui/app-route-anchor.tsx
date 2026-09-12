@@ -16,6 +16,7 @@ import { useStore } from "jotai";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { isRoutePath, resolveRouteHref } from "@/lib/route-paths";
 import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { notifyPaneLimit } from "@/lib/split-layout/notifyPaneLimit";
 import { openPaneContentInSplit } from "@/lib/split-layout/openPaneContentInSplit";
 import { paneContentForPathname } from "@/views/thread-detail/splitThreadNavigation";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
@@ -117,13 +118,15 @@ export function RouteNavigationProvider({
     (path) => {
       const content = paneContentForPathname(path.split(/[?#]/)[0] ?? path);
       if (content === null) return false;
-      openPaneContentInSplit({
-        store,
-        navigate: navigateRoute,
-        content,
-        route: path,
-        enabled: !isCompact,
-      });
+      notifyPaneLimit(
+        openPaneContentInSplit({
+          store,
+          navigate: navigateRoute,
+          content,
+          route: path,
+          enabled: !isCompact,
+        }),
+      );
       return true;
     },
     [isCompact, navigateRoute, store],
