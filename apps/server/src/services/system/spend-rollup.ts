@@ -8,6 +8,7 @@ import {
   listStoredTokenUsageEvents,
   resolveSpendModel,
   saveSpendCursor,
+  type SpendContribution,
   type SpendCursorState,
   type SpendUsageBreakdown,
   type TokenUsageObservation,
@@ -102,13 +103,61 @@ function modelForObservation(
   );
 }
 
+/**
+ * Sum the contributions that land in the same row before writing.
+ *
+ * A codex turn emits many usage events, and they nearly all land on the same
+ * (day, thread, provider, model). Writing each one separately made the append
+ * path three times slower in a 200-batch benchmark, which is not a price the
+ * hottest write path in the server should pay to record a number. Contributions
+ * are additive, so folding them in memory first is the same arithmetic with one
+ * statement instead of ten.
+ */
+function mergeContributions(
+  contributions: readonly SpendContribution[],
+): { contribution: SpendContribution; turns: number }[] {
+  const merged = new Map<
+    string,
+    { contribution: SpendContribution; turns: number }
+  >();
+  for (const contribution of contributions) {
+    const key = [
+      contribution.day,
+      contribution.threadId,
+      contribution.providerId,
+      contribution.model,
+    ].join("|");
+    const existing = merged.get(key);
+    if (existing === undefined) {
+      merged.set(key, {
+        contribution: { ...contribution, usage: { ...contribution.usage } },
+        turns: 1,
+      });
+      continue;
+    }
+    const usage = existing.contribution.usage;
+    usage.inputTokens += contribution.usage.inputTokens;
+    usage.cachedInputTokens += contribution.usage.cachedInputTokens;
+    usage.outputTokens += contribution.usage.outputTokens;
+    usage.reasoningOutputTokens += contribution.usage.reasoningOutputTokens;
+    usage.totalTokens += contribution.usage.totalTokens;
+    existing.contribution.weightedUnits += contribution.weightedUnits;
+    existing.contribution.at = Math.max(
+      existing.contribution.at,
+      contribution.at,
+    );
+    existing.turns += 1;
+  }
+  return [...merged.values()];
+}
+
 function rollUpObservations(
   db: DbQueryConnection,
   observations: readonly TokenUsageObservation[],
   historyCompleteByThreadId: ReadonlyMap<string, boolean> | null,
 ): number {
   const tracked = new Map<string, TrackedCursorEntry>();
-  let applied = 0;
+  const contributions: SpendContribution[] = [];
 
   for (const observation of observations) {
     const key = cursorKey(observation.threadId, observation.providerThreadId);
@@ -130,9 +179,12 @@ function rollUpObservations(
     entry.state = next;
     tracked.set(key, entry);
     if (contribution !== null) {
-      applySpendContribution(db, contribution);
-      applied += 1;
+      contributions.push(contribution);
     }
+  }
+
+  for (const merged of mergeContributions(contributions)) {
+    applySpendContribution(db, merged.contribution, merged.turns);
   }
 
   for (const entry of tracked.values()) {
@@ -144,7 +196,7 @@ function rollUpObservations(
     });
   }
 
-  return applied;
+  return contributions.length;
 }
 
 /**
