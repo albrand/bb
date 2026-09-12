@@ -132,6 +132,7 @@ import {
   ComposerEditorSlot,
   type ComposerEditorLayout,
 } from "./ComposerEditorSlot";
+import { ComposerResizeHandle } from "./ComposerResizeHandle";
 import { QueuedEditorTypeaheadLayoutContext } from "./queued-editor-typeahead-layout";
 import {
   isModifierSubmitKeyEvent,
@@ -3143,6 +3144,13 @@ export function PromptBoxInternal({
                   </div>
                 ) : null}
               </>
+            ) : null}
+            {!showCompactLayout ? (
+              <ComposerResizeHandle
+                scrollContainerRef={editorScrollContainerRef}
+                layout={editorLayout}
+                floorPx={minHeight}
+              />
             ) : null}
             <ComposerEditorSlot
               editor={editor}
