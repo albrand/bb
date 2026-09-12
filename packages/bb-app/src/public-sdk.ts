@@ -49,6 +49,7 @@ export type BBSdkRealtimeSocketFactory = BbRealtimeSocketFactory;
 export type BBSdkRealtimeSocketMessageEvent = BbRealtimeSocketMessageEvent;
 export type BBSdkStatusArea = BbSdk["status"];
 export type BBSdkSkillsArea = BbSdk["skills"];
+export type BBSdkSpendArea = BbSdk["spend"];
 export type BBSdkTerminalsArea = BbSdk["terminals"];
 export type BBSdkThread = ThreadGetResult;
 export type BBSdkThreadsArea = BbSdk["threads"];
@@ -68,6 +69,7 @@ export class BBSdk implements BbSdk {
   readonly projects: BbSdk["projects"];
   readonly providers: BbSdk["providers"];
   readonly skills: BbSdk["skills"];
+  readonly spend: BbSdk["spend"];
   readonly status: BbSdk["status"];
   readonly system: BbSdk["system"];
   readonly terminals: BbSdk["terminals"];
@@ -86,6 +88,7 @@ export class BBSdk implements BbSdk {
     this.projects = sdk.projects;
     this.providers = sdk.providers;
     this.skills = sdk.skills;
+    this.spend = sdk.spend;
     this.status = sdk.status;
     this.system = sdk.system;
     this.terminals = sdk.terminals;

@@ -354,10 +354,12 @@ describe("events", () => {
         {
           threadId: thread.id,
           sequence: 6,
+          createdAt: expect.any(Number),
         },
         {
           threadId: thread.id,
           sequence: 7,
+          createdAt: expect.any(Number),
         },
       ],
       insertedInputIndexes: [0, 1],
@@ -513,9 +515,9 @@ describe("events", () => {
 
     expect(result).toEqual({
       acceptedEvents: [
-        { threadId: thread.id, sequence: 4 },
-        { threadId: thread.id, sequence: 5 },
-        { threadId: thread.id, sequence: 6 },
+        { threadId: thread.id, sequence: 4, createdAt: expect.any(Number) },
+        { threadId: thread.id, sequence: 5, createdAt: expect.any(Number) },
+        { threadId: thread.id, sequence: 6, createdAt: expect.any(Number) },
       ],
       insertedInputIndexes: [1, 2, 3],
       skippedTurnUnstartedInputIndexes: [],
@@ -642,8 +644,8 @@ describe("events", () => {
 
     expect(result).toEqual({
       acceptedEvents: [
-        { threadId: thread.id, sequence: 4 },
-        { threadId: thread.id, sequence: 5 },
+        { threadId: thread.id, sequence: 4, createdAt: expect.any(Number) },
+        { threadId: thread.id, sequence: 5, createdAt: expect.any(Number) },
       ],
       insertedInputIndexes: [1, 2],
       skippedTurnUnstartedInputIndexes: [],
@@ -687,7 +689,7 @@ describe("events", () => {
 
     expect(first.insertedInputIndexes).toEqual([0, 1]);
     expect(replay).toEqual({
-      acceptedEvents: [{ threadId: thread.id, sequence: 3 }],
+      acceptedEvents: [{ threadId: thread.id, sequence: 3, createdAt: expect.any(Number) }],
       insertedInputIndexes: [1],
       skippedTurnUnstartedInputIndexes: [],
     });
@@ -903,8 +905,8 @@ describe("events", () => {
 
     expect(result).toMatchObject({
       acceptedEvents: [
-        { threadId: thread.id, sequence: 1 },
-        { threadId: thread.id, sequence: 2 },
+        { threadId: thread.id, sequence: 1, createdAt: expect.any(Number) },
+        { threadId: thread.id, sequence: 2, createdAt: expect.any(Number) },
       ],
       insertedInputIndexes: [0, 1],
     });
@@ -952,7 +954,7 @@ describe("events", () => {
     );
 
     expect(result).toMatchObject({
-      acceptedEvents: [{ threadId: thread.id, sequence: 2 }],
+      acceptedEvents: [{ threadId: thread.id, sequence: 2, createdAt: expect.any(Number) }],
       insertedInputIndexes: [0],
     });
     expect(listEvents(db, { threadId: thread.id })).toHaveLength(2);
