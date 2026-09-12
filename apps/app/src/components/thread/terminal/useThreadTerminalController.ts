@@ -28,6 +28,14 @@ import {
   shouldCloseUnretainedDisconnectedTerminalSession,
   shouldShowRetainedTerminalSession,
 } from "@/lib/terminal-session-visibility";
+import {
+  useMountedTerminalIds,
+  useMountedTerminalRegistration,
+} from "./mounted-terminals";
+import {
+  resolveTerminalScopeKey,
+  type ThreadTerminalTarget,
+} from "./terminal-scope";
 import { normalizeTerminalTitle } from "./thread-terminal-title";
 import type { TerminalCreateTarget } from "@bb/server-contract";
 
@@ -36,10 +44,7 @@ export const DEFAULT_TERMINAL_ROWS = 30;
 const EMPTY_TERMINAL_SESSIONS: readonly TerminalSession[] = [];
 const TERMINAL_TITLE_RENAME_DEBOUNCE_MS = 250;
 
-export type ThreadTerminalTarget =
-  | { kind: "thread"; threadId: string }
-  | { kind: "environment"; environmentId: string }
-  | { kind: "host_path"; cwd: string | null; hostId: string };
+export type { ThreadTerminalTarget };
 
 export interface ThreadTerminalControllerArgs {
   canCreateTerminal: boolean;
@@ -150,12 +155,7 @@ export function useThreadTerminalController({
 }: ThreadTerminalControllerArgs): ThreadTerminalController {
   const queryClient = useQueryClient();
   const terminalTargetKind = target.kind;
-  const terminalTargetId =
-    target.kind === "thread"
-      ? target.threadId
-      : target.kind === "environment"
-        ? target.environmentId
-        : `${target.hostId}:${target.cwd ?? "home"}`;
+  const terminalTargetId = resolveTerminalScopeKey(target);
   const threadQueryId = target.kind === "thread" ? target.threadId : "";
   const environmentQueryId =
     target.kind === "environment" ? target.environmentId : "";
@@ -263,15 +263,22 @@ export function useThreadTerminalController({
         (target.cwd === null || session.initialCwd === target.cwd),
     );
   }, [target, terminalsQuery.data?.sessions]);
+  const paneRetainedTerminalIds = useMemo(
+    () =>
+      new Set<string>(
+        retainedTerminalViewId === null ? [] : [retainedTerminalViewId],
+      ),
+    [retainedTerminalViewId],
+  );
   const visibleSessions = useMemo(
     () =>
       sessions.filter((session) =>
         shouldShowRetainedTerminalSession({
-          retainedTerminalId: retainedTerminalViewId,
+          retainedTerminalIds: paneRetainedTerminalIds,
           session,
         }),
       ),
-    [retainedTerminalViewId, sessions],
+    [paneRetainedTerminalIds, sessions],
   );
   const activeTerminalId = useMemo(
     () =>
@@ -289,6 +296,12 @@ export function useThreadTerminalController({
   );
   const activeSession =
     visibleSessions.find((session) => session.id === activeTerminalId) ?? null;
+  useMountedTerminalRegistration({
+    isMounted: shouldMountTerminalView,
+    scopeKey: terminalTargetId,
+    terminalId: activeTerminalId,
+  });
+  const mountedTerminalIds = useMountedTerminalIds(terminalTargetId);
   const shouldRetainActiveTerminalView =
     activeSession?.status === "disconnected" &&
     activeSession.id === retainedTerminalViewId;
@@ -439,7 +452,7 @@ export function useThreadTerminalController({
     for (const session of sessions) {
       if (
         !shouldCloseUnretainedDisconnectedTerminalSession({
-          retainedTerminalId: retainedTerminalViewId,
+          retainedTerminalIds: mountedTerminalIds,
           session,
         }) ||
         closingDisconnectedTerminalIdsRef.current.has(session.id)
@@ -467,8 +480,8 @@ export function useThreadTerminalController({
   }, [
     closeTerminal,
     isPanelOpen,
+    mountedTerminalIds,
     removeFixedTerminalTab,
-    retainedTerminalViewId,
     sessions,
     terminalsQuery.error,
     terminalsQuery.isLoading,

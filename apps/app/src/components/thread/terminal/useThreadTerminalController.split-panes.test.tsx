@@ -75,17 +75,9 @@ describe("two split panes each holding a terminal", () => {
     });
 
     await waitFor(() => {
-      expect(
-        vi.mocked(sdk.terminals.list).mock.results.length,
-      ).toBeGreaterThan(2);
+      expect(result.current.paneA.activeSession?.status).toBe("disconnected");
+      expect(result.current.paneB.activeSession?.status).toBe("disconnected");
     });
-    const listed = await vi.mocked(sdk.terminals.list).mock.results.at(-1)!
-      .value;
-    expect(listed.sessions.map((s: TerminalSession) => s.status)).toEqual([
-      "disconnected",
-      "disconnected",
-    ]);
-    expect(result.current.paneA.activeSession?.status).toBe("disconnected");
 
     const closedIds = [
       ...new Set(
@@ -128,5 +120,48 @@ describe("two split panes each holding a terminal", () => {
 
     expect(vi.mocked(sdk.terminals.close)).not.toHaveBeenCalled();
     expect(result.current.shouldRetainActiveTerminalView).toBe(true);
+  });
+
+  it("still closes a disconnected session no pane is showing", async () => {
+    const state = new Map<string, TerminalSession["status"]>([
+      ["term_a", "running"],
+      ["term_b", "running"],
+      ["term_orphan", "disconnected"],
+    ]);
+    vi.mocked(sdk.terminals.list).mockImplementation(async () => ({
+      sessions: [...state.entries()].map(([id, status]) => session(id, status)),
+    }));
+    vi.mocked(sdk.terminals.close).mockImplementation(
+      async ({ terminalId }: { terminalId: string }) => {
+        state.set(terminalId, "exited");
+        return session(terminalId, "exited");
+      },
+    );
+
+    const { wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => ({
+        paneA: useThreadTerminalController(paneArgs("term_a")),
+        paneB: useThreadTerminalController(paneArgs("term_b")),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.paneA.activeSession?.id).toBe("term_a");
+      expect(result.current.paneB.activeSession?.id).toBe("term_b");
+    });
+    await waitFor(() => {
+      expect(state.get("term_orphan")).toBe("exited");
+    });
+
+    const closedIds = [
+      ...new Set(
+        vi
+          .mocked(sdk.terminals.close)
+          .mock.calls.map(([request]) => request.terminalId),
+      ),
+    ];
+    expect(closedIds).toEqual(["term_orphan"]);
   });
 });

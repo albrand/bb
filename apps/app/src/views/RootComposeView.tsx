@@ -164,9 +164,10 @@ import {
 } from "@/components/thread/terminal/useThreadTerminalController";
 import {
   buildTerminalSyncedSecondaryFileTabs,
-  getRetainedTerminalTabId,
   syncTerminalTabsInFixedPanelState,
 } from "@/components/secondary-panel/terminalPanelTabs";
+import { useMountedTerminalIds } from "@/components/thread/terminal/mounted-terminals";
+import { resolveTerminalScopeKey } from "@/components/thread/terminal/terminal-scope";
 import {
   getActiveFixedSecondaryTab,
   useSetThreadSecondaryPanelSelection,
@@ -901,14 +902,6 @@ function RootComposeSurface({
   const activeFixedSecondaryTab = getActiveFixedSecondaryTab({
     fixedPanelTabsState,
   });
-  const retainedTerminalId = useMemo(
-    () =>
-      getRetainedTerminalTabId({
-        activeTab: activeFixedSecondaryTab,
-        isPanelOpen: isPersistedSecondaryPanelOpen,
-      }),
-    [activeFixedSecondaryTab, isPersistedSecondaryPanelOpen],
-  );
   const activeFixedSecondaryTabId = activeFixedSecondaryTab?.id ?? null;
   const isCompactViewport = useIsCompactViewport();
   const secondaryPanelDrawerVisibility =
@@ -984,6 +977,11 @@ function RootComposeSurface({
         ? { kind: "environment", environmentId: rootPanelEnvironmentId }
         : rootPanelHostPathTerminalTarget,
     [rootPanelEnvironmentId, rootPanelHostPathTerminalTarget],
+  );
+  const retainedTerminalIds = useMountedTerminalIds(
+    rootPanelTerminalTarget === null
+      ? null
+      : resolveTerminalScopeKey(rootPanelTerminalTarget),
   );
   const {
     checkThreadStorageFileExists: checkRootThreadStorageFileExists,
@@ -1067,7 +1065,7 @@ function RootComposeSurface({
     preserveWorkspaceTabsAcrossContexts: true,
     projectHostId: rootProjectHostId,
     projectId: isProjectless ? null : projectId,
-    retainedTerminalId,
+    retainedTerminalIds,
     storageFileExists: checkRootThreadStorageFileExists,
     storageFiles: rootThreadStorageFiles,
     terminalSessions: loadedTerminalSessions,
@@ -1082,10 +1080,10 @@ function RootComposeSurface({
         ? orderedSecondaryFileTabs
         : buildTerminalSyncedSecondaryFileTabs({
             orderedTabs: orderedSecondaryFileTabs,
-            retainedTerminalId,
+            retainedTerminalIds,
             terminalSessions: loadedTerminalSessions,
           }),
-    [loadedTerminalSessions, orderedSecondaryFileTabs, retainedTerminalId],
+    [loadedTerminalSessions, orderedSecondaryFileTabs, retainedTerminalIds],
   );
   useEffect(() => {
     if (!terminalsListLoaded) {
@@ -1093,13 +1091,13 @@ function RootComposeSurface({
     }
     updateFixedPanelTabsState((state) =>
       syncTerminalTabsInFixedPanelState({
-        retainedTerminalId,
+        retainedTerminalIds,
         state,
         terminalSessions,
       }),
     );
   }, [
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
     terminalsListLoaded,
     updateFixedPanelTabsState,

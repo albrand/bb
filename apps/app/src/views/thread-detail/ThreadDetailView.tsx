@@ -260,9 +260,9 @@ import { useThreadReadTracking } from "@/hooks/useThreadReadTracking";
 import { useThreadUnreadDividerState } from "./useThreadUnreadDividerState";
 import {
   buildTerminalSyncedSecondaryFileTabs,
-  getRetainedTerminalTabId,
   syncTerminalTabsInFixedPanelState,
 } from "@/components/secondary-panel/terminalPanelTabs";
+import { useMountedTerminalIds } from "@/components/thread/terminal/mounted-terminals";
 import {
   buildOpenInEditorHandler,
   resolveEnvironmentOpenContext,
@@ -580,10 +580,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const openFixedSecondaryTab = isPersistedSecondaryPanelOpen
     ? activeFixedSecondaryTab
     : null;
-  const retainedTerminalId = getRetainedTerminalTabId({
-    activeTab: activeFixedSecondaryTab,
-    isPanelOpen: isPersistedSecondaryPanelOpen,
-  });
+  const retainedTerminalIds = useMountedTerminalIds(threadId);
   const activeFixedSecondaryTabId = activeFixedSecondaryTab?.id ?? null;
   const renderSecondaryPanelAsDrawer = useIsCompactViewport();
   const secondaryPanelDrawerVisibility =
@@ -711,7 +708,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     syncThreadId: threadId,
     environmentId: thread?.environmentId,
     onCloseLastTab: secondaryPanelDrawerVisibility.closeDrawer,
-    retainedTerminalId,
+    retainedTerminalIds,
     storageFileExists: checkThreadStorageFileExists,
     storageFiles: threadStorageFiles,
     terminalSessions: terminalsListQuery.data?.sessions,
@@ -904,10 +901,10 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
         ? orderedSecondaryFileTabs
         : buildTerminalSyncedSecondaryFileTabs({
             orderedTabs: orderedSecondaryFileTabs,
-            retainedTerminalId,
+            retainedTerminalIds,
             terminalSessions: loadedTerminalSessions,
           }),
-    [loadedTerminalSessions, orderedSecondaryFileTabs, retainedTerminalId],
+    [loadedTerminalSessions, orderedSecondaryFileTabs, retainedTerminalIds],
   );
   useEffect(() => {
     if (terminalsListQuery.data === undefined) {
@@ -915,13 +912,13 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     }
     updateFixedPanelTabsState((state) =>
       syncTerminalTabsInFixedPanelState({
-        retainedTerminalId,
+        retainedTerminalIds,
         state,
         terminalSessions,
       }),
     );
   }, [
-    retainedTerminalId,
+    retainedTerminalIds,
     terminalSessions,
     terminalsListQuery.data,
     updateFixedPanelTabsState,

@@ -29,25 +29,25 @@ describe("terminal visibility", () => {
 
     expect(
       shouldShowRetainedTerminalSession({
-        retainedTerminalId: null,
+        retainedTerminalIds: new Set<string>(),
         session: disconnected,
       }),
     ).toBe(false);
     expect(
       shouldShowRetainedTerminalSession({
-        retainedTerminalId: "term_disconnected",
+        retainedTerminalIds: new Set(["term_disconnected"]),
         session: disconnected,
       }),
     ).toBe(true);
     expect(
       shouldShowRetainedTerminalSession({
-        retainedTerminalId: null,
+        retainedTerminalIds: new Set<string>(),
         session: terminalSession({ status: "running" }),
       }),
     ).toBe(true);
   });
 
-  it("cleans up only disconnected sessions without a retained terminal view", () => {
+  it("cleans up a disconnected session only when no pane still mounts it", () => {
     const disconnected = terminalSession({
       id: "term_disconnected",
       status: "disconnected",
@@ -55,19 +55,19 @@ describe("terminal visibility", () => {
 
     expect(
       shouldCloseUnretainedDisconnectedTerminalSession({
-        retainedTerminalId: null,
+        retainedTerminalIds: new Set<string>(),
         session: disconnected,
       }),
     ).toBe(true);
     expect(
       shouldCloseUnretainedDisconnectedTerminalSession({
-        retainedTerminalId: "term_disconnected",
+        retainedTerminalIds: new Set(["term_other_pane", "term_disconnected"]),
         session: disconnected,
       }),
     ).toBe(false);
     expect(
       shouldCloseUnretainedDisconnectedTerminalSession({
-        retainedTerminalId: null,
+        retainedTerminalIds: new Set<string>(),
         session: terminalSession({ status: "running" }),
       }),
     ).toBe(false);
