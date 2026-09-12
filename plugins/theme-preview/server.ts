@@ -170,9 +170,55 @@ export const BUILTIN_THEMES: ReadonlyArray<{ id: string; name: string }> = [
   { id: "solarized", name: "Solarized" },
   { id: "gruvbox", name: "Gruvbox" },
   { id: "catppuccin", name: "Catppuccin" },
+  { id: "conductor", name: "Conductor" },
+  { id: "conductor-black", name: "Conductor Pitch Black" },
 ];
 
 export const BUILTIN_SWATCHES: Record<string, { light: ThemeSwatch; dark: ThemeSwatch }> = {
+  "conductor": {
+    "light": {
+      "canvas": "#ffffff",
+      "sidebar": "#f8f7f6",
+      "card": "#ffffff",
+      "primary": "#1aa14a",
+      "accent": "#f5f3f0",
+      "foreground": "#2c2826",
+      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
+      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    },
+    "dark": {
+      "canvas": "#151110",
+      "sidebar": "#1b1716",
+      "card": "#2a1e1d",
+      "primary": "#3eb15f",
+      "accent": "#2c2726",
+      "foreground": "#ece9e7",
+      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
+      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    }
+  },
+  "conductor-black": {
+    "light": {
+      "canvas": "#ffffff",
+      "sidebar": "#f8f7f6",
+      "card": "#ffffff",
+      "primary": "#1aa14a",
+      "accent": "#f5f3f0",
+      "foreground": "#2c2826",
+      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
+      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    },
+    "dark": {
+      "canvas": "#000000",
+      "sidebar": "#000000",
+      "card": "#2a1e1d",
+      "primary": "#3eb15f",
+      "accent": "#241b1a",
+      "foreground": "#ece9e7",
+      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
+      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    }
+  },
   "default": {
     "light": {
       "canvas": "oklch(1 0 0)",

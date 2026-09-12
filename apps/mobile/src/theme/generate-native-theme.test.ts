@@ -16,6 +16,10 @@ import {
 } from "./theme.native";
 
 const MODES = ["light", "dark"] as const;
+const CARD_LIFTED_OFF_CANVAS_IN_DARK = new Set<string>([
+  "conductor",
+  "conductor-black",
+]);
 const toOklch = converter("oklch");
 
 const MINIMAL_MOBILE_CSS = `
@@ -106,9 +110,18 @@ describe("generate-native-theme", () => {
         const tokens = nativeThemes[id][mode];
 
         it("keeps card and popover flush with the canvas", () => {
+          expect(tokens.background).toBe(tokens.canvas);
+          if (mode === "dark" && CARD_LIFTED_OFF_CANVAS_IN_DARK.has(id)) {
+            expect(lightness(tokens.card)).toBeGreaterThan(
+              lightness(tokens.canvas),
+            );
+            expect(lightness(tokens.popover)).toBeGreaterThan(
+              lightness(tokens.canvas),
+            );
+            return;
+          }
           expect(tokens.card).toBe(tokens.canvas);
           expect(tokens.popover).toBe(tokens.canvas);
-          expect(tokens.background).toBe(tokens.canvas);
         });
 
         it("orders the ink ramp: sidebar < fills < border <= input", () => {

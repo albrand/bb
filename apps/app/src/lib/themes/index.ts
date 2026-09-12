@@ -4,6 +4,8 @@ import {
   type BuiltInThemeId,
 } from "@bb/domain";
 import { catppuccinThemeCss } from "./catppuccin";
+import { conductorThemeCss } from "./conductor";
+import { conductorBlackThemeCss } from "./conductor-black";
 import { draculaThemeCss } from "./dracula";
 import { gruvboxThemeCss } from "./gruvbox";
 import { nordThemeCss } from "./nord";
@@ -19,6 +21,8 @@ const builtInThemeCss: Record<BuiltInThemeId, string> = {
   solarized: solarizedThemeCss,
   gruvbox: gruvboxThemeCss,
   catppuccin: catppuccinThemeCss,
+  conductor: conductorThemeCss,
+  "conductor-black": conductorBlackThemeCss,
 };
 
 export function resolveAppThemeCss(appearance: AppTheme): string {

@@ -16,7 +16,8 @@
   - `bb theme dir` — print the absolute custom-theme directory (where to create
     `<name>/theme.css`). Use this instead of guessing the path.
   - `bb theme set <id> [--favicon-color <color>]` — activate a built-in
-    (`default`, `nord`, `dracula`, `solarized`, `gruvbox`, `catppuccin`), custom,
+    (`default`, `nord`, `dracula`, `solarized`, `gruvbox`, `catppuccin`,
+    `conductor`, `conductor-black`), custom,
     or plugin-contributed theme. Without the flag it preserves the favicon
     color; with the flag it updates the complete appearance selection.
   - `bb theme show [--css]` — print the active palette. For a custom theme,
@@ -41,7 +42,8 @@ This is the BB habit: custom app-theme work belongs in
 3. Activate it: `bb theme set <name>`. Changes apply live to every open window.
 
 Code colors follow the active palette. Built-in palettes use the matching
-Shiki pair (Nord, Dracula, Solarized, Gruvbox, Catppuccin). To restyle diffs
+Shiki pair (Nord, Dracula, Solarized, Gruvbox, Catppuccin); the Conductor
+palettes keep bb's default code colors. To restyle diffs
 for a custom palette, put Pierre / VS Code theme JSON next to the stylesheet:
 
 - `pierre-dark.json` and `pierre-light.json` in the same folder, or
