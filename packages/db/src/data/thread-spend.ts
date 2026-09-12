@@ -636,6 +636,11 @@ export function listSpendRollupRows(
  *
  * Reported unscoped it described all history beside fourteen days of rows, and
  * the analysis payload carried that mismatch into its window header.
+ *
+ * A thread counts as complete only when EVERY provider conversation on it is.
+ * Cursors are per conversation, so a thread resumed onto a second provider
+ * session can hold one complete and one partial, and counting distinct complete
+ * thread ids would have made the partial one disappear behind the complete one.
  */
 export function getSpendCoverage(
   db: DbQueryConnection,
@@ -650,8 +655,11 @@ export function getSpendCoverage(
   }
   const row = db.get<{ threads: number; historyComplete: number }>(
     sql`SELECT COUNT(DISTINCT cursor.thread_id) AS threads,
-               COUNT(DISTINCT CASE WHEN cursor.history_complete = 1
-                 THEN cursor.thread_id END) AS historyComplete
+               COUNT(DISTINCT CASE WHEN NOT EXISTS (
+                 SELECT 1 FROM ${sql.raw(CURSOR_TABLE)} partial
+                 WHERE partial.thread_id = cursor.thread_id
+                   AND partial.history_complete = 0
+               ) THEN cursor.thread_id END) AS historyComplete
         FROM ${sql.raw(CURSOR_TABLE)} cursor
         WHERE EXISTS (
           SELECT 1 FROM ${sql.raw(DAILY_TABLE)} rollup
