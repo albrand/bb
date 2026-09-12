@@ -77,11 +77,16 @@ const originalPlatform = process.platform;
 const KEYCHAIN_ACCESS_TOKEN = "keychain-access-token";
 const FILE_ACCESS_TOKEN = "stale-file-access-token";
 
-function credentialsJson(accessToken: string, expiresAt: number | null) {
+function credentialsJson(
+  accessToken: string,
+  expiresAt: number | null,
+  renewal: { refreshToken?: string; refreshTokenExpiresAt?: number } = {},
+) {
   return JSON.stringify({
     claudeAiOauth: {
       accessToken,
       expiresAt,
+      ...renewal,
       subscriptionType: "pro",
       rateLimitTier: "default_claude_max_5x",
     },
@@ -205,6 +210,88 @@ describe("Claude Code credential loading", () => {
     });
     expect(state.fileReads).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports a lapsed access token that Claude Code can renew as ready", async () => {
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() - 60_000, {
+          refreshToken: "keychain-refresh-token",
+          refreshTokenExpiresAt: Date.now() + 86_400_000,
+        }),
+      ),
+    ];
+
+    const health = await getClaudeProviderHealth();
+    const usage = await getClaudeProviderUsage();
+
+    expect(health).toEqual({
+      supported: true,
+      health: expect.objectContaining({ status: "ready", statusMessage: null }),
+    });
+    expect(usage).toEqual({
+      supported: true,
+      usage: expect.objectContaining({
+        status: "error",
+        message:
+          "Claude usage appears after Claude Code renews its sign-in on next use.",
+      }),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports ready when a lapsed access token has a refresh token with no expiry", async () => {
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() - 60_000, {
+          refreshToken: "keychain-refresh-token",
+        }),
+      ),
+    ];
+
+    const health = await getClaudeProviderHealth();
+
+    expect(health).toEqual({
+      supported: true,
+      health: expect.objectContaining({ status: "ready" }),
+    });
+  });
+
+  it("reports a refresh token past its expiry as signed out", async () => {
+    state.keychain = [
+      keychainValue(
+        credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() - 60_000, {
+          refreshToken: "keychain-refresh-token",
+          refreshTokenExpiresAt: Date.now() - 1_000,
+        }),
+      ),
+    ];
+
+    const health = await getClaudeProviderHealth();
+
+    expect(health).toEqual({
+      supported: true,
+      health: expect.objectContaining({
+        status: "unauthenticated",
+        statusMessage:
+          "Claude Code could not renew its sign-in and needs a new one.",
+      }),
+    });
+  });
+
+  it("reports a lapsed access token with nothing to renew it as expired", async () => {
+    state.keychain = [
+      keychainValue(credentialsJson(KEYCHAIN_ACCESS_TOKEN, Date.now() - 60_000)),
+    ];
+
+    const health = await getClaudeProviderHealth();
+    const usage = await getClaudeProviderUsage();
+
+    expect(health).toEqual({
+      supported: true,
+      health: expect.objectContaining({ status: "expired" }),
+    });
+    expect(usage).toEqual({ supported: true, usage: { status: "expired" } });
   });
 
   it("does not fall back to the credential file when the Keychain value is invalid", async () => {
