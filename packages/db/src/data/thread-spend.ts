@@ -442,6 +442,7 @@ export function saveSpendCursor(
 export function applySpendContribution(
   db: DbQueryConnection,
   contribution: SpendContribution,
+  turns = 1,
 ): void {
   db.run(
     sql`INSERT INTO ${sql.raw(DAILY_TABLE)} (day, thread_id, provider_id, model,
@@ -455,7 +456,7 @@ export function applySpendContribution(
           ${contribution.usage.outputTokens},
           ${contribution.usage.reasoningOutputTokens},
           ${contribution.usage.totalTokens},
-          ${contribution.weightedUnits}, 1,
+          ${contribution.weightedUnits}, ${turns},
           ${contribution.at}, ${contribution.at})
         ON CONFLICT (day, thread_id, provider_id, model) DO UPDATE SET
           input_tokens = input_tokens + excluded.input_tokens,
@@ -465,7 +466,7 @@ export function applySpendContribution(
             reasoning_output_tokens + excluded.reasoning_output_tokens,
           total_tokens = total_tokens + excluded.total_tokens,
           weighted_units = weighted_units + excluded.weighted_units,
-          turns = turns + 1,
+          turns = turns + excluded.turns,
           first_event_at = MIN(first_event_at, excluded.first_event_at),
           last_event_at = MAX(last_event_at, excluded.last_event_at)`,
   );
