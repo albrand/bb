@@ -59,6 +59,7 @@ export {
   getSpendCoverage,
   getSpendCursor,
   getSpendThreadSequenceBounds,
+  hasThreadRewind,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listSpendBackfillThreads,
   listSpendRollupRows,

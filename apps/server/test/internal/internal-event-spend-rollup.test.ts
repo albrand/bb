@@ -207,6 +207,13 @@ describe("daemon event spend rollup", () => {
       // An adopted worker replays unacked lines after a daemon restart, so the
       // server is re-sent events it already stored. Replay-key dedup drops them
       // at the append; the rollup must not count what was never inserted.
+      //
+      // NOTE: this test does NOT bind the fold's own sequence guard. The dedup
+      // stops re-delivery upstream, so the rollup never sees the repeat at all.
+      // What binds that guard is "backfills to exactly what the live path
+      // recorded", which replays stored events past a cursor that has already
+      // passed them. Editing one of these believing it covers the other will
+      // leave the guard unprotected.
       expect(
         (
           await post([
@@ -317,6 +324,9 @@ describe("daemon event spend rollup", () => {
   });
 
   it("backfills to exactly what the live path recorded", async () => {
+    // This is also the test that binds the fold's sequence guard: the second
+    // backfill replays events the cursor has already passed. The replay-key
+    // test above does not, because dedup stops those events upstream.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-backfill",
@@ -480,6 +490,97 @@ describe("daemon event spend rollup", () => {
 
       expect((await post([usage({ total: 250, last: 150 })])).status).toBe(200);
       expect(historyComplete()).toBe(1);
+    });
+  });
+
+  it("refuses to call a rewound thread complete", async () => {
+    // The pruner is not the only thing that deletes usage events. Editing an
+    // earlier message deletes the range after it, and that can happen while the
+    // thread is still far short of the pruner's window - so the prune-safe
+    // proof would call it complete with tokens missing from its total. A wrong
+    // number wearing a certainty badge is the one outcome this work exists to
+    // prevent.
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-spend-rewind",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "codex",
+        status: "active",
+      });
+      const response = await harness.app.request("/internal/session/events", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          eventGroups: groupHostDaemonEvents([
+            {
+              threadId: thread.id,
+              event: {
+                type: "turn/started",
+                threadId: thread.id,
+                providerThreadId: PROVIDER_THREAD_ID,
+                scope: turnScope(TURN_ID),
+              },
+            },
+            {
+              threadId: thread.id,
+              event: {
+                type: "thread/tokenUsage/updated",
+                threadId: thread.id,
+                providerThreadId: PROVIDER_THREAD_ID,
+                scope: turnScope(TURN_ID),
+                tokenUsage: {
+                  total: breakdown(100, {}),
+                  last: breakdown(100, {}),
+                  modelContextWindow: 258_400,
+                },
+              },
+            },
+          ]),
+        }),
+      });
+      expect(response.status).toBe(200);
+
+      // Without the marker this thread is short enough for the prune-safe
+      // proof, so the backfill calls it complete.
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      backfillSpend(harness.db);
+      const completeness = () =>
+        harness.db.get<{ historyComplete: number }>(
+          sql`SELECT history_complete AS historyComplete
+              FROM fork_thread_spend_cursor WHERE thread_id = ${thread.id}`,
+        )?.historyComplete;
+      expect(completeness()).toBe(1);
+
+      // The rewind marker an edited message leaves behind. It is appended above
+      // the range it deletes, so it survives that deletion.
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 50,
+        type: "system/operation",
+        scope: threadScope(),
+        data: {
+          operation: "edit_message",
+          status: "completed",
+          message: "Message edited",
+          operationId: "op-rewind",
+          metadata: { cutoffSequence: 2, oldMaxSequence: 2 },
+        },
+      });
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      backfillSpend(harness.db);
+      expect(completeness()).toBe(0);
     });
   });
 
