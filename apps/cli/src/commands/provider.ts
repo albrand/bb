@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import type { AvailableModel } from "@bb/domain";
-import type { SystemProviderInfo } from "@bb/server-contract";
+import type {
+  SystemProviderInfo,
+  SystemProviderState,
+} from "@bb/server-contract";
 import { action } from "../action.js";
 import { createCliBbSdk } from "../client.js";
 import { renderBorderlessTable } from "../table.js";
@@ -20,6 +23,43 @@ interface ProviderModelsCommandOptions {
   json?: boolean;
   machine?: string;
   selectedModel?: string;
+}
+
+type ProviderListRow = SystemProviderInfo & {
+  status: string;
+  statusMessage: string | null;
+  loginCommand: string | null;
+  publishesUsage: boolean;
+};
+
+const PROVIDER_STATUS_WORDS: Record<string, string> = {
+  ready: "ready",
+  unauthenticated: "not signed in",
+  expired: "sign-in expired",
+  not_installed: "not installed",
+  unsupported_version: "unsupported version",
+  unknown: "unknown",
+};
+
+function providerStatusWords(status: string): string {
+  return PROVIDER_STATUS_WORDS[status] ?? status;
+}
+
+function providerListRows(
+  providers: SystemProviderInfo[],
+  states: SystemProviderState[],
+): ProviderListRow[] {
+  const stateById = new Map(states.map((state) => [state.providerId, state]));
+  return providers.map((provider) => {
+    const state = stateById.get(provider.id);
+    return {
+      ...provider,
+      status: state?.status ?? "unknown",
+      statusMessage: state?.statusMessage ?? null,
+      loginCommand: state?.loginCommand ?? null,
+      publishesUsage: provider.maintenance.usage,
+    };
+  });
 }
 
 interface IncludeSelectedOnlyModelArgs {
@@ -53,15 +93,21 @@ export function registerProviderCommands(
       action(async (opts: ProviderListCommandOptions) => {
         const serverUrl = getUrl();
         const sdk = createCliBbSdk(serverUrl);
-        const providers = await sdk.providers.list(
-          await resolveMachineEnvironmentRouting(opts, serverUrl),
-        );
-        if (outputJson(opts, providers)) return;
-        if (providers.length === 0) {
+        const routing = await resolveMachineEnvironmentRouting(opts, serverUrl);
+        const [providers, states] = await Promise.all([
+          sdk.providers.list(routing),
+          sdk.system
+            .providerStates(routing)
+            .then((response) => response.providers)
+            .catch(() => []),
+        ]);
+        const rows = providerListRows(providers, states);
+        if (outputJson(opts, rows)) return;
+        if (rows.length === 0) {
           console.log("No providers available");
           return;
         }
-        printProviderTable(providers);
+        printProviderTable(rows);
       }),
     );
 
@@ -115,14 +161,24 @@ function includeSelectedOnlyModel(
   return selectedOnlyModel ? [selectedOnlyModel, ...args.models] : args.models;
 }
 
-function printProviderTable(providers: SystemProviderInfo[]): void {
-  const rows = providers.map((provider) => [provider.id, provider.displayName]);
+function printProviderTable(providerRows: ProviderListRow[]): void {
+  const rows = providerRows.map((provider) => [
+    provider.id,
+    provider.displayName,
+    providerStatusWords(provider.status),
+    provider.publishesUsage ? "quota" : "no quota published",
+    provider.loginCommand ?? "",
+  ]);
   const idWidth = Math.max(4, ...rows.map((row) => row[0].length));
   const nameWidth = Math.max(4, ...rows.map((row) => row[1].length));
+  const statusWidth = Math.max(6, ...rows.map((row) => row[2].length));
+  const usageWidth = Math.max(5, ...rows.map((row) => row[3].length));
+  const signInWidth = Math.max(7, ...rows.map((row) => row[4].length));
   const table = renderBorderlessTable(
     {
-      head: ["ID", "Name"],
-      colWidths: [idWidth, nameWidth],
+      head: ["ID", "Name", "Status", "Usage", "Sign in"],
+      colWidths: [idWidth, nameWidth, statusWidth, usageWidth, signInWidth],
+      trimTrailingWhitespace: true,
     },
     rows,
   );

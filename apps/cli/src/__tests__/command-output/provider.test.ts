@@ -16,16 +16,108 @@ describe("bb provider command output", () => {
     registerProviderCommands(program, () => "http://server");
 
   it("bb provider list renders the shared borderless table", async () => {
-    const get = vi.fn(async () => [{ id: "openai", displayName: "OpenAI" }]);
+    const get = vi.fn(async () => [
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        maintenance: { health: true, usage: true, installation: true },
+      },
+    ]);
     stubServerApi({ "v1.system.providers.$get": get });
 
     await runCommand(["provider", "list"], register);
 
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
       "",
-      "ID      Name  \n------  ------\nopenai  OpenAI",
+      "ID      Name    Status   Usage  Sign in\n------  ------  -------  -----  -------\nopenai  OpenAI  unknown  quota",
       "",
     ]);
+  });
+
+  it("bb provider list says which providers are usable and how to sign in", async () => {
+    stubServerApi({
+      "v1.system.providers.$get": vi.fn(async () => [
+        {
+          id: "codex",
+          displayName: "Codex",
+          maintenance: { health: true, usage: true, installation: true },
+        },
+        {
+          id: "acp-cursor",
+          displayName: "Cursor",
+          maintenance: { health: true, usage: true, installation: true },
+        },
+        {
+          id: "acp-opencode",
+          displayName: "opencode",
+          maintenance: { health: true, usage: false, installation: true },
+        },
+      ]),
+      "v1.system.providers.state.$get": vi.fn(async () => ({
+        providers: [
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            status: "ready",
+            loginCommand: null,
+          },
+          {
+            providerId: "acp-cursor",
+            displayName: "Cursor",
+            status: "unauthenticated",
+            loginCommand: "cursor-agent login",
+          },
+          {
+            providerId: "acp-opencode",
+            displayName: "opencode",
+            status: "ready",
+            loginCommand: null,
+          },
+        ],
+      })),
+    });
+
+    await runCommand(["provider", "list"], register);
+
+    const printed = collectLogPayloads(vi.mocked(console.log)).join("\n");
+    expect(printed).toContain("ready");
+    expect(printed).toContain("not signed in");
+    expect(printed).toContain("cursor-agent login");
+    expect(printed).toContain("no quota published");
+  });
+
+  it("bb provider list --json carries readiness for agents", async () => {
+    stubServerApi({
+      "v1.system.providers.$get": vi.fn(async () => [
+        {
+          id: "acp-cursor",
+          displayName: "Cursor",
+          maintenance: { health: true, usage: true, installation: true },
+        },
+      ]),
+      "v1.system.providers.state.$get": vi.fn(async () => ({
+        providers: [
+          {
+            providerId: "acp-cursor",
+            displayName: "Cursor",
+            status: "unauthenticated",
+            loginCommand: "cursor-agent login",
+          },
+        ],
+      })),
+    });
+
+    await runCommand(["provider", "list", "--json"], register);
+
+    const payload = collectLogPayloads(vi.mocked(console.log)).join("\n");
+    const parsed = JSON.parse(payload) as {
+      status: string;
+      loginCommand: string | null;
+      publishesUsage: boolean;
+    }[];
+    expect(parsed[0]?.status).toBe("unauthenticated");
+    expect(parsed[0]?.loginCommand).toBe("cursor-agent login");
+    expect(parsed[0]?.publishesUsage).toBe(true);
   });
 
   it("discovers provider routing selectors in command help", async () => {
@@ -37,7 +129,11 @@ describe("bb provider command output", () => {
 
   it("bb provider list resolves a machine and preserves portable JSON output", async () => {
     const getProviders = vi.fn(async () => [
-      { id: "acp-remote", displayName: "Remote ACP" },
+      {
+        id: "acp-remote",
+        displayName: "Remote ACP",
+        maintenance: { health: true, usage: true, installation: true },
+      },
     ]);
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
@@ -65,7 +161,17 @@ describe("bb provider command output", () => {
     });
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
       JSON.stringify(
-        [{ id: "acp-remote", displayName: "Remote ACP" }],
+        [
+          {
+            id: "acp-remote",
+            displayName: "Remote ACP",
+            maintenance: { health: true, usage: true, installation: true },
+            status: "unknown",
+            statusMessage: null,
+            loginCommand: null,
+            publishesUsage: true,
+          },
+        ],
         null,
         2,
       ),
