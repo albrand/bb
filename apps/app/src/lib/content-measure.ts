@@ -56,8 +56,14 @@ export function setContentMeasure(measure: ContentMeasure): void {
   applyContentMeasure(measure);
 }
 
+let unsubscribeContentMeasure: (() => void) | null = null;
+
 export function initializeContentMeasure(): void {
   applyContentMeasure(getContentMeasure());
+  unsubscribeContentMeasure?.();
+  unsubscribeContentMeasure = getDefaultStore().sub(contentMeasureAtom, () => {
+    applyContentMeasure(getContentMeasure());
+  });
 }
 
 export function useContentMeasure(): ContentMeasure {

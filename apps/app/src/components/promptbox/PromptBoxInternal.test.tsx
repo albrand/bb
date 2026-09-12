@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { getDefaultStore } from "jotai";
+import { composerEditorHeightAtom } from "./composerHeightAtoms";
 
 import type { PromptTextMention } from "@bb/domain";
 import { TextSelection } from "@tiptap/pm/state";
@@ -1689,6 +1691,24 @@ describe("PromptBoxInternal size controls", () => {
       expect(editorScroll?.style.maxHeight).toBe(maxHeight);
     },
   );
+
+  it("keeps the compact layout at 48px with no resize handle even when a height is remembered", () => {
+    getDefaultStore().set(composerEditorHeightAtom, 300);
+    render(
+      <PromptBoxInternal
+        {...createPromptBoxProps({ compact: { isCompact: true } })}
+      />,
+    );
+
+    expect(document.querySelector("[data-promptbox-resize-handle]")).toBeNull();
+    const editorScroll = document.querySelector<HTMLElement>(
+      "[data-promptbox-editor-scroll]",
+    );
+    expect(editorScroll?.style.height).toBe("48px");
+    expect(editorScroll?.style.minHeight).toBe("48px");
+    expect(editorScroll?.style.maxHeight).toBe("48px");
+    getDefaultStore().set(composerEditorHeightAtom, null);
+  });
 
   it("offers only the collapse action and releases editor focus", async () => {
     const onCollapse = vi.fn();
