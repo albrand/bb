@@ -2389,6 +2389,30 @@ describe("bridge", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("does not close the model probe while Claude Code is renewing its sign-in", async () => {
+    const configDir = mkdtempSync(join(tmpdir(), "bb-claude-probe-lock-"));
+    const lockPath = join(configDir, ".oauth_refresh.lock");
+    mkdirSync(lockPath);
+    const close = vi.fn();
+    queryMock.mockReturnValueOnce({
+      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      close,
+    });
+    try {
+      const listing = listClaudeCodeBridgeModels({
+        CLAUDE_CONFIG_DIR: configDir,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(close).not.toHaveBeenCalled();
+
+      rmSync(lockPath, { recursive: true });
+      await listing;
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("propagates Claude model discovery failures and closes the probe", async () => {
     const close = vi.fn();
     queryMock.mockReturnValueOnce({
