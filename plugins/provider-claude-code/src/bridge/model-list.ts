@@ -1,6 +1,7 @@
 import { type AvailableModel } from "@get-bb/plugin-sdk/provider-bridge";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { buildClaudeCodeModels } from "../model-list.js";
+import { afterClaudeRenewalSettles } from "./claude-refresh-lock.js";
 import { translateMissingClaudeCliError } from "./missing-cli-error.js";
 import { resolveClaudeCodeExecutable } from "./session-options.js";
 
@@ -39,6 +40,7 @@ export async function listClaudeCodeBridgeModels(
   } catch (error) {
     throw translateMissingClaudeCliError(error);
   } finally {
+    await afterClaudeRenewalSettles(env);
     session.close();
   }
 }

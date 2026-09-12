@@ -2614,6 +2614,30 @@ describe("bridge", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("does not close the model probe while Claude Code is renewing its sign-in", async () => {
+    const configDir = mkdtempSync(join(tmpdir(), "bb-claude-probe-lock-"));
+    const lockPath = join(configDir, ".oauth_refresh.lock");
+    mkdirSync(lockPath);
+    const close = vi.fn();
+    queryMock.mockReturnValueOnce({
+      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      close,
+    });
+    try {
+      const listing = listClaudeCodeBridgeModels({
+        CLAUDE_CONFIG_DIR: configDir,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(close).not.toHaveBeenCalled();
+
+      rmSync(lockPath, { recursive: true });
+      await listing;
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("propagates Claude model discovery failures and closes the probe", async () => {
     const close = vi.fn();
     queryMock.mockReturnValueOnce({
@@ -3921,6 +3945,76 @@ describe("bridge", () => {
       queries[1]?.finish();
       await bridge.waitForResponse(3);
     } finally {
+      bridge.restore();
+    }
+  });
+
+  it("holds an idle Claude query release while Claude Code is renewing its sign-in", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const configDir = mkdtempSync(join(tmpdir(), "bb-claude-idle-lock-"));
+    const lockPath = join(configDir, ".oauth_refresh.lock");
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+
+    const threadId = "thread-idle-release-renewal";
+    const providerThreadId = "provider-thread-idle-release-renewal";
+    try {
+      sendResumeThread({
+        bridge,
+        idleQueryReleaseEnabled: true,
+        providerThreadId,
+        requestId: 1,
+        threadId,
+      });
+      await waitForFakeTimerBridgeResponse(bridge, 1);
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          providerThreadId,
+          input: [{ type: "text", text: "before renewal" }],
+          providerOptions: { idleQueryReleaseEnabled: true },
+        }),
+      );
+      await expect(readNextPromptText(getLatestQueryCall())).resolves.toBe(
+        "before renewal",
+      );
+      await waitForFakeTimerBridgeResponse(bridge, 2);
+      queries[0]?.emit(createSuccessfulResultMessage(providerThreadId));
+      await flushFakeTimerBridgeWork(bridge);
+
+      mkdirSync(lockPath);
+      await vi.advanceTimersByTimeAsync(CLAUDE_IDLE_QUERY_GRACE_MS + 2_000);
+      expect(queries[0]?.close).not.toHaveBeenCalled();
+
+      rmSync(lockPath, { recursive: true });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(queries[0]?.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+      }
+      rmSync(configDir, { recursive: true, force: true });
+      bridge.sendRequest(3, "thread/stop", {
+        threadId,
+        providerThreadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      await bridge.flushWork();
+      queries.forEach((query) => query.finish());
+      await bridge.waitForResponse(3);
       bridge.restore();
     }
   });
