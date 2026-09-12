@@ -14,6 +14,8 @@ import {
   seedThread,
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
+import { isForkUnreadStoredEvent } from "../../src/internal/fork-unread-events.js";
+import { isActivePruneTriggerThreadEventType } from "../../src/services/system/event-pruning.js";
 
 describe("fork ingest drop for event types nothing reads", () => {
   it("drops codex hook telemetry, keeps every other unhandled provider event, and still acks the batch", async () => {
@@ -141,5 +143,43 @@ describe("fork ingest drop for event types nothing reads", () => {
       expect(storedTypes).toContain("turn/started");
       expect(storedTypes).not.toContain("turn/diff/updated");
     });
+  });
+});
+
+describe("no dropped event type is listed as an active prune trigger", () => {
+  const dropped: HostDaemonEventEnvelope["event"][] = [
+    {
+      type: "turn/diff/updated",
+      threadId: "thr_x",
+      providerThreadId: "provider-thread",
+      diff: "x",
+      scope: turnScope("turn-1"),
+    },
+    {
+      type: "provider/unhandled",
+      threadId: "thr_x",
+      providerThreadId: "provider-thread",
+      providerId: "codex",
+      rawType: "hook/started",
+      rawEvent: { jsonrpc: "2.0", method: "hook/started", params: {} },
+      scope: threadScope(),
+    },
+  ];
+
+  it("keeps the trigger set free of types the ingest filter throws away", () => {
+    for (const event of dropped) {
+      expect(isForkUnreadStoredEvent(event)).toBe(true);
+      expect(isActivePruneTriggerThreadEventType(event.type)).toBe(false);
+    }
+  });
+
+  it("still triggers on the three types that do reach the store", () => {
+    for (const type of [
+      "thread/contextWindowUsage/updated",
+      "thread/tokenUsage/updated",
+      "item/backgroundTask/progress",
+    ] as const) {
+      expect(isActivePruneTriggerThreadEventType(type)).toBe(true);
+    }
   });
 });
