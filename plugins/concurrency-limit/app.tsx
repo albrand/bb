@@ -6,6 +6,7 @@ import {
   type StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk/app";
 import { Input } from "@bb/shared-ui/input";
+import { ResourceDetailPanel } from "@bb/shared-ui/resource-detail";
 import { MAX_LIMIT_VALUE } from "./limits.js";
 import type { concurrencyLimitRpcContract } from "./server.js";
 
@@ -161,11 +162,14 @@ function ConcurrencyLimitSettings() {
   const validationMessage = `Use a whole number from 0 to ${MAX_LIMIT_VALUE}, or leave blank.`;
 
   return (
-    <div className="w-full space-y-5">
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium text-foreground">Overall limit</h3>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+    <ResourceDetailPanel
+      surface="recessed"
+      className="w-full space-y-4 px-3 py-3"
+    >
+      <div className="flex items-start justify-between gap-5">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-foreground">Overall limit</p>
+          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
             Leave blank for no overall limit. Use 0 to pause new work.
           </p>
         </div>
@@ -190,28 +194,28 @@ function ConcurrencyLimitSettings() {
       </div>
 
       <div className="border-t border-border/60 pt-4">
-        <h3 className="text-sm font-medium text-foreground">Host limits</h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        <p className="text-sm text-foreground">Host limits</p>
+        <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
           Auto allows one thread per available processor.
         </p>
 
-        <div className="ml-2 mt-2 border-l border-border/60 pl-2">
+        <div className="mt-3 overflow-hidden rounded-md border border-border/60 bg-surface-raised">
           {view.hosts.length === 0 ? (
-            <p className="px-2 py-2 text-sm text-muted-foreground">
+            <p className="px-3 py-3 text-sm text-muted-foreground">
               No hosts available.
             </p>
           ) : (
-            <div className="space-y-1">
+            <div className="divide-y divide-border/60">
               {view.hosts.map((host) => (
                 <div
                   key={host.id}
-                  className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/50"
+                  className="flex min-h-12 items-center gap-3 px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground">
+                    <div className="truncate text-sm text-foreground">
                       {host.name}
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-xs text-subtle-foreground/75">
                       {host.status === "disconnected"
                         ? host.availableParallelism === null
                           ? "Offline"
@@ -248,22 +252,24 @@ function ConcurrencyLimitSettings() {
         </div>
       </div>
 
-      <div className="flex min-h-5 justify-end" aria-live="polite">
-        {invalidField !== null ? (
-          <span className="text-xs text-destructive" role="alert">
-            {validationMessage}
-          </span>
-        ) : error !== null ? (
-          <span className="text-xs text-destructive" role="alert">
-            {error}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground" role="status">
-            {saveState === "saving" ? "Saving…" : "Saved"}
-          </span>
-        )}
-      </div>
-    </div>
+      {invalidField !== null || error !== null || saveState === "saving" ? (
+        <div className="flex justify-end" aria-live="polite">
+          {invalidField !== null ? (
+            <span className="text-xs text-destructive" role="alert">
+              {validationMessage}
+            </span>
+          ) : error !== null ? (
+            <span className="text-xs text-destructive" role="alert">
+              {error}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground" role="status">
+              Saving…
+            </span>
+          )}
+        </div>
+      ) : null}
+    </ResourceDetailPanel>
   );
 }
 
