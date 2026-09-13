@@ -20,6 +20,13 @@ const USAGE_RESPONSE: ProviderUsageResponse = {
   "acp-cursor": { status: "unauthenticated" },
 };
 
+const ALWAYS_VISIBLE_USAGE_RESPONSE: ProviderUsageResponse = {
+  codex: USAGE_RESPONSE.codex,
+  "claude-code": USAGE_RESPONSE["claude-code"],
+};
+
+const ALWAYS_VISIBLE_PROVIDER_IDS = ["codex", "claude-code"];
+
 function providerUsage(providerId: string): ProviderUsage | null {
   return USAGE_RESPONSE[providerId] ?? null;
 }
@@ -28,6 +35,7 @@ function handleUsageRequest(
   request: Parameters<
     Parameters<typeof registerHostRpcResponder>[1]["handle"]
   >[0],
+  installedOnlyProvidersInstalled = false,
 ) {
   if (request.command.type === "provider.health") {
     return {
@@ -35,7 +43,9 @@ function handleUsageRequest(
       result: {
         supported: true as const,
         health: {
-          status: "not_installed" as const,
+          status: installedOnlyProvidersInstalled
+            ? ("ready" as const)
+            : ("not_installed" as const),
           statusMessage: null,
           accountEmail: null,
           planLabel: null,
@@ -103,7 +113,7 @@ describe("GET /api/v1/system/usage-limits", () => {
       const response = await harness.app.request("/api/v1/system/usage-limits");
 
       expect(response.status).toBe(200);
-      expect(await readJson(response)).toEqual(USAGE_RESPONSE);
+      expect(await readJson(response)).toEqual(ALWAYS_VISIBLE_USAGE_RESPONSE);
       expect(
         responder.requests.some(
           (request) =>
@@ -112,10 +122,12 @@ describe("GET /api/v1/system/usage-limits", () => {
         ),
       ).toBe(false);
       expect(
-        responder.requests.some(
-          (request) => request.command.type === "provider.health",
+        responder.requests.flatMap((request) =>
+          request.command.type === "provider.health"
+            ? [request.command.providerId]
+            : [],
         ),
-      ).toBe(false);
+      ).toEqual(["acp-cursor"]);
     });
   });
 
@@ -143,10 +155,12 @@ describe("GET /api/v1/system/usage-limits", () => {
         ),
       ).toEqual(["codex"]);
       expect(
-        responder.requests.some(
-          (request) => request.command.type === "provider.health",
+        responder.requests.flatMap((request) =>
+          request.command.type === "provider.health"
+            ? [request.command.providerId]
+            : [],
         ),
-      ).toBe(false);
+      ).toEqual(["acp-cursor"]);
     });
   });
 
@@ -163,6 +177,30 @@ describe("GET /api/v1/system/usage-limits", () => {
       const response = await harness.app.request("/api/v1/system/usage-limits");
 
       expect(response.status).toBe(200);
+      expect(await readJson(response)).toEqual(ALWAYS_VISIBLE_USAGE_RESPONSE);
+      expect(
+        responder.requests.flatMap((request) =>
+          request.command.type === "provider.usage"
+            ? [request.command.providerId]
+            : [],
+        ),
+      ).toEqual(ALWAYS_VISIBLE_PROVIDER_IDS);
+    });
+  });
+
+  it("reports usage for an installed-only provider once its CLI is installed", async () => {
+    await withTestHarness(async (harness) => {
+      const primary = seedHostSession(harness.deps, { id: "host-primary" });
+      seedPrimaryHost(harness.deps, primary.host.id);
+      const responder = registerHostRpcResponder(harness, {
+        hostId: primary.host.id,
+        sessionId: primary.session.id,
+        handle: (request) => handleUsageRequest(request, true),
+      });
+
+      const response = await harness.app.request("/api/v1/system/usage-limits");
+
+      expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual(USAGE_RESPONSE);
       expect(
         responder.requests.flatMap((request) =>
@@ -170,7 +208,7 @@ describe("GET /api/v1/system/usage-limits", () => {
             ? [request.command.providerId]
             : [],
         ),
-      ).toEqual(["codex", "claude-code", "acp-cursor"]);
+      ).toEqual([...ALWAYS_VISIBLE_PROVIDER_IDS, "acp-cursor"]);
     });
   });
 
@@ -193,14 +231,14 @@ describe("GET /api/v1/system/usage-limits", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(await readJson(response)).toEqual(USAGE_RESPONSE);
+      expect(await readJson(response)).toEqual(ALWAYS_VISIBLE_USAGE_RESPONSE);
       expect(
         responder.requests.flatMap((request) =>
           request.command.type === "provider.usage"
             ? [request.command.providerId]
             : [],
         ),
-      ).toEqual(["codex", "claude-code", "acp-cursor"]);
+      ).toEqual(ALWAYS_VISIBLE_PROVIDER_IDS);
     });
   });
 });
