@@ -3,6 +3,7 @@ import {
   appendDaemonEventsInTransaction,
   deriveStoredEventItemFields,
   getThread,
+  getEnvironment,
   listCompletedTurnsByThreadIds,
   listStoredDaemonReplayKeys,
   listThreadEnvironmentAssignmentsOnHost,
@@ -10,6 +11,7 @@ import {
   recordDaemonReplayKeys,
   events as storedEvents,
   upsertThreadExecutionReport,
+  recordWorkspaceFileChanges,
 } from "@bb/db";
 import type {
   AcceptedDaemonEvent,
@@ -66,6 +68,11 @@ import {
 import { getAuthenticatedDaemon } from "./auth.js";
 import { validateExtensionPayloads } from "./extension-payloads.js";
 import { validatePresentationIcons } from "./presentation-icons.js";
+import {
+  listSharedWorkspaceActiveThreadIds,
+} from "../services/threads/workspace-awareness.js";
+import { appendThreadEvent } from "../services/threads/thread-events.js";
+import { threadScope } from "@bb/domain";
 
 interface ToStoredEventArgs {
   envelope: HostDaemonEventEnvelope;
@@ -357,6 +364,40 @@ async function applyEventEffects(
   for (const entry of events) {
     try {
       const event = entry.event;
+      if (event.type === "item/completed" && event.item.type === "fileChange") {
+        const thread = getThread(deps.db, entry.threadId);
+        const environment = thread?.environmentId
+          ? getEnvironment(deps.db, thread.environmentId)
+          : null;
+        if (
+          thread &&
+          environment?.path !== null &&
+          environment?.workspaceProvisionType === "unmanaged"
+        ) {
+          const filePaths = event.item.changes.map((change) => change.path);
+          const candidateThreadIds = [
+            entry.threadId,
+            ...listSharedWorkspaceActiveThreadIds(deps.db, environment),
+          ];
+          const notices = recordWorkspaceFileChanges(deps.db, {
+            hostId: environment.hostId,
+            workspacePath: environment.path,
+            filePaths,
+            candidateThreadIds,
+          });
+          for (const notice of notices) {
+            appendThreadEvent(deps, {
+              threadId: notice.threadId,
+              environmentId: environment.id,
+              type: "system/manager/user_message",
+              scope: threadScope(),
+              data: {
+                text: `Workspace collision detected: ${notice.filePath} was also changed by bb thread ${notice.otherThreadId}.`,
+              },
+            });
+          }
+        }
+      }
       if (event.type === "turn/started") {
         const turnId = requireThreadEventScopeTurnId({
           type: event.type,
