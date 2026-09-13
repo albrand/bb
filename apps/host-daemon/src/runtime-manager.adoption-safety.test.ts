@@ -11,7 +11,10 @@ import {
 } from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
-import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import {
+  bridgeCapabilitiesSchema,
+  PROVIDER_BRIDGE_PROTOCOL_VERSION,
+} from "@bb/provider-bridge-protocol";
 import {
   BRIDGE_SOCKET_TRANSPORT_VERSION,
   createBridgeSocketServer,
@@ -162,6 +165,7 @@ async function plantEntryWithListener(
         environmentId: "env-1",
         bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
         transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+        capabilities: bridgeCapabilitiesSchema.parse({}),
         startedAt: new Date().toISOString(),
         workspace: {
           workspacePath,
@@ -350,6 +354,31 @@ describe("bridge worker adoption safety", () => {
         retired: [
           expect.objectContaining({ reason: "incompatible-registry-format" }),
         ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
+  it("retires a format 1 worker, whose entry carries no capabilities, over its socket", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("format-1", (entry) => {
+        const { capabilities: _absent, ...formatOne } = entry;
+        return { ...formatOne, formatVersion: 1 };
+      });
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(manager.listAdoptedBridgeThreads()).toEqual([]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [expect.objectContaining({ reason: "unparseable-entry" })],
       }),
       "Reconciled provider bridge workers left by a previous host daemon",
     );

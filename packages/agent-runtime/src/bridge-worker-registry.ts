@@ -12,6 +12,7 @@ import {
 import { connect } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { bridgeCapabilitiesSchema } from "@bb/provider-bridge-protocol";
 import { BRIDGE_SHUTDOWN_METHOD } from "@bb/provider-bridge-protocol/bridge-kit";
 import { workspaceProvisionTypeSchema } from "@bb/domain";
 import { z } from "zod";
@@ -45,6 +46,7 @@ const bridgeWorkerRegistryEntrySchema = z.object({
   environmentId: z.string().min(1),
   bridgeProtocolVersion: z.number().int(),
   transportVersion: z.number().int(),
+  capabilities: bridgeCapabilitiesSchema.nullable(),
   startedAt: z.string().min(1),
   workspace: bridgeWorkerWorkspaceSchema,
   threads: z.record(z.string().min(1), bridgeWorkerThreadSchema),
@@ -57,7 +59,7 @@ export type BridgeWorkerRegistryEntry = z.infer<
 const ENTRY_SUFFIX = ".json";
 const SOCKET_DIRECTORY_DIGEST_CHARS = 16;
 
-export const BRIDGE_WORKER_REGISTRY_FORMAT_VERSION = 1 as const;
+export const BRIDGE_WORKER_REGISTRY_FORMAT_VERSION = 2 as const;
 
 export function fallbackSocketRoot(uid: number): string {
   return `/tmp/bb-${uid}`;
