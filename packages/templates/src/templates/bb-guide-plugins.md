@@ -147,6 +147,17 @@ block recovery. Its `maximumWait` setting defaults to `6 hours`; choose
 `24 hours` or `No limit` from the plugin detail page, or configure it with
 `bb plugin config provider-retry set maximumWait <value>`.
 
+The builtin Provider re-auth plugin is enabled on fresh installations. It takes
+the case Provider retry declines: a turn that failed because the provider is
+signed out. It opens that provider's own sign-in on the host, waits for the
+provider to report ready, resumes the turns that failed, and notifies once, in
+the app and on this device. One sign-in runs per provider and host, with a ten
+minute cooldown after a failure. The provider CLI receives its own code on
+localhost, so bb never sees a code and never reads that terminal's output, and
+the plugin makes no network call of its own. On a host with no desktop session
+bb notifies instead of opening a browser. Run one yourself with
+`bb provider-signin <provider> --host <host-id>`.
+
 The builtin Workflows plugin runs durable provider-independent JavaScript
 orchestration. It is disabled on fresh installations; enable `workflows` under
 Settings → Installed plugins or run `bb plugin enable workflows` before using:

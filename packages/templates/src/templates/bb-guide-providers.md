@@ -83,6 +83,17 @@ settings, or run:
   bb provider-retry cancel <thread-id> [--json]    Cancel an automatic retry
   bb provider-retry retry <thread-id> [--json]     Send a pending retry now
 
+An expired sign-in is not a retryable failure, so a different plugin handles it.
+When a turn fails and the provider reports that it is signed out, bb opens that
+provider's own sign-in on the host, waits for it to report ready, resumes the
+turns that failed, and notifies you once. The provider CLI receives its own
+code on localhost; bb never sees it and never reads that terminal's output. A
+host with no desktop session is reported instead, since bb cannot open a
+browser there.
+
+  bb provider-signin <claude-code|codex> --host <host-id> [--json]
+  bb provider-signin status [--json]                Sign-ins bb is waiting on
+
 A pending retry is a queued row on the thread, so it survives a server restart
 and appears above the composer with its reason and time. Credit and
 spend-control exhaustion does not reset on a clock, so nothing is scheduled for

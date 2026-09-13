@@ -1,0 +1,42 @@
+{
+  "name": "bb-plugin-provider-reauth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Renew an expired provider sign-in automatically and resume the turns it stopped.",
+  "engines": {
+    "bb": ">=0.0"
+  },
+  "bb": {
+    "name": "Provider re-auth",
+    "description": "Renew an expired provider sign-in automatically and resume the turns it stopped.",
+    "branding": {
+      "icon": "Lock"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "keywords": [
+    "bb-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "workspace:*",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^1.7.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.1"
+  }
+}

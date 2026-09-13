@@ -66,6 +66,10 @@
       "https://getbb.app/marketplace/v2/screenshots/plugin-api-docs/plugin-guide-reference.png"
     ]
   },
+  "provider-reauth": {
+    "category": "agents-and-providers",
+    "screenshots": []
+  },
   "provider-retry": {
     "category": "agents-and-providers",
     "screenshots": []
