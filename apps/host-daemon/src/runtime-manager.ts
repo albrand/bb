@@ -1408,6 +1408,9 @@ export class RuntimeManager {
         socketPath: item.socketPath,
       })),
     ];
+    if (retirements.length > 0) {
+      await this.deferWhileProviderSignInRenews("bridge-worker-retired");
+    }
     const retired = await Promise.all(
       retirements.map(async ({ id, pid, reason, socketPath }) => ({
         id,
