@@ -247,6 +247,7 @@ import {
   syncTerminalTabsInFixedPanelState,
 } from "@/components/secondary-panel/terminalPanelTabs";
 import { useMountedTerminalIds } from "@/components/thread/terminal/mounted-terminals";
+import { useOpenThreadInSplit } from "@/components/thread/useOpenThreadInSplit";
 import {
   buildOpenInEditorHandler,
   resolveEnvironmentOpenContext,
@@ -2446,12 +2447,17 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
         }}
       />
     ) : undefined;
+  const openThisThreadInSplit = useOpenThreadInSplit({
+    projectId: thread.projectId,
+    threadId: thread.id,
+  });
   const timelineHeader = (
     <ThreadDetailHeader
       actionsMenu={(includeResponsiveActions) => (
         <ThreadActionsMenu
           thread={thread}
           triggerClassName={HEADER_ICON_BUTTON_CLASS}
+          onOpenInSplit={openThisThreadInSplit}
           responsiveActions={
             includeResponsiveActions ? responsiveHeaderActions : undefined
           }

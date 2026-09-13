@@ -4,6 +4,8 @@ import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
 import { notifyPaneLimit } from "@/lib/split-layout/notifyPaneLimit";
 import { openThreadInSplit } from "@/lib/split-layout/openThreadInSplit";
+import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import { focusedPaneThread } from "@/lib/split-layout/focusedPaneThread";
 import { findFocusedSidebarThread } from "./sidebarThreadShortcuts";
 
 export function SidebarOpenBesideCommandHandler() {
@@ -13,14 +15,16 @@ export function SidebarOpenBesideCommandHandler() {
 
   useAppCommandHandler("thread.openBeside", () => {
     if (isCompact) return false;
-    const focused = findFocusedSidebarThread(document.activeElement);
-    if (focused === null) return false;
+    const target =
+      findFocusedSidebarThread(document.activeElement) ??
+      focusedPaneThread(store.get(splitLayoutAtom));
+    if (target === null) return false;
     notifyPaneLimit(
       openThreadInSplit({
         store,
         navigate,
-        projectId: focused.projectId,
-        threadId: focused.threadId,
+        projectId: target.projectId,
+        threadId: target.threadId,
         isCompact,
       }),
     );
