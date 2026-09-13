@@ -47,6 +47,7 @@ function buildNote(
   neighbours: readonly WorkspaceNeighbour[],
   recentFiles: ReturnType<typeof listRecentWorkspaceFiles>,
 ): PromptInput[] {
+  if (neighbours.length === 0) return [];
   const labels = neighbours.map(
     (neighbour) => `${neighbour.title?.trim() || "Untitled"} (${neighbour.id})`,
   );
