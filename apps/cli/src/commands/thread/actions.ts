@@ -712,6 +712,8 @@ export function describeQueueWait(row: {
       return "waiting for a pending interaction";
     case "plugin":
       return `${waitingOn.pluginId}: ${waitingOn.reason}`;
+    case "workspace-busy":
+      return `waiting for thread ${waitingOn.holderThreadId} to finish using the shared workspace`;
   }
 }
 

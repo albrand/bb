@@ -67,6 +67,10 @@ import {
 } from "./thread-runtime-display.js";
 import { toThreadQueuedMessage } from "./thread-queued-messages.js";
 import { isPreStartThreadStatus } from "./thread-status.js";
+import {
+  claimWorkspaceForTurn,
+  releaseWorkspaceForThread,
+} from "./workspace-write-serialization.js";
 import { queueInputForStartingTurn } from "./thread-turn-starting.js";
 import {
   ensureThreadIsWritable,
@@ -403,6 +407,17 @@ async function runDispatchAttempt(
     return waitOn({ kind: "interaction" }, null);
   }
 
+  const workspaceClaim = claimWorkspaceForTurn(deps, {
+    environment: dispatchEnvironment,
+    threadId: thread.id,
+  });
+  if (!workspaceClaim.acquired) {
+    return waitOn(
+      { kind: "workspace-busy", holderThreadId: workspaceClaim.holderThreadId },
+      null,
+    );
+  }
+
   // --- 2. the single plugin pass ------------------------------------------
 
   /**
@@ -463,6 +478,7 @@ async function runDispatchAttempt(
         : {}),
     });
     if (outcome.kind === "wait") {
+      releaseWorkspaceForThread(deps, thread);
       if (claimed !== null) {
         noteDispatchRequeued(thread.id);
       }

@@ -111,6 +111,15 @@ export {
   recordDetachedThreads,
 } from "./fork-detached-threads.js";
 export {
+  countUnmanagedWorkspaceThreads,
+  getWorkspaceWriteClaim,
+  heartbeatWorkspaceWriteClaims,
+  releaseAllWorkspaceWriteClaims,
+  releaseWorkspaceWriteClaims,
+  tryClaimWorkspaceWrite,
+} from "./fork-workspace-write-claims.js";
+export type { WorkspaceWriteClaim } from "./fork-workspace-write-claims.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,

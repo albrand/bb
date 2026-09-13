@@ -155,6 +155,10 @@ export function createAutomaticQueuedMessageGroupEligibility(
         case "host-offline":
         case "interaction":
           return false;
+        case "workspace-busy":
+          return (
+            args.thread.status === "idle" || args.thread.status === "pending"
+          );
       }
     });
 }
@@ -753,6 +757,8 @@ function describeCoreWait(waitingOn: QueuedMessageWaitingOn | null): string {
       return "the current turn is still starting";
     case "plugin":
       return `it is waiting on the "${waitingOn.pluginId}" plugin`;
+    case "workspace-busy":
+      return `thread ${waitingOn.holderThreadId} is using the shared workspace`;
     case "time":
     case "thread-busy":
     case undefined:

@@ -53,6 +53,7 @@ export const queuedMessageWaitingOnKindValues = [
   "host-offline",
   "interaction",
   "plugin",
+  "workspace-busy",
 ] as const;
 export const queuedMessageWaitingOnKindSchema = z.enum(
   queuedMessageWaitingOnKindValues,
@@ -88,6 +89,10 @@ export const queuedMessageWaitingOnSchema = z.discriminatedUnion("kind", [
     hostName: queuedMessageWaitHostNameSchema,
   }),
   z.object({ kind: z.literal("interaction") }),
+  z.object({
+    kind: z.literal("workspace-busy"),
+    holderThreadId: z.string().min(1),
+  }),
   z.object({
     kind: z.literal("plugin"),
     pluginId: pluginIdSchema,

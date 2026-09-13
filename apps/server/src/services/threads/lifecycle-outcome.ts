@@ -14,6 +14,7 @@ import {
 } from "../plugins/plugin-thread-events.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
 import { buildThreadStatusChangeMetadata } from "./thread-runtime-display.js";
+import { releaseWorkspaceForThread } from "./workspace-write-serialization.js";
 
 /**
  * `run.failed` is the only event that lands a thread in `error`, so an applied
@@ -70,6 +71,9 @@ export function applyLoggedThreadLifecycleEvent(
 ): ApplyThreadLifecycleEventOutcome {
   const outcome = applyThreadLifecycleEvent(deps.db, args);
   if (outcome.applied) {
+    if (outcome.thread.status === "idle" || outcome.thread.status === "error") {
+      releaseWorkspaceForThread(deps, outcome.thread);
+    }
     deps.hub.notifyThread(
       args.threadId,
       ["status-changed"],

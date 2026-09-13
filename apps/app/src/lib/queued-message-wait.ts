@@ -49,6 +49,8 @@ export function isQueuedMessageSendNowAllowed(args: {
     case "plugin":
     case "thread-busy":
       return true;
+    case "workspace-busy":
+      return true;
   }
 }
 
@@ -74,6 +76,8 @@ export function queuedMessageWaitIcon(args: {
   switch (args.waitingOn.kind) {
     case "thread-busy":
       return null;
+    case "workspace-busy":
+      return "Folder";
     case "turn-starting":
       return "TimeSchedule";
     case "time":
@@ -136,6 +140,8 @@ export function describeQueuedMessageWait(
   switch (args.waitingOn.kind) {
     case "thread-busy":
       return null;
+    case "workspace-busy":
+      return "Waiting for another thread to finish using the shared workspace";
     case "turn-starting":
       return "Waiting for turn to start";
     case "time":
