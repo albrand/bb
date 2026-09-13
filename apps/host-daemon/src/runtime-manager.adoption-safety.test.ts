@@ -359,6 +359,33 @@ describe("bridge worker adoption safety", () => {
     );
   });
 
+  it("retires a worker whose entry never recorded a handshake instead of adopting it with default capabilities", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("no-handshake", (entry) => ({
+        ...entry,
+        capabilities: null,
+      }));
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(manager.listAdoptedBridgeThreads()).toEqual([]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [
+          expect.objectContaining({ reason: "handshake-not-recorded" }),
+        ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
   it("retires a format 1 worker, whose entry carries no capabilities, over its socket", async () => {
     const { dir, logger, manager, shutdowns, worker } =
       await plantEntryWithListener("format-1", (entry) => {

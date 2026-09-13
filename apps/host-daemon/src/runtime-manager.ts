@@ -1145,9 +1145,11 @@ export class RuntimeManager {
         .map((entry) => ({
           entry,
           reason:
-            entry.formatVersion === BRIDGE_WORKER_REGISTRY_FORMAT_VERSION
-              ? "incompatible-protocol-or-framing"
-              : "incompatible-registry-format",
+            entry.formatVersion !== BRIDGE_WORKER_REGISTRY_FORMAT_VERSION
+              ? "incompatible-registry-format"
+              : entry.capabilities === null
+                ? "handshake-not-recorded"
+                : "incompatible-protocol-or-framing",
         }));
     const newestByProcess = new Map<string, BridgeWorkerRegistryEntry>();
     for (const entry of adoptable) {
@@ -1630,6 +1632,7 @@ function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {
     entry.formatVersion === BRIDGE_WORKER_REGISTRY_FORMAT_VERSION &&
     entry.bridgeProtocolVersion === PROVIDER_BRIDGE_PROTOCOL_VERSION &&
     entry.transportVersion === BRIDGE_SOCKET_TRANSPORT_VERSION &&
+    entry.capabilities !== null &&
     Object.keys(entry.threads).length > 0
   );
 }
