@@ -268,6 +268,66 @@ describe("provider re-auth coordinator", () => {
     expect(harness.retries).toEqual([]);
   });
 
+  it("does not sign in again the moment a renewed provider fails once more", async () => {
+    const harness = createHarness({
+      claudeStatuses: ["unauthenticated", "ready", "unauthenticated"],
+    });
+
+    await harness.coordinator.handleTurnFailed(failure());
+    await harness.coordinator.whenSettled();
+    await harness.coordinator.handleTurnFailed(failure());
+    await harness.coordinator.whenSettled();
+
+    expect(harness.createdCount()).toBe(1);
+    expect(harness.notifications()).toHaveLength(1);
+  });
+
+  it("does not let a flood of failures shorten the cooldown", async () => {
+    const harness = createHarness({
+      claudeStatuses: ["unauthenticated"],
+      terminalScript: (terminal) => {
+        terminal.status = "exited";
+        terminal.exitCode = 1;
+      },
+    });
+
+    await harness.coordinator.handleTurnFailed(failure());
+    await harness.coordinator.whenSettled();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await harness.coordinator.handleTurnFailed(
+        failure({ threadId: `thread-flood-${attempt}` }),
+      );
+      await harness.coordinator.whenSettled();
+    }
+
+    expect(harness.createdCount()).toBe(1);
+    expect(harness.notifications()).toHaveLength(1);
+  });
+
+  it("honours an explicit sign-in request during a cooldown", async () => {
+    const harness = createHarness({
+      claudeStatuses: ["unauthenticated"],
+      terminalScript: (terminal) => {
+        terminal.status = "exited";
+        terminal.exitCode = HEADLESS_EXIT_CODE;
+      },
+    });
+
+    await harness.coordinator.handleTurnFailed(failure());
+    await harness.coordinator.whenSettled();
+    expect(harness.createdCount()).toBe(1);
+
+    await expect(
+      harness.coordinator.start({
+        providerId: "claude-code",
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ started: true, reason: "started" });
+    await harness.coordinator.whenSettled();
+
+    expect(harness.createdCount()).toBe(2);
+  });
+
   it("leaves a healthy provider alone", async () => {
     const harness = createHarness({ claudeStatuses: ["ready"] });
 
