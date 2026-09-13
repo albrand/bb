@@ -46,6 +46,18 @@ import {
   SETTINGS_DROPDOWN_TRIGGER_CLASS,
 } from "@/components/settings/settings-dropdown";
 
+const LONG_TEXT_VALUE_LENGTH = 28;
+const VERY_LONG_TEXT_VALUE_LENGTH = 48;
+export function textSettingInputClass(value: string): string {
+  const width =
+    value.length > VERY_LONG_TEXT_VALUE_LENGTH
+      ? "sm:w-[32rem]"
+      : value.length > LONG_TEXT_VALUE_LENGTH
+        ? "sm:w-96"
+        : "sm:w-64";
+  return `h-7 w-full text-xs ${width}`;
+}
+
 const MULTILINE_MIN_ROWS = 6;
 const MULTILINE_MAX_ROWS = 24;
 const INVALID_NUMBER_DRAFT = Symbol();
@@ -274,7 +286,7 @@ function PluginSettingField({
       placeholder={isSecret ? (secretIsSet ? "[set]" : "[not set]") : undefined}
       onChange={(event) => onChange(event.target.value)}
       onBlur={onBlur}
-      className="h-7 w-full text-xs sm:w-64"
+      className={isSecret ? textSettingInputClass("") : textSettingInputClass(value)}
     />
   );
 }
@@ -581,7 +593,10 @@ function PluginSettingsContent({ plugin }: { plugin: PluginListItem }) {
               {plugin.name ?? plugin.id}
             </h1>
             {plugin.description ? (
-              <p className="truncate text-xs text-subtle-foreground">
+              <p
+                className="line-clamp-2 text-xs leading-snug text-subtle-foreground"
+                title={plugin.description}
+              >
                 {plugin.description}
               </p>
             ) : null}
