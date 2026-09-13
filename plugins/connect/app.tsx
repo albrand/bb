@@ -628,7 +628,7 @@ function AddMobileDeviceSectionContent({
   return (
     <div className="space-y-2.5 border-t border-border-seam pt-4">
       <div className="flex items-center">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-subtle-foreground">
+        <h3 className="text-xs font-medium text-foreground">
           Mobile app
         </h3>
         <span className="flex-1" />
@@ -788,7 +788,7 @@ function SharedPortsSection({
       )}
     >
       <div className="flex items-center">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-subtle-foreground">
+        <h3 className="text-xs font-medium text-foreground">
           Shared ports
         </h3>
         <span className="flex-1" />
@@ -1114,7 +1114,7 @@ function ConnectedContent({
 
       <SharedPortsSection shares={status.shares} dimmed={false} />
 
-      <div className="-mx-4 mt-4 flex items-center gap-3 border-t border-border-seam px-4 pt-3">
+      <div className="mt-4 flex items-center gap-3 border-t border-border-seam pt-3">
         <span className="min-w-0 text-xs text-muted-foreground">
           Disconnecting forgets this bb&apos;s credential.
         </span>
@@ -1205,7 +1205,7 @@ function ReconnectingContent({
 
       <SharedPortsSection shares={status.shares} dimmed />
 
-      <div className="-mx-4 mt-4 flex items-center gap-3 border-t border-border-seam px-4 pt-3">
+      <div className="mt-4 flex items-center gap-3 border-t border-border-seam pt-3">
         <span className="min-w-0 text-xs text-muted-foreground">
           Remote devices can&apos;t reach this bb right now. Local access is
           unaffected.
