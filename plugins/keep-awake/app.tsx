@@ -6,6 +6,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Checkbox } from "@bb/shared-ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@bb/shared-ui/radio-group";
+import { ResourceDetailPanel } from "@bb/shared-ui/resource-detail";
 import { Switch } from "@bb/shared-ui/switch";
 import type { keepAwakeRpcContract } from "./server.js";
 
@@ -141,13 +142,14 @@ function KeepAwakeSettings() {
   const hasHosts = view.hosts.length > 0;
 
   return (
-    <div className="w-full space-y-5">
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium text-foreground">
-            Prevent idle sleep
-          </h3>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+    <ResourceDetailPanel
+      surface="recessed"
+      className="w-full space-y-4 px-3 py-3"
+    >
+      <div className="flex items-start justify-between gap-5">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-foreground">Prevent idle sleep</p>
+          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
             Keep selected Macs awake while bb is running. Closing the lid or
             choosing Sleep still sleeps the Mac.
           </p>
@@ -165,8 +167,8 @@ function KeepAwakeSettings() {
       {view.enabled ? (
         <>
           <div className="border-t border-border/60 pt-4">
-            <h3 className="text-sm font-medium text-foreground">Hosts</h3>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="text-sm text-foreground">Hosts</p>
+            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
               Choose which Macs to keep awake.
             </p>
             <RadioGroup
@@ -222,7 +224,7 @@ function KeepAwakeSettings() {
           </div>
 
           {view.selection.mode === "selected" ? (
-            <div className="overflow-hidden rounded-md border border-border/60">
+            <div className="overflow-hidden rounded-md border border-border/60 bg-surface-raised">
               {hasHosts ? (
                 <div className="divide-y divide-border/60">
                   {view.hosts.map((host) => {
@@ -264,18 +266,20 @@ function KeepAwakeSettings() {
         </>
       ) : null}
 
-      <div className="flex min-h-5 justify-end" aria-live="polite">
-        {error !== null ? (
-          <span className="text-xs text-destructive" role="alert">
-            {error}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground" role="status">
-            {saveState === "saving" ? "Saving…" : "Saved"}
-          </span>
-        )}
-      </div>
-    </div>
+      {error !== null || saveState === "saving" ? (
+        <div className="flex justify-end" aria-live="polite">
+          {error !== null ? (
+            <span className="text-xs text-destructive" role="alert">
+              {error}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground" role="status">
+              Saving…
+            </span>
+          )}
+        </div>
+      ) : null}
+    </ResourceDetailPanel>
   );
 }
 
