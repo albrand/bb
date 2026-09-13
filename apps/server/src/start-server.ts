@@ -17,6 +17,11 @@ import { PluginHostArtifactRegistry } from "./services/plugins/plugin-host-artif
 import { createProviderNativeRootsCache } from "./services/providers/native-roots.js";
 import { createAiServiceRegistry } from "./services/ai/ai-service-registry.js";
 import { createAppVersionService } from "./services/system/app-version.js";
+import {
+  resetWorkspaceWriteClaims,
+  startWorkspaceWriteClaimHeartbeat,
+  stopWorkspaceWriteClaimHeartbeat,
+} from "./services/threads/workspace-write-serialization.js";
 import { createBbAppManagedConfigReloader } from "./services/system/bb-app-managed-config.js";
 import { startEventLoopStallMonitor } from "./services/system/event-loop-stall-monitor.js";
 import {
@@ -189,6 +194,8 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     },
     { staticDir },
   );
+  resetWorkspaceWriteClaims({ db });
+  startWorkspaceWriteClaimHeartbeat({ db });
   const eventLoopStallMonitor = startEventLoopStallMonitor({ logger });
 
   const sweepDeps = {
@@ -260,6 +267,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     }
     shutdownPromise = (async () => {
       eventLoopStallMonitor.stop();
+      stopWorkspaceWriteClaimHeartbeat({ db });
       clearInterval(sweepInterval);
       pluginCatalogService.stopPeriodicRefresh();
       await pluginService.stopPeriodicUpdateChecks();
