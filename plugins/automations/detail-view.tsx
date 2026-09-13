@@ -51,6 +51,7 @@ import {
   oneShotLifecycleAllowsToggle,
 } from "./lib/format-schedule";
 import { AutomationMetadataItem } from "./metadata";
+import { describeSkipReason } from "./src/skip-reason.js";
 
 interface AutomationRunsViewState {
   runs: readonly AutomationRunResponse[];
@@ -463,7 +464,9 @@ function RunRow({
         )}
       >
         {running ? `${visual.label}\u2026` : (duration ?? "")}
-        {run.skipReason ? `${duration ? " · " : ""}${run.skipReason}` : ""}
+        {run.skipReason
+          ? `${duration ? " · " : ""}${describeSkipReason(run.skipReason)}`
+          : ""}
       </span>
       {openable ? (
         <Icon
