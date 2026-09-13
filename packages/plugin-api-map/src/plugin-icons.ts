@@ -43,6 +43,7 @@ const FIRST_PARTY_PLUGINS: Record<string, FirstPartyPlugin> = {
   "Inline visualizations": { id: "inline-vis", icon: BrowserIcon },
   "Keep Awake": { id: "keep-awake", icon: Coffee01Icon },
   Memory: { id: "memory", icon: BrainIcon },
+  "Provider re-auth": { id: "provider-reauth", icon: LockIcon },
   "Provider retry": { id: "provider-retry", icon: ArrowReloadHorizontalIcon },
   "Provider usage": { id: "provider-usage", icon: ChartColumnIcon },
   "Push notifications": { id: "push-notifications", icon: BellDotIcon },

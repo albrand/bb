@@ -36,6 +36,7 @@ const EXPECTED_RUNNING_BUILTIN_PLUGINS = [
   "inline-vis",
   "keep-awake",
   "pdf-preview",
+  "provider-reauth",
   "provider-retry",
   "scheduled-send",
   "secrets",
