@@ -18,7 +18,10 @@ import {
   spawnPortableProcess,
   supportsProcessGroups,
 } from "@bb/process-utils";
-import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import {
+  type BridgeCapabilities,
+  PROVIDER_BRIDGE_PROTOCOL_VERSION,
+} from "@bb/provider-bridge-protocol";
 import {
   BRIDGE_ACK_METHOD,
   BRIDGE_RESUME_METHOD,
@@ -354,6 +357,7 @@ export class SocketBridgeWorker
               socketPath: this.socketPath,
               bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
               transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+              capabilities: null,
               startedAt: new Date().toISOString(),
               workspace: args.workspace,
               threads: {},
@@ -414,6 +418,13 @@ export class SocketBridgeWorker
     } else {
       entry.threads[threadId] = thread;
     }
+    writeBridgeWorkerEntry(this.workerDir, entry);
+  }
+
+  recordCapabilities(capabilities: BridgeCapabilities): void {
+    const entry = this.registryEntry;
+    if (entry === null || this.exited || this.released) return;
+    entry.capabilities = capabilities;
     writeBridgeWorkerEntry(this.workerDir, entry);
   }
 

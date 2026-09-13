@@ -782,9 +782,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         },
       );
       const [first] = threads;
-      if (first === undefined) continue;
+      if (first === undefined || entry.capabilities === null) continue;
       const proc = providerProcesses.adoptProviderProcess({
         bridgeLaunch: first.config.bridgeLaunch,
+        capabilities: entry.capabilities,
         entry,
         processKey: entry.processKey,
         providerId: entry.providerId,

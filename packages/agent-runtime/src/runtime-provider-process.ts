@@ -7,6 +7,7 @@ import {
   stopProcessGroupLeaderFirst,
   supportsProcessGroups,
 } from "@bb/process-utils";
+import type { BridgeCapabilities } from "@bb/provider-bridge-protocol";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import type { BridgeWorkerRegistryEntry } from "./bridge-worker-registry.js";
 import {
@@ -117,6 +118,7 @@ interface AttachProviderProcessArgs {
 
 interface AdoptProviderProcessArgs {
   bridgeLaunch: AgentRuntimeBridgeLaunch;
+  capabilities: BridgeCapabilities;
   entry: BridgeWorkerRegistryEntry;
   processKey: string;
   providerId: string;
@@ -230,6 +232,10 @@ export class RuntimeProviderProcessManager {
             if (this.shuttingDown) return;
             if (request.required) throw error;
           }
+        }
+
+        if (providerProcess.child instanceof SocketBridgeWorker) {
+          providerProcess.child.recordCapabilities(adapter.handshake);
         }
 
         if (this.args.skillRoots.length > 0) {
@@ -476,9 +482,11 @@ export class RuntimeProviderProcessManager {
   }
 
   adoptProviderProcess(args: AdoptProviderProcessArgs): RuntimeProviderProcess {
+    const adapter = this.getAdapter(args.providerId, args.bridgeLaunch);
+    adapter.adoptHandshake(args.capabilities);
     this.currentProcessKeyByProviderId.set(args.providerId, args.processKey);
     return this.attachProviderProcess({
-      adapter: this.getAdapter(args.providerId, args.bridgeLaunch),
+      adapter,
       child: new SocketBridgeWorker({
         kind: "adopt",
         entry: args.entry,

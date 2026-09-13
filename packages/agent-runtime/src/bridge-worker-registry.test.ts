@@ -35,6 +35,7 @@ function entry(
     environmentId: "env_1",
     bridgeProtocolVersion: 2,
     transportVersion: 1,
+    capabilities: null,
     startedAt: "2026-09-11T00:00:00.000Z",
     workspace: {
       workspacePath: "/tmp/workspace",

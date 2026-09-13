@@ -870,6 +870,7 @@ function adoptedWorker(args: {
       environmentId: "env-1",
       bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
       transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+      capabilities: null,
       startedAt: new Date().toISOString(),
       workspace: {
         workspacePath: args.workspacePath,

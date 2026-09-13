@@ -55,6 +55,8 @@ export interface BridgeProtocolAdapter {
   id: string;
   capabilities: BridgeEnforcedCapabilities;
   readonly approvalEnforcedBy: "runtime" | "provider";
+  readonly handshake: BridgeCapabilities;
+  adoptHandshake(capabilities: BridgeCapabilities): void;
   process: { command: string; args: string[]; env?: Record<string, string> };
   buildCommandPlan(command: AdapterCommand): ProviderCommandPlan;
   buildPostInitializeRequests(): readonly ProviderPostInitializeRequest[];
@@ -158,6 +160,21 @@ export function createBridgeProtocolAdapter(
   }
   const deltaAssembler = createDeltaAssembler({ providerId: options.id });
 
+  function acceptHandshake(capabilities: BridgeCapabilities): void {
+    const grammarVersion = negotiateGrammarVersion(
+      ASSEMBLER_GRAMMAR_VERSIONS,
+      capabilities.grammarVersions,
+    );
+    if (grammarVersion === null) {
+      const [bridgeMin, bridgeMax] = capabilities.grammarVersions;
+      const [runtimeMin, runtimeMax] = ASSEMBLER_GRAMMAR_VERSIONS;
+      throw new Error(
+        `Provider bridge "${options.id}" speaks thread/delta grammar versions ${bridgeMin}-${bridgeMax}, but this runtime assembles versions ${runtimeMin}-${runtimeMax}. Update the "${options.id}" provider plugin or bb so the two ranges overlap.`,
+      );
+    }
+    handshake = capabilities;
+  }
+
   function gate(
     capability: keyof BridgeCapabilities & string,
     plan: ProviderCommandPlan,
@@ -204,6 +221,10 @@ export function createBridgeProtocolAdapter(
     get approvalEnforcedBy() {
       return handshake.approvalEnforcedBy;
     },
+    get handshake() {
+      return handshake;
+    },
+    adoptHandshake: acceptHandshake,
     process: options.process,
 
     buildCommandPlan(command: AdapterCommand): ProviderCommandPlan {
@@ -448,19 +469,7 @@ export function createBridgeProtocolAdapter(
                 `Provider bridge "${options.id}" speaks Provider Bridge Protocol version ${parsed.data.protocolVersion}, but this runtime requires version ${PROVIDER_BRIDGE_PROTOCOL_VERSION}. Update the "${options.id}" provider plugin to a build published for protocol version ${PROVIDER_BRIDGE_PROTOCOL_VERSION}.`,
               );
             }
-            const grammarVersion = negotiateGrammarVersion(
-              ASSEMBLER_GRAMMAR_VERSIONS,
-              parsed.data.capabilities.grammarVersions,
-            );
-            if (grammarVersion === null) {
-              const [bridgeMin, bridgeMax] =
-                parsed.data.capabilities.grammarVersions;
-              const [runtimeMin, runtimeMax] = ASSEMBLER_GRAMMAR_VERSIONS;
-              throw new Error(
-                `Provider bridge "${options.id}" speaks thread/delta grammar versions ${bridgeMin}-${bridgeMax}, but this runtime assembles versions ${runtimeMin}-${runtimeMax}. Update the "${options.id}" provider plugin or bb so the two ranges overlap.`,
-              );
-            }
-            handshake = parsed.data.capabilities;
+            acceptHandshake(parsed.data.capabilities);
           },
         },
       ];
