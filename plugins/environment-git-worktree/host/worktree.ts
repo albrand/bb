@@ -1,6 +1,7 @@
 import { experimental_killProcessesWithCwdUnder } from "@get-bb/plugin-sdk/host";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { removeDirectoryTree } from "./remove-directory-tree.js";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   findWorktreeForBranch,
@@ -667,6 +668,6 @@ export async function removeWorktree(args: RemoveWorktreeArgs): Promise<void> {
   }
 
   throwIfProvisionAborted(args.signal);
-  await fs.rm(workspacePath, { recursive: true, force: true });
+  await removeDirectoryTree(workspacePath);
   await removeDirectoryIfEmpty(parentPath);
 }

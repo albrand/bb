@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import {
   experimental_defineHostEntry,
   experimental_killProcessesWithCwdUnder,
@@ -8,6 +8,7 @@ import {
   assertRemovableWorkspacePath,
   resolveWorkspacePath,
 } from "./host/paths.js";
+import { removeDirectoryTree } from "./host/remove-directory-tree.js";
 
 async function pathExists(target: string): Promise<boolean> {
   try {
@@ -46,7 +47,7 @@ export function createPersonalWorkspaceHostEntry() {
         if (existed) {
           await experimental_killProcessesWithCwdUnder({ directory: target });
         }
-        await rm(target, { recursive: true, force: true });
+        await removeDirectoryTree(target);
         return { removed: existed };
       },
     },
