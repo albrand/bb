@@ -499,6 +499,10 @@ export const threadResponseSchema = threadWithRuntimeSchema.extend({
   // `GET /threads/:id/queued-messages` supplies the reasons once a surface
   // actually renders them.
   queuedMessageCount: z.number().int().nonnegative(),
+  workspaceSharing: z
+    .object({ threadCount: z.number().int().positive() })
+    .nullable()
+    .default(null),
 });
 export type ThreadResponse = z.infer<typeof threadResponseSchema>;
 

@@ -72,6 +72,58 @@ function makeGitSection(
 afterEach(cleanup);
 
 describe("ThreadPromptContextBanner", () => {
+  it("shows shared workspace ownership only when multiple threads are attached", () => {
+    const shared = renderToStaticMarkup(
+      <ThreadPromptContextBanner
+        gitSection={{
+          ...makeGitSection(),
+          workspaceSharingThreadCount: 17,
+        }}
+        gitSectionPending={false}
+        archivedSection={null}
+        environmentGoneSection={null}
+        parentThreadSection={null}
+        childThreadsSection={null}
+        pullRequestSection={null}
+        expandedSection={null}
+        onToggleSection={noop}
+      />,
+    );
+    const privateMarkup = renderToStaticMarkup(
+      <ThreadPromptContextBanner
+        gitSection={{ ...makeGitSection(), workspaceSharingThreadCount: 1 }}
+        gitSectionPending={false}
+        archivedSection={null}
+        environmentGoneSection={null}
+        parentThreadSection={null}
+        childThreadsSection={null}
+        pullRequestSection={null}
+        expandedSection={null}
+        onToggleSection={noop}
+      />,
+    );
+    expect(shared).toContain("Shared · 17 threads");
+    expect(privateMarkup).not.toContain("Shared");
+  });
+
+  it("shows the holder when a turn waits on a shared workspace", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadPromptContextBanner
+        gitSection={null}
+        gitSectionPending={false}
+        archivedSection={null}
+        environmentGoneSection={null}
+        parentThreadSection={null}
+        childThreadsSection={null}
+        pullRequestSection={null}
+        queuedWorkspaceWait="Waiting for thread thr_holder to finish using the shared workspace"
+        expandedSection={null}
+        onToggleSection={noop}
+      />,
+    );
+    expect(markup).toContain("Waiting for thread thr_holder");
+  });
+
   it("renders the archived read-only status without an action", () => {
     const markup = renderToStaticMarkup(
       <ThreadPromptContextBanner

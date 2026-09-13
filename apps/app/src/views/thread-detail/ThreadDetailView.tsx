@@ -2506,6 +2506,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       workspaceChangedFilesSection={
         canUseGitUi ? workspaceChangedFilesSection : null
       }
+      workspaceSharingThreadCount={thread.workspaceSharing?.threadCount ?? null}
       workspaceStatusPending={
         canUseGitUi && (environmentQuery.isLoading || workStatusQuery.isLoading)
       }

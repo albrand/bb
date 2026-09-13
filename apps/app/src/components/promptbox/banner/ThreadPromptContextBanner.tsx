@@ -67,6 +67,7 @@ export interface ThreadPromptGitSection {
   changedFiles: WorkspaceChangedFilesSection;
   mergeBase: ContextBannerMergeBaseConfig | null;
   onPromptBannerFileClick: (selection: WorkspaceChangedFileSelection) => void;
+  workspaceSharingThreadCount?: number | null;
 }
 
 export interface ThreadPromptParentThreadSection {
@@ -140,6 +141,7 @@ interface ThreadPromptContextBannerProps {
   pullRequestSection: ThreadPromptPullRequestSection | null;
   expandedSection: ThreadPromptContextBannerExpandedSection | null;
   onToggleSection: (section: ThreadPromptContextBannerExpandedSection) => void;
+  queuedWorkspaceWait?: string | null;
 }
 
 const KIND_PREFIX: Record<WorkspaceChangedFilesSection["kind"], string> = {
@@ -784,6 +786,7 @@ export function ThreadPromptContextBanner({
   pullRequestSection,
   expandedSection,
   onToggleSection,
+  queuedWorkspaceWait,
 }: ThreadPromptContextBannerProps) {
   if (archivedSection || environmentGoneSection) {
     const environmentGone = environmentGoneSection !== null;
@@ -819,11 +822,22 @@ export function ThreadPromptContextBanner({
   const showChildThreads =
     childThreadsSection !== null && childThreadsSection.items.length > 0;
   const showPullRequest = pullRequestSection !== null;
-  if (!showGit && !showParentThread && !showChildThreads && !showPullRequest) {
+  const showWorkspaceWait =
+    queuedWorkspaceWait !== null && queuedWorkspaceWait !== undefined;
+  if (
+    !showGit &&
+    !showParentThread &&
+    !showChildThreads &&
+    !showPullRequest &&
+    !showWorkspaceWait
+  ) {
     return null;
   }
   const visibleSegmentCount =
-    Number(showParentThread) + Number(showPullRequest) + Number(showGit);
+    Number(showParentThread) +
+    Number(showPullRequest) +
+    Number(showGit) +
+    Number(showWorkspaceWait);
   const hasSingleVisibleSegment = visibleSegmentCount === 1;
   const isPullRequestAndGitOnly =
     showPullRequest && showGit && visibleSegmentCount === 2;
@@ -999,6 +1013,44 @@ export function ThreadPromptContextBanner({
               isExpanded={isGitExpanded}
               onToggle={() => onToggleSection("git")}
             />
+          ) : null}
+          {showGit &&
+          gitSection.workspaceSharingThreadCount &&
+          gitSection.workspaceSharingThreadCount > 1 ? (
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 text-xs",
+                PROMPT_STACK_INLAY_SEGMENT_CLASS,
+              )}
+              role="status"
+              aria-label={`Shared workspace with ${gitSection.workspaceSharingThreadCount} threads`}
+            >
+              <Icon
+                name="UserRound"
+                className="size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <span className="truncate">
+                Shared · {gitSection.workspaceSharingThreadCount} threads
+              </span>
+            </div>
+          ) : null}
+          {showWorkspaceWait ? (
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 text-xs",
+                PROMPT_STACK_INLAY_SEGMENT_CLASS,
+              )}
+              role="status"
+              aria-label={queuedWorkspaceWait ?? undefined}
+            >
+              <Icon
+                name="TimeSchedule"
+                className="size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <span className="truncate">{queuedWorkspaceWait}</span>
+            </div>
           ) : null}
           {pullRequestAction}
           {segmentAction}

@@ -106,13 +106,17 @@ function createHookedThread(
     projectId: string;
     origin?: "app" | "cli" | "sdk";
     model?: string;
+    workspacePath?: string;
   },
 ) {
   return createThreadFromRequest(harness.deps, {
     environment: {
       type: "host",
       hostId: args.hostId,
-      workspace: { type: "unmanaged", path: WORKSPACE_PATH },
+      workspace: {
+        type: "unmanaged",
+        path: args.workspacePath ?? WORKSPACE_PATH,
+      },
     },
     input: textInput("Do the thing"),
     origin: args.origin ?? "app",
@@ -422,8 +426,16 @@ describe("message.dispatch hook composition", () => {
       const { host, project } = seedDispatchFixture(harness, "host-hook-lock");
 
       await Promise.all([
-        createHookedThread(harness, { hostId: host.id, projectId: project.id }),
-        createHookedThread(harness, { hostId: host.id, projectId: project.id }),
+        createHookedThread(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          workspacePath: "/tmp/dispatch-hooks-project-a",
+        }),
+        createHookedThread(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          workspacePath: "/tmp/dispatch-hooks-project-b",
+        }),
       ]);
 
       expect(maxInFlight).toBe(1);
@@ -460,8 +472,16 @@ describe("message.dispatch hook admission visibility", () => {
       const { host, project } = seedDispatchFixture(harness, "host-admission");
 
       const created = await Promise.all([
-        createHookedThread(harness, { hostId: host.id, projectId: project.id }),
-        createHookedThread(harness, { hostId: host.id, projectId: project.id }),
+        createHookedThread(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          workspacePath: "/tmp/dispatch-hooks-project-a",
+        }),
+        createHookedThread(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          workspacePath: "/tmp/dispatch-hooks-project-b",
+        }),
       ]);
 
       expect(seen).toHaveLength(2);
