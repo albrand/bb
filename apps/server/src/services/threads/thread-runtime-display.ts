@@ -1,5 +1,6 @@
 import {
   getEnvironment,
+  countUnmanagedWorkspaceThreads,
   getLatestSessionForHost,
   getSessionById,
   listActiveBackgroundTaskCountsByThreadIds,
@@ -359,6 +360,25 @@ export function toThreadResponseFromThread(
       listQueuedThreadMessageCountsByThreadIds(deps.db, {
         threadIds: [args.thread.id],
       })[0]?.queuedMessageCount ?? 0,
+    workspaceSharing: (() => {
+      const environment =
+        args.thread.environmentId === null
+          ? null
+          : getEnvironment(deps.db, args.thread.environmentId);
+      if (
+        environment === null ||
+        environment.managed ||
+        environment.workspaceProvisionType !== "unmanaged" ||
+        environment.path === null
+      ) {
+        return null;
+      }
+      const threadCount = countUnmanagedWorkspaceThreads(deps.db, {
+        hostId: environment.hostId,
+        workspacePath: environment.path,
+      });
+      return threadCount > 1 ? { threadCount } : null;
+    })(),
   };
 }
 

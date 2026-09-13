@@ -456,6 +456,10 @@ export const threadResponseSchema = threadWithRuntimeSchema.extend({
   activeBackgroundAgentCount: z.number().int().nonnegative(),
   canSpawnChild: z.boolean(),
   queuedMessageCount: z.number().int().nonnegative(),
+  workspaceSharing: z
+    .object({ threadCount: z.number().int().positive() })
+    .nullable()
+    .default(null),
 });
 export type ThreadResponse = z.infer<typeof threadResponseSchema>;
 

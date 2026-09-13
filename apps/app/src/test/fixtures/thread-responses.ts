@@ -23,6 +23,7 @@ export function makeThreadResponse(
     activeBackgroundAgentCount: 0,
     canSpawnChild: true,
     queuedMessageCount: 0,
+    workspaceSharing: null,
     ...overrides,
     runtime: thread.runtime,
   };

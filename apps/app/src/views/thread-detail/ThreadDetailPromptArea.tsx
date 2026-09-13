@@ -174,6 +174,7 @@ interface ThreadDetailPromptAreaProps {
   projectId: string;
   resolveMentionLink: PromptMentionLinkResolver;
   workspaceChangedFilesSection: WorkspaceChangedFilesSection | null;
+  workspaceSharingThreadCount?: number | null;
   workspaceStatusPending: boolean;
   contextBannerMergeBase: ContextBannerMergeBaseConfig | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
@@ -369,6 +370,7 @@ export function ThreadDetailPromptArea({
   projectId,
   resolveMentionLink,
   workspaceChangedFilesSection,
+  workspaceSharingThreadCount,
   workspaceStatusPending,
   contextBannerMergeBase,
   pendingTodos,
@@ -1596,12 +1598,21 @@ export function ThreadDetailPromptArea({
                   onPromptBannerFileClick: canUseGitUi
                     ? onChangedFileClick
                     : ignorePromptBannerFileClick,
+                  workspaceSharingThreadCount,
                 }
               : null
           }
           gitSectionPending={workspaceStatusPending}
           expandedSection={expandedBannerSection}
           onToggleSection={handleToggleBannerSection}
+          queuedWorkspaceWait={(() => {
+            const waiting = queuedMessages.find(
+              (message) => message.waitingOn?.kind === "workspace-busy",
+            )?.waitingOn;
+            return waiting?.kind === "workspace-busy"
+              ? `Waiting for thread ${waiting.holderThreadId} to finish using the shared workspace`
+              : null;
+          })()}
         />
         {modelFallback ? (
           <ThreadModelFallbackCard
