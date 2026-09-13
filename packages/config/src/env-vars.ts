@@ -368,16 +368,6 @@ export const DEFAULT_BB_APP_URL = "";
 export const DEFAULT_BB_SERVER_BIND_HOST: ServerBindHost = BB_LOOPBACK_HOST;
 export const DEFAULT_BB_EXTERNAL_URL = "";
 export const DEFAULT_OPENAI_API_KEY = "";
-/**
- * Empty in this fork. Upstream ships a PostHog project key here, which makes
- * telemetry a default-on feature of any packaged build. The fork is a personal
- * build for one machine, so there is no product to instrument and no analytics
- * account that should receive its events. Both halves of the gate are closed:
- * an empty key already makes createTelemetryService return the noop, and
- * BB_TELEMETRY defaults to false, so restoring one alone changes nothing.
- * Setting both BB_POSTHOG_API_KEY and BB_TELEMETRY=true still works for anyone
- * who wants it.
- */
 export const DEFAULT_BB_POSTHOG_API_KEY = "";
 export const DEFAULT_BB_TELEMETRY = false;
 export const DEFAULT_BB_DEV_APP_HOST = "";
