@@ -76,6 +76,7 @@ import {
   type PromptWithGroups,
 } from "./deferred-first-turn-context.js";
 import type { TelemetryEvent } from "../system/telemetry.js";
+import { workspaceAwarenessInput } from "./workspace-awareness.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
 type TextPromptInput = Extract<PromptInput, { type: "text" }>;
@@ -121,7 +122,11 @@ interface TurnAcceptanceWatch {
 
 function watchTurnAcceptance(graceMs: number): TurnAcceptanceWatch {
   if (graceMs <= 0) {
-    return { refuse: () => {}, settle: () => {}, result: NO_REFUSAL.acceptance };
+    return {
+      refuse: () => {},
+      settle: () => {},
+      result: NO_REFUSAL.acceptance,
+    };
   }
   let resolve: (refusal: ThreadSendRefusal | null) => void = () => {};
   const result = new Promise<ThreadSendRefusal | null>((settle) => {
@@ -548,6 +553,19 @@ async function sendThreadMessageWithoutContextClear(
     { input, ...(inputGroups !== undefined ? { inputGroups } : {}) },
     deferredFirstTurnContext,
   ));
+  const awarenessInput = workspaceAwarenessInput(deps.db, {
+    environment,
+    thread,
+  });
+  if (awarenessInput.length > 0) {
+    input = [...awarenessInput, ...input];
+    if (inputGroups !== undefined && inputGroups.length > 0) {
+      inputGroups = [
+        [...awarenessInput, ...inputGroups[0]!],
+        ...inputGroups.slice(1),
+      ];
+    }
+  }
   const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
     tx,
   }) => {

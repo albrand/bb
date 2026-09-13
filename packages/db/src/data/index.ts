@@ -113,6 +113,12 @@ export {
 } from "./fork-workspace-write-claims.js";
 export type { WorkspaceWriteClaim } from "./fork-workspace-write-claims.js";
 export {
+  listRecentWorkspaceFiles,
+  recordWorkspaceFileChanges,
+  type RecentWorkspaceFile,
+  type WorkspaceCollisionNotice,
+} from "./fork-workspace-collisions.js";
+export {
   createProjectSource,
   countProjectSources,
   getProjectSourceForProject,

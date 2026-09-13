@@ -57,6 +57,7 @@ import {
   requireDeferredFirstTurnContextCurrent,
   resolveDeferredFirstTurnContext,
 } from "./deferred-first-turn-context.js";
+import { workspaceAwarenessInput } from "./workspace-awareness.js";
 import { appendClientTurnEventInTransaction } from "./thread-events.js";
 import {
   getActiveTurnId,
@@ -476,6 +477,17 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
     { input, inputGroups },
     deferredFirstTurnContext,
   ));
+  const awarenessInput = workspaceAwarenessInput(deps.db, {
+    environment,
+    thread,
+  });
+  if (awarenessInput.length > 0) {
+    input = [...awarenessInput, ...input];
+    inputGroups = [
+      [...awarenessInput, ...inputGroups[0]!],
+      ...inputGroups.slice(1),
+    ];
+  }
   const payload = sendQueuedMessagePayload(
     { ...queuedMessage, content: input },
     args.mode,
