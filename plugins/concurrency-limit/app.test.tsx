@@ -90,6 +90,8 @@ describe("Concurrency limit settings", () => {
         .getByRole("spinbutton", { name: "Laptop thread limit" })
         .getAttribute("placeholder"),
     ).toBe("Auto (8)");
+    expect(slot.queryByRole("status")).toBeNull();
+    expect(slot.queryByText("Saved")).toBeNull();
   });
 
   it("saves overall and per-host limits without accepting invalid numbers", async () => {
