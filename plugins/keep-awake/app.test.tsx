@@ -106,7 +106,7 @@ describe("Keep Awake settings", () => {
         },
       }),
     );
-    expect(slot.getByRole("status").textContent).toBe("Saved");
+    await waitFor(() => expect(slot.queryByRole("status")).toBeNull());
   });
 
   it("reverts an optimistic change when autosave fails", async () => {
@@ -174,9 +174,7 @@ describe("Keep Awake settings", () => {
       await second.promise;
     });
 
-    await waitFor(() =>
-      expect(slot.getByRole("status").textContent).toBe("Saved"),
-    );
+    await waitFor(() => expect(slot.queryByRole("status")).toBeNull());
     expect(
       (
         slot.getByRole("radio", {
