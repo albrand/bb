@@ -104,6 +104,11 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: false,
   },
   {
+    name: "provider-reauth",
+    pluginId: "provider-reauth",
+    defaultEnabled: true,
+  },
+  {
     name: "provider-retry",
     pluginId: "provider-retry",
     defaultEnabled: true,
