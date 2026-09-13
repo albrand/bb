@@ -123,6 +123,7 @@ import {
   shouldQueueFollowUpMessage,
   type FollowUpExecutionSelection,
 } from "@bb/client-core";
+import { isFinishedPullRequest } from "@/components/pull-request/finished-pull-request";
 
 const ignorePromptBannerFileClick = () => {};
 
@@ -543,7 +544,7 @@ export function ThreadDetailPromptArea({
     useState<ThreadPromptContextBannerExpandedSection | null>(null);
   const pullRequestSection =
     useMemo<ThreadPromptPullRequestSection | null>(() => {
-      if (!pullRequest) {
+      if (!pullRequest || isFinishedPullRequest(pullRequest)) {
         return null;
       }
       const actions =
