@@ -247,7 +247,6 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       providerRegistry.markRegistrationsSettled();
       pluginService.startPeriodicUpdateChecks();
     });
-  pluginCatalogService.startPeriodicRefresh();
 
   const sweepInterval = setInterval(() => {
     void runPeriodicSweeps(sweepDeps);

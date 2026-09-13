@@ -1,21 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { loadServerConfig } from "@bb/config/server";
+import { createTelemetryService } from "../../src/services/system/telemetry.js";
 
-// The loader needs these to resolve at all outside a real install; they say
-// nothing about telemetry.
 const BASE_ENV = {
   BB_DATA_DIR: "/tmp/fork-telemetry-off",
   BB_HOST_DAEMON_PORT: "49162",
   BB_SERVER_PORT: "49161",
   NODE_ENV: "development",
 } as const;
-import { createTelemetryService } from "../../src/services/system/telemetry.js";
 
-/**
- * This fork sends no usage events anywhere. A default key or a default-true
- * flag would reinstate them silently on the next upstream merge, so both are
- * asserted here rather than left to review.
- */
 describe("fork: telemetry is off by default", () => {
   it("resolves to no PostHog key and no opt-in, with nothing set", () => {
     const config = loadServerConfig({ env: { ...BASE_ENV } });
@@ -44,7 +37,6 @@ describe("fork: telemetry is off by default", () => {
         appSurface: "desktop",
         appVersion: "0.42.1",
         dataDir: "/tmp/fork-telemetry-off",
-        // Even with the flag forced on, an empty key must keep it silent.
         enabled: true,
         logger: {
           debug: () => {},
