@@ -131,6 +131,47 @@ describe("PluginSettingsForm", () => {
     );
   });
 
+  it("widens a text input to fit a path or URL instead of clipping it", async () => {
+    const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    const registry = "https://registry.modelcontextprotocol.io";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonOk({
+          ok: true,
+          schema: {
+            chrome: { type: "string", label: "Chrome executable" },
+            registry: { type: "string", label: "MCP registry" },
+            port: { type: "string", label: "Port" },
+            apiKey: { type: "string", label: "API key", secret: true },
+          },
+          values: {
+            chrome: chromePath,
+            registry,
+            port: "9333",
+            apiKey: { set: true },
+          },
+        }),
+      ),
+    );
+
+    const { wrapper } = createQueryClientTestHarness();
+    render(<PluginSettingsForm pluginId="demo" />, { wrapper });
+
+    const chrome = await screen.findByLabelText("Chrome executable");
+    expect(chrome.className).toContain("sm:w-[32rem]");
+    expect(screen.getByLabelText("MCP registry").className).toContain(
+      "sm:w-96",
+    );
+    expect(screen.getByLabelText("Port").className).toContain("sm:w-64");
+    expect(screen.getByLabelText("API key").className).toContain("sm:w-64");
+
+    fireEvent.change(screen.getByLabelText("Port"), {
+      target: { value: "http://127.0.0.1:9333/devtools/browser/abc" },
+    });
+    expect(screen.getByLabelText("Port").className).toContain("sm:w-96");
+  });
+
   it("autosaves a number input on blur and unsets it when cleared", async () => {
     const view = {
       ok: true,
