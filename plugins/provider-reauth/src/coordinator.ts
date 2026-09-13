@@ -15,6 +15,7 @@ import {
 export const READINESS_POLL_MS = 5_000;
 export const LOGIN_TIMEOUT_MS = 10 * 60_000;
 export const COOLDOWN_MS = 10 * 60_000;
+export const RENEWED_COOLDOWN_MS = 60_000;
 const CONSENT_WITHOUT_INPUT_MS = 5_000;
 const TERMINAL_COLS = 100;
 const TERMINAL_ROWS = 30;
@@ -194,6 +195,10 @@ export function createReauthCoordinator(
           body: turnsPhrase(resumed),
           canRetry: false,
         });
+        cooldowns.set(
+          loginKey(run.providerId, run.hostId),
+          now() + RENEWED_COOLDOWN_MS,
+        );
         return;
       }
       const terminal = await bb.sdk.terminals.get({ terminalId });
@@ -276,6 +281,7 @@ export function createReauthCoordinator(
     providerId: ReauthProviderId,
     hostId: string,
     waiting: WaitingTurn | null,
+    ignoreCooldown = false,
   ): ReauthStartResult {
     const key = loginKey(providerId, hostId);
     const existing = runs.get(key);
@@ -289,9 +295,10 @@ export function createReauthCoordinator(
       return { started: false, reason: "already-running" };
     }
     const cooldownUntil = cooldowns.get(key);
-    if (cooldownUntil !== undefined && now() < cooldownUntil) {
+    if (!ignoreCooldown && cooldownUntil !== undefined && now() < cooldownUntil) {
       return { started: false, reason: "cooling-down" };
     }
+    cooldowns.delete(key);
     const run: RunningLogin = {
       providerId,
       hostId,
@@ -339,7 +346,7 @@ export function createReauthCoordinator(
       if (status === "ready") {
         return { started: false, reason: "already-ready" };
       }
-      return launch(providerId, hostId, null);
+      return launch(providerId, hostId, null, true);
     },
     async whenSettled() {
       while (settling.size > 0) {
