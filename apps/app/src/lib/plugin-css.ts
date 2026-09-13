@@ -1,4 +1,8 @@
 import { useInsertionEffect } from "react";
+import {
+  collectHostUtilityKeys,
+  prunePluginUtilities,
+} from "./plugin-css-dedupe";
 
 const CSS_MARKER = "data-bb-plugin-css";
 const CSS_PRELOAD_MARKER = "data-bb-plugin-css-preload";
@@ -108,6 +112,7 @@ function activateStylesheet(
     record.stylesheet = link;
     record.pendingStylesheet = null;
     record.loadedUrl = url;
+    pruneHostUtilities(link);
   };
   link.onerror = () => {
     link.remove();
@@ -115,6 +120,31 @@ function activateStylesheet(
     if (record.url === url) warnLoadFailure(pluginId, url);
   };
   document.head.appendChild(link);
+}
+
+function hostStyleSheets(): CSSStyleSheet[] {
+  const sheets: CSSStyleSheet[] = [];
+  for (const sheet of document.styleSheets) {
+    const owner = sheet.ownerNode;
+    if (owner instanceof Element && owner.hasAttribute(CSS_MARKER)) continue;
+    try {
+      void sheet.cssRules;
+    } catch {
+      continue;
+    }
+    sheets.push(sheet);
+  }
+  return sheets;
+}
+
+function pruneHostUtilities(link: HTMLLinkElement): void {
+  const sheet = link.sheet;
+  if (sheet === null) return;
+  try {
+    prunePluginUtilities(sheet, collectHostUtilityKeys(hostStyleSheets()));
+  } catch {
+    return;
+  }
 }
 
 function deactivateStylesheet(record: PluginCssRecord): void {
