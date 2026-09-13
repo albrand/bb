@@ -166,17 +166,11 @@ describe("public provider installation routes", () => {
 
       expect(response.status).toBe(200);
       const body = (await readJson(response)) as ProviderCliStatusResponse;
-      expect(Object.keys(body)).toEqual([
-        "codex",
-        "claude-code",
-        "pi",
-        "acp-cursor",
-      ]);
+      expect(Object.keys(body)).toEqual(["codex", "claude-code", "pi"]);
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
         "Codex",
         "Claude Code",
         "Pi",
-        "Cursor",
       ]);
       expect(
         responder.requests
@@ -186,7 +180,7 @@ describe("public provider installation routes", () => {
               ? request.command.providerId
               : null,
           ),
-      ).toEqual([]);
+      ).toEqual(["acp-cursor"]);
       expect(
         responder.requests
           .filter(
@@ -198,7 +192,34 @@ describe("public provider installation routes", () => {
               ? request.command.providerId
               : null,
           ),
-      ).toEqual(["codex", "claude-code", "pi", "acp-cursor"]);
+      ).toEqual(["codex", "claude-code", "pi"]);
+    });
+  });
+
+  it("lists an installed-only provider once its CLI is installed", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "provider-installation-installed-only-host",
+      });
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => handleProviderInstallationRpc(request, true),
+      });
+
+      const response = await harness.app.request(
+        `${API}/hosts/${host.id}/provider-clis/status`,
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await readJson(response)) as ProviderCliStatusResponse;
+      expect(Object.keys(body)).toEqual([
+        "codex",
+        "claude-code",
+        "pi",
+        "acp-cursor",
+      ]);
+      expect(body["acp-cursor"]?.displayName).toBe("Cursor");
     });
   });
 
@@ -233,11 +254,10 @@ describe("public provider installation routes", () => {
 
       expect(response.status).toBe(200);
       const body = (await readJson(response)) as ProviderCliStatusResponse;
-      expect(Object.keys(body)).toEqual(["codex", "pi", "acp-cursor"]);
+      expect(Object.keys(body)).toEqual(["codex", "pi"]);
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
         "Codex",
         "Pi",
-        "Cursor",
       ]);
       expect(warn).toHaveBeenCalledWith(
         {
