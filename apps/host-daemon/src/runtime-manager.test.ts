@@ -2837,6 +2837,39 @@ describe("RuntimeManager provider sign-in renewal", () => {
     }
   });
 
+  it("does not retire a bridge worker while a sign-in renewal lock is held", async () => {
+    const { configDir, lockPath } = await renewalLock();
+    const dataDir = await makeTempDir("bb-sign-in-renewal-workers-");
+    const dir = path.join(dataDir, "bridge-workers");
+    await fs.mkdir(dir, { recursive: true });
+    const registered = path.join(dir, "cccccccccccc.json");
+    await fs.writeFile(
+      registered,
+      JSON.stringify({
+        id: "cccccccccccc",
+        socketPath: path.join(dir, "cccccccccccc.sock"),
+      }),
+    );
+    const manager = new RuntimeManager({
+      dataDir,
+      createRuntime: () => createFakeRuntime(),
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/env-retire-lock"),
+      shellEnv: { CLAUDE_CONFIG_DIR: configDir },
+    });
+
+    let reconciled = false;
+    const reconciling = manager.reconcileBridgeWorkers().then(() => {
+      reconciled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(reconciled).toBe(false);
+
+    await fs.rm(lockPath, { recursive: true });
+    await reconciling;
+    expect(reconciled).toBe(true);
+    expect(await fs.readdir(dir)).toEqual([]);
+  });
+
   it("ignores a renewal lock abandoned by a process that exited mid-renewal", async () => {
     const { configDir, lockPath } = await renewalLock();
     const abandonedAt = new Date(Date.now() - 120_000);
