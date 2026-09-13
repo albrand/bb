@@ -36,6 +36,7 @@ import {
   copyWorktreeIncludeFiles,
   type CopyWorktreeIncludeFilesResult,
 } from "./worktree-include.js";
+import { removeDirectoryTree } from "./remove-directory-tree.js";
 
 type ProgressCallback = (entry: ProvisioningTranscriptEntry) => void;
 type EmitStepArgs = {
@@ -984,7 +985,7 @@ export async function removeWorktree(args: RemoveWorktreeArgs): Promise<void> {
     );
   }
 
-  await fs.rm(workspacePath, { recursive: true, force: true });
+  await removeDirectoryTree(workspacePath);
   if (args.pruneEmptyParent) {
     await removeDirectoryIfEmpty(parentPath);
   }

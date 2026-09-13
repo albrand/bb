@@ -1,4 +1,4 @@
-import { mkdir, realpath, rm } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { ProvisioningTranscriptEntry, WorkspaceStatus } from "@bb/domain";
 import type {
@@ -42,6 +42,7 @@ import {
   type GitProcessOptions,
 } from "./git.js";
 import { resolveAdditionalWorkspaceWriteRoots } from "./workspace-write-roots.js";
+import { removeDirectoryTree } from "./remove-directory-tree.js";
 
 type ProvisionProgressCallback = (entry: ProvisioningTranscriptEntry) => void;
 
@@ -702,7 +703,7 @@ async function provisionPersonalWorkspace(
     throwIfProvisionAborted(opts.signal);
   } catch (error) {
     if (!targetExisted) {
-      await rm(targetPath, { recursive: true, force: true });
+      await removeDirectoryTree(targetPath);
     }
     throw error;
   }
@@ -729,7 +730,7 @@ async function provisionPersonalWorkspace(
     isGitRepo,
     isWorktree,
     shellPath: opts.shellPath,
-    destroyFn: () => rm(targetPath, { recursive: true, force: true }),
+    destroyFn: () => removeDirectoryTree(targetPath),
   });
 }
 
