@@ -1502,6 +1502,9 @@ importers:
       bb-plugin-provider-pi:
         specifier: workspace:*
         version: link:../../plugins/provider-pi
+      bb-plugin-provider-reauth:
+        specifier: workspace:*
+        version: link:../../plugins/provider-reauth
       bb-plugin-provider-retry:
         specifier: workspace:*
         version: link:../../plugins/provider-retry
