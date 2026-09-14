@@ -17,8 +17,12 @@ interface WorkspaceAwarenessCacheEntry {
 
 const cache = new Map<string, WorkspaceAwarenessCacheEntry>();
 
-function cacheKey(environment: Pick<Environment, "hostId" | "path">): string | null {
-  return environment.path === null ? null : `${environment.hostId}\0${environment.path}`;
+function cacheKey(
+  environment: Pick<Environment, "hostId" | "path">,
+): string | null {
+  return environment.path === null
+    ? null
+    : `${environment.hostId}\0${environment.path}`;
 }
 
 function readNeighbours(
@@ -26,7 +30,10 @@ function readNeighbours(
   environment: Pick<Environment, "hostId" | "path" | "workspaceProvisionType">,
   threadId: string,
 ): WorkspaceNeighbour[] {
-  if (environment.path === null || environment.workspaceProvisionType !== "unmanaged") {
+  if (
+    environment.path === null ||
+    environment.workspaceProvisionType !== "unmanaged"
+  ) {
     return [];
   }
   return db.$client
@@ -72,14 +79,21 @@ function buildNote(
 export function workspaceAwarenessInput(
   db: Pick<DbConnection, "$client">,
   args: {
-    environment: Pick<Environment, "hostId" | "path" | "workspaceProvisionType">;
+    environment: Pick<
+      Environment,
+      "hostId" | "path" | "workspaceProvisionType"
+    >;
     thread: Pick<Thread, "id">;
     now?: number;
   },
 ): PromptInput[] {
   const key = cacheKey(args.environment);
   const workspacePath = args.environment.path;
-  if (key === null || workspacePath === null || args.environment.workspaceProvisionType !== "unmanaged") {
+  if (
+    key === null ||
+    workspacePath === null ||
+    args.environment.workspaceProvisionType !== "unmanaged"
+  ) {
     return [];
   }
   const now = args.now ?? Date.now();
@@ -90,6 +104,7 @@ export function workspaceAwarenessInput(
     listRecentWorkspaceFiles(db, {
       hostId: args.environment.hostId,
       workspacePath,
+      now,
       limit: 16,
     }),
   );
