@@ -2377,6 +2377,10 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     },
     [handleOpenLiveFilePreview, thread?.environmentId],
   );
+  const openThisThreadInSplit = useOpenThreadInSplit({
+    projectId,
+    threadId,
+  });
 
   if (threadQueryState.status === "loading") {
     return <RouteLoadingSkeleton isBoundedPane={isBoundedPane} />;
@@ -2511,10 +2515,6 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
         }}
       />
     ) : undefined;
-  const openThisThreadInSplit = useOpenThreadInSplit({
-    projectId: thread.projectId,
-    threadId: thread.id,
-  });
   const timelineHeader = (
     <ThreadDetailHeader
       actionsMenu={(includeResponsiveActions) => (
