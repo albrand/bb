@@ -112,6 +112,21 @@ export function workspaceAwarenessInput(
   return note;
 }
 
+export function workspaceAwarenessInstructions(
+  db: Pick<DbConnection, "$client">,
+  args: {
+    environment: Pick<
+      Environment,
+      "hostId" | "path" | "workspaceProvisionType"
+    >;
+    thread: Pick<Thread, "id">;
+    now?: number;
+  },
+): string | null {
+  const [input] = workspaceAwarenessInput(db, args);
+  return input?.type === "text" ? input.text : null;
+}
+
 export function clearWorkspaceAwarenessCache(): void {
   cache.clear();
 }

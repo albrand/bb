@@ -38,6 +38,7 @@ import {
   readWorkspaceAgentInstructions,
 } from "./workspace-agent-instructions.js";
 import { resolveDeprecatedWorkspaceProvisionType } from "../environments/environment-response.js";
+import { workspaceAwarenessInstructions } from "./workspace-awareness.js";
 
 const UPDATE_ENVIRONMENT_DIRECTORY_INSTRUCTIONS =
   "If the user asks you to move this thread to another checkout, worktree, or directory, make sure the target directory exists, then call `update_environment_directory` with its absolute path. After it succeeds, stop work in the current turn; future turns will run in the updated environment.";
@@ -279,6 +280,13 @@ export async function resolveThreadRuntimeCommandConfig(
       `The following workspace instructions come from ${WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH}:`,
       workspaceAgentInstructions,
     );
+  }
+  const workspaceAwareness = workspaceAwarenessInstructions(deps.db, {
+    environment: args.environment,
+    thread: args.thread,
+  });
+  if (workspaceAwareness) {
+    instructionSections.push(workspaceAwareness);
   }
   const instructions = instructionSections.join("\n\n");
   const threadStoragePath = await requireLiveThreadStoragePath(deps, {
