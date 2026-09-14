@@ -533,7 +533,7 @@ it("cancels setup with contributions even when another attach is waiting", async
     await expect(fs.stat(`${sourcePath}/after-cancel`)).rejects.toThrow();
     expect(harness.provisions).toHaveLength(0);
   } finally {
-    await harness.manager.shutdownAll();
+    await harness.manager.shutdownAll("stop");
     await settled;
   }
 });

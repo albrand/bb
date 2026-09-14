@@ -43,20 +43,18 @@ function interruptionTypes(harness: TestAppHarness, threadId: string) {
 
 function openRestartedSession(
   harness: TestAppHarness,
-  host: { id: string; name: string; type: "persistent" },
+  host: { id: string; name: string },
   extra: Record<string, unknown>,
 ) {
   return harness.app.request("/internal/session/open", {
     method: "POST",
     headers: internalAuthHeaders(harness, {
       hostId: host.id,
-      hostType: host.type,
     }),
     body: JSON.stringify({
       hostId: host.id,
       instanceId: "instance-restarted",
       hostName: host.name,
-      hostType: host.type,
       hasMachineCredential: false,
       platform: "darwin",
       dataDir: "/tmp/host-daemon-adopted-threads",

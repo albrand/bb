@@ -796,7 +796,6 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           threadId,
           providerId: entry.providerId,
           providerState: proc.identity,
-          expectsIdentityNotification: false,
         });
         if (thread.providerThreadId !== null) {
           recordProviderThreadIdentity(proc, threadId, thread.providerThreadId);

@@ -26,13 +26,11 @@ async function restartWithNullAdoption(
       method: "POST",
       headers: internalAuthHeaders(harness, {
         hostId: host.id,
-        hostType: host.type,
       }),
       body: JSON.stringify({
         hostId: host.id,
         instanceId: "instance-restarted",
         hostName: host.name,
-        hostType: host.type,
         hasMachineCredential: false,
         platform: "darwin",
         dataDir: "/tmp/host-daemon-null-adoption",

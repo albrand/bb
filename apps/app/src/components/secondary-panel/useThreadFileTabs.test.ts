@@ -1073,6 +1073,7 @@ describe("useThreadFileTabs file opener diversion", () => {
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-repeat",
+        retainedTerminalIds: new Set<string>(),
         syncThreadId: "opener-repeat",
         environmentId: "env_1",
         storageFiles: undefined,

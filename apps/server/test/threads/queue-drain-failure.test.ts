@@ -18,10 +18,7 @@ import {
   QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS,
   recordQueuedMessageDrainFailure,
 } from "../../src/services/threads/queue-drain-failure.js";
-import {
-  requestQueuedMessageDispatch,
-  runQueuedMessageDispatch,
-} from "../../src/services/threads/queued-message-dispatch.js";
+import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
 import { toThreadQueuedMessage } from "../../src/services/threads/thread-queued-messages.js";
 import { textInput } from "../helpers/prompt-input.js";
 import {

@@ -105,7 +105,7 @@ function isTerminalDispatchFailure(
     const environment = getEnvironment(deps.db, thread.environmentId);
     if (
       environment === null ||
-      environment.status === "destroying" ||
+      environment.teardownStatus !== null ||
       environment.status === "destroyed"
     ) {
       return true;

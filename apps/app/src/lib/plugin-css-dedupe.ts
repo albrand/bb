@@ -1,4 +1,5 @@
 export interface RuleLike {
+  readonly cssText?: string;
   readonly selectorText?: string;
   readonly conditionText?: string;
   readonly name?: string;

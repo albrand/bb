@@ -2489,7 +2489,6 @@ describe("RuntimeManager bridge workers", () => {
           value: pluginSecret,
           source: { plugin: "secret-plugin" },
           reason: "test",
-          secret: true,
         },
       ],
       environmentId: "env-1",

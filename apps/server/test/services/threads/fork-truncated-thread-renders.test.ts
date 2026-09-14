@@ -6,13 +6,14 @@ import {
   createProject,
   createThread,
   FILE_CHANGE_DIFF_TRUNCATION_MARKER,
+  getLatestThreadSequence,
   insertEvents,
   migrate,
   noopNotifier,
   upsertHost,
 } from "@bb/db";
 import type { DbConnection } from "@bb/db";
-import { buildThreadTimeline } from "../../../src/services/threads/timeline.js";
+import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
 
 const providerThreadId = "provider-root";
 
@@ -140,14 +141,14 @@ describe("a thread whose rows retention already truncated still renders", () => 
       },
     ]);
 
-    const timeline = buildThreadTimeline(db, thread, {
+    const timeline = buildThreadTimelineWithProfile(db, thread, {
       eventBudget: 1_000_000,
-      includeProviderUnhandledOperations: false,
+      includeDiagnosticOperations: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
-      maxSeq: 0,
+      maxSeq: getLatestThreadSequence(db, { threadId: thread.id }),
       page: { kind: "latest", segmentLimit: 20 },
-    });
+    }).response;
 
     const workRows = timeline.rows.filter((row) => row.kind === "work");
     expect(workRows.length).toBeGreaterThanOrEqual(3);
@@ -247,14 +248,14 @@ describe("a thread whose rows retention already truncated still renders", () => 
       },
     ]);
 
-    const timeline = buildThreadTimeline(db, thread, {
+    const timeline = buildThreadTimelineWithProfile(db, thread, {
       eventBudget: 1_000_000,
-      includeProviderUnhandledOperations: false,
+      includeDiagnosticOperations: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
-      maxSeq: 0,
+      maxSeq: getLatestThreadSequence(db, { threadId: thread.id }),
       page: { kind: "latest", segmentLimit: 20 },
-    });
+    }).response;
 
     const row = timeline.rows.find((candidate) =>
       candidate.id.includes("cmd-pair"),
