@@ -66,7 +66,11 @@ afterEach(() => {
   setPluginHookProvider(undefined);
 });
 
-function seedDispatchFixture(harness: TestAppHarness, hostId: string) {
+function seedDispatchFixture(
+  harness: TestAppHarness,
+  hostId: string,
+  options: { unmanaged?: boolean } = {},
+) {
   const { host } = seedHostSession(harness.deps, { id: hostId });
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
@@ -76,6 +80,12 @@ function seedDispatchFixture(harness: TestAppHarness, hostId: string) {
     hostId: host.id,
     projectId: project.id,
     path: WORKSPACE_PATH,
+    ...(options.unmanaged
+      ? {
+          environmentProviderId: "project-checkout",
+          environmentProviderPluginId: "environment-project-checkout",
+        }
+      : {}),
   });
   return { environment, host, project };
 }
@@ -493,6 +503,80 @@ describe("message.dispatch hook admission visibility", () => {
 });
 
 describe("dispatch hooks and the no-hook path", () => {
+  it("dispatches another thread immediately when an unmanaged workspace is shared", async () => {
+    await withTestHarness(async (harness) => {
+      installHooks(emptyRegistry());
+      const { environment, host, project } = seedDispatchFixture(
+        harness,
+        "host-shared-no-lock",
+        { unmanaged: true },
+      );
+      const first = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "idle",
+      });
+      const second = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "idle",
+      });
+      for (const thread of [first, second]) {
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: environment.id,
+          providerThreadId: `provider-${thread.id}`,
+          threadId: thread.id,
+        });
+      }
+
+      await acceptThreadSendRequest(harness.deps, {
+        payload: { input: textInput("first shared turn"), mode: "auto" },
+        thread: first,
+      });
+      await acceptThreadSendRequest(harness.deps, {
+        payload: { input: textInput("second shared turn"), mode: "auto" },
+        thread: second,
+      });
+
+      expect(listQueuedThreadMessages(harness.db, first.id)).toEqual([]);
+      expect(listQueuedThreadMessages(harness.db, second.id)).toEqual([]);
+      expect(
+        getWorkspaceWriteClaim(harness.db, {
+          hostId: host.id,
+          workspacePath: WORKSPACE_PATH,
+        }),
+      ).toMatchObject({ threadId: first.id });
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", first.id),
+      ).toHaveLength(1);
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", second.id),
+      ).toHaveLength(1);
+      const [secondCommand] = listQueuedThreadCommands(
+        harness,
+        "turn.submit",
+        second.id,
+      );
+      if (secondCommand?.type !== "turn.submit") {
+        throw new Error("expected a turn.submit command");
+      }
+      expect(secondCommand.input[0]).toMatchObject({
+        type: "text",
+        visibility: "agent-only",
+        text: expect.stringContaining(
+          "call update_environment_directory with its absolute path",
+        ),
+      });
+      expect(secondCommand.input[0]).toMatchObject({
+        text: expect.stringContaining(first.id),
+      });
+      expect(secondCommand.input[1]).toMatchObject({
+        type: "text",
+        text: "second shared turn",
+      });
+    });
+  });
+
   it("leaves creation unchanged when no plugin answers the hook", async () => {
     await withTestHarness(async (harness) => {
       installHooks(emptyRegistry());

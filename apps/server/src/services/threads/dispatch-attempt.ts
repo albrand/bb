@@ -79,6 +79,7 @@ import {
   claimWorkspaceForTurn,
   releaseWorkspaceForThread,
 } from "./workspace-write-serialization.js";
+import { SHARED_WORKSPACE_ISOLATION_INSTRUCTION } from "./workspace-awareness.js";
 import { queueInputForStartingTurn } from "./thread-turn-starting.js";
 import {
   ensureThreadIsWritable,
@@ -278,9 +279,9 @@ async function runDispatchAttempt(
     payload,
     args.executionDefaults ?? { threadId: thread.id },
   );
-  const resolvedPayload = resolveExecutionIntoPayload(payload, execution);
+  let resolvedPayload = resolveExecutionIntoPayload(payload, execution);
   const queuedMessage: QueuedDispatchMessage = {
-    input: payload.input,
+    input: resolvedPayload.input,
     execution,
     senderThreadId,
     payload: args.queuePayload,
@@ -399,10 +400,25 @@ async function runDispatchAttempt(
     threadId: thread.id,
   });
   if (!workspaceClaim.acquired) {
-    return waitOn(
-      { kind: "workspace-busy", holderThreadId: workspaceClaim.holderThreadId },
-      null,
-    );
+    const instruction: PromptInput = {
+      type: "text",
+      text: `${SHARED_WORKSPACE_ISOLATION_INSTRUCTION} The current shared-workspace owner is ${workspaceClaim.holderThreadId}.`,
+      mentions: [],
+      visibility: "agent-only",
+    };
+    const input = resolvedPayload.input.some(
+      (item) =>
+        item.type === "text" &&
+        item.visibility === "agent-only" &&
+        item.text.includes(SHARED_WORKSPACE_ISOLATION_INSTRUCTION),
+    )
+      ? resolvedPayload.input
+      : [instruction, ...resolvedPayload.input];
+    resolvedPayload = {
+      ...resolvedPayload,
+      input,
+    };
+    queuedMessage.input = resolvedPayload.input;
   }
 
   try {
@@ -422,7 +438,7 @@ async function runDispatchAttempt(
             ? null
             : intendedThreadHostId(deps, thread.id),
         environmentIntent: intendedThreadEnvironmentIntent(deps, thread),
-        input: payload.input,
+        input: resolvedPayload.input,
         requestedExecution: {
           providerId: thread.providerId,
           model: execution.model,

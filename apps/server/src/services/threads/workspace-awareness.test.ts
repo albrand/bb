@@ -103,6 +103,14 @@ describe("workspace awareness", () => {
           `src/shared.ts [${[currentThread.id, neighbourThread.id].sort().join(", ")}]`,
         ),
       });
+      expect(input).toMatchObject({
+        text: expect.stringContaining(
+          "call update_environment_directory with its absolute path",
+        ),
+      });
+      expect(input).toMatchObject({
+        text: expect.stringContaining("Do not write in this shared workspace"),
+      });
     } finally {
       db.$client.close();
       clearWorkspaceAwarenessCache();

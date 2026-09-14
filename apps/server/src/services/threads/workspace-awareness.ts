@@ -4,6 +4,9 @@ import { listRecentWorkspaceFiles, type DbConnection } from "@bb/db";
 const MAX_NEIGHBOURS = 16;
 const CACHE_TTL_MS = 500;
 
+export const SHARED_WORKSPACE_ISOLATION_INSTRUCTION =
+  "Before changing files, create or choose a dedicated worktree outside this shared path, call update_environment_directory with its absolute path, and end this turn. Do not write in this shared workspace.";
+
 interface WorkspaceNeighbour {
   id: string;
   title: string | null;
@@ -73,7 +76,8 @@ function buildNote(
           .join(", ")}`;
   const text =
     `Workspace awareness: this is an unmanaged shared workspace. ` +
-    `${neighbourText}. ${filesText}. Treat their changes as shared workspace state.`;
+    `${neighbourText}. ${filesText}. Treat their changes as shared workspace state. ` +
+    SHARED_WORKSPACE_ISOLATION_INSTRUCTION;
   return [{ type: "text", text, mentions: [], visibility: "agent-only" }];
 }
 
