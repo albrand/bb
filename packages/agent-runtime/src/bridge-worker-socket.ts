@@ -244,7 +244,9 @@ export function privateSocketDirectory(args: {
     try {
       mkdirSync(path, { mode: 0o700 });
     } catch (error) {
-      if (!(error instanceof Error && Reflect.get(error, "code") === "EEXIST")) {
+      if (
+        !(error instanceof Error && Reflect.get(error, "code") === "EEXIST")
+      ) {
         throw error;
       }
     }
@@ -358,6 +360,7 @@ export class SocketBridgeWorker
               bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
               transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
               capabilities: null,
+              capabilitiesSource: undefined,
               startedAt: new Date().toISOString(),
               workspace: args.workspace,
               threads: {},
@@ -425,6 +428,7 @@ export class SocketBridgeWorker
     const entry = this.registryEntry;
     if (entry === null || this.exited || this.released) return;
     entry.capabilities = capabilities;
+    entry.capabilitiesSource = "negotiated";
     writeBridgeWorkerEntry(this.workerDir, entry);
   }
 
@@ -549,7 +553,10 @@ export class SocketBridgeWorker
       this.lineHandler?.(frame, null);
       return;
     }
-    if (decoded.wseq <= this.lastReceivedWseq && !this.restoredKeeps.has(decoded.wseq)) {
+    if (
+      decoded.wseq <= this.lastReceivedWseq &&
+      !this.restoredKeeps.has(decoded.wseq)
+    ) {
       return;
     }
     this.restoredKeeps.delete(decoded.wseq);

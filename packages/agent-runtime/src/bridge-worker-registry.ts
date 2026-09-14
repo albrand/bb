@@ -46,7 +46,8 @@ const bridgeWorkerRegistryEntrySchema = z.object({
   environmentId: z.string().min(1),
   bridgeProtocolVersion: z.number().int(),
   transportVersion: z.number().int(),
-  capabilities: bridgeCapabilitiesSchema.nullable(),
+  capabilities: bridgeCapabilitiesSchema.nullable().default(null),
+  capabilitiesSource: z.enum(["negotiated", "inferred"]).optional(),
   startedAt: z.string().min(1),
   workspace: bridgeWorkerWorkspaceSchema,
   threads: z.record(z.string().min(1), bridgeWorkerThreadSchema),
@@ -260,9 +261,7 @@ export function isBridgeWorkerAlive(
 
 export function reapDeadBridgeWorkers(
   dir: string,
-  isAlive: (
-    entry: BridgeWorkerRegistryEntry,
-  ) => boolean = isBridgeWorkerAlive,
+  isAlive: (entry: BridgeWorkerRegistryEntry) => boolean = isBridgeWorkerAlive,
 ): {
   live: BridgeWorkerRegistryEntry[];
   reaped: BridgeWorkerRegistryEntry[];

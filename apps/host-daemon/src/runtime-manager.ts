@@ -6,6 +6,7 @@ import {
   readBridgeWorkerEntries,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
+  writeBridgeWorkerEntry,
   type BridgeWorkerRegistryEntry,
   type AgentRuntime,
   type AgentRuntimeOptions,
@@ -44,7 +45,12 @@ import {
   stageInjectedSkillSources,
   type InjectedSkillsLogger,
 } from "./injected-skills.js";
-import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "@bb/provider-bridge-protocol";
+import {
+  bridgeCapabilitiesSchema,
+  PROVIDER_BRIDGE_PROTOCOL_VERSION,
+  type BridgeCapabilities,
+} from "@bb/provider-bridge-protocol";
+import { ASSEMBLER_GRAMMAR_VERSIONS } from "@bb/provider-bridge-protocol/assembler";
 import { BRIDGE_SOCKET_TRANSPORT_VERSION } from "@bb/provider-bridge-protocol/bridge-kit";
 import {
   createProviderInstallationGate,
@@ -56,6 +62,7 @@ import { userExecutableProcessOptions } from "./user-executable-env.js";
 import { runSetupScript } from "./environment-lifecycle-script.js";
 import { runInSerialLane } from "./serial-lane.js";
 import { waitWhileProviderSignInRenews } from "./provider-sign-in-renewal.js";
+import { z } from "zod";
 
 type StopWatching = () => void | Promise<void>;
 
@@ -1138,9 +1145,12 @@ export class RuntimeManager {
     if (this.options.dataDir === undefined) return;
     const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
     const { live, reaped, retirable } = reapDeadBridgeWorkers(dir);
-    const adoptable = live.filter(isAdoptableBridgeWorker);
+    const normalizedLive = live.map((entry) =>
+      migrateLegacyBridgeWorkerEntry(dir, entry),
+    );
+    const adoptable = normalizedLive.filter(isAdoptableBridgeWorker);
     const unadopted: { entry: BridgeWorkerRegistryEntry; reason: string }[] =
-      live
+      normalizedLive
         .filter((entry) => !adoptable.includes(entry))
         .map((entry) => ({
           entry,
@@ -1625,6 +1635,80 @@ const BRIDGE_WORKER_RETIRE_TIMEOUT_MS = 2_000;
 
 function bridgeWorkerProcessSlot(entry: BridgeWorkerRegistryEntry): string {
   return `${entry.environmentId}\n${entry.processKey}`;
+}
+
+const legacyThreadConfigSchema = z.object({
+  bridgeLaunch: z.object({
+    capabilities: z
+      .object({
+        fork: z.enum(["none", "tip", "checkpoint"]),
+        supportsThreadArchive: z.boolean(),
+        supportsThreadRename: z.boolean(),
+      })
+      .passthrough(),
+  }),
+  sessionRestorable: z.boolean(),
+});
+
+const legacyProviderHandshakeDefaults: Record<
+  string,
+  Pick<
+    BridgeCapabilities,
+    "threadGoalClear" | "approvalEnforcedBy" | "steerMode"
+  >
+> = {
+  "claude-code": {
+    threadGoalClear: false,
+    approvalEnforcedBy: "provider",
+    steerMode: "inject",
+  },
+  codex: {
+    threadGoalClear: true,
+    approvalEnforcedBy: "runtime",
+    steerMode: "inject",
+  },
+  pi: {
+    threadGoalClear: false,
+    approvalEnforcedBy: "runtime",
+    steerMode: "inject",
+  },
+};
+
+function inferLegacyBridgeCapabilities(
+  entry: BridgeWorkerRegistryEntry,
+): BridgeCapabilities | null {
+  if (entry.formatVersion !== 1 || entry.capabilities !== null) return null;
+  const declaration = legacyProviderHandshakeDefaults[entry.providerId];
+  if (declaration === undefined) return null;
+  const firstThread = Object.values(entry.threads)[0];
+  if (firstThread === undefined) return null;
+  const parsed = legacyThreadConfigSchema.safeParse(firstThread.config);
+  if (!parsed.success) return null;
+  return bridgeCapabilitiesSchema.parse({
+    sessionRestore: parsed.data.sessionRestorable,
+    threadArchive: parsed.data.bridgeLaunch.capabilities.supportsThreadArchive,
+    threadRename: parsed.data.bridgeLaunch.capabilities.supportsThreadRename,
+    ...declaration,
+    fork: parsed.data.bridgeLaunch.capabilities.fork,
+    grammarVersions: ASSEMBLER_GRAMMAR_VERSIONS,
+    skills: { configure: true },
+  });
+}
+
+function migrateLegacyBridgeWorkerEntry(
+  dir: string,
+  entry: BridgeWorkerRegistryEntry,
+): BridgeWorkerRegistryEntry {
+  const capabilities = inferLegacyBridgeCapabilities(entry);
+  if (capabilities === null) return entry;
+  const migrated = {
+    ...entry,
+    formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+    capabilities,
+    capabilitiesSource: "inferred" as const,
+  };
+  writeBridgeWorkerEntry(dir, migrated);
+  return migrated;
 }
 
 function isAdoptableBridgeWorker(entry: BridgeWorkerRegistryEntry): boolean {

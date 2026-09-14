@@ -6,6 +6,7 @@ export {
   type BridgeWorkerWorkspace,
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
+  writeBridgeWorkerEntry,
   readProcessIdentity,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
