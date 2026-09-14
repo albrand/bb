@@ -107,6 +107,7 @@ export {
   countUnmanagedWorkspaceThreads,
   getWorkspaceWriteClaim,
   heartbeatWorkspaceWriteClaims,
+  listWorkspaceWriteClaimThreadIds,
   releaseAllWorkspaceWriteClaims,
   releaseWorkspaceWriteClaims,
   tryClaimWorkspaceWrite,

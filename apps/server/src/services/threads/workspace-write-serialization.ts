@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   getEnvironment,
   heartbeatWorkspaceWriteClaims,
+  listWorkspaceWriteClaimThreadIds,
   releaseAllWorkspaceWriteClaims,
   releaseWorkspaceWriteClaims,
   tryClaimWorkspaceWrite,
@@ -11,6 +12,7 @@ import type { Environment, Thread } from "@bb/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { toEnvironmentResponse } from "../environments/environment-response.js";
 import { readThreadProvisionContext } from "./thread-startup-store.js";
+import { getActiveTurnId } from "./thread-events.js";
 import { z } from "zod";
 
 const ownerToken = randomUUID();
@@ -92,7 +94,10 @@ export function startWorkspaceWriteClaimHeartbeat(
 ): void {
   if (heartbeatTimer !== null) return;
   heartbeatTimer = setInterval(() => {
-    heartbeatWorkspaceWriteClaims(deps.db, { ownerToken });
+    const activeThreadIds = listWorkspaceWriteClaimThreadIds(deps.db, {
+      ownerToken,
+    }).filter((threadId) => getActiveTurnId(deps, threadId) !== null);
+    heartbeatWorkspaceWriteClaims(deps.db, { activeThreadIds, ownerToken });
   }, heartbeatInterval);
   heartbeatTimer.unref();
 }

@@ -144,14 +144,34 @@ export function releaseAllWorkspaceWriteClaims(db: DbConnection): void {
 
 export function heartbeatWorkspaceWriteClaims(
   db: DbConnection,
-  args: { ownerToken: string; now?: number },
+  args: {
+    ownerToken: string;
+    activeThreadIds: readonly string[];
+    now?: number;
+  },
 ): void {
   ensureTable(db);
+  if (args.activeThreadIds.length === 0) return;
+  const placeholders = args.activeThreadIds.map(() => "?").join(", ");
   db.$client
-    .prepare<
-      [number, string]
-    >(`UPDATE ${TABLE} SET heartbeat_at = ? WHERE owner_token = ?`)
-    .run(args.now ?? Date.now(), args.ownerToken);
+    .prepare<[number, string, ...string[]]>(
+      `UPDATE ${TABLE} SET heartbeat_at = ?
+       WHERE owner_token = ? AND thread_id IN (${placeholders})`,
+    )
+    .run(args.now ?? Date.now(), args.ownerToken, ...args.activeThreadIds);
+}
+
+export function listWorkspaceWriteClaimThreadIds(
+  db: DbConnection,
+  args: { ownerToken: string },
+): string[] {
+  ensureTable(db);
+  return db.$client
+    .prepare<[string], { threadId: string }>(
+      `SELECT thread_id AS threadId FROM ${TABLE} WHERE owner_token = ?`,
+    )
+    .all(args.ownerToken)
+    .map((row) => row.threadId);
 }
 
 export function getWorkspaceWriteClaim(

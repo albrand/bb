@@ -1,5 +1,6 @@
 import {
   getThread,
+  getWorkspaceWriteClaim,
   listEvents,
   listQueuedThreadMessages,
   listQueuedThreadMessagesForApi,
@@ -354,6 +355,12 @@ describe("message.dispatch hook composition", () => {
       expect(error.body.details).toEqual({ pluginId: "dlp" });
       expect(laterHandlerRan).toBe(false);
       expect(listQueuedThreadMessagesForApi(harness.db, {})).toEqual([]);
+      expect(
+        getWorkspaceWriteClaim(harness.db, {
+          hostId: host.id,
+          workspacePath: WORKSPACE_PATH,
+        }),
+      ).toBeNull();
     });
   });
 
@@ -571,6 +578,12 @@ describe("message.dispatch hooks on the queue drain", () => {
         reason: "at capacity",
       });
       expect(turnRequests(harness, thread.id)).toHaveLength(turnsBefore);
+      expect(
+        getWorkspaceWriteClaim(harness.db, {
+          hostId: "host-hook-drain",
+          workspacePath: WORKSPACE_PATH,
+        }),
+      ).toBeNull();
     });
   });
 
