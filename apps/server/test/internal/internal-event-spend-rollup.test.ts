@@ -110,7 +110,6 @@ describe("daemon event spend rollup", () => {
 
       expect((await post([turnStarted])).status).toBe(200);
 
-      // 100, then the same reading re-emitted, then a real 150.
       expect(
         (
           await post([
@@ -122,12 +121,9 @@ describe("daemon event spend rollup", () => {
       ).toBe(200);
       expect(totalTokens()).toBe(250);
 
-      // A repeat in a LATER batch. The guard only holds if the last total was
-      // persisted rather than kept in the batch's own memory.
       expect((await post([usage({ total: 250, last: 150 })])).status).toBe(200);
       expect(totalTokens()).toBe(250);
 
-      // The provider process restarts and its running total goes backwards.
       expect(
         (
           await post([
@@ -204,16 +200,6 @@ describe("daemon event spend rollup", () => {
         ).status,
       ).toBe(200);
 
-      // An adopted worker replays unacked lines after a daemon restart, so the
-      // server is re-sent events it already stored. Replay-key dedup drops them
-      // at the append; the rollup must not count what was never inserted.
-      //
-      // NOTE: this test does NOT bind the fold's own sequence guard. The dedup
-      // stops re-delivery upstream, so the rollup never sees the repeat at all.
-      // What binds that guard is "backfills to exactly what the live path
-      // recorded", which replays stored events past a cursor that has already
-      // passed them. Editing one of these believing it covers the other will
-      // leave the guard unprotected.
       expect(
         (
           await post([
@@ -239,9 +225,6 @@ describe("daemon event spend rollup", () => {
   });
 
   it("leaves the usage event in the thread's event log", async () => {
-    // The fleet plugin reads usage by polling the event log. If the rollup
-    // consumed the event the way `storeExecutionReports` consumes its own, the
-    // plugin's numbers would silently go to zero.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-observe",
@@ -305,11 +288,6 @@ describe("daemon event spend rollup", () => {
         .all();
       expect(stored).toHaveLength(1);
 
-      // The rollup needed the stored row's timestamp, so `AcceptedDaemonEvent`
-      // gained a `createdAt`. That type is server-internal and must stay that
-      // way: a stock upstream daemon parses this body against a strict schema,
-      // so an extra field would fail it and HOST_DAEMON_PROTOCOL_VERSION is
-      // deliberately still 180.
       const body = hostDaemonEventBatchResponseSchema.parse(
         await response.json(),
       );
@@ -324,9 +302,6 @@ describe("daemon event spend rollup", () => {
   });
 
   it("backfills to exactly what the live path recorded", async () => {
-    // This is also the test that binds the fold's sequence guard: the second
-    // backfill replays events the cursor has already passed. The replay-key
-    // test above does not, because dedup stops those events upstream.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-backfill",
@@ -406,7 +381,6 @@ describe("daemon event spend rollup", () => {
       });
       expect(backfilled).toEqual(live);
 
-      // Idempotent: replaying the same history changes nothing.
       const second = backfillSpend(harness.db);
       expect(second.contributionsApplied).toBe(0);
       expect(
@@ -416,10 +390,6 @@ describe("daemon event spend rollup", () => {
   });
 
   it("keeps a complete thread complete when it spends again", async () => {
-    // Every live append saves a cursor, and most have no opinion about whether
-    // the thread's early history survived. Writing "not complete" for "no
-    // opinion" reset the flag on the next usage event, so coverage converged on
-    // "every thread is partial" and said so in the CLI and to Hermes.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-keeps",
@@ -482,8 +452,6 @@ describe("daemon event spend rollup", () => {
           ])
         ).status,
       ).toBe(200);
-      // The thread has not reached the pruner's smallest window, so no usage
-      // event can have been taken from it and the backfill agrees.
       harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
       backfillSpend(harness.db);
       expect(historyComplete()).toBe(1);
@@ -494,12 +462,6 @@ describe("daemon event spend rollup", () => {
   });
 
   it("refuses to call a resumed thread complete when its history is gone", async () => {
-    // The case that broke the earlier rule. A long thread spent 900 tokens
-    // before the rollup existed, the pruner has since taken its usage events,
-    // and the user resumes it. The new usage event is then the EARLIEST
-    // SURVIVING one, which is not the same claim as being the first - and
-    // reading it as the first badged the thread complete while its total held
-    // 500 of the 1,400 it had spent. Certainty over a 36% shortfall.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-resume",
@@ -557,10 +519,6 @@ describe("daemon event spend rollup", () => {
 
       expect((await post(spend("turn-old", 900))).status).toBe(200);
 
-      // The world this thread actually lives in: the rollup was not running
-      // when those tokens were spent, so there is no cursor and nothing was
-      // counted, and the pruner has since taken the usage events. The thread is
-      // long, so it is far past the prune-safe window.
       harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
       harness.db.run(sql`DELETE FROM fork_thread_spend_daily`);
       harness.db.run(
@@ -590,20 +548,12 @@ describe("daemon event spend rollup", () => {
         threadId: thread.id,
       }).reduce((sum, row) => sum + row.totalTokens, 0);
 
-      // The 500 is right - it is what the rollup saw. Calling it complete was
-      // the defect, because 1,400 was spent.
       expect(rolledUp).toBe(500);
       expect(cursor?.historyComplete).toBe(0);
     });
   });
 
   it("refuses to call a rewound thread complete", async () => {
-    // The pruner is not the only thing that deletes usage events. Editing an
-    // earlier message deletes the range after it, and that can happen while the
-    // thread is still far short of the pruner's window - so the prune-safe
-    // proof would call it complete with tokens missing from its total. A wrong
-    // number wearing a certainty badge is the one outcome this work exists to
-    // prevent.
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-rewind",
@@ -655,8 +605,6 @@ describe("daemon event spend rollup", () => {
       });
       expect(response.status).toBe(200);
 
-      // Without the marker this thread is short enough for the prune-safe
-      // proof, so the backfill calls it complete.
       harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
       backfillSpend(harness.db);
       const completeness = () =>
@@ -666,8 +614,6 @@ describe("daemon event spend rollup", () => {
         )?.historyComplete;
       expect(completeness()).toBe(1);
 
-      // The rewind marker an edited message leaves behind. It is appended above
-      // the range it deletes, so it survives that deletion.
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -740,10 +686,6 @@ describe("daemon event spend rollup", () => {
       });
       expect(response.status).toBe(200);
 
-      // Push the thread past the pruner's smallest keep-recent window. Below it
-      // the pruner provably never ran; above it there is no way to tell from
-      // here whether a usage event was taken, so the thread is partial and its
-      // total is a floor.
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,

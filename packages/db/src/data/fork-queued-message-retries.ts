@@ -1,21 +1,5 @@
 import type { DbConnection } from "../connection.js";
 
-/**
- * Fork (albrand/bb): the retry budget a queued row has spent on failed dispatch
- * attempts, and when the next attempt is due.
- *
- * Deliberately neither a drizzle migration nor new columns on
- * `queued_thread_messages`. A migration would fork the snapshot chain, and the
- * row's existing `retry_*` columns already mean something else — they describe
- * a `retry` PAYLOAD (re-submitting a failed turn), which `toQueuedMessagePayload`
- * throws on if they are set without a `retry` payload kind. A table created here
- * is invisible to the migration history, an official build ignores it, and
- * dropping it loses nothing but an in-progress backoff.
- *
- * The state lives in the database rather than in a timer so a server restart
- * re-derives it: the row and its budget are one durable fact, and the sweep that
- * re-attempts them reads both from disk on every tick.
- */
 const QUEUED_MESSAGE_RETRIES_TABLE = "fork_queued_message_dispatch_retries";
 
 const retriesTableReady = new WeakSet<object>();
@@ -63,16 +47,6 @@ export interface RecordQueuedMessageDispatchRetryArgs {
   threadId: string;
 }
 
-/**
- * Books one failed attempt against a row's budget, returning false when the row
- * is not there to book it against.
- *
- * The insert is a SELECT gated on the same liveness the queue's own wait writes
- * use — the row exists, belongs to this thread, and no drain holds a claim on
- * it. Without that gate a row that dispatched (and was deleted) or that another
- * drain is dispatching right now would accumulate attempts it never made, and
- * the budget would run out on a message that was going fine.
- */
 export function recordQueuedMessageDispatchRetry(
   db: DbConnection,
   args: RecordQueuedMessageDispatchRetryArgs,
@@ -125,18 +99,6 @@ export function getQueuedMessageDispatchRetry(
   return row ?? null;
 }
 
-/**
- * Forgets a row's budget. Two callers, and both are cases where the row is
- * starting over rather than continuing: a host that went away (an absent
- * machine is an unbounded wait, not a spent attempt) and a wait whose
- * condition was actually answered.
- *
- * A re-queue is deliberately NOT one of them. It looks like it should be —
- * it is a fresh, successful statement of why the row is waiting, and it does
- * clear `failure_reason` — but the attempts behind it were still spent, and
- * refunding them is how a thread alternating between busy and broken books
- * attempt one forever without ever reaching an answer.
- */
 export function clearQueuedMessageDispatchRetry(
   db: DbConnection,
   queuedMessageId: string,
@@ -149,15 +111,6 @@ export function clearQueuedMessageDispatchRetry(
     .run(queuedMessageId);
 }
 
-/**
- * The ids on this thread whose next attempt has not come round yet, as the
- * drain's group eligibility consults them.
- *
- * Scoped to one thread and read once per drain rather than once per row: the
- * table is empty in the overwhelming case, and a backoff that only the due
- * sweep honoured would be no backoff at all — the idle drain re-claims a
- * `thread-busy` row every sweep tick without ever looking at a clock.
- */
 export function listDeferredQueuedMessageDispatchRetryIds(
   db: DbConnection,
   args: { now: number; threadId: string },
@@ -175,14 +128,6 @@ export function listDeferredQueuedMessageDispatchRetryIds(
   return new Set(rows.map((row) => row.queuedMessageId));
 }
 
-/**
- * Rows whose next attempt is due, oldest first.
- *
- * The queue join is what makes a deleted or claimed row invisible here, and the
- * thread predicates are the same ones the due-scheduled sweep applies: a
- * message into a thread the user archived or threw away, or onto an environment
- * that is never coming back, must not wake the sweep every cycle.
- */
 export function listDueQueuedMessageDispatchRetries(
   db: DbConnection,
   now: number,

@@ -559,8 +559,6 @@ const codexTokenUsageBreakdownSchema = z
     totalTokens: z.number(),
     inputTokens: z.number(),
     cachedInputTokens: z.number(),
-    // In the app-server's TokenUsageBreakdown; optional so an older codex that
-    // omits it still parses.
     cacheWriteInputTokens: z.number().optional(),
     outputTokens: z.number(),
     reasoningOutputTokens: z.number(),

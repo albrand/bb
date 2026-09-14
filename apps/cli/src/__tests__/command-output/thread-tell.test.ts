@@ -33,8 +33,6 @@ describe("bb thread tell command output", () => {
   });
 
   it("bb thread tell names the typed reason a message queued for", async () => {
-    // The server says WHY, so the CLI stops inferring it from the flags it
-    // sent — which is what let the old four-way delivery enum collapse.
     const post = vi.fn(async () => ({
       ok: true,
       delivery: "queued",

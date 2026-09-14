@@ -16,19 +16,6 @@ export interface BuildSpendAnalysisPayloadArgs {
   to: string;
 }
 
-/**
- * The complete set of fields an analysis request may carry.
- *
- * The guarantee is structural rather than a filter: every value below is read
- * from a column of `fork_thread_spend_daily`, and that table has no column that
- * can hold a prompt, a message, a title, a path, a repository name or a
- * credential. There is no richer object being narrowed here, so there is no
- * narrowing to get wrong, and a later change that widens what leaves the
- * machine has to add a column in a diff someone can see.
- *
- * Thread ids are opaque handles. `thr_4teuv9v346` identifies a row in the local
- * database and carries no content.
- */
 export const SPEND_ANALYSIS_PAYLOAD_FIELDS = [
   "day",
   "threadId",
@@ -71,13 +58,6 @@ function formatRow(row: SpendRollupRow): string {
   ].join("\t");
 }
 
-/**
- * Build the exact bytes an analysis request would send, and their digest.
- *
- * Returned rather than sent so `--dry-run` can print them: what leaves the
- * machine should be something the operator reads, not something the command
- * asserts.
- */
 export function buildSpendAnalysisPayload(
   args: BuildSpendAnalysisPayloadArgs,
 ): SpendAnalysisPayload {

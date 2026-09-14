@@ -55,7 +55,6 @@ function observation(
   };
 }
 
-/** Fold a stream and return the total tokens it contributed. */
 function play(
   readings: readonly Reading[],
   options: { providerId?: string; state?: SpendCursorState } = {},
@@ -80,8 +79,6 @@ function play(
 
 describe("spend fold", () => {
   it("drops a re-emitted reading whose running total did not advance", () => {
-    // Codex repeats a usage event rather than reporting a new turn: 509 of
-    // 6,342 in one measured session. Counting the repeat reports 350.
     expect(
       play([
         { sequence: 1, total: 100, last: 100 },
@@ -92,9 +89,6 @@ describe("spend fold", () => {
   });
 
   it("still drops a repeat that arrives in a later batch", () => {
-    // The guard has to survive the boundary between two appends. The fleet
-    // plugin's equivalent keeps this state inside its per-page parser, so a
-    // repeat straddling a page boundary is counted twice there.
     const first = play([
       { sequence: 1, total: 100, last: 100 },
       { sequence: 2, total: 100, last: 100 },
@@ -106,10 +100,6 @@ describe("spend fold", () => {
   });
 
   it("counts a turn after a provider process restart", () => {
-    // Codex's running total restarts at zero when its app-server process does.
-    // A guard written as `total <= previous` swallows everything after the
-    // reset; the correct guard is equality, and the lower value is a new
-    // baseline.
     expect(
       play([
         { sequence: 1, total: 100, last: 100 },
@@ -121,7 +111,6 @@ describe("spend fold", () => {
   });
 
   it("ignores an event at or below the cursor", () => {
-    // What makes a backfill idempotent and lets it run beside live traffic.
     const first = play([
       { sequence: 1, total: 100, last: 100 },
       { sequence: 2, total: 250, last: 150 },
@@ -143,9 +132,6 @@ describe("spend fold", () => {
   });
 
   it("records codex cached input disjointly from fresh input", () => {
-    // A 208,000-token prompt served entirely from cache. Read under the
-    // Anthropic convention it is recorded as 208,000 fresh plus 208,000 cached,
-    // reporting a fully cached turn as half fresh.
     const result = foldTokenUsageObservation(
       emptySpendCursorState(1),
       {
@@ -178,7 +164,6 @@ describe("spend fold", () => {
   });
 
   it("leaves an anthropic reading alone", () => {
-    // Verified live: 8,295 + 2,065,773 + 11,062 = 2,085,130.
     const usage: SpendUsageBreakdown = {
       inputTokens: 8_295,
       cachedInputTokens: 2_065_773,
@@ -190,9 +175,6 @@ describe("spend fold", () => {
   });
 
   it("normalises a small cached prefix, and does so only once", () => {
-    // The tolerance form of this check passed only because its fixture used a
-    // 207,800-token prefix. A row with 21,475 fresh and 4,224 cached sits
-    // inside any sane tolerance, so a second pass subtracted the prefix again.
     const reported: SpendUsageBreakdown = {
       inputTokens: 25_699,
       cachedInputTokens: 4_224,

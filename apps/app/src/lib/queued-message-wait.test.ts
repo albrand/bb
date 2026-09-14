@@ -221,9 +221,6 @@ describe("isQueuedMessageSendNowAllowed", () => {
   });
 
   it("offers send-now on a failed row whatever it is waiting on", () => {
-    // A row the drain gave up on is the one case where nothing will happen on
-    // its own, so the wait must stop hiding the only affordance that retries
-    // it. Every one of these renders as delete-only without this.
     for (const waitingOn of [
       { kind: "turn-starting" },
       { kind: "provisioning" },

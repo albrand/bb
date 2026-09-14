@@ -145,14 +145,12 @@ describe("project-execution-defaults", () => {
       updatedAt: 2,
     });
 
-    // Using claude-code must not erase what the project remembers for codex.
     expect(
       getProjectExecutionDefaults(db, {
         projectId: project.id,
         providerId: "codex",
       }),
     ).toMatchObject({ providerId: "codex", model: "gpt-5", reasoningLevel: "high" });
-    // Unscoped reads still preselect the most recently used provider.
     expect(
       getProjectExecutionDefaults(db, { projectId: project.id }),
     ).toMatchObject({ providerId: "claude-code" });

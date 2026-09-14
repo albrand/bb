@@ -3,9 +3,6 @@ import { describeQueueWait } from "./actions.js";
 
 describe("describeQueueWait", () => {
   it("says a row failed rather than reading its wait back", () => {
-    // `bb thread queue list` renders this string, and a row the drain gave up
-    // on used to read as an ordinary healthy wait — the same sentence a
-    // message that is about to go gets.
     expect(
       describeQueueWait({
         failureReason: "The message could not be sent.",

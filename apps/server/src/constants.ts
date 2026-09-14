@@ -14,15 +14,4 @@ export const DIFF_FILE_TOO_LARGE_CHANGED_LINES = 20_000;
 export const DIFF_FILE_PATCH_MAX_BYTES = 512 * 1024;
 export const DIFF_FILES_INLINE_PATCH_MAX_FILES = 10;
 
-/**
- * How long a send waits for the daemon to accept a `turn.submit` before it
- * reports the message sent anyway.
- *
- * The daemon answers a submit as soon as the turn is started or steered, and a
- * refusal ("Refusing to start a competing turn …") comes back in milliseconds.
- * Without this wait a refused message was reported as delivered: `bb thread
- * tell` printed "updated" and exited 0 while the thread went to `error` behind
- * it. Short, because a submit to a cold provider session can legitimately take
- * much longer, and those still report "sent" exactly as before.
- */
 export const TURN_ACCEPTANCE_GRACE_MS = 3_000;

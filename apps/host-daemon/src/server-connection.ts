@@ -30,9 +30,7 @@ import { ServerResponseError } from "./server-client.js";
 
 export type { CreateReconnectingWebSocket } from "./server-connection-support.js";
 
-/** How long a protocol self-update waits for in-flight agent turns to finish. */
 export const SELF_UPDATE_DRAIN_TIMEOUT_MS = 10 * 60 * 1000;
-/** How often the drain gate re-checks for active agent turns. */
 export const SELF_UPDATE_DRAIN_POLL_INTERVAL_MS = 2_000;
 
 interface WaitForAgentWorkToDrainArgs {
@@ -45,13 +43,6 @@ interface WaitForAgentWorkToDrainArgs {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/**
- * Waits until no agent turn is running AND no background work (a shell command
- * or sub-agent a finished turn left running) is open, or until the deadline.
- *
- * Background work counts because a restart kills it just the same, and a
- * thread whose turn ended reads as idle while that work is still going.
- */
 export async function waitForAgentWorkToDrain(
   args: WaitForAgentWorkToDrainArgs,
 ): Promise<"drained" | "timed-out"> {
@@ -437,12 +428,6 @@ export class ServerConnection {
     }
   }
 
-  /**
-   * A protocol self-update restarts the daemon, and restarting kills every
-   * provider bridge worker it owns, interrupting any agent turn in flight.
-   * Wait for turns to finish first; past the deadline, restart anyway so a
-   * stuck turn cannot pin the daemon on an incompatible protocol forever.
-   */
   private async waitForActiveTurnsToDrain(): Promise<void> {
     const { getActiveThreads, hasOpenBackgroundWork } = this.options;
     if (getActiveThreads === undefined) return;

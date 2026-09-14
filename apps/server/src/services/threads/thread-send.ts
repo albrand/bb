@@ -87,11 +87,6 @@ type SendThreadMessagePayload = SendMessageRequest & {
 
 interface SendThreadMessageArgs {
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
-  /**
-   * Present only when this send re-submits a failed turn. Marks the turn event
-   * as attempt N of an earlier request, which is what makes the next failure's
-   * attempt number correct without a separate tally.
-   */
   retryOf?: TurnRequestRetryMarker;
   environment: EnvironmentRow;
   historyReplacement?: {
@@ -103,21 +98,15 @@ interface SendThreadMessageArgs {
   trigger: SendThreadMessageTrigger;
 }
 
-/** The daemon's refusal of a turn it was sent, as the caller should see it. */
 export interface ThreadSendRefusal {
   code: string;
   message: string;
 }
 
-/**
- * What a send learned from the daemon. `refusal` is null both when the daemon
- * accepted the turn and when it had not answered within the grace period.
- */
 export interface ThreadSendResult {
   refusal: ThreadSendRefusal | null;
 }
 
-/** Held across the send guard, awaited after it: see `sendThreadMessage`. */
 interface DispatchedThreadSend {
   acceptance: Promise<ThreadSendRefusal | null>;
 }
@@ -132,8 +121,6 @@ interface TurnAcceptanceWatch {
 
 function watchTurnAcceptance(graceMs: number): TurnAcceptanceWatch {
   if (graceMs <= 0) {
-    // No wait at all, not a zero-length one: a timer, however short, never
-    // fires under fake timers and would hang the send.
     return { refuse: () => {}, settle: () => {}, result: NO_REFUSAL.acceptance };
   }
   let resolve: (refusal: ThreadSendRefusal | null) => void = () => {};
@@ -197,7 +184,6 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
-  /** Retry provenance; absent for an original dispatch. */
   retryOf?: TurnRequestRetryMarker;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
   db: DbConnection;
@@ -510,7 +496,6 @@ export async function sendThreadMessage(
   const dispatched = await withThreadSendGuard(args.thread.id, () =>
     sendThreadMessageWithoutContextClear(deps, args),
   );
-  // Outside the guard: waiting on the daemon must not hold up the next send.
   return { refusal: await dispatched.acceptance };
 }
 
@@ -579,11 +564,6 @@ async function sendThreadMessageWithoutContextClear(
     input,
     projectId: thread.projectId,
   });
-  // Agent-originated CLI sends still appear as normal turn requests in the
-  // timeline, while initiator lets policy distinguish the source. A retry is
-  // `system` whatever the original was: nobody asked for it a second time, and
-  // counting it as a user message would inflate every "messages sent" figure by
-  // however many times the provider happened to be rate limited.
   const initiator: ThreadTurnInitiator =
     args.retryOf !== undefined ? "system" : senderThreadId ? "agent" : "user";
   const shouldCaptureUserMessageSent =
@@ -592,9 +572,6 @@ async function sendThreadMessageWithoutContextClear(
     mode === "auto" || mode === "steer"
       ? getActiveTurnId(deps, thread.id)
       : null;
-  // A retry's model is provenance — the failed attempt's tuple, replayed —
-  // not a fresh model choice, so it must not rewrite the thread's sticky
-  // override the way an explicit user send's model does.
   if (senderThreadId === null && args.retryOf === undefined) {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
@@ -613,11 +590,6 @@ async function sendThreadMessageWithoutContextClear(
   const execution = await buildExecutionOptions(deps, payload, {
     threadId: thread.id,
   });
-  // No hook pass here. User messages are decided ONCE, at the dispatch
-  // checkpoint in `attemptDispatch`, before they reach this function. The two
-  // other callers bypass the checkpoint deliberately: a manual compaction turn
-  // and an edited message's re-send are operations on the thread's existing
-  // conversation, not new work a limiter admits.
   const permissionEscalation = resolvePermissionEscalation({
     initiator,
   });
@@ -740,8 +712,6 @@ async function sendThreadMessageWithoutContextClear(
       queuedRequest.request.notificationChanges,
       queuedRequest.request.notificationMetadata,
     );
-    // Only a submit answers promptly; a `thread.start` answers once the
-    // provider session exists, which is no signal about the message.
     const acceptance =
       command.mode === "turn.submit"
         ? watchTurnAcceptance(deps.config.turnAcceptanceGraceMs)

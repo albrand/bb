@@ -1,19 +1,5 @@
 import type { DbConnection } from "../connection.js";
 
-/**
- * Fork (albrand/bb): replay keys of daemon events already stored.
- *
- * A provider bridge worker outlives its host daemon and replays every line
- * the old daemon had not acknowledged to the daemon that adopts it. The
- * daemon posts each resulting event with a stable replay key
- * (`<workerId>:<wseq>:<index>`), and the server skips an event whose key it
- * already holds. The keys only matter for the short window between a
- * forwarded line and its acknowledgement, so rows older than a week go.
- *
- * Deliberately not a drizzle migration: a fork-numbered migration collides
- * with upstream's next one, while this table is invisible to bb's migration
- * history and dropping it loses nothing but deduplication of replays.
- */
 const REPLAY_KEYS_TABLE = "fork_worker_event_keys";
 const REPLAY_KEY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;

@@ -338,7 +338,6 @@ describe("desktop update service", () => {
   });
 
   it("fork build: the version check stays off unless asked", () => {
-    // albrand/bb publishes no version feed; checking it only returns 404s.
     expect(shouldEnableDesktopVersionCheck({ env: {} })).toBe(false);
     expect(
       shouldEnableDesktopVersionCheck({

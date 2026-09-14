@@ -92,7 +92,6 @@ export interface ProjectBranchesArgs extends ProjectBranchesQuery {
 
 export interface ProjectDefaultExecutionOptionsArgs {
   projectId: string;
-  /** The provider whose remembered settings are wanted; omitted, the latest. */
   providerId?: string;
   signal?: AbortSignal;
 }

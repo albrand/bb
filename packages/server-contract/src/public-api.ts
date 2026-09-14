@@ -1134,11 +1134,6 @@ export const publicApiRoutes = {
       ),
       response: jsonResponse<ThreadListResponse>(),
     }),
-    /**
-     * Grouped `SELECT count(*)` over threads. Exists because a plugin gate
-     * that limits concurrency must count without loading: `threads.list`
-     * would page rows into memory and still miscount past its limit.
-     */
     count: defineRoute({
       path: "/threads/count",
       method: "get",
@@ -1147,12 +1142,6 @@ export const publicApiRoutes = {
       ),
       response: jsonResponse<ThreadCountResponse>(),
     }),
-    /**
-     * The threads occupying capacity right now, as rows rather than a count.
-     * A limiter needs to know *which* threads are running to hold several
-     * pools at once — `threads.count` answers one pool per request and cannot
-     * reconcile a global limit with a per-host one from separate counts.
-     */
     running: defineRoute({
       path: "/threads/running",
       method: "get",
@@ -1255,11 +1244,6 @@ export const publicApiRoutes = {
       ),
       response: jsonResponse<EditMessageResponse>(),
     }),
-    /**
-     * Retry a failed turn: re-submit it by reference, as an ordinary dispatch
-     * attempt. `turnRequestId` null means the thread's most recent turn, whose
-     * failure is what put the thread in `error`.
-     */
     retry: defineRoute({
       path: "/threads/:id/retry",
       method: "post",
@@ -1272,10 +1256,6 @@ export const publicApiRoutes = {
       request: noRequest<PathId>(),
       response: jsonResponse<ThreadQueuedMessageListResponse>(),
     }),
-    /**
-     * Create a queued message; senderThreadId preserves agent-to-agent context
-     * until send time.
-     */
     createQueuedMessage: defineRoute({
       path: "/threads/:id/queued-messages",
       method: "post",
@@ -1597,13 +1577,6 @@ export const publicApiRoutes = {
   },
 
   queue: {
-    /**
-     * Every live queued row, optionally narrowed to one thread or one
-     * wait holder. Cross-thread because "what is queued right now" is a
-     * whole-workspace question (`bb thread queue list` with no thread, a
-     * limiter plugin's own bookkeeping, a router recovering its rows after a
-     * restart) that no single thread's list can answer.
-     */
     list: defineRoute({
       path: "/queued-messages",
       method: "get",
@@ -1614,11 +1587,6 @@ export const publicApiRoutes = {
     }),
   },
 
-  /**
-   * Fork (albrand/bb): per-thread, per-provider, per-model, per-day token
-   * totals, maintained by the server because the events they come from are
-   * pruned out from under anything that polls for them.
-   */
   spend: {
     rollup: defineRoute({
       path: "/spend/rollup",
@@ -1749,12 +1717,6 @@ export const publicApiRoutes = {
       request: noRequest(),
       response: jsonResponse<ThemeCatalogResponse>(),
     }),
-    /**
-     * Resolve a built-in, custom, or plugin theme exactly as activating it
-     * would, without persisting anything. The Settings palette hover preview
-     * and `bb theme show <id>` read it; `faviconColor` echoes the stored
-     * appearance because the response is a full `AppTheme`.
-     */
     resolveTheme: defineRoute({
       path: "/settings/themes/:id",
       method: "get",

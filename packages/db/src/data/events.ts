@@ -184,7 +184,6 @@ export interface AppendDaemonEventInput {
 }
 
 export interface AcceptedDaemonEvent {
-  /** The stored row's `created_at`, so a caller need not re-read the row. */
   createdAt: number;
   sequence: number;
   threadId: string;
@@ -1935,14 +1934,6 @@ export interface StoredThreadEventDataRow {
   type: ThreadEventType;
 }
 
-/**
- * The newest row of any of `types`, optionally restricted to what came after a
- * sequence.
- *
- * Assembling a turn's failure context means asking two questions of the log —
- * "how did the provider describe this failure" and "what rate-limit windows did
- * it last report" — and both are one indexed row, not a scan the caller filters.
- */
 export function getLatestStoredThreadEventOfTypes(
   db: DbQueryConnection,
   args: {
@@ -1978,13 +1969,6 @@ export function getLatestStoredThreadEventOfTypes(
   );
 }
 
-/**
- * The newest rate-limit snapshot this thread saw for one provider.
- *
- * Filtered on the provider inside the query: a thread's log can carry snapshots
- * from more than one provider id, and the caller wants its own thread's
- * provider rather than whatever reported last.
- */
 export function getLatestStoredRateLimitsEventForProvider(
   db: DbQueryConnection,
   args: { threadId: string; providerId: string },

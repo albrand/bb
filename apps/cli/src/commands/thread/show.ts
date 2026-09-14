@@ -76,8 +76,6 @@ type ThreadShowEnvironmentJsonPayload = Environment & {
 interface ThreadShowJsonPayload extends ThreadStatusPayload {
   environment: ThreadShowEnvironmentJsonPayload | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
-  /** Requested vs stored vs next-turn execution (get-bb/bb#1787). Null when
-   * the server predates the route. */
   execution: ThreadExecutionProfileResult | null;
   workStatus?: WorkspaceStatus | null;
   gitDiff?: ThreadGitDiffResponse | null;
@@ -192,10 +190,6 @@ function threadShowEnvironmentJson(
   };
 }
 
-/**
- * What the thread runs with, labelled by what each value is. "Requested" is
- * never presented as what ran; "Executed" is only what the provider reported.
- */
 export function printExecutionProfile(
   execution: ThreadExecutionProfileResult | null,
 ): void {

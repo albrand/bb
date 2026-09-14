@@ -38,10 +38,6 @@ export interface SpendBackfillResult {
 }
 
 interface TrackedCursorEntry {
-  /**
-   * Whether this thread's early history survived, or undefined when the cursor
-   * already existed and nothing here has a better answer than the stored one.
-   */
   historyComplete: boolean | undefined;
   providerThreadId: string;
   state: SpendCursorState;
@@ -83,13 +79,6 @@ function cursorKey(threadId: string, providerThreadId: string): string {
   return `${threadId}|${providerThreadId}`;
 }
 
-/**
- * The model for an observation, reusing the cursor's answer while the turn is
- * the same one.
- *
- * Codex emits thousands of usage events against a few hundred turns, so the
- * lookup is per turn and the cursor carries the answer between them.
- */
 function modelForObservation(
   db: DbQueryConnection,
   state: SpendCursorState,
@@ -112,16 +101,6 @@ function modelForObservation(
   );
 }
 
-/**
- * Sum the contributions that land in the same row before writing.
- *
- * A codex turn emits many usage events, and they nearly all land on the same
- * (day, thread, provider, model). Writing each one separately made the append
- * path three times slower in a 200-batch benchmark, which is not a price the
- * hottest write path in the server should pay to record a number. Contributions
- * are additive, so folding them in memory first is the same arithmetic with one
- * statement instead of ten.
- */
 function mergeContributions(
   contributions: readonly SpendContribution[],
 ): { contribution: SpendContribution; turns: number }[] {
@@ -160,24 +139,6 @@ function mergeContributions(
   return [...merged.values()];
 }
 
-/**
- * Whether the rollup can prove this thread's usage history is intact.
- *
- * Only two things delete a usage event, and each has to be ruled out.
- *
- * The pruner deletes at `sequence <= latestSequence - keepRecent`, so a thread
- * whose latest sequence is at or below the smallest keep-recent window cannot
- * have lost one. That is the whole of the positive proof. "The rollup just
- * stored the earliest surviving usage event" reads like a second proof and is
- * not one: once the pruner has run, earliest-surviving stops meaning first, and
- * ruling out a deletion at sequence 1 needs `latestSequence < 121` regardless -
- * so it collapsed into the rule above while granting certainty over threads
- * whose history was already gone. A resumed thread with 900 pruned tokens and
- * 500 new ones was badged complete while holding 36% of what it had spent.
- *
- * An edited message deletes a range outright and can do it long before the
- * pruner's window, so the marker it leaves is checked too.
- */
 function resolveHistoryComplete(
   db: DbQueryConnection,
   args: { threadId: string },
@@ -206,9 +167,6 @@ function rollUpObservations(
         threadId: observation.threadId,
         providerThreadId: observation.providerThreadId,
       });
-      // Completeness is settled once, when the cursor row is created. An
-      // existing row already carries the answer and later appends must not
-      // overwrite it with a guess.
       const historyComplete =
         stored === null
           ? resolveHistoryComplete(db, { threadId: observation.threadId })
@@ -249,32 +207,6 @@ function rollUpObservations(
   return contributions.length;
 }
 
-/**
- * Record the spend in a batch of daemon events that were just stored.
- *
- * Called inside the append transaction, from the indexes the append reported as
- * INSERTED. Four things follow from that placement and none of them hold
- * anywhere else:
- *
- *   * it is atomic with the append, so no crash can leave an event stored but
- *     unaccounted, or accounted but unstored;
- *   * it is exactly-once against the #3143 replay path. An adopted worker
- *     replays unacked lines, so the server is re-sent events it already stored;
- *     replay-key dedup and the `(thread_id, sequence)` high-water mark drop
- *     those at the append and they never reach `insertedInputIndexes`. The
- *     sequence guard inside the fold is a second line of defence for the same
- *     case, and the reason a backfill can run alongside live traffic;
- *   * the events are typed and validated, so nothing here reparses stored JSON
- *     or casts through `unknown`;
- *   * it runs BEFORE the pruner, which is the only reason a complete record is
- *     possible at all.
- *
- * It OBSERVES and does not consume. `storeExecutionReports` in the same append
- * path removes its event from the batch, which is right for a report that is
- * not meant to be stored and would be wrong here: the fleet plugin reads usage
- * by polling `events.list`, so filtering the event out would silently zero its
- * numbers while this table filled up.
- */
 export function recordSpendForInsertedEvents(
   db: DbConnection,
   sources: readonly SpendRollupObservationSource[],
@@ -296,23 +228,6 @@ export function recordSpendForInsertedEvents(
   return rollUpObservations(db, observations);
 }
 
-/**
- * Replay the usage events the pruner has not yet deleted.
- *
- * Runs the same fold as the live path over the same shape of input, which is
- * what makes their agreement a property rather than a coincidence, and is safe
- * to run repeatedly: the fold ignores anything at or below the cursor, so a
- * second run is a no-op and the order of backfill and live traffic does not
- * matter.
- *
- * It never tops a thread up from the one cumulative `total` the pruner left
- * behind. That snapshot carries a single timestamp, so any per-day bucket
- * derived from it is invented; codex resets mean a final `total` is not the
- * session's truth; and mixing `total`-derived rows with `last`-derived deltas
- * double counts the moment the thread emits again. A thread it cannot prove
- * intact is recorded as partial and its total read as a floor - see
- * `resolveHistoryComplete` for what "prove" means here.
- */
 export function backfillSpend(db: DbConnection): SpendBackfillResult {
   ensureSpendTables(db);
   const threads = listSpendBackfillThreads(db);
@@ -344,10 +259,6 @@ export function backfillSpend(db: DbConnection): SpendBackfillResult {
     contributionsApplied += rollUpObservations(db, observations);
   }
 
-  // Counted from what the cursors actually hold, not from the backfill's own
-  // rule applied a second time. A thread the LIVE path proved complete has a
-  // latest sequence well past the pruner's window, so re-deriving here would
-  // have reported it as partial and the summary would contradict the table.
   const coverage = getSpendCoverage(db);
 
   return {

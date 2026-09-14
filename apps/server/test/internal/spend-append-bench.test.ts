@@ -18,39 +18,6 @@ import { withTestHarness } from "../helpers/test-app.js";
 import { initDb } from "../../src/db.js";
 import { migrate } from "@bb/db";
 
-/**
- * What the spend rollup costs the append path, measured rather than asserted.
- *
- * Skipped by default because it is a measurement, not a test - nothing here has
- * a pass or fail. Run it with `BB_SPEND_BENCH=1` and read `BB_SPEND_BENCH_OUT`
- * (default /tmp/spend-bench.txt):
- *
- *   BB_SPEND_BENCH=1 npx vitest run test/internal/spend-append-bench.test.ts \
- *     --root apps/server
- *
- * To get the no-hook baseline, comment out the `recordSpendForInsertedEvents`
- * call in `apps/server/src/internal/events.ts` and run it again.
- *
- * Two configurations, because they answer different questions. The harness's
- * in-memory database has no WAL commit and no fsync, so it isolates the
- * rollup's own work but overstates it as a fraction of a real append.
- * `BB_SPEND_BENCH_FILE=1` puts the harness database on disk in WAL mode, which
- * is what a running bb does, and is the number to quote as a production cost.
- *
- * Batch SHAPE matters more than either. `BB_SPEND_BENCH_EVENTS` usage events
- * and `BB_SPEND_BENCH_FILLER` other events per batch:
- *
- *   EVENTS=10 FILLER=0    the worst case, an all-usage batch
- *   EVENTS=1  FILLER=19   the realistic mix
- *   EVENTS=0  FILLER=20   no usage at all, which is most event traffic
- *
- * The last one needs no number. `recordSpendForInsertedEvents` returns at
- * `sources.length === 0` before `ensureSpendTables` and before a statement is
- * prepared, so a batch with no usage events does no work beyond the type check
- * already walking it. The benchmark agrees, but the gap it reports is smaller
- * than its own run-to-run variance, so the code is the evidence and the number
- * is only a sanity check.
- */
 const ENABLED = process.env.BB_SPEND_BENCH === "1";
 const ON_DISK = process.env.BB_SPEND_BENCH_FILE === "1";
 const OUT = process.env.BB_SPEND_BENCH_OUT ?? "/tmp/spend-bench.txt";
@@ -150,8 +117,6 @@ describe.skipIf(!ENABLED)("spend append latency", () => {
               });
             }
             for (let n = 0; n < FILLER_PER_BATCH; n += 1) {
-              // A thread-scoped event the rollup ignores, so a batch can be
-              // given a realistic shape rather than only its worst one.
               envelopes.push({
                 threadId: thread.id,
                 event: {

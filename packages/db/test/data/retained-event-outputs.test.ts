@@ -18,6 +18,7 @@ import {
   COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
+  getCompletedEventOutputTruncationLimits,
 } from "../../src/retained-event-output.js";
 import { createThread } from "../../src/data/threads.js";
 import { noopNotifier } from "../../src/notifier.js";
@@ -26,6 +27,8 @@ import type {
   CreateConnectionOptions,
   SlowDbQueryLogFields,
 } from "../../src/connection.js";
+
+const COMMAND_LIMITS = getCompletedEventOutputTruncationLimits("commandExecution");
 
 function setup(options: CreateConnectionOptions = {}) {
   const db = createMigratedConnection(options);
@@ -169,11 +172,11 @@ describe("retained completed-event outputs", () => {
     }
     const preview = readOutput(stored.data, "aggregatedOutput");
     expect(preview).not.toBe(output);
-    expect(preview.startsWith(output.slice(0, 2_048))).toBe(true);
-    expect(preview.endsWith(output.slice(-2_048))).toBe(true);
+    expect(preview.startsWith(output.slice(0, COMMAND_LIMITS.retainedHeadChars))).toBe(true);
+    expect(preview.endsWith(output.slice(-COMMAND_LIMITS.retainedTailChars))).toBe(true);
     expect(preview.length).toBe(
-      COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS +
-        COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS +
+      COMMAND_LIMITS.retainedHeadChars +
+        COMMAND_LIMITS.retainedTailChars +
         77,
     );
 
@@ -196,13 +199,13 @@ describe("retained completed-event outputs", () => {
     const now = 1_800_000_000_000;
     const { db, source } = setup();
     const headBoundaryOutput =
-      "h".repeat(COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS - 1) +
+      "h".repeat(COMMAND_LIMITS.retainedHeadChars - 1) +
       "😀" +
       "m".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS);
     const tailBoundaryOutput =
       "m".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS) +
       "😀" +
-      "t".repeat(COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS - 1);
+      "t".repeat(COMMAND_LIMITS.retainedTailChars - 1);
 
     insertEvents(
       db,
@@ -241,14 +244,20 @@ describe("retained completed-event outputs", () => {
           JSON.parse(row.data).item.truncation.aggregatedOutput
             .retainedHeadLength,
       ),
-    ).toEqual([COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS - 1, 2_048]);
+    ).toEqual([
+      COMMAND_LIMITS.retainedHeadChars - 1,
+      COMMAND_LIMITS.retainedHeadChars,
+    ]);
     expect(
       storedRows.map(
         (row) =>
           JSON.parse(row.data).item.truncation.aggregatedOutput
             .retainedTailLength,
       ),
-    ).toEqual([2_048, COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS - 1]);
+    ).toEqual([
+      COMMAND_LIMITS.retainedTailChars,
+      COMMAND_LIMITS.retainedTailChars - 1,
+    ]);
     db.$client.close();
   });
 

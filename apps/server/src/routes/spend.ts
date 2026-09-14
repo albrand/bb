@@ -29,14 +29,6 @@ const ALL_DAYS = "*";
 const ALL_MODELS = "*";
 const ALL_PROVIDERS = "*";
 
-/**
- * Collapse the stored rows onto one dimension.
- *
- * Grouping happens here rather than in SQL because the stored grain is already
- * the finest the table has and a grouped read is a handful of rows either way;
- * a second set of aggregate queries would be a second place for the weighting
- * to drift.
- */
 function groupRows(
   rows: readonly SpendRollupRow[],
   groupBy: SpendGroupByQueryValue,
@@ -80,8 +72,6 @@ function groupRows(
     existing.turns += row.turns;
     existing.firstEventAt = Math.min(existing.firstEventAt, row.firstEventAt);
     existing.lastEventAt = Math.max(existing.lastEventAt, row.lastEventAt);
-    // One unpriced row makes the group unpriced. A partial sum presented as a
-    // total is the failure mode an absent price exists to avoid.
     existing.costUsd =
       existing.costUsd === null || row.costUsd === null
         ? null

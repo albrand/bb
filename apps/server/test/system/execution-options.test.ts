@@ -629,7 +629,6 @@ describe("resolveSystemExecutionOptions", () => {
         "codex",
         "claude-code",
         "pi",
-        "acp-cursor",
       ]);
       expect(response.modelLoadError).toEqual({
         providerId: "codex",

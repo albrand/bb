@@ -35,9 +35,6 @@ function build(rows: SpendRollupRow[]) {
 
 describe("spend analysis payload", () => {
   it("carries only ids, providers, models, counts and dates", () => {
-    // The guarantee is that the payload is built from rollup columns, none of
-    // which can hold prose. This pins it: a row's data line has exactly one
-    // field per declared column and nothing else.
     const built = build([ROW]);
     const lines = built.payload.split("\n");
     const header = lines.find((line) =>
@@ -55,8 +52,6 @@ describe("spend analysis payload", () => {
   });
 
   it("never carries a field the rollup does not store", () => {
-    // A regression guard for the day someone adds a title or a path to the
-    // rollup and the payload starts carrying it silently.
     const built = build([ROW]);
     const forbidden = [
       "prompt",

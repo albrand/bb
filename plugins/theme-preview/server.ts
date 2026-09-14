@@ -52,12 +52,6 @@ const SWATCH_TOKENS: ReadonlyArray<[keyof ThemeSwatch, readonly string[]]> = [
   ["fontMono", ["font-mono"]],
 ];
 
-/**
- * Which mode a top-level block contributes to, including declarations shared
- * by both modes through `:root`. Element-scoped blocks (for
- * example `.dark .fixed.bg-sidebar`) are skipped: their values are true, but
- * they describe one surface rather than the palette a chip should advertise.
- */
 export function classifySelector(selector: string): "shared" | "light" | "dark" | null {
   const parts = selector
     .split(",")
@@ -68,33 +62,23 @@ export function classifySelector(selector: string): "shared" | "light" | "dark" 
   let sawLight = false;
   let sawDark = false;
   for (const part of parts) {
-    if (/\s/.test(part.replace(/:not\([^)]*\)/g, ""))) return null; // descendant selector
+    if (/\s/.test(part.replace(/:not\([^)]*\)/g, ""))) return null;
     if (part === ":root") sawShared = true;
     else if (part === ".light" || part === ".light:not(.dark)" || part === ":root:not(.dark)" || part === "html:not(.dark)") sawLight = true;
     else if (part === ".dark" || part === ":root.dark" || part === "html.dark") sawDark = true;
     else return null;
   }
-  // `:root` still matches when the root carries `.dark`; in a selector list
-  // such as `:root, .light` it therefore establishes shared defaults that a
-  // later dark block may override.
   if (sawShared) return "shared";
   if (sawDark && !sawLight) return "dark";
   if (sawLight && !sawDark) return "light";
   return null;
 }
 
-/**
- * Pull the palette a theme advertises out of its CSS. Later declarations win,
- * which is how the cascade resolves them, so a variant's override block beats
- * the base it was built on.
- */
 export function parseThemeSwatches(css: string): { light: ThemeSwatch | null; dark: ThemeSwatch | null } {
   const declarations: { light: Map<string, string>; dark: Map<string, string> } = {
     light: new Map(),
     dark: new Map(),
   };
-  // Comments first: a block comment that mentions a selector would otherwise be
-  // captured as part of the next selector and disqualify the whole block.
   const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const blocks = source.matchAll(/([^{}]+)\{([^{}]*)\}/g);
   for (const block of blocks) {
@@ -155,18 +139,11 @@ async function readCustomThemeCss(directory: string, id: string, signal?: AbortS
       return await readFile(candidate, { encoding: "utf8", signal });
     } catch {
       signal?.throwIfAborted();
-      // try the next layout
     }
   }
   return null;
 }
 
-/**
- * bb's bundled palettes, with swatches extracted from bb's own source
- * (apps/app/src/components/ui/theme.css and lib/themes/*.ts at bb@c942421a4):
- * each builtin's overrides overlaid on the base theme, var() references
- * inlined. color-mix() strings are kept verbatim — the browser resolves them.
- */
 export const BUILTIN_THEMES: ReadonlyArray<{ id: string; name: string }> = [
   { id: "default", name: "Default" },
   { id: "nord", name: "Nord" },
@@ -357,7 +334,6 @@ export const BUILTIN_SWATCHES: Record<string, { light: ThemeSwatch; dark: ThemeS
   }
 };
 
-/** Flatten `sdk.theme.catalog()` into a selectable list with palette previews. */
 export async function buildCatalog(
   result: unknown,
   readCss: (id: string) => Promise<string | null>,
@@ -379,7 +355,6 @@ export async function buildCatalog(
   for (const builtin of BUILTIN_THEMES) {
     if (!entries.some((entry) => entry.id === builtin.id)) entries.push(builtin);
   }
-  // Anything active but unknown (a newer builtin, say) still has to be listed.
   if (activeThemeId && !entries.some((entry) => entry.id === activeThemeId)) {
     entries.unshift({ id: activeThemeId, name: activeThemeId });
   }
@@ -394,10 +369,6 @@ export async function buildCatalog(
   return { activeThemeId, themes, revision: 0 };
 }
 
-/**
- * A plugin theme id is `plugin:<pluginId>:<themeId>`; its CSS lives in the
- * plugin's install dir at the path the manifest's `bb.themes[]` entry names.
- */
 const PLUGIN_THEME_ID_PATTERN = /^plugin:([^:]+):(.+)$/;
 
 async function pluginThemeCssPath(rootDir: string, localId: string, signal?: AbortSignal): Promise<string | null> {
@@ -455,17 +426,11 @@ async function activeThemePath(
       return candidate;
     } catch {
       signal?.throwIfAborted();
-      // try the next layout
     }
   }
   return null;
 }
 
-/**
- * Catalog and selection share one coordinator so an older poll cannot undo a
- * newer picker action. File stamps are keyed by path: changing the active
- * theme is not itself mistaken for editing the previous theme's stylesheet.
- */
 export function createCatalogLoader(bb: BbPluginApi) {
   const slowWarningMs = 5_000;
   const catalogOperationTimeoutMs = 15_000;
@@ -551,8 +516,6 @@ export function createCatalogLoader(bb: BbPluginApi) {
           const previousStamp = stamps.get(path);
           stamps.set(path, stamp);
           if (previousStamp !== undefined && stamp !== previousStamp) {
-            // Everything above can await. Confirm that neither this panel nor
-            // another bb surface selected a different theme in the meantime.
             const current = (await observeCatalogOperation("active theme confirmation", (signal) =>
               bb.sdk.theme.catalog({ signal }),
             )) as { active?: { themeId?: unknown } };
@@ -587,18 +550,12 @@ export function createCatalogLoader(bb: BbPluginApi) {
   const setTheme = async (themeId: string) => {
     selectionGeneration += 1;
     const generation = selectionGeneration;
-    // Theme application is global and not cancellable. Preserve click order
-    // so a slower earlier apply cannot land after the user's newer choice.
     const apply = selectionQueue.then(async () => {
       await warnIfSlow(`theme apply (${themeId})`, () => bb.sdk.theme.set(themeId));
     });
     selectionQueue = apply.catch(() => undefined);
     await apply;
 
-    // The picker already has the enriched catalog it selected from. Confirm
-    // the global mutation from that snapshot so a slow CSS/plugin scan cannot
-    // make a successful selection look stuck. The next watcher signal or poll
-    // refreshes enrichment independently.
     const base = latestCatalog ?? await catalog();
     const selected = { ...base, activeThemeId: themeId };
     if (selectionGeneration === generation) latestCatalog = selected;
@@ -609,21 +566,9 @@ export function createCatalogLoader(bb: BbPluginApi) {
 }
 
 export default async function plugin(bb: BbPluginApi) {
-  // Live-reload support. bb reads a custom theme's CSS from disk on demand and
-  // never watches the file, so an agent editing `<dataDir>/theme/<id>/theme.css`
-  // in one split leaves every open window painted with the previous version.
-  // The background watcher below handles custom-theme edits immediately. Each
-  // catalog poll also stats the active custom or plugin theme as a fallback;
-  // when it has changed we re-set the same palette, which makes bb re-read the
-  // CSS and push it to every client.
   const catalogLoader = createCatalogLoader(bb);
   const catalog = catalogLoader.catalog;
 
-  // Instant path. Watch the custom-theme directory (new themes, edits) and push
-  // a signal to every open panel; the panel refetches on the signal, so a new
-  // theme shows up in the dropdown and an edited one repaints within the
-  // watcher's latency instead of the next poll. The poll stays as a slow
-  // fallback for filesystems where watching is unreliable.
   bb.background.service("theme-watch", {
     async start(signal) {
       let watcher: FSWatcher | null = null;
@@ -637,7 +582,7 @@ export default async function plugin(bb: BbPluginApi) {
           if (timer) clearTimeout(timer);
           timer = setTimeout(async () => {
             try {
-              const next = await catalog(); // re-applies the active theme if its file changed
+              const next = await catalog();
               bb.realtime.publish("theme-preview:changed", { revision: next.revision, at: Date.now() });
             } catch (error) {
               bb.log.warn(`theme-preview: watch refresh failed: ${String(error)}`);

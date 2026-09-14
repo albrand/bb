@@ -607,8 +607,6 @@ export function projectDefaultExecutionOptionsQueryKey({
   projectId,
   providerId,
 }: ProjectDefaultExecutionOptionsQueryKeyArgs): ProjectDefaultExecutionOptionsQueryKey {
-  // The per-provider key extends the project key, so invalidating the project
-  // key refreshes both.
   return providerId === undefined
     ? [PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, projectId]
     : [PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, projectId, providerId];

@@ -49,7 +49,7 @@ interface OptionalServerFieldGroup {
   reason: string;
 }
 
-const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 30;
+const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 31;
 
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   {

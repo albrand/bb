@@ -124,17 +124,6 @@ function pruneList(
   return removed;
 }
 
-/**
- * Drop every plugin utility the host stylesheet already ships.
- *
- * A plugin stylesheet re-declares Tailwind utilities scoped to the plugin
- * root and loads after the host stylesheet. Same layer, same specificity,
- * later source: the plugin's `.hidden` beat the host's `.md:flex` on every
- * host component rendered inside a plugin, so responsive variants silently
- * stopped working there. Identical utilities carry identical declarations,
- * so removing the duplicate leaves the host's own cascade order intact and
- * keeps only the utilities the host never emitted.
- */
 export function prunePluginUtilities(
   sheet: { cssRules: RuleListLike; deleteRule(index: number): void },
   hostKeys: ReadonlySet<string>,

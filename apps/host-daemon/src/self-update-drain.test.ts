@@ -32,8 +32,6 @@ describe("self-update drain", () => {
   });
 
   it("waits for background work a finished turn left running", async () => {
-    // No active turn, but a background shell command is still open: a restart
-    // now would kill it, so the drain must hold.
     const h = harness([
       { threads: 0, background: true },
       { threads: 0, background: true },

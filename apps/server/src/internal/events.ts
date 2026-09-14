@@ -893,18 +893,6 @@ function storeExecutionReports<
   return kept;
 }
 
-/**
- * The usage events in a batch that were actually stored, paired with the
- * sequence and timestamp the append gave them.
- *
- * `acceptedEvents[k]` and `insertedInputIndexes[k]` are pushed together by the
- * append, so they index each other. Reading the event from `labelledEntries`
- * rather than from the stored `data` keeps it typed and validated.
- *
- * Nothing here removes an entry from the batch. The fleet plugin reads usage by
- * polling `events.list`, and it keeps working only while this stays an
- * observation.
- */
 function collectSpendObservationSources(
   deps: AppDeps,
   args: {

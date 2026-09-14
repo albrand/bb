@@ -1821,9 +1821,6 @@ describe("queued row affordances", () => {
   });
 
   it("offers Send now on a failed row whatever it is waiting on", () => {
-    // The waits that hide Send now are exactly the ones a failed row carries,
-    // so before this the only thing a user could do with a message that had
-    // given up was delete it.
     const onSend = vi.fn();
     const { getByLabelText } = render(
       <QueuedMessagesList

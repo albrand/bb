@@ -39,14 +39,6 @@ type HookRegistry = {
   [K in PluginHookName]: PluginHookRegistration<K>[];
 };
 
-/**
- * A thread with a queued row on a host that is either connected or not.
- *
- * `seedHostSession` opens a daemon session; `seedHost` alone leaves the host
- * enrolled but away, which is exactly the state a drain hits when a laptop
- * shuts. Nothing else about the fixture differs, so a test that flips this flag
- * is testing the host's liveness and nothing else.
- */
 function seedQueuedRow(
   harness: TestAppHarness,
   args: { hostConnected: boolean; hostName: string; sendAt?: number },
@@ -254,8 +246,6 @@ describe("recordQueuedMessageDrainFailure", () => {
       const { thread, row } = seedQueuedRow(harness, {
         hostConnected: false,
         hostName: "M4",
-        // A due row that could not be delivered: the instant has passed and
-        // keeping it would leave the due sweep re-claiming a row that cannot go.
         sendAt: Date.now() - 1_000,
       });
 
@@ -271,10 +261,7 @@ describe("recordQueuedMessageDrainFailure", () => {
         hostName: "M4",
       });
       expect(queued.sendAt).toBeNull();
-      // An absent machine is a wait, not a failure: the row recovers by itself
-      // when the host comes back, so presenting it as an error would be wrong.
       expect(queued.failureReason).toBeNull();
-      // A drain failure changes the row, not the transcript.
       expect(listEvents(harness.db, { threadId: thread.id })).toEqual([]);
     });
   });
@@ -293,15 +280,9 @@ describe("recordQueuedMessageDrainFailure", () => {
         thread,
       });
 
-      // Terminal because the world says so, not because the error was phrased
-      // a certain way: the thread this message was for is archived, and no
-      // number of re-attempts un-archives it.
       const queued = reread(harness, row.id);
       expect(queued.failureReason).toBe("Thread is archived");
       expect(getQueuedMessageDispatchRetry(harness.db, row.id)).toBeNull();
-      // The row is still waiting on what queued it. A failure says what went
-      // wrong last time, not what the row is waiting for, and a queue would
-      // have erased it on the very next attempt.
       expect(queued.waitingOn).toEqual({ kind: "thread-busy" });
       expect(listEvents(harness.db, { threadId: thread.id })).toEqual([]);
     });
@@ -320,9 +301,6 @@ describe("recordQueuedMessageDrainFailure", () => {
         thread,
       });
 
-      // The thread is writable, so whatever produced this is a fault rather
-      // than a fact about the destination, and the row keeps a NULL failure
-      // reason — the column every automatic drain reads as "never again".
       expect(reread(harness, row.id).failureReason).toBeNull();
       expect(getQueuedMessageDispatchRetry(harness.db, row.id)?.attempt).toBe(1);
     });
@@ -345,8 +323,6 @@ describe("recordQueuedMessageDrainFailure", () => {
         });
       }
 
-      // `ApiError` messages are written for a caller; anything else was
-      // written for a log and has no business on a queued row.
       expect(reread(harness, row.id).failureReason).toBe(
         "The message could not be sent.",
       );
@@ -372,9 +348,6 @@ describe("recordQueuedMessageDrainFailure", () => {
         thread,
       });
 
-      // The host is away, so this attempt re-queues rather than failing — and a
-      // fresh statement of why the row is waiting supersedes the stale failure
-      // instead of showing the reader two contradictory explanations.
       const queued = reread(harness, row.id);
       expect(queued.waitingOn).toEqual({
         kind: "host-offline",

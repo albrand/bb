@@ -161,11 +161,6 @@ async function fetchDesktopVersionFeed(
   }
 }
 
-/**
- * Fork build (albrand/bb): no version feed is published for it, so the hourly
- * check only ever got a 404. Fork updates come from the rebuild automation and
- * `fork-swap.sh`; the check runs only when explicitly asked for.
- */
 export function shouldEnableDesktopVersionCheck(args: {
   env: NodeJS.ProcessEnv;
 }): boolean {

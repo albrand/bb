@@ -16,7 +16,7 @@ import {
 import { environments, events, maintenanceScanCursors } from "../schema.js";
 import {
   insertPreparedRetainedEventOutput,
-  prepareCompletedEventOutputData,
+  prepareLegacyCompletedEventOutputData,
   prepareLegacyImageGenerationOutputData,
   type PreparedCompletedEventOutputData,
 } from "./retained-event-outputs.js";
@@ -545,7 +545,7 @@ const COMPLETED_EVENT_ITEM_OUTPUT_MIGRATION_STRATEGY: CompletedEventOutputMigrat
     listScanRows: listCompletedEventOutputScanRows,
     missingScanRowError: "Expected completed output migration scan row",
     prepare: (candidate, args) =>
-      prepareCompletedEventOutputData({
+      prepareLegacyCompletedEventOutputData({
         createdAt: candidate.created_at,
         data: candidate.data,
         itemKind: args.itemKind,

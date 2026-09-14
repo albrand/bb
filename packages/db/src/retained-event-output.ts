@@ -26,7 +26,7 @@ export interface CompletedEventOutputTruncationLimits {
   thresholdChars: number;
 }
 
-const DEFAULT_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS: CompletedEventOutputTruncationLimits =
+export const UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS: CompletedEventOutputTruncationLimits =
   {
     retainedHeadChars: COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
     retainedTailChars: COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
@@ -42,14 +42,14 @@ const COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS: Record<
     retainedTailChars: 4 * 1024,
     thresholdChars: 8 * 1024,
   },
-  imageGeneration: DEFAULT_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
+  imageGeneration: UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
   toolCall: {
     retainedHeadChars: 2 * 1024,
     retainedTailChars: 2 * 1024,
     thresholdChars: 4 * 1024,
   },
-  webFetch: DEFAULT_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
-  webSearch: DEFAULT_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
+  webFetch: UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
+  webSearch: UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
 };
 
 export function getCompletedEventOutputTruncationLimits(

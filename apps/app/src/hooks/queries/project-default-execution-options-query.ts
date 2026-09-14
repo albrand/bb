@@ -7,7 +7,6 @@ import { projectDefaultExecutionOptionsQueryKey } from "./query-keys";
 
 interface UseProjectDefaultExecutionOptionsArgs {
   projectId: string | undefined;
-  /** Fork (albrand/bb): a named provider's remembered settings. */
   providerId?: string;
 }
 

@@ -426,10 +426,6 @@ export function useThreadCreationOptions(
   const effectiveProviderMatchesInitialProvider =
     effectiveProviderId.length > 0 &&
     effectiveProviderId === renderedThreadSelections.selectedProviderId;
-  // Fork (albrand/bb): a provider this browser has no choice stored for falls
-  // back to what the project remembers for THAT provider (get-bb/bb#3463),
-  // not straight to the catalog default. Only the latest provider's settings
-  // arrive with the project, so the others are asked for by name.
   const rememberedProviderDefaultsQuery = useProjectDefaultExecutionOptions(
     {
       projectId: preferenceProjectId ?? undefined,

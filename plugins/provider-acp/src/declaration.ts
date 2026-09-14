@@ -12,8 +12,6 @@ const ACP_BASE_CAPABILITIES: PluginProviderCapabilities = {
   supportsThreadArchive: false,
   supportsThreadRename: false,
   fork: "none",
-  // The standard ACP surface carries context-window occupancy only, no token
-  // counts, and no dialect here adds them (get-bb/bb#2397).
   reportsTokenUsage: false,
   permissionModes: ["accept-edits", "full"],
   reasoningLevels: ["low", "medium", "high", "xhigh", "max"],

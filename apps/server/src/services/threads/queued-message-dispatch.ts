@@ -363,18 +363,6 @@ async function runInteractionSettledDispatch(
   }
 }
 
-/**
- * Outcomes that are not this row's attempt failing, and must never be written
- * down as one.
- *
- * A host command that timed out is still in flight. A lost claim means another
- * drain got there first, or the claim aged out — either way this attempt never
- * ran. A paused auto-send and a context clear in progress are the queue
- * deliberately holding the row. `sendNextQueuedMessageIfPresent` already
- * swallows the last three on its own path; this is the same list for the
- * wake-driven path, which used to record every one of them as a terminal
- * failure and park the row.
- */
 function isDeferredQueuedMessageDispatchOutcome(error: unknown): boolean {
   return (
     isCommandTimeoutError(error) ||
@@ -476,16 +464,6 @@ async function runDueScheduledDispatch(
   }
 }
 
-/**
- * Re-attempts every row whose retry backoff has elapsed.
- *
- * Its own sweep rather than a `sendAt` on the row, because the retry clock is
- * core's and the row's schedule is the user's: overwriting `sendAt` would
- * discard "send this at 9am" and, on a row with no schedule at all, invent a
- * countdown the queue would render. The claim path still applies the row's
- * ordinary eligibility, so a due retry into a busy thread waits for the turn
- * to end exactly as the first attempt did.
- */
 async function runDueRetryDispatch(
   deps: QueueDispatchDeps,
   now: number,

@@ -10,6 +10,7 @@ import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   getCompletedEventOutputTruncationLimits,
   RETAINED_EVENT_OUTPUT_TARGETS,
+  UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
   type CompletedEventOutputTruncationLimits,
   type RetainedEventOutputPath,
   type RetainedEventOutputTarget,
@@ -174,12 +175,33 @@ function prepareRetainedOutputData(args: {
 export function prepareCompletedEventOutputData(
   args: PrepareCompletedEventOutputDataArgs,
 ): PreparedCompletedEventOutputData {
+  return prepareCompletedEventOutputDataWithinLimits(
+    args,
+    getCompletedEventOutputTruncationLimits,
+  );
+}
+
+export function prepareLegacyCompletedEventOutputData(
+  args: PrepareCompletedEventOutputDataArgs,
+): PreparedCompletedEventOutputData {
+  return prepareCompletedEventOutputDataWithinLimits(
+    args,
+    () => UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
+  );
+}
+
+function prepareCompletedEventOutputDataWithinLimits(
+  args: PrepareCompletedEventOutputDataArgs,
+  resolveLimits: (
+    itemKind: RetainedEventOutputTarget["itemKind"],
+  ) => CompletedEventOutputTruncationLimits,
+): PreparedCompletedEventOutputData {
   const target =
     args.type === "item/completed" ? targetForItemKind(args.itemKind) : null;
   if (target === null) {
     return { data: args.data, retainedOutput: null };
   }
-  const limits = getCompletedEventOutputTruncationLimits(target.itemKind);
+  const limits = resolveLimits(target.itemKind);
   if (args.data.length <= limits.thresholdChars) {
     return { data: args.data, retainedOutput: null };
   }
@@ -225,7 +247,7 @@ export function prepareLegacyImageGenerationOutputData(args: {
     createdAt: args.createdAt,
     data: args.data,
     item: imageGeneration.item,
-    limits: getCompletedEventOutputTruncationLimits("imageGeneration"),
+    limits: UPSTREAM_COMPLETED_EVENT_OUTPUT_TRUNCATION_LIMITS,
     outputPath: "result",
     payload,
   });

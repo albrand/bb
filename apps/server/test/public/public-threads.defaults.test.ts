@@ -360,7 +360,6 @@ describe("public thread default routes", () => {
         reasoningLevel: "low",
         permissionMode: "auto",
       });
-      // Codex used afterwards: it becomes the project's latest provider.
       upsertProjectExecutionDefaults(harness.db, {
         projectId: project.id,
         providerId: "codex",

@@ -2,37 +2,6 @@ import { eq } from "drizzle-orm";
 import type { DbConnection } from "../connection.js";
 import { maintenanceScanCursors } from "../schema.js";
 
-/**
- * Fork (albrand/bb): retention for file-change diffs.
- *
- * Upstream's completed-event output sweep truncates three string paths
- * (aggregatedOutput, result, resultText). A fileChange item stores its patches
- * in `$.item.changes`, a structured array of {path, kind, diff}, which that
- * sweep cannot touch: slicing the array's JSON text head and tail produces
- * invalid JSON. This truncates structurally instead. Every entry survives, so
- * the file list a thread renders stays complete, and only each entry's `diff`
- * string is shortened, with the truncation marker left inline because
- * ThreadEventFileChange has nowhere to record a truncation descriptor and
- * adding one would change a contract shared with the daemon and the plugin SDK.
- *
- * Both item/started and item/completed carry the same array, so both are
- * scanned: leaving one side whole re-inflates what the other side dropped.
- *
- * The already-truncated test is structural, not a substring search. A diff can
- * legitimately contain the marker text — a diff of this very file does, and on
- * the live database twelve command events quote it in their command line or
- * their output without having been truncated at all. A substring test would
- * exempt those from truncation forever. A truncated diff instead has an exact
- * shape: its length is head + marker + tail and the marker sits at exactly
- * `head`, which ordinary content cannot reach by accident.
- *
- * The cursor is seeded at the time of its first scan, so introducing this
- * target never rewrites the rows already on disk. Compacting those is a
- * separate, scheduled, backed-up pass.
- *
- * Deliberately not a drizzle migration: the index is created on demand, the
- * way the fork's other side tables are.
- */
 const FILE_CHANGE_DIFF_TRUNCATION_CURSOR_POLICY =
   "fork_file_change_diff_truncation";
 const FILE_CHANGE_DIFF_TRUNCATION_CURSOR_VERSION = 1;

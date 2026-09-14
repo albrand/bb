@@ -149,7 +149,7 @@ describe("ThreadActionsMenu", () => {
     return {
       type: "pane",
       paneId,
-      content: { kind: "thread", projectId: "proj_test", threadId },
+      content: { kind: "thread", projectId: thread.projectId, threadId },
     };
   }
 
@@ -223,7 +223,7 @@ describe("ThreadActionsMenu", () => {
       dir: "row",
       sizes: Array.from({ length: 8 }, () => 0.125),
       children: Array.from({ length: 8 }, (_, index) =>
-        pane(`pane-${index + 1}`, index === 4 ? "thr_test" : `other${index}`),
+        pane(`pane-${index + 1}`, index === 4 ? thread.id : `other${index}`),
       ),
     };
     renderMenu(layout, onOpenInSplit);

@@ -21,8 +21,6 @@ const USAGE: SpendUsageBreakdown = {
   totalTokens: 10_500,
 };
 
-// Fork (albrand/bb): the spend rollup the server maintains because the events
-// behind it are pruned out from under anything that polls for them.
 describe("spend rollup route", () => {
   it("groups onto one dimension and reports how partial the history is", async () => {
     await withTestHarness(async (harness) => {
@@ -58,8 +56,6 @@ describe("spend rollup route", () => {
       expect(byProvider.rows).toHaveLength(1);
       expect(byProvider.rows[0]?.providerId).toBe("codex");
       expect(byProvider.rows[0]?.totalTokens).toBe(USAGE.totalTokens * 4);
-      // A grouped row keeps a span, not a single time, so a consumer in another
-      // timezone can tell whether it straddles its own day boundary.
       expect(byProvider.rows[0]?.firstEventAt).toBeLessThan(
         byProvider.rows[0]?.lastEventAt ?? 0,
       );
@@ -93,9 +89,6 @@ describe("spend rollup route", () => {
         });
       }
 
-      // fork_spend_prices ships empty, so nothing is priced until somebody
-      // puts a rate in it. A null is visibly absent; a guessed rate would read
-      // as fact.
       const unpriced = spendRollupResponseSchema.parse(
         await readJson(
           await harness.app.request("/api/v1/spend/rollup?from=2026-09-01"),
@@ -115,7 +108,6 @@ describe("spend rollup route", () => {
         ),
       );
       const gpt5 = priced.rows.find((row) => row.model === "gpt-5");
-      // 1000 fresh at 1.25, 9000 cached at 0.125, 500 out at 10.0, per million.
       expect(gpt5?.costUsd).toBeCloseTo(
         (1_000 * 1.25 + 9_000 * 0.125 + 500 * 10.0) / 1_000_000,
         10,
@@ -124,8 +116,6 @@ describe("spend rollup route", () => {
         priced.rows.find((row) => row.model === "gpt-5-codex")?.costUsd,
       ).toBeNull();
 
-      // One unpriced row makes the group unpriced: a partial sum presented as a
-      // total is what an absent price exists to avoid.
       const grouped = spendRollupResponseSchema.parse(
         await readJson(
           await harness.app.request(
@@ -138,10 +128,6 @@ describe("spend rollup route", () => {
   });
 
   it("flags totals as a lower bound rather than a deficiency", async () => {
-    // A floor is not a shortfall. bb deletes usage events and leaves no trace of
-    // what it deleted, so there is no missing amount to report - and a consumer
-    // that reads `historyPartial` as "threads missing data" will render a gap
-    // bb never measured. `totalsAreLowerBound` is the flag to branch on.
     await withTestHarness(async (harness) => {
       ensureSpendTables(harness.db);
       applySpendContribution(harness.db, {

@@ -1,17 +1,5 @@
 import type { DbConnection } from "../connection.js";
 
-/**
- * Fork (albrand/bb): threads a daemon detached from on purpose.
- *
- * A graceful daemon exit leaves its provider workers running so the next
- * daemon can adopt them. Before exiting it names the threads it left
- * mid-turn, and the server holds off interrupting them for a while instead
- * of the usual 30 s, so a slow restart still finds them active. A row
- * expires on its own; a new daemon session for the host consumes them.
- *
- * Deliberately not a drizzle migration, for the same reason as the other
- * fork side tables: it must stay invisible to bb's migration history.
- */
 const DETACHED_THREADS_TABLE = "fork_detached_threads";
 
 const detachedThreadsTableReady = new WeakSet<object>();

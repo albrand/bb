@@ -2,11 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Fork (albrand/bb). A rebuilt app has a new signature, and macOS holds the
-// first keychain read (`safeStorage`) on an "allow access" prompt. If that read
-// comes before the local server starts, nothing runs until someone clicks, and
-// an unattended install leaves every agent down. main.ts is not unit-testable
-// as a whole, so this pins the order in its source.
 const mainSource = readFileSync(join(process.cwd(), "src/main.ts"), "utf8");
 
 describe("desktop startup order", () => {

@@ -4,16 +4,6 @@ import {
 } from "@bb/domain";
 import type { DbConnection } from "../connection.js";
 
-/**
- * Fork (albrand/bb), get-bb/bb#1787: the latest session settings a provider
- * reported for a thread.
- *
- * Deliberately neither a drizzle migration nor a stored thread event. A stored
- * event with a type an official build does not know makes its strict event
- * parse throw, which breaks the thread's event log and timeline after a
- * rollback. A table created here is invisible to the migration history, the
- * official app ignores it, and dropping it loses nothing but the report.
- */
 const EXECUTION_REPORTS_TABLE = "fork_thread_execution_reports";
 
 interface ExecutionReportRow {

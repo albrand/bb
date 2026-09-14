@@ -115,7 +115,6 @@ type ClaimedQueuedMessage = Exclude<
 interface SendClaimedQueuedMessageArgs {
   mode: SendQueuedMessageMode;
   queuedMessages: ClaimedQueuedMessage[];
-  /** True for an explicit "send now"; false for an ordinary drain. */
   sendNow: boolean;
   threadId: string;
 }
@@ -132,10 +131,6 @@ export function createAutomaticQueuedMessageGroupEligibility(
   args: { now: number; thread: Thread },
 ): QueuedThreadMessageGroupEligibility {
   const activeTurnId = getActiveTurnId(deps, args.thread.id);
-  // Read once here rather than per member inside the claim transaction. A
-  // backoff only the due sweep honoured would be no backoff at all: the idle
-  // drain re-claims a `thread-busy` row on every sweep tick without ever
-  // consulting a clock, so every automatic claim has to ask the same question.
   const deferredRetryIds = listDeferredQueuedMessageDispatchRetryIds(deps.db, {
     now: args.now,
     threadId: args.thread.id,
@@ -252,10 +247,6 @@ export async function createQueuedMessageForThread(
           reasoningLevel: execution.reasoningLevel,
           permissionMode: execution.permissionMode,
           serviceTier: execution.serviceTier,
-          // An explicit "queue this" is a message waiting for the running turn
-          // to end, which is exactly `thread-busy`. Naming it rather than
-          // leaving the wait null keeps every row on one vocabulary, and the
-          // idle drain treats the two identically anyway.
           waitingOn: { kind: "thread-busy" },
           sendAt: null,
           payload: { kind: "inline" },
@@ -444,13 +435,6 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   if (args.mode !== "auto") {
     return null;
   }
-  // This fast path dispatches straight to the daemon, bypassing the dispatch
-  // checkpoint. With a hook installed the drain takes the general path instead,
-  // so there is exactly one place a turn is decided about. With none (the
-  // overwhelming case) this check is a boolean and the drain is byte-for-byte
-  // what it was before the queue carried waits: the row it claims is already
-  // known drainable, so every core wait it could hit has been answered by the
-  // claim query itself.
   if (hasMessageDispatchHooks()) {
     return null;
   }
@@ -495,9 +479,6 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   );
   const initiator: ThreadTurnInitiator =
     senderThreadId === null ? "user" : "agent";
-  // A retry row's model is provenance — the failed attempt's tuple, replayed —
-  // not a model the user picked for this row, so it must not become the
-  // thread's sticky override the way a composed queued message's choice does.
   if (initiator === "user" && queuedMessage.payload.kind !== "retry") {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
@@ -609,15 +590,6 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   return queuedMessage;
 }
 
-/**
- * Delivers a claimed row that is one of core's own system notices.
- *
- * Such a row is not a user dispatch and does not go through the checkpoint:
- * it is an `initiator: "system"` turn with its own taxonomy and its own
- * dispatch path, and the only reason it was on the queue at all is that the
- * queue is where a blocked dispatch waits. Null when the row is an ordinary
- * message, which is every row but these.
- */
 async function sendClaimedSystemNotice(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendClaimedQueuedMessageForThreadArgs,
@@ -637,8 +609,6 @@ async function sendClaimedSystemNotice(
     systemMessageSubject: notice.subject,
   });
   if (!delivered) {
-    // The thread changed under the drain. Leave the row claimed-and-released
-    // by the caller's error path rather than consuming a notice nobody got.
     throw createQueuedMessageClaimLostError();
   }
   const consumed = deps.db.transaction(
@@ -655,15 +625,6 @@ async function sendClaimedSystemNotice(
   return queuedMessage;
 }
 
-/**
- * Re-attempts a claimed group through the dispatch checkpoint.
- *
- * The drain is nothing but a re-attempt: the same checkpoint runs, so a row
- * whose wait cleared but whose thread went busy in the meantime simply queues
- * again on the new reason rather than dispatching into a running turn. The
- * claim the caller already won is handed to the attempt, which either consumes
- * it inside the dispatch transaction (exactly once) or gives it back.
- */
 async function sendClaimedQueuedMessageForThread(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendClaimedQueuedMessageForThreadArgs,
@@ -717,10 +678,6 @@ async function sendClaimedQueuedMessageForThread(
     trigger: "auto-dispatch",
   });
   if (args.sendNow && args.mode !== "steer" && outcome.kind === "queued") {
-    // "Send now" overrides every plugin wait and the row's own schedule, but
-    // not a core wait — those guard invariants rather than express a policy.
-    // The row is back on the queue with its new reason; say so rather than
-    // returning a success the caller would read as "it went".
     throw new ApiError(
       409,
       "queued_message_still_waiting",
@@ -730,7 +687,6 @@ async function sendClaimedQueuedMessageForThread(
   return queuedMessage;
 }
 
-/** The user-facing half of a core wait, for a refused "Send now". */
 function describeCoreWait(waitingOn: QueuedMessageWaitingOn | null): string {
   switch (waitingOn?.kind) {
     case "provisioning":
@@ -873,10 +829,6 @@ export async function sendNextQueuedMessageIfPresent(
     ) {
       return false;
     }
-    // Nobody is listening to this attempt, so the row itself has to carry what
-    // happened — either as a `host-offline` wait it can recover from, or as a
-    // failure reason the queued row renders. A host timeout is excluded: the
-    // command is still in flight, so the attempt has not failed yet.
     if (!isCommandTimeoutError(error)) {
       recordQueuedMessageDrainFailure(deps, {
         error,
@@ -899,28 +851,10 @@ export function releaseStaleQueuedMessageDispatchClaims(
   });
 }
 
-/**
- * Hands back every claim on the queue, for a server that has just started.
- *
- * A claim is an in-flight dispatch, and at startup there are none: whatever
- * held these rows died with the previous process. Waiting out
- * `STALE_QUEUED_MESSAGE_CLAIM_MS` instead would leave a row claimed moments
- * before a crash invisible for five minutes — the queue list, the thread
- * badges and every drain all filter claimed rows out — for a claim that is
- * already known to be dead.
- *
- * The live token set is still passed rather than an empty list. It is empty on
- * this path today, so it costs nothing, and it keeps the call safe if the
- * startup sweep ever moves after the listener opens: a request that claims a
- * row mid-sweep must not have that claim taken from under it.
- */
 export function releaseOrphanedQueuedMessageDispatchClaims(
   deps: Pick<AppDeps, "db" | "hub">,
 ): number {
   return releaseStaleQueuedMessageClaims(deps.db, deps.hub, {
-    // Every claim, not "every claim older than now": the bound is exclusive,
-    // so a cutoff of this instant keeps a claim taken in the same millisecond
-    // — which a warm process reaches easily, and which is still a dead claim.
     claimedBefore: null,
     protectedClaimTokens: [...activeQueuedMessageClaimTokens],
   });

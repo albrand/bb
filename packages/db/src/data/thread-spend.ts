@@ -1,27 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { DbConnection, DbQueryConnection } from "../connection.js";
 
-/**
- * Fork (albrand/bb): the spend ledger.
- *
- * `thread/tokenUsage/updated` is a prunable event type. The pruner keeps at
- * most two of them per thread below its cutoff — the latest root one and the
- * latest carrying a model context window — so the event store is a window onto
- * recent usage, not a record of it. Measured on a live database: 8,363
- * `client/turn/requested` events against 1,291 surviving usage events, and 350
- * of the 567 threads that still had any were down to a single one.
- *
- * Anything outside the server that wants spend has to poll, and polling races
- * the pruner: a thread that emits a thousand events between two reads has had
- * its usage history deleted before the second one. The server is the only place
- * that sees a usage event before it is pruned, which is why this table exists
- * here rather than in the plugin that draws the panels.
- *
- * Deliberately not a drizzle migration. bb validates its applied-migration
- * history, so a fork-numbered migration collides with upstream's next one and
- * can stop the official app from starting after a rollback. A table created
- * here is invisible to that history and an official build ignores it.
- */
 const DAILY_TABLE = "fork_thread_spend_daily";
 const CURSOR_TABLE = "fork_thread_spend_cursor";
 const PRICES_TABLE = "fork_spend_prices";
@@ -78,21 +57,13 @@ export interface SpendRollupRow {
   turns: number;
   firstEventAt: number;
   lastEventAt: number;
-  /** Null unless `fork_spend_prices` holds a rate for this provider+model. */
   costUsd: number | null;
 }
 
 export interface SpendCoverage {
   threads: number;
-  /** Threads counted from their first turn, so their totals are exact. */
   historyComplete: number;
-  /**
-   * Threads whose usage events bb had already deleted before the rollup
-   * existed. Their totals are lower bounds, not shortfalls: deletion leaves no
-   * trace, so there is no missing amount to report, only a floor.
-   */
   historyPartial: number;
-  /** True when any thread in the window contributes a floor rather than a total. */
   totalsAreLowerBound: boolean;
 }
 
@@ -104,16 +75,6 @@ const ZERO_USAGE: SpendUsageBreakdown = {
   totalTokens: 0,
 };
 
-/**
- * Published price ratios, normalised so fresh input is 1.
- *
- * These are RATIOS, not money. Both providers in use here are on flat
- * subscriptions, so a dollar figure derived from them would be invented. What
- * they buy is comparability: 34M tokens that are 99% cache reads and 34M tokens
- * that are all fresh input are the same number and wildly different burn, and
- * only the weighted view separates them. Dollars, if they are ever wanted, come
- * from `fork_spend_prices` at query time and stay absent until it is populated.
- */
 export const SPEND_WEIGHTS = {
   input: 1,
   cachedInput: 0.1,
@@ -128,31 +89,6 @@ export function spendWeightedUnits(usage: SpendUsageBreakdown): number {
   );
 }
 
-/**
- * Providers disagree about whether cached input is part of the input count or
- * beside it, and reading one convention as the other doubles a bill.
- *
- * Anthropic reports them disjointly — `inputTokens` is fresh only, cache reads
- * arrive separately, and `total = input + cached + output`. OpenAI/codex reports
- * `inputTokens` as the whole prompt with `cachedInputTokens` as the subset of it
- * served from cache, so `total = input + output`. Verified on live rows of each:
- * a claude-code turn at 8,295 + 2,065,773 + 11,062 = 2,085,130, and a codex turn
- * at 19,164,271 + 37,264 = 19,201,535.
- *
- * This table's contract is DISJOINT — `input_tokens` means fresh input and
- * nothing else — so the codex convention is normalised to it here, at the one
- * place a row is built. `totalTokens` is left as the provider reported it: it is
- * the arbiter that decides which convention a row is in, so adjusting it would
- * destroy the evidence.
- *
- * Which convention fits is decided by comparing the two residuals against that
- * total rather than by a tolerance. A tolerance reads correctly for a large
- * cached prefix and silently fails for a small one — a normalised row whose
- * cached part is under the tolerance still satisfies the inclusive test, so a
- * second pass subtracts the prefix again. Comparing residuals has no constant to
- * get wrong and is idempotent by construction: once a row is normalised it
- * satisfies the disjoint identity exactly and can never match again.
- */
 export function normalizeSpendUsage(
   usage: SpendUsageBreakdown,
   providerId: string,
@@ -181,15 +117,6 @@ export function normalizeSpendUsage(
   };
 }
 
-/**
- * The calendar day an event belongs to, on the machine running the server.
- *
- * Local rather than UTC because the person reading "today" reads it in their own
- * timezone, and a UTC key files late-evening work under tomorrow. The cost is
- * that a row cannot be re-bucketed into another timezone exactly — for that the
- * consumer needs `first_event_at`/`last_event_at`, which bound the row's real
- * time span and say whether it straddles a boundary at all.
- */
 export function spendLocalDay(at: number): string {
   const date = new Date(at);
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
@@ -207,31 +134,6 @@ export function emptySpendCursorState(sequence: number): SpendCursorState {
   };
 }
 
-/**
- * Fold one usage observation into a cursor, returning what it contributes.
- *
- * The live append path and the backfill both call this and nothing else does
- * the arithmetic, which is what makes "the backfill agrees with the live path"
- * a property rather than a coincidence.
- *
- * Three rules, each of which is a trap that has cost real accuracy:
- *
- *   * An event at or below the cursor's sequence contributes nothing. That is
- *     what makes a backfill idempotent, and what makes backfill-then-live and
- *     live-then-backfill produce the same table.
- *   * A re-emission contributes nothing. Codex repeats a usage event whose
- *     running total has not advanced — 509 of 6,342 in one measured session,
- *     +8.7% if counted. The comparison is against the LAST TOTAL RECORDED FOR
- *     THIS PROVIDER CONVERSATION, persisted in the cursor, so it holds across
- *     page boundaries, across daemon batches and across a server restart.
- *   * A total that moves BACKWARDS is a process restart, not a repeat. Codex's
- *     running total restarts at zero when its app-server process does — eight
- *     times in one session — so the guard is equality and never `<=`. Written as
- *     `<=` it would swallow every turn after a reset. The lower value simply
- *     becomes the new baseline, and the turn counts, because `last` is a
- *     per-turn delta and stays correct across the reset. Summing `last` rather
- *     than reading `total` is the whole reason resets are survivable.
- */
 export function foldTokenUsageObservation(
   state: SpendCursorState,
   observation: TokenUsageObservation,
@@ -276,37 +178,8 @@ export function foldTokenUsageObservation(
   };
 }
 
-/**
- * The pruner's smallest keep-recent window.
- *
- * It prunes with `sequenceCutoff = latestSequence - keepRecent` and does
- * nothing when that is not positive, so a thread whose latest sequence is at or
- * below the smallest window (archived threads, 120) provably cannot have had a
- * usage event deleted. Anything above it might have.
- */
 export const SPEND_PRUNE_SAFE_SEQUENCE = 120;
 
-/**
- * Whether a thread has been rewound by an edited message.
- *
- * The pruner is not the only thing that deletes usage events.
- * `deleteThreadEventSuffixInTransaction` removes every event in
- * [cutoffSequence, oldMaxSequence] when an earlier message is edited, usage
- * events with them, and a thread can be rewound while still far short of the
- * pruner's window - so the prune-safe proof would call it complete while its
- * recorded total was missing whatever the rewind took.
- *
- * The rewind leaves evidence that survives its own deletion: a
- * `system/operation` event with `operation: "edit_message"`, appended BEFORE
- * the range below it is removed and at a sequence above that range, because
- * sequences are allocated as max-per-thread. Seeing one is enough to refuse the
- * certainty; it is not enough to say how much was lost, which is exactly what
- * "partial" means.
- *
- * A thread whose cursor already exists is unaffected: those tokens were spent
- * and the rollup counted them as they arrived, so a later rewind does not make
- * the recorded total wrong.
- */
 export function hasThreadRewind(
   db: DbQueryConnection,
   args: { threadId: string },
@@ -321,26 +194,6 @@ export function hasThreadRewind(
   return row?.found === 1;
 }
 
-/**
- * The thread's latest sequence, which is what decides whether the pruner can
- * have taken a usage event from it.
- *
- * There is no way to see a deleted row, so completeness is inferred from the
- * pruner's own rule rather than asserted, and only one inference is sound: a
- * usage event at sequence `s` can only be deleted by a prune whose cutoff
- * reached it, which needs the thread's latest sequence to have been at least
- * `s + keepRecent`. Sequences only grow, so `latestSequence <= 120` proves no
- * usage event has ever been deleted from this thread.
- *
- * An earlier version also accepted "the rollup just stored the earliest
- * surviving usage event", which is not the same claim once the pruner has run
- * and is unsound exactly where it is the only thing firing. Ruling out the
- * deletion of an event at sequence 1 requires `latestSequence < 121` anyway, so
- * it collapsed into the rule above and only ever added false certainty.
- * Measured on a live database: all 14 threads the pruner had never run on had
- * their first usage event at sequence <= 120, so the sound rule already covers
- * every thread the unsound one would have.
- */
 export function getSpendThreadLatestSequence(
   db: DbQueryConnection,
   args: { threadId: string },
@@ -429,13 +282,6 @@ export interface SpendAssessmentRow {
   threadId: string;
 }
 
-/**
- * The answer to one analysis request, keyed by topic so a follow-up round
- * replaces the round it follows rather than accumulating.
- *
- * `payload_sha256` is the digest of exactly what was sent, so an assessment can
- * be checked against the numbers it was given rather than the numbers now.
- */
 export function recordSpendAssessment(
   db: DbQueryConnection,
   row: SpendAssessmentRow,
@@ -496,16 +342,6 @@ export function getSpendCursor(
   return row ?? null;
 }
 
-/**
- * `historyComplete` is three-valued on purpose: true, false, or not known now.
- *
- * Every live append saves a cursor, and most of them have no opinion about
- * whether the thread's early history survived - that is settled once, when the
- * cursor row is created. Writing `0` for "no opinion" reset every thread the
- * backfill had marked complete on its very next usage event, so coverage
- * converged on "every thread is partial" and both `bb spend` and the Hermes
- * payload reported it. An unknown is COALESCEd away instead.
- */
 export function saveSpendCursor(
   db: DbQueryConnection,
   args: {
@@ -537,13 +373,6 @@ export function saveSpendCursor(
   );
 }
 
-/**
- * Whether a thread's usage history survived intact, by the same rule the
- * backfill uses: its earliest surviving usage event is also its earliest
- * surviving event, so nothing was pruned out from under it.
- *
- * Asked once per thread, when its cursor row is created, not per event.
- */
 export function isSpendHistoryComplete(
   db: DbQueryConnection,
   args: { threadId: string },
@@ -607,14 +436,6 @@ export interface ListSpendRollupArgs {
   providerId?: string;
 }
 
-/**
- * Rows for a window, with dollars applied only where a price exists.
- *
- * `fork_spend_prices` ships empty, so `costUsd` is null everywhere until
- * somebody puts a rate in it. That is the point: both providers here are on
- * flat subscriptions, and a figure derived from a guessed rate reads as fact.
- * A null is visibly absent; a wrong number is not.
- */
 export function listSpendRollupRows(
   db: DbQueryConnection,
   args: ListSpendRollupArgs,
@@ -660,17 +481,6 @@ export function listSpendRollupRows(
   );
 }
 
-/**
- * Coverage for the same window the rows describe.
- *
- * Reported unscoped it described all history beside fourteen days of rows, and
- * the analysis payload carried that mismatch into its window header.
- *
- * A thread counts as complete only when EVERY provider conversation on it is.
- * Cursors are per conversation, so a thread resumed onto a second provider
- * session can hold one complete and one partial, and counting distinct complete
- * thread ids would have made the partial one disappear behind the complete one.
- */
 export function getSpendCoverage(
   db: DbQueryConnection,
   args: { from?: string; to?: string } = {},
@@ -715,19 +525,6 @@ export function countSpendCursors(db: DbQueryConnection): number {
 
 export { ZERO_USAGE as ZERO_SPEND_USAGE };
 
-/**
- * The model in force at a point in a thread's history.
- *
- * bb emits `client/turn/requested` once per turn, before the turn starts, for
- * every provider, and it carries the resolved execution settings. Reading the
- * latest one at or below the usage event's sequence attributes each turn to the
- * model actually in force, so a mid-thread model switch lands on the right side
- * of the change instead of flattening to one value for the thread.
- *
- * Called once per turn, not once per usage event: codex emits thousands of usage
- * events against a few hundred turns, and the cursor carries the answer between
- * them.
- */
 export function resolveSpendModel(
   db: DbQueryConnection,
   args: { threadId: string; sequence: number },
@@ -774,14 +571,6 @@ export interface SpendBackfillThreadRow {
   latestSequence: number;
 }
 
-/**
- * Threads with usage events still in the store, and how far each has run.
- *
- * `latestSequence` is what decides whether a backfilled thread can be called
- * complete: below the pruner's smallest window it cannot have lost a usage
- * event, and above it there is no way to tell from here, so the thread is
- * reported as partial and its total read as a floor.
- */
 export function listSpendBackfillThreads(
   db: DbQueryConnection,
 ): SpendBackfillThreadRow[] {

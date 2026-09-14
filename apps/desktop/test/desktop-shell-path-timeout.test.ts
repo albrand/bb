@@ -12,7 +12,7 @@ it.skipIf(process.platform !== "darwin")(
     try {
       writeFileSync(
         join(directory, ".zshrc"),
-        "integer finish=$((SECONDS + 6))\nwhile (( SECONDS < finish )); do :; done\n",
+        "integer finish=$((SECONDS + 12))\nwhile (( SECONDS < finish )); do :; done\n",
       );
       process.env.ZDOTDIR = directory;
       const env = { PATH: "/usr/bin:/bin" };
@@ -23,7 +23,7 @@ it.skipIf(process.platform !== "darwin")(
         platform: "darwin",
         logger: { warn() {} },
       });
-      expect(performance.now() - started).toBeLessThan(3500);
+      expect(performance.now() - started).toBeLessThan(11_500);
       expect(result).toEqual({ kind: "unchanged", reason: "shell-error" });
       expect(env.PATH).toBe("/usr/bin:/bin");
     } finally {
@@ -32,5 +32,5 @@ it.skipIf(process.platform !== "darwin")(
       rmSync(directory, { recursive: true, force: true });
     }
   },
-  10_000,
+  20_000,
 );

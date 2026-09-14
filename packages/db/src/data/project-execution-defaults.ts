@@ -10,11 +10,6 @@ import { projectExecutionDefaults } from "../schema.js";
 
 export interface GetProjectExecutionDefaultsArgs {
   projectId: string;
-  /**
-   * The provider whose remembered settings are wanted. Omitted, the project's
-   * most recently used provider is returned, which is what preselects a new
-   * thread.
-   */
   providerId?: string;
 }
 
@@ -31,20 +26,6 @@ export interface UpsertProjectExecutionDefaultsArgs extends GetProjectExecutionD
   updatedAt?: number;
 }
 
-/**
- * Fork (albrand/bb): settings remembered per provider.
- *
- * `project_execution_defaults` holds one row per project, so using a second
- * provider in a project overwrote the first provider's model and reasoning.
- * The latest provider's row stays there exactly as upstream writes it; this
- * side table keeps every provider's last settings.
- *
- * Deliberately not a drizzle migration. bb validates its applied-migration
- * history, so a fork-numbered migration collides with upstream's next one and
- * can stop the official app from starting after a rollback. A table created
- * here is invisible to that history, the official app ignores it, and
- * dropping it loses nothing but the remembered settings.
- */
 const PER_PROVIDER_TABLE = "fork_project_provider_execution_defaults";
 
 interface PerProviderRow {

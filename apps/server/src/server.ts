@@ -608,18 +608,12 @@ export function createApp(
         pluginId,
       });
     },
-    // `bb.experimental_hooks.recheck()`: a plugin whose wait condition
-    // may have changed asks core to re-attempt the plugin-queued rows. Core
-    // owns the walk, the coalescing and the pacing; the plugin owns knowing
-    // when to ask.
     requestQueueDrain: () => {
       requestQueuedMessageDispatch(deps, { kind: "plugin-recheck" });
     },
     watchBuiltinPluginSources:
       process.env.BB_MANAGED_DEV_BUILTIN_PLUGIN_HOT_RELOAD === "1",
   });
-  // Messages queued while a thread awaited user interaction stop waiting once
-  // that interaction settles (#1650); the idle drain then delivers them.
   deps.pendingInteractions.setThreadInteractionSettledListener((threadId) => {
     requestQueuedMessageDispatch(deps, {
       kind: "interaction-settled",
@@ -627,8 +621,6 @@ export function createApp(
     });
   });
   setPluginThreadEventEmitter(pluginService.events);
-  // Bridge the dispatch pipeline to this service's hooks. Until this runs
-  // there are no hooks, which is exactly the zero-overhead path.
   setPluginHookProvider(pluginService.hooks);
   setPluginEnvironmentProviderBridge(pluginService.environmentProviders);
   setEnvironmentProvisioningRecheckHandler((threadId) =>
@@ -649,7 +641,6 @@ export function createApp(
     deps.hub.notifySystem(["config-changed"]);
     void recheckEnvironmentProviderCreations(deps, pluginId);
   });
-  // Bridge runtime-config assembly to plugin skills + context (§4.4).
   setPluginAgentContributions(pluginService);
   const publicApi = new Hono();
   publicApi.use("*", async (context, next) => {

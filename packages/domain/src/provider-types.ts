@@ -39,7 +39,6 @@ const providerCapabilitiesSchema = z.object({
   supportsSessionRewind: z.boolean(),
   permissionModes: z.array(permissionModeSchema).min(1),
   modelCatalogScope: providerModelCatalogScopeSchema,
-  /** Absent = unknown. See `PluginProviderCapabilities.reportsTokenUsage`. */
   reportsTokenUsage: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof providerCapabilitiesSchema>;

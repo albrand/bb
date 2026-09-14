@@ -6,8 +6,6 @@ import { readJson } from "../helpers/json.js";
 import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
-// Fork (albrand/bb), get-bb/bb#1787: read back what a thread runs with, with
-// each value labelled for what it is.
 describe("thread execution profile", () => {
   it("separates the last request, the stored overrides and the next turn", async () => {
     await withTestHarness(async (harness) => {
@@ -36,7 +34,6 @@ describe("thread execution profile", () => {
           source: "tell",
         },
       });
-      // Chosen mid-turn: stored for the next turn, invisible until now.
       setThreadExecutionOverride(harness.db, {
         threadId: thread.id,
         reasoningLevelOverride: "max",

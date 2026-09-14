@@ -46,9 +46,6 @@ function shouldRememberProjectExecutionDefaults(args: {
   origin: ThreadCreateServiceRequest["origin"];
   originKind?: ThreadCreateServiceRequest["originKind"];
 }): boolean {
-  // Reusing an existing worktree is a one-off in a specific environment, not
-  // a fresh default-shaping event. Don't overwrite the project's stored
-  // execution defaults with the picker selections made for that single thread.
   if (args.environment.type === "reuse") return false;
   if (args.originKind !== null) return false;
   return args.origin === "app";
@@ -68,12 +65,6 @@ function resolveRequestedCreateExecutionValue<TValue>({
   return sources[field] === undefined ? undefined : value;
 }
 
-/**
- * Resolves the create's provider through the defaults ladder. This is the only
- * place a thread's provider is chosen: it is immutable afterwards, because a
- * provider session IS the conversation and no other provider can continue one
- * it never started.
- */
 export function resolveProjectExecutionDefaultsForCreate(
   deps: Pick<AppDeps, "db" | "providerRegistry">,
   args: ResolveProjectExecutionDefaultsForCreateArgs,
@@ -83,8 +74,6 @@ export function resolveProjectExecutionDefaultsForCreate(
     sources: args.executionInputSources,
     value: args.providerId,
   });
-  // A requested provider gets ITS remembered settings; none requested gets the
-  // project's most recently used provider.
   const storedDefaults = getProjectExecutionDefaults(deps.db, {
     projectId: args.projectId,
     ...(requestedProviderId ? { providerId: requestedProviderId } : {}),

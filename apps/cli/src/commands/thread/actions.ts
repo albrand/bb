@@ -117,10 +117,6 @@ interface PostThreadMessageArgs {
   sendAt?: number;
 }
 
-// The server's own answer plus the mode we asked for. `sendAt` used to be
-// echoed back here so the outcome line could name the time; the queued arm of
-// the response now carries it, along with the reason, so the CLI no longer
-// has to reconstruct what happened from the flags it sent.
 type PostThreadMessageResult = ThreadSendResult & {
   mode: ThreadTellDeliveryMode;
 };
@@ -598,9 +594,6 @@ function describeThreadTellOutcome(
   response: PostThreadMessageResult,
 ): string {
   if (response.delivery === "queued") {
-    // The server says WHY it is waiting, so the CLI does not have to guess
-    // from the flags it happened to send. `bb thread queue list` shows the
-    // same reason for the row afterwards.
     return `Thread ${threadId} message queued (${describeQueueWait(response.queuedMessage)}); it dispatches when that clears`;
   }
   if (response.refusal) {
@@ -611,11 +604,6 @@ function describeThreadTellOutcome(
     : `Thread ${threadId} updated`;
 }
 
-/**
- * What the retry did. A retry is a dispatch like any other, so it either went
- * or is waiting — and when it is waiting the server says why, exactly as `tell`
- * reports a queued send.
- */
 function describeThreadRetryOutcome(
   threadId: string,
   response: ThreadRetryResult,
@@ -629,10 +617,6 @@ function describeThreadRetryOutcome(
     : `Thread ${threadId} retrying ${turn}`;
 }
 
-/**
- * The daemon refused the turn: the message is on the thread as a failed turn,
- * not running. `stop` clears a turn the daemon still holds.
- */
 function describeRefusal(
   threadId: string,
   refusal: { code: string; message: string },
@@ -640,22 +624,11 @@ function describeRefusal(
   return `Thread ${threadId} refused the message: ${refusal.message}\nIt is recorded as a failed turn. If a turn is stuck, run \`bb thread stop ${threadId}\`, then \`bb thread retry ${threadId}\`.`;
 }
 
-/** One short phrase for a queued row's wait, shared by `tell` and `queue`. */
 export function describeQueueWait(row: {
-  /**
-   * Absent, rather than null, only for the retry response — a retry that has
-   * just queued has not had a drain attempt yet, so it has no failure to
-   * report and the contract gives it no field. Every caller rendering a row
-   * that has been sitting in the queue passes it.
-   */
   failureReason?: string | null;
   sendAt: number | null;
   waitingOn: QueuedMessageWaitingOn | null;
 }): string {
-  // A row the drain gave up on is not waiting for anything, and reading its
-  // wait back as "waiting for the current turn to start" is how a failed
-  // message looks like a healthy one in `bb thread queue list`. The wait is
-  // still there underneath — it is just no longer the interesting fact.
   if (row.failureReason !== undefined && row.failureReason !== null) {
     return `failed: ${row.failureReason}`;
   }

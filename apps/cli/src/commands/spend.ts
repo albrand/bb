@@ -72,13 +72,6 @@ function labelFor(
   return row.model === "" ? "unknown-model" : row.model;
 }
 
-/**
- * The machine that can run a Hermes review, if one is connected.
- *
- * A host is a candidate only if it actually exposes the provider: a connected
- * machine that does not is not a Hermes, and reporting one as available is how
- * a review comes back as a timeout instead of a clear refusal.
- */
 async function findHermesHost(
   sdk: BbSdk,
 ): Promise<{ id: string; name: string } | null> {
@@ -103,15 +96,6 @@ async function readThreadOutput(sdk: BbSdk, threadId: string): Promise<string> {
   return record.output ?? record.text ?? "";
 }
 
-/**
- * A checkout on the reviewer's machine to open the thread in.
- *
- * A reviewer reads the question, not the repository, but a thread still has to
- * open somewhere. The caller's own project usually has no source on the Hermes
- * box - the common default is the personal project, which cannot hold one at
- * all - so any project with a source there is borrowed. The borrowed project
- * decides only which directory the thread opens in.
- */
 async function findHermesWorkspace(
   sdk: BbSdk,
   args: { hostId: string; projectId: string },
@@ -138,20 +122,6 @@ async function findHermesWorkspace(
   return null;
 }
 
-/**
- * Send one analysis request to Hermes and return what it answers.
- *
- * Three behaviours here are carried over from `bb fleet validate`, which
- * discovered each of them the hard way:
- *
- *   * `threads.send` requires `mode`. Without it every send fails and a caller
- *     that swallows the error spawns a fresh reviewer instead of continuing;
- *   * waiting for `idle` on a thread that is ALREADY idle returns immediately,
- *     so the read returns the PREVIOUS answer as though it were new. The output
- *     before sending is captured and the new text has to differ;
- *   * a topic's thread is not archived, or the next round faces a reviewer that
- *     has never seen the round it is following up on.
- */
 async function consultHermes(
   sdk: BbSdk,
   args: {
@@ -175,10 +145,6 @@ async function consultHermes(
       providerId: HERMES_PROVIDER,
       visibility: "hidden",
       prompt: args.payload,
-      // `ThreadSpawnArgs` does not type `environment`, and a review thread has
-      // to open in a checkout on the reviewer's machine rather than the
-      // caller's. This is the boundary, so the cast stays here and narrows
-      // immediately into a thread id.
     } as never);
     const threadId = spawned.id;
     await sdk.threads.wait({
@@ -197,9 +163,6 @@ async function consultHermes(
 
   const threadId = args.threadId;
   const before = await readThreadOutput(sdk, threadId);
-  // `mode` is required by the route and absent from `ThreadSendArgs`. Omitting
-  // it makes every send fail, which is how the plugin this follows ended up
-  // spawning a fresh reviewer each round while believing it continued one.
   await sdk.threads.send({
     threadId,
     mode: "auto",
@@ -269,9 +232,6 @@ export function registerSpendCommands(
           );
           return;
         }
-        // The cost column appears only when a price exists for something in the
-        // window. bb ships no prices, so normally it does not, and a column of
-        // dashes would read as "free" rather than "not priced".
         const priced = result.rows.some((row) => row.costUsd !== null);
         console.log(
           renderBorderlessTable(
@@ -311,10 +271,6 @@ export function registerSpendCommands(
             "No dollar figure: fork_spend_prices is empty and bb does not guess a rate.",
           );
         }
-        // A floor is not a shortfall, and the difference matters: bb deletes
-        // usage events and leaves no trace of what it deleted, so there is no
-        // missing amount to report. Saying "N threads are incomplete" invites
-        // the reader to imagine a gap bb could have measured and did not.
         if (result.coverage.totalsAreLowerBound) {
           console.log(
             `These are at-least figures. ${result.coverage.historyPartial} of ${result.coverage.threads} threads spent tokens before this rollup existed, and bb had already deleted that usage history.`,

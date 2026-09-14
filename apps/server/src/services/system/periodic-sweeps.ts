@@ -66,7 +66,6 @@ interface PluginScheduleSweeper {
 
 type PeriodicSweepDeps = LoggedPendingInteractionWorkSessionDeps & {
   pluginSchedules: PluginScheduleSweeper;
-  /** Liveness directory for `plugin:<id>` wait holders. */
   plugins: QueueWaitPluginDirectory;
 };
 
@@ -595,10 +594,6 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
 export async function runStartupRecoverySweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): Promise<void> {
-  // Every claim on the queue belongs to a dispatch that died with the previous
-  // process, so none of them is protecting anything. Handing them back here
-  // rather than waiting out the stale-claim window is what stops a row claimed
-  // moments before a crash from being invisible for five minutes.
   const releasedClaims = releaseOrphanedQueuedMessageDispatchClaims(deps);
   if (releasedClaims > 0) {
     deps.logger.info(

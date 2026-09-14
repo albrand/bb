@@ -41,23 +41,11 @@ export interface SpendRecordAssessmentArgs extends SpendAssessment {
   signal?: AbortSignal;
 }
 
-/**
- * Fork (albrand/bb): the server's own token totals.
- *
- * Present so an agent and a plugin read the same number the CLI prints, instead
- * of each re-deriving it from an event log the pruner is emptying underneath
- * them.
- */
 export interface SpendArea {
-  /**
-   * Exactly what an analysis request would send, and its digest. Nothing is
-   * sent by reading it.
-   */
   analysisPayload(
     args?: SpendAnalysisPayloadArgs,
   ): Promise<SpendAnalysisPayloadResult>;
   assessments(args?: SpendAssessmentListArgs): Promise<SpendAssessmentListResult>;
-  /** Replay the usage events still in the store. Safe to run repeatedly. */
   backfill(args?: SpendBackfillArgs): Promise<SpendBackfillResult>;
   recordAssessment(args: SpendRecordAssessmentArgs): Promise<SpendAssessment>;
   rollup(args?: SpendRollupArgs): Promise<SpendRollupResult>;

@@ -63,9 +63,6 @@ describe("thread runtime stop", () => {
 
   it("interrupts when the daemon declines a release to keep an active turn", async () => {
     await withTestHarness(async (harness) => {
-      // The server believes the thread is idle, but the daemon still holds a
-      // turn that never reported completion. Left in place, every later send
-      // is refused with "Refusing to start a competing turn".
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "idle", visibility: "hidden" },
       });

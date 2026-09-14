@@ -64,13 +64,6 @@ import type {
   StandardSchemaV1Result,
 } from "../rpc-contract.js";
 
-/**
- * Shared registration policy for the real plugin host and the in-process fake.
- *
- * These rules decide whether `bb.*.register()` throws. The fake host must
- * accept and reject the same names, schemas, and caps as production so plugin
- * unit tests are not lying about load-time behavior.
- */
 
 export { RESERVED_BB_CLI_COMMANDS };
 
@@ -82,17 +75,10 @@ export function pluginCliCollisionWarning(
   return `CLI command "${commandName}" collides with core command "bb ${commandName}"; core keeps the short form. Use "bb plugin run ${pluginId}" to invoke this plugin.`;
 }
 
-/**
- * Built-in dynamic tool names plugins may not shadow. Maintained by hand —
- * kept in sync with the built-in tools in
- * apps/server/src/services/threads/thread-runtime-config.ts by
- * apps/server/test/services/plugins/plugin-agent-tools.test.ts.
- */
 export const RESERVED_AGENT_TOOL_NAMES: readonly string[] = [
   "update_environment_directory",
 ];
 
-/** JSON values ≤256KB; larger writes are rejected with a clear error. */
 export const KV_VALUE_MAX_BYTES = 256 * 1024;
 
 const PLUGIN_HTTP_METHODS: ReadonlySet<string> = new Set([
@@ -105,16 +91,12 @@ const PLUGIN_HTTP_METHODS: ReadonlySet<string> = new Set([
   "OPTIONS",
 ]);
 
-// Rpc method names become URL path segments.
 const RPC_METHOD_PATTERN = /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*$/;
 
-// Service/schedule names appear in status text and plugin_schedules rows.
 const BACKGROUND_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
-// CLI command names become `bb <name>` invocations.
 const CLI_COMMAND_NAME_PATTERN = /^[a-z0-9-]+$/;
 
-// Agent tool names are shown to (and called by) the model.
 const AGENT_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 export const PLUGIN_PROVIDER_ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 export const PLUGIN_PROVIDER_ENV_MAX_ENTRIES = 32;
@@ -163,22 +145,16 @@ export function validatePluginProviderEnvEntries(
 }
 
 const PLUGIN_AGENT_STATIC_INSTRUCTIONS_MAX_CHARS = 4096;
-/** Status labels ride on every tool-call event and share one timeline row. */
 export const PLUGIN_AGENT_STATUS_LABEL_MAX_CHARS = 80;
 const PLUGIN_AGENT_SELECTION_MAX_IDS = 256;
 const PLUGIN_AGENT_DYNAMIC_INSTRUCTIONS_MAX_CHARS = 4096;
 const PLUGIN_AGENT_TOOL_PARAMETERS_MAX_BYTES = 128 * 1024;
 
-// Mention provider ids prefix wire item ids ("<providerId>:<itemId>"), so
-// ":" is excluded to keep the split unambiguous.
 const MENTION_PROVIDER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
-// Agent provider ids are stable public identifiers: thread rows persist them
-// and routes/pickers reference them. 2-64 chars, lowercase.
 export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
 export const PLUGIN_PROVIDER_BRIDGE_OPTIONS_MAX_BYTES = 64 * 1024;
 
-// Settings keys become file names (secrets) and CLI arguments.
 export const SETTING_KEY_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 const settingsBaseFields = {
@@ -207,8 +183,6 @@ const settingDescriptorSchema = z.discriminatedUnion("type", [
       default: z.string().optional(),
     })
     .strict()
-    // A secret is edited in a one-line password field and never echoed back,
-    // so a multi-line secret has no rendering; refuse the pair at define time.
     .refine(
       (descriptor) =>
         !(
@@ -255,11 +229,6 @@ const settingDescriptorSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
-/**
- * Validate freeform descriptors from plugin code and merge them into the
- * plugin's registered schema. Plugin source is not type-safe at runtime, so
- * both the production and fake hosts must enforce this boundary identically.
- */
 export function registerSettingDescriptors(
   target: PluginSettingDescriptors,
   added: Record<string, unknown>,
@@ -334,7 +303,6 @@ function settingSchemaError<T extends string | number | boolean>(
   }
 }
 
-/** Validate a settings update. `null` means unset. */
 export function validateSettingsUpdate(
   descriptors: PluginSettingDescriptors,
   values: Record<string, unknown>,
@@ -516,9 +484,6 @@ export const PLUGIN_PROVIDER_COMPOSER_ACTION_VALUES = [
   "goal",
 ] as const satisfies readonly PluginProviderComposerAction[];
 
-/** Plugin-relative path rules shared by provider icon assets and bridge
- * entries — the manifest entry-path escape rules, minus the rootDir resolve
- * (the SDK has no rootDir): relative, no ".." segments, no backslashes. */
 function validateProviderRelativePath(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`provider ${label} must be a non-blank relative path`);
@@ -892,14 +857,6 @@ function validateProviderEnvPassthrough(
   return Object.freeze([...seen]);
 }
 
-/**
- * A provider's own skill or command roots: the declaration's input form
- * (paths or paths with options) checked and normalized with the domain's own
- * schemas, so this boundary and the wire schema the daemon parses accept
- * exactly the same roots. Relative paths without dot segments, unique per
- * side, at most 32 per side; `ancestors` only on `project`; a name prefix is
- * a plugin-name-like token ending in ':'.
- */
 function validateProviderNativeRoots(
   providerId: string,
   field: "experimental_nativeSkillRoots" | "experimental_nativeCommandRoots",
@@ -935,11 +892,6 @@ const PROVIDER_MODEL_CATALOG_SCOPES = [
   "workspace",
 ] as const satisfies readonly PluginProviderModelCatalogScope[];
 
-/**
- * How far one `model/list` answer travels. Absent means `"workspace"`: a
- * bridge bb knows nothing about may read the workspace path, and probing per
- * workspace is the answer that can only cost a redundant probe.
- */
 function validateProviderModelCatalogScope(
   providerId: string,
   value: unknown,
@@ -958,10 +910,6 @@ function validateProviderModelCatalogScope(
   return value as PluginProviderModelCatalogScope;
 }
 
-/**
- * Returns undefined when the declaration carries `models` for a
- * reason other than a fallback list — `scope` alone is a valid declaration.
- */
 function validateProviderFallbackModels(
   providerId: string,
   value: unknown,
@@ -1100,14 +1048,6 @@ function validateProviderFallbackModels(
 
 const AI_SERVICE_KINDS = new Set<PluginAiServiceKind>(["inference", "voice"]);
 
-/**
- * AI-service ids the server serves itself: `openai` transcription and the
- * builtin inference providers (pi-ai 0.84). A plugin cannot register one —
- * it would capture the user's prompts and audio. This list is the one source
- * for both the fake host and production (`isServerDirectAiServiceId`);
- * apps/server/test/services/plugins/plugin-ai-services.test.ts pins it to
- * pi-ai's provider registry, so a pi-ai bump must move it in the same change.
- */
 export const SERVER_DIRECT_AI_SERVICE_IDS: readonly string[] = Object.freeze([
   "openai",
   "amazon-bedrock",
@@ -1150,11 +1090,6 @@ export const SERVER_DIRECT_AI_SERVICE_IDS: readonly string[] = Object.freeze([
   "zai-coding-cn",
 ]);
 
-/**
- * Validate one `bb.experimental_aiServices.register` declaration the same
- * way in the production host and the fake host. Throws on the first problem;
- * returns a normalized, frozen copy carrying only contract fields.
- */
 export function validatePluginAiServiceDeclaration(
   declaration: PluginAiServiceDeclaration,
 ): PluginAiServiceDeclaration {
@@ -1200,37 +1135,13 @@ export function validatePluginAiServiceDeclaration(
   });
 }
 
-/**
- * What an AI service binds to, decided at the
- * `bb.experimental_aiServices.register` call: the plugin's built `bb.host`
- * artifact, or — when the plugin declares an entry that failed to build —
- * nothing yet, with the build problem. An unbound service is staged so the
- * factory completes; the load then fails on that problem before the staged
- * registrations flush, so the service never goes live, while a provider the
- * same factory declared can still be retained as unavailable.
- */
 export type AiServiceHostBinding<THostArtifact> =
   | { readonly artifact: THostArtifact; readonly problem: null }
   | { readonly artifact: null; readonly problem: string };
 
-/**
- * The refusals a host makes at `bb.experimental_aiServices.register` before
- * it stages the declaration: a reserved server-direct id, and a plugin with
- * no `bb.host` entry for the service to run on. A plugin whose declared
- * entry failed to build is not refused here: the service is staged unbound,
- * carrying the build problem, so the load fails on that problem — the
- * actionable one — after the factory instead of at this call, and a
- * provider the same factory declares is listed as unavailable rather than
- * lost. Returns what the service binds to. The production host and the fake
- * host both call this, so they refuse identically;
- * apps/server/test/services/plugins/plugin-ai-services.test.ts pins the
- * messages.
- */
 export function assertAiServiceRegistrable<THostArtifact>(args: {
   id: string;
-  /** The plugin's built `bb.host` artifact, or null when it has none. */
   hostArtifact: THostArtifact | null;
-  /** Why the artifact is missing when the plugin declared an entry that failed to build. */
   hostArtifactProblem: string | null;
 }): AiServiceHostBinding<THostArtifact> {
   if (SERVER_DIRECT_AI_SERVICE_IDS.includes(args.id)) {
@@ -1249,31 +1160,14 @@ export function assertAiServiceRegistrable<THostArtifact>(args: {
   );
 }
 
-/** The collision a second registration of a live AI-service id raises. */
 export function aiServiceAlreadyRegisteredMessage(id: string): string {
   return `AI service "${id}" is already registered; a plugin cannot shadow an existing service.`;
 }
 
-/** The collision a second registration of a live provider id raises. */
 export function providerAlreadyRegisteredMessage(id: string): string {
   return `Provider "${id}" is already registered; a plugin cannot shadow an existing provider.`;
 }
 
-/**
- * Validate one `bb.providers.register` declaration. Plugin
- * sources are untyped at runtime, so every field is checked; the production
- * host and the fake host both call this, so they accept and reject provider
- * declarations identically. Throws a descriptive error on the first problem;
- * returns a normalized, deeply frozen copy carrying only contract fields.
- */
-/**
- * A declaration that has been through {@link validatePluginProviderDeclaration}.
- *
- * The validator fills the defaults it owns, so a consumer reads one explicit
- * value rather than re-deciding what an absent field means. Only the fields
- * the validator GUARANTEES are narrowed here; everything else keeps the
- * author-facing shape.
- */
 export type NormalizedPluginProviderDeclaration = Omit<
   PluginProviderDeclaration,
   | "experimental_nativeSkillRoots"
@@ -1294,12 +1188,6 @@ export type NormalizedPluginProviderDeclaration = Omit<
   };
 };
 
-/**
- * Declaration fields SDK 0.4.16 renamed when they stabilized (S2). A plugin
- * built against an SDK before 0.4.16 still passes the old key; a validator
- * that reads only the new one would drop the field without a word, so the
- * old key is a registration error that names its replacement.
- */
 const RENAMED_PROVIDER_DECLARATION_FIELDS: Readonly<Record<string, string>> =
   Object.freeze({
     experimental_family: "family",
@@ -1312,7 +1200,6 @@ const RENAMED_PROVIDER_DECLARATION_FIELDS: Readonly<Record<string, string>> =
     experimental_deriveProviderOptions: "deriveProviderOptions",
   });
 
-/** The `capabilities.*` booleans SDK 0.4.16 moved into `maintenance`. */
 const MOVED_PROVIDER_CAPABILITY_FIELDS: Readonly<Record<string, string>> =
   Object.freeze({
     experimental_providerHealth: "maintenance.health",
@@ -1320,11 +1207,6 @@ const MOVED_PROVIDER_CAPABILITY_FIELDS: Readonly<Record<string, string>> =
     experimental_providerInstallation: "maintenance.installation",
   });
 
-/**
- * The `experimental_` declaration keys {@link validatePluginProviderDeclaration}
- * still reads. Keep this in step with the reads below: a key listed here but
- * never read is the silent drop this check exists to prevent.
- */
 const READ_EXPERIMENTAL_PROVIDER_DECLARATION_FIELDS: ReadonlySet<string> =
   new Set([
     "experimental_bridgeOptions",
@@ -1336,12 +1218,6 @@ const READ_EXPERIMENTAL_PROVIDER_DECLARATION_FIELDS: ReadonlySet<string> =
 
 const RENAMED_PROVIDER_FIELDS_SDK_VERSION = "0.4.16";
 
-/**
- * Reject every `experimental_`-prefixed own key of `value` that the validator
- * does not read. A renamed or moved key gets a message that names the new
- * key; any other prefixed key is unknown. `scope` prefixes the key in the
- * message (`"capabilities."`) so the author can find it.
- */
 function rejectStaleExperimentalFields(args: {
   providerId: string;
   value: object;
@@ -1381,10 +1257,6 @@ export function validatePluginProviderDeclaration(
       `invalid provider id ${JSON.stringify(id)} — use 2-64 lowercase letters, digits, and "-", starting with a letter or digit`,
     );
   }
-  // Before any other field: a plugin built against the pre-rename SDK gets
-  // the rename message, not a follow-on error about the field it could not
-  // set (an old `experimental_providerHealth: true` would otherwise fail the
-  // `experimental_visibility` check for a `maintenance.health` it never saw).
   rejectStaleExperimentalFields({
     providerId: id,
     value: declaration,
@@ -1424,13 +1296,6 @@ export function validatePluginProviderDeclaration(
         `provider "${id}" icon must be a non-blank string — a named host glyph ("Zap"), a plugin-relative path ("./icons/agent.svg"), or a declared icon ("<pluginId>/<name>")`,
       );
     }
-    // The `bb.branding.icon` forms plus one: a leading "./" means a
-    // plugin-owned file and gets the escape rules; "<pluginId>/<name>" names
-    // an entry of the plugin's `bb.branding.experimental_icons` map (the host
-    // checks the plugin id and the name at registration, since only it holds
-    // the manifest; `bb.branding.icon` itself refuses this form); anything
-    // else names a host glyph. A path-shaped value that is neither would
-    // otherwise be read as a glyph name that resolves to nothing.
     if (isPluginOwnedIconPath(declaration.icon)) {
       icon = validateProviderRelativePath(declaration.icon, `"${id}" icon`);
     } else if (isNamespacedGlyph(declaration.icon)) {
@@ -1455,9 +1320,6 @@ export function validatePluginProviderDeclaration(
     renamed: MOVED_PROVIDER_CAPABILITY_FIELDS,
     verb: "moved",
   });
-  // Maintenance support: an omitted object or key means the bridge does not
-  // implement that request. Filled here once, then an explicit boolean
-  // everywhere inside bb.
   const maintenance = declaration.maintenance ?? {};
   if (typeof maintenance !== "object" || maintenance === null) {
     throw new Error(`provider "${id}" maintenance must be an object`);
@@ -1552,8 +1414,6 @@ export function validatePluginProviderDeclaration(
       `provider "${id}" experimental_visibility "installed" requires maintenance.health`,
     );
   }
-  // Target-state declaration fields: validated and carried when present so
-  // WS2a can project them, never silently dropped.
   const strings =
     declaration.strings === undefined
       ? undefined
@@ -1582,8 +1442,6 @@ export function validatePluginProviderDeclaration(
     declaration.models === undefined
       ? undefined
       : validateProviderFallbackModels(id, declaration.models);
-  // Filled in at the boundary rather than left absent: every consumer reads
-  // one value, and the default is a decision this validator owns.
   const modelCatalogScope = validateProviderModelCatalogScope(
     id,
     declaration.models?.scope,
@@ -1664,13 +1522,6 @@ export function validatePluginProviderDeclaration(
   });
 }
 
-/**
- * Run a declaration's `deriveProviderOptions` hook for one
- * command and validate its result as a bounded, plain-JSON object — the same
- * rules as `experimental_bridgeOptions`, because the result rides the same
- * wire slot. Shared by the real host and the fake so a hook that works in
- * tests works in production.
- */
 export function deriveValidatedProviderOptions(args: {
   declaration: PluginProviderDeclaration;
   context: Parameters<
@@ -1723,8 +1574,6 @@ function readRpcMethodContract(
   return { input, output };
 }
 
-/** Duck-typed zod detection: plugin sources may carry their own zod copy,
- * so instanceof is useless — anything with safeParse is treated as zod. */
 type ZodSchemaLike = {
   safeParse: z.ZodType["safeParse"];
   toJSONSchema?: z.ZodType["toJSONSchema"];
@@ -1855,11 +1704,6 @@ function forEachJsonSchemaChild(
   }
 }
 
-/**
- * Reject recursive local references before a tool schema reaches a provider.
- * Some providers reject the complete tool list when any one schema contains a
- * recursive `$ref`, so this is a shared production/fake-host boundary rule.
- */
 function assertNoRecursiveJsonSchemaReferences(
   schema: unknown,
   subject: string,
@@ -1927,11 +1771,6 @@ function assertNoRecursiveJsonSchemaReferences(
   visit(schema);
 }
 
-/**
- * Registration fields SDK 0.4.16 renamed or folded away. A plugin compiled
- * against an older SDK still passes them, and dropping them silently would
- * change how its tool rows render, so each names its replacement.
- */
 const RENAMED_AGENT_TOOL_FIELDS: ReadonlyMap<string, string> = new Map([
   [
     "experimental_presentation",
@@ -1943,14 +1782,6 @@ const RENAMED_AGENT_TOOL_FIELDS: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
-/**
- * Reject the fields a registration never reads. Renamed fields get the
- * message above; any other `experimental_` field is unknown (the same
- * rule configure() output follows in the plugin service). The production
- * host and the fake host both call this before parsing `presentation`, so
- * a registration built against an older SDK fails a plugin's own unit test
- * with the message bb would give it.
- */
 function rejectStaleAgentToolFields(toolName: string, tool: object): void {
   const unknownKeys: string[] = [];
   for (const key of Object.keys(tool).sort()) {
@@ -1969,14 +1800,6 @@ function rejectStaleAgentToolFields(toolName: string, tool: object): void {
   }
 }
 
-/**
- * The declared shape of `presentation`, copied field by field so
- * a plugin's object cannot smuggle prototypes or extra markup into the
- * persisted row. Labels share the status-label length cap. The production
- * host and the fake host both call this, so a presentation that registers
- * in a plugin unit test registers in bb, and one bb rejects is rejected
- * with the same message.
- */
 export function parsePluginAgentToolPresentation(
   toolName: string,
   value: unknown,
@@ -2059,7 +1882,6 @@ export function parsePluginAgentToolPresentation(
   return presentation;
 }
 
-/** Compact issue summary from a (possibly foreign-instance) zod error. */
 export function summarizeStandardIssues(
   issues: readonly StandardSchemaV1Issue[],
 ): string {
@@ -2129,19 +1951,6 @@ export function enforcePluginCliOutputLimit(
     : { exitCode: 1, stdout: "", stderr: error.message, error };
 }
 
-/**
- * Adopt the value a plugin HTTP route handler returned.
- *
- * Plugin handlers can run in a different realm (jiti-loaded modules, bundled
- * fetch polyfills), so a valid `Response` from a handler can fail
- * `instanceof Response` in the host (#1661). Both the real host and the fake
- * host accept a structurally valid Response from any realm and re-wrap it
- * into a this-realm `Response`, so Hono always consumes a native object and a
- * malformed return still fails at the invoke boundary with a pointed error.
- *
- * The body streams through: a foreign `body` stream is piped chunk by chunk
- * with cancellation forwarded to the source, so no full-size buffer is made.
- */
 export function adoptHttpRouteResponse(value: unknown): Response {
   if (value instanceof Response) return value;
   if (!isResponseLike(value)) {
@@ -2164,8 +1973,6 @@ export function adoptHttpRouteResponse(value: unknown): Response {
 function adoptBodyStream(value: Response): ReadableStream<Uint8Array> {
   const source = value.body;
   if (!isReadableStreamLike(source)) {
-    // No usable stream (for example a body already consumed by a proxy):
-    // fall back to the buffered body so the route still returns its content.
     return new ReadableStream<Uint8Array>({
       async start(controller) {
         controller.enqueue(new Uint8Array(await value.arrayBuffer()));
@@ -2211,19 +2018,6 @@ function isResponseLike(value: unknown): value is Response {
   );
 }
 
-/**
- * The one rule for a namespaced glyph (`"<pluginId>/<name>"`) wherever a
- * plugin may reference its own declared icons — a tool presentation at
- * `bb.agents.registerTool`, a provider icon at `bb.providers.register`, and a
- * row presentation at ingest: the plugin id must be the emitting plugin's
- * and the name must be in its `bb.branding.experimental_icons` map. The
- * server and the fake plugin host apply it from here, so a registration the
- * fake accepts is one the server accepts.
- *
- * Returns the reason a glyph is refused, always naming the glyph and the
- * plugin, or null when the glyph is acceptable. A host glyph (no `/`) is
- * never refused here: whether the client can draw it is the client's call.
- */
 export function undeclaredIconProblem(
   pluginId: string,
   declaredIconNames: ReadonlySet<string>,
@@ -2239,7 +2033,6 @@ export function undeclaredIconProblem(
   return null;
 }
 
-/** `bb.providers.register` refusal for an icon {@link undeclaredIconProblem} rejects. */
 export function providerIconRefusalMessage(
   providerId: string,
   problem: string,
@@ -2247,7 +2040,6 @@ export function providerIconRefusalMessage(
   return `provider "${providerId}" icon ${problem}`;
 }
 
-/** `bb.agents.registerTool` refusal for a glyph {@link undeclaredIconProblem} rejects. */
 function agentToolIconRefusalMessage(
   toolName: string,
   problem: string,
@@ -2255,28 +2047,10 @@ function agentToolIconRefusalMessage(
   return `tool "${toolName}" presentation.icon ${problem}`;
 }
 
-/**
- * `bb.providers.register` refusal for a plugin whose manifest declares no
- * `bb.host` entry: a declaration is metadata, and the bridge it runs on is
- * that entry.
- */
 export function providerWithoutBridgeMessage(providerId: string): string {
   return `provider "${providerId}" has no bridge to run on: this plugin declares no "bb.host" entry in its manifest`;
 }
 
-/**
- * Files a hook handler under its key in a per-hook record.
- *
- * The record is a mapped type over the hook-name union, so writing to it
- * through a generic key is not expressible soundly in TypeScript: this call
- * site knows `handler` matches `hook`, but the checker only knows both range
- * over the union and so demands their intersection. The erasure is confined to
- * this one function; every READ is sound, because a slot is typed for its own
- * hook and the runner builds the context for the hook it read the handler from.
- *
- * Shared by the real host (`plugin-api.ts`) and the fake one so both register
- * hooks by the same rule, which is the point of every other helper here.
- */
 export function storePluginHook<K extends PluginHookName>(
   records: { [N in PluginHookName]: PluginHookHandler<N> | null },
   hook: K,
@@ -2285,7 +2059,6 @@ export function storePluginHook<K extends PluginHookName>(
   (records as Record<PluginHookName, unknown>)[hook] = handler;
 }
 
-/** The refusal a second handler for one hook from one plugin gets. */
 export function pluginHookAlreadyRegisteredMessage(
   hook: PluginHookName,
 ): string {
