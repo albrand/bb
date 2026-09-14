@@ -88,7 +88,7 @@ import {
 const PLUGIN_WIRE_HTTP_PATH = /^\/api\/v1\/plugins\/[^/]+\/http(?:\/|$)/u;
 import { rankAcceptedAssetEncodings } from "./asset-content-encoding.js";
 import { apiJsonCompression } from "./api-response-compression.js";
-import { buildUnclaimedAnswerMessage } from "./services/interactions/unclaimed-answer-message.js";
+import { planUnclaimedAnswerDelivery } from "./services/interactions/deliver-unclaimed-answer.js";
 import { createQueuedMessageForThread } from "./services/threads/queued-messages.js";
 import { getThread } from "@bb/db";
 
@@ -609,16 +609,23 @@ export function createApp(
   // instead, so the agent still gets what it asked for.
   deps.pendingInteractions.setUnclaimedPluginAnswerListener(
     ({ interaction, value }) => {
-      const text = buildUnclaimedAnswerMessage(interaction.payload, value);
-      if (text === null) return;
-      const thread = getThread(deps.db, interaction.threadId);
+      const delivery = planUnclaimedAnswerDelivery({ interaction, value });
+      if (delivery === null) return;
+      const thread = getThread(deps.db, delivery.threadId);
       if (!thread) return;
       void createQueuedMessageForThread(deps, {
         payload: {
-          input: [{ type: "text", text, mentions: [] }],
+          input: [{ type: "text", text: delivery.text, mentions: [] }],
         } as never,
         thread,
-      }).catch((error: unknown) => {
+      })
+        .then(() => {
+          requestQueuedMessageDispatch(deps, {
+            kind: "interaction-settled",
+            threadId: delivery.threadId,
+          });
+        })
+        .catch((error: unknown) => {
         deps.logger.warn(
           { err: error, threadId: interaction.threadId },
           "Could not queue an answer that arrived after its tool call ended",
