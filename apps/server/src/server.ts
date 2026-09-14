@@ -623,10 +623,6 @@ export function createApp(
       threadId,
     });
   });
-  // An answer that arrives after the provider stopped waiting for its tool
-  // call used to be dropped on the floor: the person had answered, the row
-  // said resolved, and nobody received it. It becomes a queued message
-  // instead, so the agent still gets what it asked for.
   deps.pendingInteractions.setUnclaimedPluginAnswerListener(
     ({ interaction, value }) => {
       const delivery = planUnclaimedAnswerDelivery({ interaction, value });
