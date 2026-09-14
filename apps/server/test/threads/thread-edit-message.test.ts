@@ -6,6 +6,7 @@ import {
   listEvents,
   listStoredProjectPromptHistoryRows,
   listStoredThreadPromptHistoryRows,
+  recordWorkspaceFileChanges,
   setExperiments,
 } from "@bb/db";
 import {
@@ -203,6 +204,7 @@ function seedEditableThread(
     providerId?: string;
     selectedCompletionStatus?: ThreadEventTurnStatus;
     threadStatus?: ThreadStatus;
+    includeWorkspaceAwareness?: boolean;
   } = {},
 ) {
   setExperiments(harness.db, {
@@ -228,6 +230,31 @@ function seedEditableThread(
     providerId: args.providerId ?? "codex",
     status: args.threadStatus ?? "idle",
   });
+  if (args.includeWorkspaceAwareness) {
+    const { project: neighbourProject } = seedProjectWithSource(harness.deps, {
+      hostId: host.id,
+      path: "/tmp/edit-message",
+    });
+    const neighbourEnvironment = seedEnvironment(harness.deps, {
+      hostId: host.id,
+      projectId: neighbourProject.id,
+      path: "/tmp/edit-message",
+      status: "ready",
+    });
+    const neighbourThread = seedThread(harness.deps, {
+      projectId: neighbourProject.id,
+      environmentId: neighbourEnvironment.id,
+      providerId: args.providerId ?? "codex",
+      status: "active",
+      title: "Workspace neighbour",
+    });
+    recordWorkspaceFileChanges(harness.db, {
+      hostId: host.id,
+      workspacePath: "/tmp/edit-message",
+      filePaths: ["src/shared.ts"],
+      candidateThreadIds: [thread.id, neighbourThread.id],
+    });
+  }
   if (args.includeIdentity !== false) {
     seedStoredEvent(harness.deps, {
       threadId: thread.id,
@@ -367,7 +394,9 @@ describe("editThreadMessage", () => {
 
   it("targets the latest user message when expectedRequestSequence is omitted, skipping agent turns", async () => {
     await withTestHarness(async (harness) => {
-      const { environment, thread } = seedEditableThread(harness);
+      const { environment, thread } = seedEditableThread(harness, {
+        includeWorkspaceAwareness: true,
+      });
       seedTurn(harness, {
         initiator: "agent",
         providerCheckpointId: "checkpoint-agent",
@@ -688,6 +717,7 @@ describe("editThreadMessage", () => {
       expect(JSON.parse(replacement?.data ?? "null")).toMatchObject({
         input: [{ type: "text", text: "Replacement message", mentions: [] }],
       });
+      expect(replacement?.data).not.toContain("Workspace awareness:");
       expect(getThread(harness.db, thread.id)).toMatchObject({
         status: "active",
       });
@@ -696,6 +726,12 @@ describe("editThreadMessage", () => {
         (queued) =>
           queued.command.type === "thread.start" &&
           queued.command.threadId === thread.id,
+      );
+      if (replacementStart.command.type !== "thread.start") {
+        throw new Error("Expected a replacement thread.start command");
+      }
+      expect(replacementStart.command.instructions).toContain(
+        "Workspace awareness:",
       );
       expect(
         listQueuedThreadCommands(harness, "thread.start", thread.id),
