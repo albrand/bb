@@ -36,7 +36,10 @@ import type { NotificationHub } from "../../ws/hub.js";
 import { resolveProviderPlanCommand } from "../providers/provider-plan-command.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
 import { listQueuedThreadMessageCountsByThreadIds } from "@bb/db";
-import { resolveEnvironmentWorkspaceDisplayKind } from "../environments/environment-response.js";
+import {
+  resolveEnvironmentWorkspaceDisplayKind,
+  toEnvironmentResponse,
+} from "../environments/environment-response.js";
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { toThreadEventWithMeta } from "./timeline.js";
 
@@ -219,11 +222,6 @@ export function resolveThreadRuntimeState(
 function resolveThreadRuntimeStateFromLatestSession(
   args: ResolveThreadRuntimeStateFromLatestSessionArgs,
 ): ThreadRuntimeState {
-  // A `pending` thread needs no special case: it is never `active`, so it
-  // falls straight through to `threadStatusRuntimeState`, which reports it as
-  // itself. This used to short-circuit to a separate `held` display status
-  // derived from live dispatch holds — the holds are gone and `pending` is the
-  // status, so the derivation and its second vocabulary went with them.
   if (args.status !== "active" || args.environmentHostId === null) {
     return threadStatusRuntimeState(args.status);
   }
@@ -361,10 +359,12 @@ export function toThreadResponseFromThread(
         threadIds: [args.thread.id],
       })[0]?.queuedMessageCount ?? 0,
     workspaceSharing: (() => {
-      const environment =
+      const environmentRow =
         args.thread.environmentId === null
           ? null
           : getEnvironment(deps.db, args.thread.environmentId);
+      const environment =
+        environmentRow === null ? null : toEnvironmentResponse(environmentRow);
       if (
         environment === null ||
         environment.managed ||
@@ -531,13 +531,6 @@ function buildThreadActivityStateByThreadId(
   return result;
 }
 
-/**
- * Whether each thread has queued work, from one grouped count over live queued
- * rows. Threads with an empty queue are absent, so the caller fills "none".
- *
- * A failure outranks a plain wait: a row that failed to go out is the one the
- * reader has to do something about, and a thread can easily hold both.
- */
 function buildThreadQueuedWorkByThreadId(
   deps: ThreadRuntimeDisplayDeps,
   threads: readonly Thread[],

@@ -54,12 +54,6 @@ type MessageDispatchHookContextOverrides = Omit<
   > | null;
 };
 
-/**
- * A complete, deterministic host response for faking `bb.sdk.hosts.list()`
- * and environment-provider contexts. Override only the fields the test cares
- * about. If the contract grows a required field, this builder fails
- * typecheck — update the default here.
- */
 export function makeHostResponse(
   overrides: Partial<HostResponse> = {},
 ): HostResponse {
@@ -85,12 +79,6 @@ export function makeHostResponse(
   };
 }
 
-/**
- * A complete, deterministic `ThreadResponse` for thread lifecycle event
- * payloads (`harness.emitThreadEvent`). Defaults are the minimal idle
- * thread; override the fields the test cares about. If the contract grows a
- * required field, this builder fails typecheck — update the default here.
- */
 export function makeThreadResponse(
   overrides: Partial<ThreadResponse> = {},
 ): ThreadResponse {
@@ -124,12 +112,6 @@ export function makeThreadResponse(
   };
 }
 
-/**
- * A complete, deterministic context for conditional agent configuration.
- * Defaults describe a standard project on an unmanaged local environment;
- * override the fields the test cares about. If the contract grows a required
- * field, this builder fails typecheck — update the default here.
- */
 export function makePluginAgentConfigurationContext(
   overrides: PluginAgentConfigurationContextOverrides = {},
 ): PluginAgentConfigurationContext {
@@ -180,12 +162,6 @@ export function makePluginAgentConfigurationContext(
   };
 }
 
-/**
- * A complete, deterministic context for the `message.dispatch` hook. Defaults
- * describe a first inline dispatch before an environment or host is selected;
- * override the fields the test cares about. If the contract grows a required
- * field, this builder fails typecheck — update the default here.
- */
 export function makeMessageDispatchHookContext(
   overrides: MessageDispatchHookContextOverrides = {},
 ): MessageDispatchHookContext {
@@ -301,13 +277,6 @@ export function makeMessageDispatchHookContext(
   };
 }
 
-/**
- * A complete, deterministic queued row for the `message.*` event payloads
- * and for faking `sdk.threads.queuedMessages.list`. Defaults are a live inline
- * row on this plugin's wait; override what the test is about. If the
- * contract grows a required field, this builder fails typecheck — update the
- * default here.
- */
 export function makeQueueEntry(
   overrides: Partial<QueueEntry> = {},
 ): QueueEntry {
@@ -337,13 +306,6 @@ export function makeQueueEntry(
   };
 }
 
-/**
- * A complete, deterministic `turn.failed` payload. Defaults are a first attempt
- * that failed inside a provider turn with neither structured error info nor
- * rate limits — the shape a retry policy must handle before it handles the
- * interesting ones. If the contract grows a required field, this builder fails
- * typecheck — update the default here.
- */
 export function makeTurnFailedEvent(
   overrides: Partial<TurnFailedEvent> = {},
 ): TurnFailedEvent {

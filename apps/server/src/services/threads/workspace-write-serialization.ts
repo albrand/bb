@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  getThreadPendingStartContext,
+  getEnvironment,
   heartbeatWorkspaceWriteClaims,
   releaseAllWorkspaceWriteClaims,
   releaseWorkspaceWriteClaims,
@@ -9,7 +9,8 @@ import {
 import type { DbQueryConnection } from "@bb/db";
 import type { Environment, Thread } from "@bb/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
-import { threadProvisionEnvironmentIntentSchema } from "./thread-provisioning-context.js";
+import { toEnvironmentResponse } from "../environments/environment-response.js";
+import { readThreadProvisionContext } from "./thread-startup-store.js";
 import { z } from "zod";
 
 const ownerToken = randomUUID();
@@ -49,23 +50,28 @@ function pendingWorkspaceWriteTarget(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
   threadId: string,
 ): { hostId: string; workspacePath: string } | null {
-  const raw = getThreadPendingStartContext(deps.db, threadId);
-  if (raw === null) return null;
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(raw);
-  } catch {
-    return null;
+  const context = readThreadProvisionContext(deps.db, threadId);
+  if (context === null) return null;
+  const { environmentIntent } = context.request;
+  if (environmentIntent.type === "reuse") {
+    const environment = getEnvironment(
+      deps.db,
+      environmentIntent.environmentId,
+    );
+    return workspaceWriteTarget(
+      environment === null ? null : toEnvironmentResponse(environment),
+    );
   }
-  const parsed = z
-    .object({ environmentIntent: z.unknown() })
-    .safeParse(decoded);
-  if (!parsed.success) return null;
-  const intent = threadProvisionEnvironmentIntentSchema.safeParse(
-    parsed.data.environmentIntent,
-  );
-  if (!intent.success || !("path" in intent.data)) return null;
-  return { hostId: intent.data.hostId, workspacePath: intent.data.path };
+  if (environmentIntent.machine.type !== "existing") return null;
+  const inputs = z
+    .object({ path: z.string().min(1) })
+    .passthrough()
+    .safeParse(environmentIntent.inputs);
+  if (!inputs.success) return null;
+  return {
+    hostId: environmentIntent.machine.hostId,
+    workspacePath: inputs.data.path,
+  };
 }
 
 export function releaseWorkspaceForThread(
