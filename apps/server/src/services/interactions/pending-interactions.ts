@@ -239,6 +239,11 @@ type PendingInteractionLifecycleArgs = CreateLifecycleDeps;
 
 export type ThreadInteractionSettledListener = (threadId: string) => void;
 
+export type UnclaimedPluginAnswerListener = (args: {
+  interaction: PendingInteraction;
+  value: JsonValue;
+}) => void;
+
 function buildInteractionChangeMetadata({
   db,
   hasPendingInteraction,
@@ -276,6 +281,8 @@ export class PendingInteractionLifecycle {
   private pluginDirectory: PendingInteractionPluginDirectory | null = null;
   private started = false;
   private interactionSettledListener: ThreadInteractionSettledListener | null =
+    null;
+  private unclaimedPluginAnswerListener: UnclaimedPluginAnswerListener | null =
     null;
 
   constructor(args: PendingInteractionLifecycleArgs) {
@@ -964,6 +971,41 @@ export class PendingInteractionLifecycle {
     this.notifyInteractionSettled(interaction.threadId);
   }
 
+  setUnclaimedPluginAnswerListener(
+    listener: UnclaimedPluginAnswerListener,
+  ): void {
+    this.unclaimedPluginAnswerListener = listener;
+  }
+
+  private reportUnclaimedPluginAnswer(
+    interactionId: string,
+    result: PluginInteractionResult,
+  ): void {
+    if (result.outcome !== "submitted") return;
+    let interaction: PendingInteraction;
+    try {
+      interaction = this.requireInteraction(interactionId);
+    } catch {
+      return;
+    }
+    this.deps.logger.warn(
+      { interactionId, threadId: interaction.threadId },
+      "An answer arrived after the provider stopped waiting for it",
+    );
+    if (!this.unclaimedPluginAnswerListener) return;
+    try {
+      this.unclaimedPluginAnswerListener({
+        interaction,
+        value: result.value,
+      });
+    } catch (error) {
+      this.deps.logger.warn(
+        { err: error, interactionId },
+        "Unclaimed plugin answer listener failed",
+      );
+    }
+  }
+
   private notifyInteractionSettled(threadId: string): void {
     if (!this.interactionSettledListener) {
       return;
@@ -1054,7 +1096,10 @@ export class PendingInteractionLifecycle {
     result: PluginInteractionResult,
   ): void {
     const waiter = this.pluginWaiters.get(interactionId);
-    if (!waiter) return;
+    if (!waiter) {
+      this.reportUnclaimedPluginAnswer(interactionId, result);
+      return;
+    }
     this.pluginWaiters.delete(interactionId);
     clearTimeout(waiter.timer);
     waiter.removeAbortListener();
