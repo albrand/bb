@@ -100,7 +100,7 @@ describe("workspace awareness", () => {
       });
       expect(input).toMatchObject({
         text: expect.stringContaining(
-          `src/shared.ts [${currentThread.id}, ${neighbourThread.id}]`,
+          `src/shared.ts [${[currentThread.id, neighbourThread.id].sort().join(", ")}]`,
         ),
       });
     } finally {
