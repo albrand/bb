@@ -1,4 +1,5 @@
-import type { DbConnection } from "../connection.js";
+import type { DbConnection, DbQueryConnection } from "../connection.js";
+import { sql } from "drizzle-orm";
 
 const TABLE = "fork_workspace_write_claims";
 const STALE_AFTER_MS = 90_000;
@@ -100,9 +101,23 @@ export function tryClaimWorkspaceWrite(
 }
 
 export function releaseWorkspaceWriteClaims(
-  db: DbConnection,
+  db: DbQueryConnection,
   args: { threadId: string; ownerToken?: string },
 ): void {
+  if (!("$client" in db)) {
+    if (args.ownerToken === undefined) {
+      db.run(
+        sql`DELETE FROM ${sql.raw(TABLE)} WHERE thread_id = ${args.threadId}`,
+      );
+      return;
+    }
+    db.run(
+      sql`DELETE FROM ${sql.raw(TABLE)}
+          WHERE thread_id = ${args.threadId}
+            AND owner_token = ${args.ownerToken}`,
+    );
+    return;
+  }
   ensureTable(db);
   if (args.ownerToken === undefined) {
     db.$client

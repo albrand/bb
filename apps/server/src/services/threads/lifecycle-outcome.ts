@@ -91,6 +91,12 @@ export function applyLoggedThreadLifecycleEventInTransaction(
   args: ApplyThreadLifecycleEventArgs,
 ): ApplyThreadLifecycleEventOutcome {
   const outcome = applyThreadLifecycleEventInTransaction(deps.db, args);
+  if (
+    outcome.applied &&
+    (outcome.thread.status === "idle" || outcome.thread.status === "error")
+  ) {
+    releaseWorkspaceForThread(deps, outcome.thread);
+  }
   logUnappliedThreadLifecycleEvent(deps.logger, args, outcome);
   emitPluginThreadLifecycleOutcome(outcome);
   announceTurnFailed(args, outcome);

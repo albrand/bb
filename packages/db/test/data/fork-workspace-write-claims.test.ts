@@ -60,6 +60,30 @@ describe("fork workspace write claims", () => {
     ).toEqual({ acquired: true });
   });
 
+  it("releases a holder when the lifecycle transaction commits", () => {
+    const db = createMigratedConnection();
+    tryClaimWorkspaceWrite(db, {
+      ...target,
+      threadId: "thread-1",
+      ownerToken: "owner-1",
+      now: 100,
+    });
+    db.transaction((tx) => {
+      releaseWorkspaceWriteClaims(tx, {
+        threadId: "thread-1",
+        ownerToken: "owner-1",
+      });
+    });
+    expect(
+      tryClaimWorkspaceWrite(db, {
+        ...target,
+        threadId: "thread-2",
+        ownerToken: "owner-2",
+        now: 101,
+      }),
+    ).toEqual({ acquired: true });
+  });
+
   it("reclaims a dead holder after the bounded lease expires", () => {
     const db = createMigratedConnection();
     tryClaimWorkspaceWrite(db, {

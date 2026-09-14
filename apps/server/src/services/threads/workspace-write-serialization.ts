@@ -6,6 +6,7 @@ import {
   releaseWorkspaceWriteClaims,
   tryClaimWorkspaceWrite,
 } from "@bb/db";
+import type { DbQueryConnection } from "@bb/db";
 import type { Environment, Thread } from "@bb/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { threadProvisionEnvironmentIntentSchema } from "./thread-provisioning-context.js";
@@ -50,9 +51,15 @@ function pendingWorkspaceWriteTarget(
 ): { hostId: string; workspacePath: string } | null {
   const raw = getThreadPendingStartContext(deps.db, threadId);
   if (raw === null) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    return null;
+  }
   const parsed = z
     .object({ environmentIntent: z.unknown() })
-    .safeParse(JSON.parse(raw));
+    .safeParse(decoded);
   if (!parsed.success) return null;
   const intent = threadProvisionEnvironmentIntentSchema.safeParse(
     parsed.data.environmentIntent,
@@ -62,7 +69,7 @@ function pendingWorkspaceWriteTarget(
 }
 
 export function releaseWorkspaceForThread(
-  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  deps: { db: DbQueryConnection },
   thread: Pick<Thread, "id">,
 ): void {
   releaseWorkspaceWriteClaims(deps.db, { ownerToken, threadId: thread.id });
