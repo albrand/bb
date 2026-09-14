@@ -358,11 +358,25 @@ export function toThreadResponseFromThread(
       listQueuedThreadMessageCountsByThreadIds(deps.db, {
         threadIds: [args.thread.id],
       })[0]?.queuedMessageCount ?? 0,
-    workspaceSharing: (() => {
+    workspaceSharing: ((): { threadCount: number } | null => {
+      try {
+        return resolveWorkspaceSharing(deps, args.thread);
+      } catch {
+        return null;
+      }
+    })(),
+  };
+}
+
+function resolveWorkspaceSharing(
+  deps: ThreadRuntimeDisplayDeps,
+  thread: Thread,
+): { threadCount: number } | null {
+  return ((): { threadCount: number } | null => {
       const environmentRow =
-        args.thread.environmentId === null
+        thread.environmentId === null
           ? null
-          : getEnvironment(deps.db, args.thread.environmentId);
+          : getEnvironment(deps.db, thread.environmentId);
       const environment =
         environmentRow === null ? null : toEnvironmentResponse(environmentRow);
       if (
@@ -378,8 +392,7 @@ export function toThreadResponseFromThread(
         workspacePath: environment.path,
       });
       return threadCount > 1 ? { threadCount } : null;
-    })(),
-  };
+  })();
 }
 
 function getThreadPromptBannerActivityState(
