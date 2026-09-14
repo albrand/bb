@@ -6,7 +6,7 @@ import {
   type StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk/app";
 import { Input } from "@bb/shared-ui/input";
-import { ResourceDetailPanel } from "@bb/shared-ui/resource-detail";
+import { ResourceDetailPanel } from "@bb/shared-ui/resource-list";
 import { MAX_LIMIT_VALUE, parseLimitValue } from "./limits.js";
 import type { concurrencyLimitRpcContract } from "./server.js";
 
