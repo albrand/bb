@@ -121,9 +121,9 @@ async function startTurnThenDetach(label: string) {
 
 async function plantEntryWithListener(
   label: string,
-  mutate: (
-    entry: Record<string, unknown>,
-  ) => Record<string, unknown> = (entry) => entry,
+  mutate: (entry: Record<string, unknown>) => Record<string, unknown> = (
+    entry,
+  ) => entry,
 ) {
   const dataDir = await fs.mkdtemp(path.join("/tmp", "bbw-"));
   tempDirs.push(dataDir);
@@ -359,6 +359,44 @@ describe("bridge worker adoption safety", () => {
     );
   });
 
+  it("adopts a format 1 worker by inferring the declared bridge capabilities", async () => {
+    const { createManager, dir, registered } =
+      await startTurnThenDetach("format-1-adopt");
+    const entryFile = (await fs.readdir(dir)).find((name) =>
+      name.endsWith(".json"),
+    );
+    if (entryFile === undefined) throw new Error("expected registry entry");
+    const entry = JSON.parse(
+      await fs.readFile(path.join(dir, entryFile), "utf8"),
+    ) as Record<string, unknown>;
+    delete entry.capabilities;
+    entry.formatVersion = 1;
+    entry.providerId = "claude-code";
+    await fs.writeFile(path.join(dir, entryFile), JSON.stringify(entry));
+
+    const adopting = createManager([]);
+    try {
+      await adopting.reconcileBridgeWorkers();
+      expect(adopting.listAdoptedBridgeThreads()).toEqual([
+        expect.objectContaining({ threadId: "t1" }),
+      ]);
+      const migrated = JSON.parse(
+        await fs.readFile(path.join(dir, entryFile), "utf8"),
+      ) as Record<string, unknown>;
+      expect(migrated).toMatchObject({
+        formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+        capabilitiesSource: "inferred",
+        capabilities: {
+          fork: "checkpoint",
+          approvalEnforcedBy: "provider",
+        },
+      });
+      expect(isProcessAlive(registered.pid)).toBe(true);
+    } finally {
+      await adopting.shutdownAll("detach");
+    }
+  }, 60_000);
+
   it("retires a worker whose entry never recorded a handshake instead of adopting it with default capabilities", async () => {
     const { dir, logger, manager, shutdowns, worker } =
       await plantEntryWithListener("no-handshake", (entry) => ({
@@ -386,7 +424,7 @@ describe("bridge worker adoption safety", () => {
     );
   });
 
-  it("retires a format 1 worker, whose entry carries no capabilities, over its socket", async () => {
+  it("retires a format 1 worker whose capabilities cannot be reconstructed", async () => {
     const { dir, logger, manager, shutdowns, worker } =
       await plantEntryWithListener("format-1", (entry) => {
         const { capabilities: _absent, ...formatOne } = entry;
@@ -405,8 +443,87 @@ describe("bridge worker adoption safety", () => {
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({
         adopted: [],
-        retired: [expect.objectContaining({ reason: "unparseable-entry" })],
+        retired: [
+          expect.objectContaining({ reason: "incompatible-registry-format" }),
+        ],
       }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
+  it("retires a worker with an incompatible bridge protocol version", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("protocol-version", (entry) => ({
+        ...entry,
+        bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION + 1,
+      }));
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [
+          expect.objectContaining({
+            reason: "incompatible-protocol-or-framing",
+          }),
+        ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
+  it("retires a worker with an incompatible transport version", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("transport-version", (entry) => ({
+        ...entry,
+        transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION + 1,
+      }));
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adopted: [],
+        retired: [
+          expect.objectContaining({
+            reason: "incompatible-protocol-or-framing",
+          }),
+        ],
+      }),
+      "Reconciled provider bridge workers left by a previous host daemon",
+    );
+  });
+
+  it("retires a live worker with no threads", async () => {
+    const { dir, logger, manager, shutdowns, worker } =
+      await plantEntryWithListener("no-threads", (entry) => ({
+        ...entry,
+        threads: {},
+      }));
+    try {
+      await manager.reconcileBridgeWorkers();
+    } finally {
+      worker.close();
+      await manager.shutdownAll("detach");
+    }
+
+    expect(shutdowns).toEqual(["requested"]);
+    expect(await registryFileNames(dir)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ adopted: [] }),
       "Reconciled provider bridge workers left by a previous host daemon",
     );
   });
