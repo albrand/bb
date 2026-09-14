@@ -6,22 +6,27 @@ const STALE_AFTER_MS = 90_000;
 
 const readyClients = new WeakSet<object>();
 
-function ensureTable(db: DbConnection): void {
-  if (readyClients.has(db.$client)) return;
-  db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS ${TABLE} (
-      host_id TEXT NOT NULL,
-      workspace_path TEXT NOT NULL,
-      thread_id TEXT NOT NULL,
-      owner_token TEXT NOT NULL,
-      acquired_at INTEGER NOT NULL,
-      heartbeat_at INTEGER NOT NULL,
-      PRIMARY KEY (host_id, workspace_path)
-    );
-    CREATE INDEX IF NOT EXISTS ${TABLE}_thread
-      ON ${TABLE} (thread_id);
-  `);
-  readyClients.add(db.$client);
+const CREATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${TABLE} (
+    host_id TEXT NOT NULL,
+    workspace_path TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    owner_token TEXT NOT NULL,
+    acquired_at INTEGER NOT NULL,
+    heartbeat_at INTEGER NOT NULL,
+    PRIMARY KEY (host_id, workspace_path)
+  )`;
+const CREATE_INDEX_SQL = `CREATE INDEX IF NOT EXISTS ${TABLE}_thread
+  ON ${TABLE} (thread_id)`;
+
+function ensureTable(db: DbQueryConnection): void {
+  if ("$client" in db) {
+    if (readyClients.has(db.$client)) return;
+    db.$client.exec(`${CREATE_TABLE_SQL}; ${CREATE_INDEX_SQL};`);
+    readyClients.add(db.$client);
+    return;
+  }
+  db.run(sql.raw(CREATE_TABLE_SQL));
+  db.run(sql.raw(CREATE_INDEX_SQL));
 }
 
 export interface WorkspaceWriteClaim {
@@ -104,6 +109,7 @@ export function releaseWorkspaceWriteClaims(
   db: DbQueryConnection,
   args: { threadId: string; ownerToken?: string },
 ): void {
+  ensureTable(db);
   if (!("$client" in db)) {
     if (args.ownerToken === undefined) {
       db.run(
@@ -118,7 +124,6 @@ export function releaseWorkspaceWriteClaims(
     );
     return;
   }
-  ensureTable(db);
   if (args.ownerToken === undefined) {
     db.$client
       .prepare<[string]>(`DELETE FROM ${TABLE} WHERE thread_id = ?`)

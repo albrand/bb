@@ -304,7 +304,6 @@ async function runDispatchAttempt(
     return { kind: "queued", entry };
   };
 
-
   const sendAt = payload.sendAt ?? null;
   if (!sendNow && sendAt !== null && sendAt > Date.now()) {
     return waitOn({ kind: "time" }, sendAt);
@@ -406,112 +405,120 @@ async function runDispatchAttempt(
     );
   }
 
+  try {
+    const admitted: { ran: boolean; value: PendingThreadAdmission | null } = {
+      ran: false,
+      value: null,
+    };
 
-  const admitted: { ran: boolean; value: PendingThreadAdmission | null } = {
-    ran: false,
-    value: null,
-  };
-
-  if (!sendNow && hasMessageDispatchHooks()) {
-    const outcome = await runMessageDispatchHookPass(deps, {
-      thread,
-      threadResponse: toThreadResponseFromThread(deps, { thread }),
-      project: requirePublicProject(deps.db, thread.projectId),
-      environmentId: thread.environmentId,
-      intendedHostId:
-        thread.environmentId !== null
-          ? null
-          : intendedThreadHostId(deps, thread.id),
-      environmentIntent: intendedThreadEnvironmentIntent(deps, thread),
-      input: payload.input,
-      requestedExecution: {
-        providerId: thread.providerId,
-        model: execution.model,
-        reasoningLevel: execution.reasoningLevel,
-        serviceTier: execution.serviceTier,
-        permissionMode: execution.permissionMode,
-      },
-      executionSources: dispatchExecutionSources(
-        payload.executionInputSources ?? {},
-      ),
-      attempt,
-      origin: args.origin,
-      originPluginId: args.originPluginId,
-      startedOnBehalfOf: args.startedOnBehalfOf,
-      parentThreadId: thread.parentThreadId,
-      queuedMessage:
-        claimed?.[0] === undefined ? null : toThreadQueuedMessage(claimed[0]),
-      ...(firstDispatch
-        ? {
-            commitAdmission: async () => {
-              admitted.ran = true;
-              admitted.value = await admitPendingThread(deps, {
-                claimed,
-                payload: resolvedPayload,
-                respectManualStopPause,
-                startContext: args.startContext ?? retryStartContext,
-                thread,
-              });
-            },
-          }
-        : {}),
-    });
-    if (outcome.kind === "wait") {
-      releaseWorkspaceForThread(deps, thread);
-      if (claimed !== null) {
-        noteDispatchRequeued(thread.id);
-      }
-      return waitOn(
-        {
-          kind: "plugin",
-          pluginId: outcome.waiter.pluginId,
-          reason: dispatchWaitReasonForPass(outcome),
+    if (!sendNow && hasMessageDispatchHooks()) {
+      const outcome = await runMessageDispatchHookPass(deps, {
+        thread,
+        threadResponse: toThreadResponseFromThread(deps, { thread }),
+        project: requirePublicProject(deps.db, thread.projectId),
+        environmentId: thread.environmentId,
+        intendedHostId:
+          thread.environmentId !== null
+            ? null
+            : intendedThreadHostId(deps, thread.id),
+        environmentIntent: intendedThreadEnvironmentIntent(deps, thread),
+        input: payload.input,
+        requestedExecution: {
+          providerId: thread.providerId,
+          model: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          serviceTier: execution.serviceTier,
+          permissionMode: execution.permissionMode,
         },
-        outcome.waiter.sendAt,
-      );
+        executionSources: dispatchExecutionSources(
+          payload.executionInputSources ?? {},
+        ),
+        attempt,
+        origin: args.origin,
+        originPluginId: args.originPluginId,
+        startedOnBehalfOf: args.startedOnBehalfOf,
+        parentThreadId: thread.parentThreadId,
+        queuedMessage:
+          claimed?.[0] === undefined ? null : toThreadQueuedMessage(claimed[0]),
+        ...(firstDispatch
+          ? {
+              commitAdmission: async () => {
+                admitted.ran = true;
+                admitted.value = await admitPendingThread(deps, {
+                  claimed,
+                  payload: resolvedPayload,
+                  respectManualStopPause,
+                  startContext: args.startContext ?? retryStartContext,
+                  thread,
+                });
+              },
+            }
+          : {}),
+      });
+      if (outcome.kind === "wait") {
+        releaseWorkspaceForThread(deps, thread);
+        if (claimed !== null) {
+          noteDispatchRequeued(thread.id);
+        }
+        return waitOn(
+          {
+            kind: "plugin",
+            pluginId: outcome.waiter.pluginId,
+            reason: dispatchWaitReasonForPass(outcome),
+          },
+          outcome.waiter.sendAt,
+        );
+      }
     }
-  }
 
-
-  if (firstDispatch) {
-    const admission = admitted.ran
-      ? admitted.value
-      : await admitPendingThread(deps, {
-          claimed,
-          payload: resolvedPayload,
-          respectManualStopPause,
-          startContext: args.startContext ?? retryStartContext,
-          thread,
-        });
-    if (admission === null) {
-      const current = getThread(deps.db, thread.id);
-      return reattemptDispatchForThreadChange(deps, args, current, reattempted);
-    }
-    await launchAdmittedThread(deps, admission);
-    return { kind: "dispatched" };
-  }
-
-  const environment = await requireThreadCommandEnvironment(deps, { thread });
-  const sent = await sendThreadMessage(deps, {
-    environment,
-    payload: resolvedPayload,
-    thread,
-    trigger: args.trigger,
-    ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-    ...(claimed === null
-      ? {}
-      : {
-          beforeAppendInTransaction: consumeClaimedRows(
+    if (firstDispatch) {
+      const admission = admitted.ran
+        ? admitted.value
+        : await admitPendingThread(deps, {
             claimed,
-            thread.id,
+            payload: resolvedPayload,
             respectManualStopPause,
-          ),
-        }),
-  });
-  if (claimed !== null) {
-    settleQueueRowDispatched({ row: claimed[0]! });
+            startContext: args.startContext ?? retryStartContext,
+            thread,
+          });
+      if (admission === null) {
+        const current = getThread(deps.db, thread.id);
+        return reattemptDispatchForThreadChange(
+          deps,
+          args,
+          current,
+          reattempted,
+        );
+      }
+      await launchAdmittedThread(deps, admission);
+      return { kind: "dispatched" };
+    }
+
+    const environment = await requireThreadCommandEnvironment(deps, { thread });
+    const sent = await sendThreadMessage(deps, {
+      environment,
+      payload: resolvedPayload,
+      thread,
+      trigger: args.trigger,
+      ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      ...(claimed === null
+        ? {}
+        : {
+            beforeAppendInTransaction: consumeClaimedRows(
+              claimed,
+              thread.id,
+              respectManualStopPause,
+            ),
+          }),
+    });
+    if (claimed !== null) {
+      settleQueueRowDispatched({ row: claimed[0]! });
+    }
+    return { kind: "dispatched", refusal: sent.refusal };
+  } catch (error) {
+    releaseWorkspaceForThread(deps, thread);
+    throw error;
   }
-  return { kind: "dispatched", refusal: sent.refusal };
 }
 
 function reattemptDispatchForThreadChange(
