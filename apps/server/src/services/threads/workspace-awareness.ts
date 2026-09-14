@@ -21,7 +21,14 @@ interface WorkspaceAwarenessCacheEntry {
 interface WorkspaceAwarenessEnvironment {
   hostId: string;
   path: string | null;
+  managed?: boolean;
   providerOwnsPath?: boolean;
+}
+
+function environmentProviderOwnsPath(
+  environment: WorkspaceAwarenessEnvironment,
+): boolean | undefined {
+  return environment.providerOwnsPath ?? environment.managed;
 }
 
 const cache = new Map<string, WorkspaceAwarenessCacheEntry>();
@@ -37,7 +44,10 @@ function readNeighbours(
   environment: WorkspaceAwarenessEnvironment,
   threadId: string,
 ): WorkspaceNeighbour[] {
-  if (environment.path === null || environment.providerOwnsPath !== false) {
+  if (
+    environment.path === null ||
+    environmentProviderOwnsPath(environment) !== false
+  ) {
     return [];
   }
   return db.$client
@@ -86,7 +96,7 @@ export function workspaceAwarenessInput(
   args: {
     environment: Pick<
       WorkspaceAwarenessEnvironment,
-      "hostId" | "path" | "providerOwnsPath"
+      "hostId" | "path" | "managed" | "providerOwnsPath"
     >;
     thread: Pick<Thread, "id">;
     now?: number;
@@ -97,7 +107,7 @@ export function workspaceAwarenessInput(
   if (
     key === null ||
     workspacePath === null ||
-    args.environment.providerOwnsPath !== false
+    environmentProviderOwnsPath(args.environment) !== false
   ) {
     return [];
   }
@@ -122,7 +132,7 @@ export function workspaceAwarenessInstructions(
   args: {
     environment: Pick<
       WorkspaceAwarenessEnvironment,
-      "hostId" | "path" | "providerOwnsPath"
+      "hostId" | "path" | "managed" | "providerOwnsPath"
     >;
     thread: Pick<Thread, "id">;
     now?: number;

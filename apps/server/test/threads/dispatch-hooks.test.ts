@@ -503,6 +503,69 @@ describe("message.dispatch hook admission visibility", () => {
 });
 
 describe("dispatch hooks and the no-hook path", () => {
+  it("isolates from an active unmanaged-workspace neighbour after claims reset", async () => {
+    await withTestHarness(async (harness) => {
+      installHooks(emptyRegistry());
+      const { environment, host, project } = seedDispatchFixture(
+        harness,
+        "host-shared-claim-reset",
+        { unmanaged: true },
+      );
+      const first = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "active",
+      });
+      const second = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "idle",
+      });
+      for (const thread of [first, second]) {
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: environment.id,
+          providerThreadId: `provider-${thread.id}`,
+          threadId: thread.id,
+        });
+      }
+      seedTurnStarted(harness.deps, {
+        environmentId: environment.id,
+        providerThreadId: `provider-${first.id}`,
+        threadId: first.id,
+        turnId: `turn-${first.id}`,
+      });
+
+      expect(
+        getWorkspaceWriteClaim(harness.db, {
+          hostId: host.id,
+          workspacePath: WORKSPACE_PATH,
+        }),
+      ).toBeNull();
+
+      await acceptThreadSendRequest(harness.deps, {
+        payload: { input: textInput("second turn after restart"), mode: "auto" },
+        thread: second,
+      });
+
+      expect(listQueuedThreadMessages(harness.db, second.id)).toEqual([]);
+      const [secondCommand] = listQueuedThreadCommands(
+        harness,
+        "turn.submit",
+        second.id,
+      );
+      if (secondCommand?.type !== "turn.submit") {
+        throw new Error("expected a turn.submit command");
+      }
+      expect(secondCommand.input[0]).toMatchObject({
+        type: "text",
+        visibility: "agent-only",
+        text: expect.stringContaining(
+          `The current shared-workspace owner is ${first.id}`,
+        ),
+      });
+    });
+  });
+
   it("dispatches another thread immediately when an unmanaged workspace is shared", async () => {
     await withTestHarness(async (harness) => {
       installHooks(emptyRegistry());

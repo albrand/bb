@@ -79,7 +79,10 @@ import {
   claimWorkspaceForTurn,
   releaseWorkspaceForThread,
 } from "./workspace-write-serialization.js";
-import { SHARED_WORKSPACE_ISOLATION_INSTRUCTION } from "./workspace-awareness.js";
+import {
+  listSharedWorkspaceActiveThreadIds,
+  SHARED_WORKSPACE_ISOLATION_INSTRUCTION,
+} from "./workspace-awareness.js";
 import { queueInputForStartingTurn } from "./thread-turn-starting.js";
 import {
   ensureThreadIsWritable,
@@ -399,10 +402,19 @@ async function runDispatchAttempt(
     environment: dispatchEnvironment,
     threadId: thread.id,
   });
-  if (!workspaceClaim.acquired) {
+  const activeWorkspaceNeighbourId =
+    dispatchEnvironment === null
+      ? null
+      : (listSharedWorkspaceActiveThreadIds(deps.db, dispatchEnvironment).find(
+          (threadId) => threadId !== thread.id,
+        ) ?? null);
+  const workspaceOwnerThreadId = workspaceClaim.acquired
+    ? activeWorkspaceNeighbourId
+    : workspaceClaim.holderThreadId;
+  if (workspaceOwnerThreadId !== null) {
     const instruction: PromptInput = {
       type: "text",
-      text: `${SHARED_WORKSPACE_ISOLATION_INSTRUCTION} The current shared-workspace owner is ${workspaceClaim.holderThreadId}.`,
+      text: `${SHARED_WORKSPACE_ISOLATION_INSTRUCTION} The current shared-workspace owner is ${workspaceOwnerThreadId}.`,
       mentions: [],
       visibility: "agent-only",
     };

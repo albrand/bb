@@ -133,4 +133,29 @@ describe("workspace awareness", () => {
       clearWorkspaceAwarenessCache();
     }
   });
+
+  it("accepts the runtime environment DTO managed field", () => {
+    const { db, unmanagedEnvironment, currentThread, neighbourThread } =
+      setup();
+    clearWorkspaceAwarenessCache();
+    try {
+      const [input] = workspaceAwarenessInput(db, {
+        environment: {
+          hostId: unmanagedEnvironment.hostId,
+          path: unmanagedEnvironment.path,
+          managed: false,
+        },
+        thread: currentThread,
+        now: 1_001,
+      });
+      expect(input).toMatchObject({
+        type: "text",
+        visibility: "agent-only",
+        text: expect.stringContaining(neighbourThread.id),
+      });
+    } finally {
+      db.$client.close();
+      clearWorkspaceAwarenessCache();
+    }
+  });
 });
