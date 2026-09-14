@@ -107,6 +107,9 @@ import {
 const PLUGIN_WIRE_HTTP_PATH = /^\/api\/v1\/plugins\/[^/]+\/http(?:\/|$)/u;
 import { rankAcceptedAssetEncodings } from "./asset-content-encoding.js";
 import { apiJsonCompression } from "./api-response-compression.js";
+import { buildUnclaimedAnswerMessage } from "./services/interactions/unclaimed-answer-message.js";
+import { createQueuedMessageForThread } from "./services/threads/queued-messages.js";
+import { getThread } from "@bb/db";
 
 type CloseWebSockets = () => Promise<void>;
 type NodeWebSocketServer = ReturnType<typeof createNodeWebSocket>["wss"];
@@ -620,6 +623,29 @@ export function createApp(
       threadId,
     });
   });
+  // An answer that arrives after the provider stopped waiting for its tool
+  // call used to be dropped on the floor: the person had answered, the row
+  // said resolved, and nobody received it. It becomes a queued message
+  // instead, so the agent still gets what it asked for.
+  deps.pendingInteractions.setUnclaimedPluginAnswerListener(
+    ({ interaction, value }) => {
+      const text = buildUnclaimedAnswerMessage(interaction.payload, value);
+      if (text === null) return;
+      const thread = getThread(deps.db, interaction.threadId);
+      if (!thread) return;
+      void createQueuedMessageForThread(deps, {
+        payload: {
+          input: [{ type: "text", text, mentions: [] }],
+        } as never,
+        thread,
+      }).catch((error: unknown) => {
+        deps.logger.warn(
+          { err: error, threadId: interaction.threadId },
+          "Could not queue an answer that arrived after its tool call ended",
+        );
+      });
+    },
+  );
   setPluginThreadEventEmitter(pluginService.events);
   setPluginHookProvider(pluginService.hooks);
   setPluginEnvironmentProviderBridge(pluginService.environmentProviders);
