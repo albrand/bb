@@ -666,7 +666,9 @@ describe("editThreadMessage", () => {
 
   it("keeps history intact until the staged Codex rewind succeeds, then replaces the suffix", async () => {
     await withTestHarness(async (harness) => {
-      const { environment, thread } = seedEditableThread(harness);
+      const { environment, thread } = seedEditableThread(harness, {
+        includeWorkspaceAwareness: true,
+      });
       const payload = {
         operationId: "edit-op-success",
         expectedRequestSequence: 7,

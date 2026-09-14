@@ -49,6 +49,7 @@ export interface ThreadRuntimeCommandEnvironment {
   hostId: string;
   id: string;
   path: string | null;
+  providerOwnsPath?: boolean;
   status: EnvironmentStatus;
 }
 

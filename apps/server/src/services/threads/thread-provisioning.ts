@@ -198,6 +198,7 @@ async function startThreadIfEnvironmentReady(
       id: args.environment.id,
       hostId: args.environment.hostId,
       path: args.environment.path,
+      providerOwnsPath: args.environment.providerOwnsPath,
       status: args.environment.status,
     },
     fork: args.context.request.fork,

@@ -1,4 +1,4 @@
-import type { Environment, PromptInput, Thread } from "@bb/domain";
+import type { PromptInput, Thread } from "@bb/domain";
 import { listRecentWorkspaceFiles, type DbConnection } from "@bb/db";
 
 const MAX_NEIGHBOURS = 16;
@@ -15,11 +15,15 @@ interface WorkspaceAwarenessCacheEntry {
   note: PromptInput[];
 }
 
+interface WorkspaceAwarenessEnvironment {
+  hostId: string;
+  path: string | null;
+  providerOwnsPath?: boolean;
+}
+
 const cache = new Map<string, WorkspaceAwarenessCacheEntry>();
 
-function cacheKey(
-  environment: Pick<Environment, "hostId" | "path">,
-): string | null {
+function cacheKey(environment: WorkspaceAwarenessEnvironment): string | null {
   return environment.path === null
     ? null
     : `${environment.hostId}\0${environment.path}`;
@@ -27,13 +31,10 @@ function cacheKey(
 
 function readNeighbours(
   db: Pick<DbConnection, "$client">,
-  environment: Pick<Environment, "hostId" | "path" | "workspaceProvisionType">,
+  environment: WorkspaceAwarenessEnvironment,
   threadId: string,
 ): WorkspaceNeighbour[] {
-  if (
-    environment.path === null ||
-    environment.workspaceProvisionType !== "unmanaged"
-  ) {
+  if (environment.path === null || environment.providerOwnsPath !== false) {
     return [];
   }
   return db.$client
@@ -41,7 +42,7 @@ function readNeighbours(
       `SELECT t.id AS id, t.title AS title, t.status AS status
        FROM threads t
        INNER JOIN environments e ON e.id = t.environment_id
-       WHERE e.host_id = ? AND e.path = ? AND e.workspace_provision_type = 'unmanaged'
+       WHERE e.host_id = ? AND e.path = ? AND e.provider_owns_path = 0
          AND t.id <> ? AND t.status IN ('starting', 'active')
          AND t.archived_at IS NULL AND t.deleted_at IS NULL
        ORDER BY t.updated_at DESC
@@ -80,8 +81,8 @@ export function workspaceAwarenessInput(
   db: Pick<DbConnection, "$client">,
   args: {
     environment: Pick<
-      Environment,
-      "hostId" | "path" | "workspaceProvisionType"
+      WorkspaceAwarenessEnvironment,
+      "hostId" | "path" | "providerOwnsPath"
     >;
     thread: Pick<Thread, "id">;
     now?: number;
@@ -92,7 +93,7 @@ export function workspaceAwarenessInput(
   if (
     key === null ||
     workspacePath === null ||
-    args.environment.workspaceProvisionType !== "unmanaged"
+    args.environment.providerOwnsPath !== false
   ) {
     return [];
   }
@@ -116,8 +117,8 @@ export function workspaceAwarenessInstructions(
   db: Pick<DbConnection, "$client">,
   args: {
     environment: Pick<
-      Environment,
-      "hostId" | "path" | "workspaceProvisionType"
+      WorkspaceAwarenessEnvironment,
+      "hostId" | "path" | "providerOwnsPath"
     >;
     thread: Pick<Thread, "id">;
     now?: number;
@@ -133,7 +134,7 @@ export function clearWorkspaceAwarenessCache(): void {
 
 export function listSharedWorkspaceActiveThreadIds(
   db: Pick<DbConnection, "$client">,
-  environment: Pick<Environment, "hostId" | "path" | "workspaceProvisionType">,
+  environment: WorkspaceAwarenessEnvironment,
 ): string[] {
   return readNeighbours(db, environment, "").map((neighbour) => neighbour.id);
 }

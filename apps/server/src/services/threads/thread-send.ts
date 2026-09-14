@@ -654,6 +654,7 @@ async function sendThreadMessageWithoutContextClear(
         id: readyEnvironment.id,
         hostId: readyEnvironment.hostId,
         path: readyEnvironment.path,
+        providerOwnsPath: readyEnvironment.providerOwnsPath,
         status: readyEnvironment.status,
       },
       projectId: thread.projectId,
@@ -775,6 +776,7 @@ async function sendThreadMessageWithoutContextClear(
       id: readyEnvironment.id,
       hostId: readyEnvironment.hostId,
       path: readyEnvironment.path,
+      providerOwnsPath: readyEnvironment.providerOwnsPath,
       status: readyEnvironment.status,
     },
   });

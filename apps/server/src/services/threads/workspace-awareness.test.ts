@@ -40,14 +40,14 @@ function setup(): {
     projectId: firstProject.id,
     hostId: host.id,
     path: "/repo",
-    workspaceProvisionType: "unmanaged",
+    providerOwnsPath: false,
     status: "ready",
   });
   const managedEnvironment = createEnvironment(db, noopNotifier, {
     projectId: secondProject.id,
     hostId: host.id,
     path: "/managed",
-    workspaceProvisionType: "managed-worktree",
+    providerOwnsPath: true,
     status: "ready",
   });
   const currentThread = createThread(db, noopNotifier, {

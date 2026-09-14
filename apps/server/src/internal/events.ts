@@ -369,8 +369,9 @@ async function applyEventEffects(
           : null;
         if (
           thread &&
+          environment !== null &&
           environment?.path !== null &&
-          environment?.workspaceProvisionType === "unmanaged"
+          !environment.providerOwnsPath
         ) {
           const filePaths = event.item.changes.map((change) => change.path);
           const candidateThreadIds = [
