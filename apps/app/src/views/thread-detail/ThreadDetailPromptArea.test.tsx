@@ -68,10 +68,13 @@ const mocks = vi.hoisted(() => ({
   queuedMessages: [] as ThreadQueuedMessage[] | undefined,
   reorderQueuedMessageMutateAsync: vi.fn(),
   sendQueuedMessageMutateAsync: vi.fn(),
+  setReasoningLevel: vi.fn(),
   setQueuedMessageGroupBoundaryMutateAsync: vi.fn(),
+  setSelectedModel: vi.fn(),
   stopThreadMutate: vi.fn(),
   toastError: vi.fn(),
   unarchiveThreadMutate: vi.fn(),
+  updateThreadMutate: vi.fn(),
   uploadPromptAttachmentMutateAsync: vi.fn(),
   updateQueuedMessageMutateAsync: vi.fn(),
   useThreadDefaultExecutionOptions: vi.fn(),
@@ -128,8 +131,9 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
         };
         model: {
           active?: { model: string } | null;
+          onChange: (model: string) => void;
         };
-        reasoning: { value: string };
+        reasoning: { onChange: (reasoningLevel: string) => void; value: string };
         serviceTier?: { value?: string };
       };
       executionReadOnly?: boolean;
@@ -178,6 +182,18 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
         </div>
         <div data-testid="selected-model">{execution.model.active?.model}</div>
         <div data-testid="selected-reasoning">{execution.reasoning.value}</div>
+        <button
+          type="button"
+          onClick={() => execution.model.onChange("gpt-5.6-sol")}
+        >
+          Change model
+        </button>
+        <button
+          type="button"
+          onClick={() => execution.reasoning.onChange("xhigh")}
+        >
+          Change reasoning
+        </button>
         <div data-testid="selected-service-tier">
           {execution.serviceTier?.value}
         </div>
@@ -500,8 +516,8 @@ vi.mock("@/hooks/useThreadCreationOptions", () => ({
       serviceTier: undefined,
       serviceTierSupportByProvider: {},
       setPermissionMode: vi.fn(),
-      setReasoningLevel: vi.fn(),
-      setSelectedModel: vi.fn(),
+      setReasoningLevel: mocks.setReasoningLevel,
+      setSelectedModel: mocks.setSelectedModel,
       setServiceTier: vi.fn(),
       supportsPermissionModeSelection: true,
       supportsServiceTier: false,
@@ -561,6 +577,10 @@ vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
     isPending: false,
     mutate: mocks.unarchiveThreadMutate,
     variables: null,
+  }),
+  useUpdateThread: () => ({
+    isPending: false,
+    mutate: mocks.updateThreadMutate,
   }),
 }));
 
@@ -805,6 +825,26 @@ describe("environment follow-up summary", () => {
 });
 
 describe("ThreadDetailPromptArea", () => {
+  it("persists model and reasoning changes for a live thread", () => {
+    renderPromptArea({ thread: makeThread({ status: "active" }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change model" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Change reasoning" }),
+    );
+
+    expect(mocks.setSelectedModel).toHaveBeenCalledWith("gpt-5.6-sol");
+    expect(mocks.setReasoningLevel).toHaveBeenCalledWith("xhigh");
+    expect(mocks.updateThreadMutate).toHaveBeenNthCalledWith(1, {
+      id: "thr_1",
+      model: "gpt-5.6-sol",
+    });
+    expect(mocks.updateThreadMutate).toHaveBeenNthCalledWith(2, {
+      id: "thr_1",
+      reasoningLevel: "xhigh",
+    });
+  });
+
   it("shows queued work while its message details are loading", () => {
     mocks.queuedMessages = undefined;
 

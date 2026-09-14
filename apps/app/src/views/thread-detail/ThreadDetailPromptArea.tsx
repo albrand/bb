@@ -87,7 +87,10 @@ import {
   useClearThreadGoal,
   useStopThread,
 } from "@/hooks/mutations/thread-runtime-mutations";
-import { useUnarchiveThread } from "@/hooks/mutations/thread-state-mutations";
+import {
+  useUnarchiveThread,
+  useUpdateThread,
+} from "@/hooks/mutations/thread-state-mutations";
 import {
   getLatestPendingInteraction,
   useThreadQueuedMessages,
@@ -460,6 +463,7 @@ export function ThreadDetailPromptArea({
   const cancelThreadPlan = useCancelThreadPlan();
   const clearThreadGoal = useClearThreadGoal();
   const unarchiveThread = useUnarchiveThread();
+  const updateThread = useUpdateThread();
   const projectName = useProjectDisplayName(
     thread.projectId === PERSONAL_PROJECT_ID ? undefined : thread.projectId,
   );
@@ -662,8 +666,19 @@ export function ThreadDetailPromptArea({
         setOverriddenFallbackIdentity(fallbackIdentity);
       }
       setSelectedModel(model);
+      updateThread.mutate({ id: thread.id, model });
     },
-    [fallbackIdentity, setSelectedModel],
+    [fallbackIdentity, setSelectedModel, thread.id, updateThread],
+  );
+  const handleReasoningLevelChange = useCallback(
+    (nextReasoningLevel: typeof reasoningLevel) => {
+      setReasoningLevel(nextReasoningLevel);
+      updateThread.mutate({
+        id: thread.id,
+        reasoningLevel: nextReasoningLevel,
+      });
+    },
+    [setReasoningLevel, thread.id, updateThread],
   );
   const { typeaheadConfig, promptActions } = useComposerTypeahead({
     projectId: thread.projectId,
@@ -1155,7 +1170,7 @@ export function ThreadDetailPromptArea({
       reasoning: {
         value: reasoningLevel,
         options: reasoningOptions,
-        onChange: setReasoningLevel,
+        onChange: handleReasoningLevelChange,
       },
       footerAction: {
         label: "Handoff to new thread",
@@ -1168,6 +1183,7 @@ export function ThreadDetailPromptArea({
       hasMultipleProviders,
       handleHandoffToNewThread,
       handleModelChange,
+      handleReasoningLevelChange,
       isLoadingModels,
       modelLoadFailed,
       modelLoadError,
@@ -1180,7 +1196,6 @@ export function ThreadDetailPromptArea({
       selectedProviderId,
       serviceTier,
       serviceTierSupportByProvider,
-      setReasoningLevel,
       setServiceTier,
       supportsServiceTier,
       serviceTierFastLabel,
