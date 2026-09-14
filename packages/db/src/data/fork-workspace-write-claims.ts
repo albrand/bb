@@ -200,8 +200,7 @@ export function countUnmanagedWorkspaceThreads(
        INNER JOIN environments ON environments.id = threads.environment_id
        WHERE environments.host_id = ?
          AND environments.path = ?
-         AND environments.managed = 0
-         AND environments.workspace_provision_type = 'unmanaged'
+         AND environments.provider_owns_path = 0
          AND threads.archived_at IS NULL
          AND threads.deleted_at IS NULL`,
     )

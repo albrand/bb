@@ -14,8 +14,6 @@ import {
   hydrateRetainedEventOutputRowsWithinDataByteLimit,
 } from "../../src/data/retained-event-outputs.js";
 import {
-  COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
-  COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS,
   getCompletedEventOutputTruncationLimits,
