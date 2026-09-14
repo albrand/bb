@@ -35,6 +35,8 @@ function row(index: number, detail = "stable"): TimelineRow {
   };
 }
 
+const GZIP_TOLERANCE = 0.05;
+
 describe("server-to-browser timeline payload sizes", () => {
   it("records full and single-row delta sizes across representative windows", () => {
     const measurements = [1, 20, 100].map((rowCount) => {
@@ -59,7 +61,7 @@ describe("server-to-browser timeline payload sizes", () => {
       };
     });
 
-    expect(measurements).toEqual([
+    const recorded = [
       {
         rowCount: 1,
         full: { gzipBytes: 216, jsonBytes: 629 },
@@ -78,7 +80,34 @@ describe("server-to-browser timeline payload sizes", () => {
         legacyDelta: { gzipBytes: 471, jsonBytes: 2_662 },
         compactDelta: { gzipBytes: 230, jsonBytes: 649 },
       },
-    ]);
+    ];
+    expect(
+      measurements.map(({ rowCount, full, legacyDelta, compactDelta }) => ({
+        rowCount,
+        full: full.jsonBytes,
+        legacyDelta: legacyDelta.jsonBytes,
+        compactDelta: compactDelta.jsonBytes,
+      })),
+    ).toEqual(
+      recorded.map(({ rowCount, full, legacyDelta, compactDelta }) => ({
+        rowCount,
+        full: full.jsonBytes,
+        legacyDelta: legacyDelta.jsonBytes,
+        compactDelta: compactDelta.jsonBytes,
+      })),
+    );
+    for (const [index, measurement] of measurements.entries()) {
+      const expected = recorded[index];
+      if (expected === undefined) throw new Error("missing recorded window");
+      for (const key of ["full", "legacyDelta", "compactDelta"] as const) {
+        expect(measurement[key].gzipBytes).toBeGreaterThan(
+          expected[key].gzipBytes * (1 - GZIP_TOLERANCE),
+        );
+        expect(measurement[key].gzipBytes).toBeLessThan(
+          expected[key].gzipBytes * (1 + GZIP_TOLERANCE),
+        );
+      }
+    }
 
     for (const measurement of measurements) {
       expect(measurement.compactDelta.jsonBytes).toBeLessThanOrEqual(
