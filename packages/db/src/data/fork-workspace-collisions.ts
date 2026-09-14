@@ -62,7 +62,10 @@ export function listRecentWorkspaceFiles(
   const now = args.now ?? Date.now();
   const limit = Math.min(Math.max(args.limit ?? 16, 1), 64);
   const rows = db.$client
-    .prepare<[string, string, number, number], { filePath: string; threadIds: string; observedAt: number }>(
+    .prepare<
+      [string, string, number, number],
+      { filePath: string; threadIds: string; observedAt: number }
+    >(
       `SELECT file_path AS filePath, thread_ids AS threadIds, observed_at AS observedAt
        FROM ${OBSERVATIONS_TABLE}
        WHERE host_id = ? AND workspace_path = ? AND observed_at >= ?
@@ -95,61 +98,139 @@ export function recordWorkspaceFileChanges(
     return [];
   }
   const notices: WorkspaceCollisionNotice[] = [];
-  const read = db.$client.prepare<[string, string, string, number], ObservationRow>(
+  const read = db.$client.prepare<
+    [string, string, string, number],
+    ObservationRow
+  >(
     `SELECT thread_ids AS threadIds FROM ${OBSERVATIONS_TABLE}
      WHERE host_id = ? AND workspace_path = ? AND file_path = ? AND window_start = ?`,
   );
-  const write = db.$client.prepare<[string, string, string, number, string, number]>(
+  const write = db.$client.prepare<
+    [string, string, string, number, string, number]
+  >(
     `INSERT INTO ${OBSERVATIONS_TABLE}
       (host_id, workspace_path, file_path, window_start, thread_ids, observed_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (host_id, workspace_path, file_path, window_start) DO UPDATE SET
        thread_ids = excluded.thread_ids, observed_at = excluded.observed_at`,
   );
-  const collision = db.$client.prepare<[string, string, string, number, string, string], { noticedAt: number }>(
+  const collision = db.$client.prepare<
+    [string, string, string, number, string, string],
+    { noticedAt: number }
+  >(
     `SELECT noticed_at AS noticedAt FROM ${COLLISIONS_TABLE}
      WHERE host_id = ? AND workspace_path = ? AND file_path = ? AND window_start = ?
        AND thread_a = ? AND thread_b = ?`,
   );
-  const insertCollision = db.$client.prepare<[string, string, string, number, string, string, number]>(
+  const insertCollision = db.$client.prepare<
+    [string, string, string, number, string, string, number]
+  >(
     `INSERT OR IGNORE INTO ${COLLISIONS_TABLE}
       (host_id, workspace_path, file_path, window_start, thread_a, thread_b, noticed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const filePath of [...new Set(args.filePaths)].slice(0, 64)) {
-    const previous = read.get(args.hostId, args.workspacePath, filePath, windowStart);
-    const previousIds = previous ? (JSON.parse(previous.threadIds) as string[]) : [];
+    const previous = read.get(
+      args.hostId,
+      args.workspacePath,
+      filePath,
+      windowStart,
+    );
+    const previousIds = previous
+      ? (JSON.parse(previous.threadIds) as string[])
+      : [];
     const previousSet = new Set(previousIds);
     const newIds = candidates.filter((id) => !previousSet.has(id));
     for (const threadId of newIds) {
       for (const otherThreadId of previousIds) {
         const [threadA, threadB] = [threadId, otherThreadId].sort();
-        if (collision.get(args.hostId, args.workspacePath, filePath, windowStart, threadA, threadB)) continue;
-        insertCollision.run(args.hostId, args.workspacePath, filePath, windowStart, threadA, threadB, now);
+        if (
+          collision.get(
+            args.hostId,
+            args.workspacePath,
+            filePath,
+            windowStart,
+            threadA,
+            threadB,
+          )
+        )
+          continue;
+        insertCollision.run(
+          args.hostId,
+          args.workspacePath,
+          filePath,
+          windowStart,
+          threadA,
+          threadB,
+          now,
+        );
         notices.push({ filePath, threadId: threadA, otherThreadId: threadB });
         notices.push({ filePath, threadId: threadB, otherThreadId: threadA });
       }
     }
-    if (newIds.length === 0 && previousIds.length > 1 && candidates.length > 1) {
+    if (
+      newIds.length === 0 &&
+      previousIds.length > 1 &&
+      candidates.length > 1
+    ) {
       for (const threadA of previousIds) {
         for (const threadB of previousIds) {
           if (threadA >= threadB) continue;
-          if (collision.get(args.hostId, args.workspacePath, filePath, windowStart, threadA, threadB)) continue;
-          insertCollision.run(args.hostId, args.workspacePath, filePath, windowStart, threadA, threadB, now);
+          if (
+            collision.get(
+              args.hostId,
+              args.workspacePath,
+              filePath,
+              windowStart,
+              threadA,
+              threadB,
+            )
+          )
+            continue;
+          insertCollision.run(
+            args.hostId,
+            args.workspacePath,
+            filePath,
+            windowStart,
+            threadA,
+            threadB,
+            now,
+          );
           notices.push({ filePath, threadId: threadA, otherThreadId: threadB });
           notices.push({ filePath, threadId: threadB, otherThreadId: threadA });
         }
       }
     }
-    write.run(args.hostId, args.workspacePath, filePath, windowStart, JSON.stringify([...new Set([...previousIds, ...candidates])]), now);
+    write.run(
+      args.hostId,
+      args.workspacePath,
+      filePath,
+      windowStart,
+      JSON.stringify([...new Set([...previousIds, ...candidates])]),
+      now,
+    );
   }
   pruneWorkspaceCollisionTables(db, now);
   return notices;
 }
 
 function pruneWorkspaceCollisionTables(db: DbConnection, now: number): void {
-  db.$client.prepare<[number]>(`DELETE FROM ${OBSERVATIONS_TABLE} WHERE observed_at < ?`).run(now - RETENTION_MS);
-  db.$client.prepare<[number]>(`DELETE FROM ${COLLISIONS_TABLE} WHERE noticed_at < ?`).run(now - RETENTION_MS);
-  db.$client.prepare(`DELETE FROM ${OBSERVATIONS_TABLE} WHERE rowid NOT IN (SELECT rowid FROM ${OBSERVATIONS_TABLE} ORDER BY observed_at DESC LIMIT ${MAX_ROWS})`).run();
-  db.$client.prepare(`DELETE FROM ${COLLISIONS_TABLE} WHERE rowid NOT IN (SELECT rowid FROM ${COLLISIONS_TABLE} ORDER BY noticed_at DESC LIMIT ${MAX_ROWS})`).run();
+  db.$client
+    .prepare<
+      [number]
+    >(`DELETE FROM ${OBSERVATIONS_TABLE} WHERE observed_at < ?`)
+    .run(now - RETENTION_MS);
+  db.$client
+    .prepare<[number]>(`DELETE FROM ${COLLISIONS_TABLE} WHERE noticed_at < ?`)
+    .run(now - RETENTION_MS);
+  db.$client
+    .prepare(
+      `DELETE FROM ${OBSERVATIONS_TABLE} WHERE rowid NOT IN (SELECT rowid FROM ${OBSERVATIONS_TABLE} ORDER BY observed_at DESC LIMIT ${MAX_ROWS})`,
+    )
+    .run();
+  db.$client
+    .prepare(
+      `DELETE FROM ${COLLISIONS_TABLE} WHERE rowid NOT IN (SELECT rowid FROM ${COLLISIONS_TABLE} ORDER BY noticed_at DESC LIMIT ${MAX_ROWS})`,
+    )
+    .run();
 }

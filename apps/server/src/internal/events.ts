@@ -68,9 +68,7 @@ import {
 import { getAuthenticatedDaemon } from "./auth.js";
 import { validateExtensionPayloads } from "./extension-payloads.js";
 import { validatePresentationIcons } from "./presentation-icons.js";
-import {
-  listSharedWorkspaceActiveThreadIds,
-} from "../services/threads/workspace-awareness.js";
+import { listSharedWorkspaceActiveThreadIds } from "../services/threads/workspace-awareness.js";
 import { appendThreadEvent } from "../services/threads/thread-events.js";
 import { threadScope } from "@bb/domain";
 
