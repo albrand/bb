@@ -2,6 +2,7 @@ import { useInsertionEffect } from "react";
 import {
   collectHostUtilityKeys,
   prunePluginUtilities,
+  type RuleListLike,
 } from "./plugin-css-dedupe";
 
 const CSS_MARKER = "data-bb-plugin-css";
@@ -122,8 +123,14 @@ function activateStylesheet(
   document.head.appendChild(link);
 }
 
-function hostStyleSheets(): CSSStyleSheet[] {
-  const sheets: CSSStyleSheet[] = [];
+type HostStyleSheet = { cssRules: RuleListLike };
+type PrunableStyleSheet = {
+  cssRules: RuleListLike;
+  deleteRule(index: number): void;
+};
+
+function hostStyleSheets(): HostStyleSheet[] {
+  const sheets: HostStyleSheet[] = [];
   for (const sheet of document.styleSheets) {
     const owner = sheet.ownerNode;
     if (owner instanceof Element && owner.hasAttribute(CSS_MARKER)) continue;
@@ -132,7 +139,7 @@ function hostStyleSheets(): CSSStyleSheet[] {
     } catch {
       continue;
     }
-    sheets.push(sheet);
+    sheets.push(sheet as unknown as HostStyleSheet);
   }
   return sheets;
 }
@@ -141,7 +148,10 @@ function pruneHostUtilities(link: HTMLLinkElement): void {
   const sheet = link.sheet;
   if (sheet === null) return;
   try {
-    prunePluginUtilities(sheet, collectHostUtilityKeys(hostStyleSheets()));
+    prunePluginUtilities(
+      sheet as unknown as PrunableStyleSheet,
+      collectHostUtilityKeys(hostStyleSheets()),
+    );
   } catch {
     return;
   }
