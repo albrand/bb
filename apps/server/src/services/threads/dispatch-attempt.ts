@@ -418,130 +418,140 @@ async function runDispatchAttempt(
     );
   }
 
-  // --- 2. the single plugin pass ------------------------------------------
+  try {
+    // --- 2. the single plugin pass ------------------------------------------
 
-  /**
-   * Filled by `commitAdmission` while the pass still holds the evaluation
-   * lock. A holder rather than a bare `let` because the write happens in a
-   * callback, which narrowing cannot see.
-   */
-  const admitted: { ran: boolean; value: PendingThreadAdmission | null } = {
-    ran: false,
-    value: null,
-  };
+    /**
+     * Filled by `commitAdmission` while the pass still holds the evaluation
+     * lock. A holder rather than a bare `let` because the write happens in a
+     * callback, which narrowing cannot see.
+     */
+    const admitted: { ran: boolean; value: PendingThreadAdmission | null } = {
+      ran: false,
+      value: null,
+    };
 
-  if (!sendNow && hasMessageDispatchHooks()) {
-    const outcome = await runMessageDispatchHookPass(deps, {
-      thread,
-      threadResponse: toThreadResponseFromThread(deps, { thread }),
-      project: requirePublicProject(deps.db, thread.projectId),
-      environmentId: thread.environmentId,
-      intendedHostId:
-        thread.environmentId !== null
-          ? null
-          : intendedThreadHostId(deps, thread.id),
-      input: payload.input,
-      requestedExecution: {
-        providerId: thread.providerId,
-        model: execution.model,
-        reasoningLevel: execution.reasoningLevel,
-        serviceTier: execution.serviceTier,
-        permissionMode: execution.permissionMode,
-      },
-      executionSources: dispatchExecutionSources(
-        payload.executionInputSources ?? {},
-      ),
-      attempt,
-      origin: args.origin,
-      originPluginId: args.originPluginId,
-      startedOnBehalfOf: args.startedOnBehalfOf,
-      parentThreadId: thread.parentThreadId,
-      queuedMessage:
-        claimed?.[0] === undefined ? null : toThreadQueuedMessage(claimed[0]),
-      // A first dispatch is the admission a limiter is deciding about, so its
-      // `pending → starting` flip is committed here, inside the lock, and the
-      // next handler in line sees it. A follow-up has no transition this side of
-      // the send transaction, so it has nothing to commit.
-      ...(firstDispatch
-        ? {
-            commitAdmission: async () => {
-              admitted.ran = true;
-              admitted.value = await admitPendingThread(deps, {
-                claimed,
-                payload: resolvedPayload,
-                respectManualStopPause,
-                startContext: args.startContext ?? null,
-                thread,
-              });
-            },
-          }
-        : {}),
-    });
-    if (outcome.kind === "wait") {
-      releaseWorkspaceForThread(deps, thread);
-      if (claimed !== null) {
-        noteDispatchRequeued(thread.id);
-      }
-      return waitOn(
-        {
-          kind: "plugin",
-          pluginId: outcome.waiter.pluginId,
-          reason: dispatchWaitReasonForPass(outcome),
+    if (!sendNow && hasMessageDispatchHooks()) {
+      const outcome = await runMessageDispatchHookPass(deps, {
+        thread,
+        threadResponse: toThreadResponseFromThread(deps, { thread }),
+        project: requirePublicProject(deps.db, thread.projectId),
+        environmentId: thread.environmentId,
+        intendedHostId:
+          thread.environmentId !== null
+            ? null
+            : intendedThreadHostId(deps, thread.id),
+        input: payload.input,
+        requestedExecution: {
+          providerId: thread.providerId,
+          model: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          serviceTier: execution.serviceTier,
+          permissionMode: execution.permissionMode,
         },
-        outcome.waiter.sendAt,
-      );
+        executionSources: dispatchExecutionSources(
+          payload.executionInputSources ?? {},
+        ),
+        attempt,
+        origin: args.origin,
+        originPluginId: args.originPluginId,
+        startedOnBehalfOf: args.startedOnBehalfOf,
+        parentThreadId: thread.parentThreadId,
+        queuedMessage:
+          claimed?.[0] === undefined ? null : toThreadQueuedMessage(claimed[0]),
+        // A first dispatch is the admission a limiter is deciding about, so its
+        // `pending → starting` flip is committed here, inside the lock, and the
+        // next handler in line sees it. A follow-up has no transition this side of
+        // the send transaction, so it has nothing to commit.
+        ...(firstDispatch
+          ? {
+              commitAdmission: async () => {
+                admitted.ran = true;
+                admitted.value = await admitPendingThread(deps, {
+                  claimed,
+                  payload: resolvedPayload,
+                  respectManualStopPause,
+                  startContext: args.startContext ?? null,
+                  thread,
+                });
+              },
+            }
+          : {}),
+      });
+      if (outcome.kind === "wait") {
+        releaseWorkspaceForThread(deps, thread);
+        if (claimed !== null) {
+          noteDispatchRequeued(thread.id);
+        }
+        return waitOn(
+          {
+            kind: "plugin",
+            pluginId: outcome.waiter.pluginId,
+            reason: dispatchWaitReasonForPass(outcome),
+          },
+          outcome.waiter.sendAt,
+        );
+      }
     }
-  }
 
-  // --- 3. dispatch --------------------------------------------------------
+    // --- 3. dispatch --------------------------------------------------------
 
-  if (firstDispatch) {
-    // Already admitted under the lock when a hook pass ran; admitted here when
-    // no handler is installed or send-now skipped the pass entirely.
-    const admission = admitted.ran
-      ? admitted.value
-      : await admitPendingThread(deps, {
-          claimed,
-          payload: resolvedPayload,
-          respectManualStopPause,
-          startContext: args.startContext ?? null,
-          thread,
-        });
-    if (admission === null) {
-      // The thread left `pending` underneath this attempt — a concurrent
-      // attempt admitted it, or it was archived. Nothing was consumed and
-      // nothing was sent, so the message is re-decided against the thread as
-      // it is now: it queues behind the winner's cold start, or is refused
-      // for a thread that is gone. Reporting a dispatch here would tell the
-      // caller their message went when it went nowhere.
-      const current = getThread(deps.db, thread.id);
-      return reattemptDispatchForThreadChange(deps, args, current, reattempted);
-    }
-    await launchAdmittedThread(deps, admission);
-    return { kind: "dispatched" };
-  }
-
-  const environment = await requireThreadCommandEnvironment(deps, { thread });
-  const sent = await sendThreadMessage(deps, {
-    environment,
-    payload: resolvedPayload,
-    thread,
-    trigger: args.trigger,
-    ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-    ...(claimed === null
-      ? {}
-      : {
-          beforeAppendInTransaction: consumeClaimedRows(
+    if (firstDispatch) {
+      // Already admitted under the lock when a hook pass ran; admitted here when
+      // no handler is installed or send-now skipped the pass entirely.
+      const admission = admitted.ran
+        ? admitted.value
+        : await admitPendingThread(deps, {
             claimed,
-            thread.id,
+            payload: resolvedPayload,
             respectManualStopPause,
-          ),
-        }),
-  });
-  if (claimed !== null) {
-    settleQueueRowDispatched({ row: claimed[0]! });
+            startContext: args.startContext ?? null,
+            thread,
+          });
+      if (admission === null) {
+        // The thread left `pending` underneath this attempt — a concurrent
+        // attempt admitted it, or it was archived. Nothing was consumed and
+        // nothing was sent, so the message is re-decided against the thread as
+        // it is now: it queues behind the winner's cold start, or is refused
+        // for a thread that is gone. Reporting a dispatch here would tell the
+        // caller their message went when it went nowhere.
+        const current = getThread(deps.db, thread.id);
+        return reattemptDispatchForThreadChange(
+          deps,
+          args,
+          current,
+          reattempted,
+        );
+      }
+      await launchAdmittedThread(deps, admission);
+      return { kind: "dispatched" };
+    }
+
+    const environment = await requireThreadCommandEnvironment(deps, { thread });
+    const sent = await sendThreadMessage(deps, {
+      environment,
+      payload: resolvedPayload,
+      thread,
+      trigger: args.trigger,
+      ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      ...(claimed === null
+        ? {}
+        : {
+            beforeAppendInTransaction: consumeClaimedRows(
+              claimed,
+              thread.id,
+              respectManualStopPause,
+            ),
+          }),
+    });
+    if (claimed !== null) {
+      settleQueueRowDispatched({ row: claimed[0]! });
+    }
+    return { kind: "dispatched", refusal: sent.refusal };
+  } catch (error) {
+    releaseWorkspaceForThread(deps, thread);
+    throw error;
   }
-  return { kind: "dispatched", refusal: sent.refusal };
 }
 
 function reattemptDispatchForThreadChange(
