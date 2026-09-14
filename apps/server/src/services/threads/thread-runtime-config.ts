@@ -43,6 +43,7 @@ import {
   readDataDirAgentInstructions,
   readWorkspaceAgentInstructions,
 } from "./workspace-agent-instructions.js";
+import { workspaceAwarenessInstructions } from "./workspace-awareness.js";
 
 const STANDARD_AGENT_INSTRUCTIONS = renderTemplate(
   "standardAgentAppendInstructions",
@@ -308,6 +309,13 @@ export async function resolveThreadRuntimeCommandConfig(
       `The following workspace instructions come from ${WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH}:`,
       workspaceAgentInstructions,
     );
+  }
+  const workspaceAwareness = workspaceAwarenessInstructions(deps.db, {
+    environment: args.environment,
+    thread: args.thread,
+  });
+  if (workspaceAwareness) {
+    instructionSections.push(workspaceAwareness);
   }
   const instructions = instructionSections.join("\n\n");
   const threadStoragePath = await requireThreadStoragePath(deps, {

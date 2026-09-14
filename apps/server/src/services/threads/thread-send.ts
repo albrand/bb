@@ -71,7 +71,6 @@ import {
   requireDeferredFirstTurnContextCurrent,
   resolveDeferredFirstTurnContext,
 } from "./deferred-first-turn-context.js";
-import { workspaceAwarenessInput } from "./workspace-awareness.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
 type TextPromptInput = Extract<PromptInput, { type: "text" }>;
@@ -130,7 +129,11 @@ function watchTurnAcceptance(graceMs: number): TurnAcceptanceWatch {
   if (graceMs <= 0) {
     // No wait at all, not a zero-length one: a timer, however short, never
     // fires under fake timers and would hang the send.
-    return { refuse: () => {}, settle: () => {}, result: NO_REFUSAL.acceptance };
+    return {
+      refuse: () => {},
+      settle: () => {},
+      result: NO_REFUSAL.acceptance,
+    };
   }
   let resolve: (refusal: ThreadSendRefusal | null) => void = () => {};
   const result = new Promise<ThreadSendRefusal | null>((settle) => {
@@ -529,19 +532,6 @@ async function sendThreadMessageWithoutContextClear(
     { input, ...(inputGroups !== undefined ? { inputGroups } : {}) },
     deferredFirstTurnContext,
   ));
-  const awarenessInput = workspaceAwarenessInput(deps.db, {
-    environment,
-    thread,
-  });
-  if (awarenessInput.length > 0) {
-    input = [...awarenessInput, ...input];
-    if (inputGroups !== undefined && inputGroups.length > 0) {
-      inputGroups = [
-        [...awarenessInput, ...inputGroups[0]!],
-        ...inputGroups.slice(1),
-      ];
-    }
-  }
   const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
     tx,
   }) => {
