@@ -1229,8 +1229,8 @@ describe("codex item translation", () => {
           result: {},
           presentation: {
             label: {
-              pending: "Waiting for agents",
-              completed: "Waited for agents",
+              pending: "Waiting for coordination",
+              completed: "Waited for coordination",
             },
             icon: { glyph: "UserRound" },
           },

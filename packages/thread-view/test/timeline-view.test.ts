@@ -569,6 +569,31 @@ describe("buildTimelineViewRows", () => {
     );
   });
 
+  it("keeps no-target collaboration waits out of the generic tool summary", () => {
+    const rows = buildTimelineViewRows([
+      toolRow({
+        id: "coordination-wait-1",
+        sourceSeqStart: 1,
+        toolName: "wait",
+        toolArgs: { senderThreadId: "root-provider", receiverThreadIds: [] },
+      }),
+      toolRow({
+        id: "coordination-wait-2",
+        sourceSeqStart: 2,
+        toolName: "wait",
+        toolArgs: { senderThreadId: "root-provider", receiverThreadIds: [] },
+      }),
+    ]);
+    const summary = expectBundleSummaryRow(rows[0]);
+
+    expect(buildTimelineWorkSummaryLabel(summary)).toBe(
+      "Waited for coordination",
+    );
+    expect(buildTimelineWorkSummaryLabel(summary, { active: true })).toBe(
+      "Waiting for coordination",
+    );
+  });
+
   it("collapses completed delegation children into a step-summary", () => {
     const rows = buildTimelineViewRows([
       delegationRow({

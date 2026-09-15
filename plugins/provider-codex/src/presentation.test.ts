@@ -85,7 +85,26 @@ describe("codex presentation", () => {
   });
 
   it("labels each collab verb and headlines the prompt", () => {
-    expect(collabAgentPresentation({ tool: "wait", prompt: null })).toEqual({
+    expect(
+      collabAgentPresentation({
+        hasReceivers: false,
+        tool: "wait",
+        prompt: null,
+      }),
+    ).toEqual({
+      label: {
+        pending: "Waiting for coordination",
+        completed: "Waited for coordination",
+      },
+      icon: { glyph: "UserRound" },
+    });
+    expect(
+      collabAgentPresentation({
+        hasReceivers: true,
+        tool: "wait",
+        prompt: null,
+      }),
+    ).toEqual({
       label: { pending: "Waiting for agents", completed: "Waited for agents" },
       icon: { glyph: "UserRound" },
     });

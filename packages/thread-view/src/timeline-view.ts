@@ -98,6 +98,7 @@ type TimelineExplorationKind = "files" | "searches" | "lists";
 
 interface TimelineWorkSummaryCounts {
   commands: number;
+  coordinationWaits: number;
   createdFiles: number;
   deletedFiles: number;
   delegations: number;
@@ -119,6 +120,7 @@ interface TimelineWorkSummaryCounts {
 
 type TimelineWorkSummaryCategory =
   | "commands"
+  | "coordination"
   | "delegations"
   | "exploration"
   | "extensions"
@@ -192,6 +194,12 @@ function getFileChangeIdentity(row: TimelineFileChangeWorkRow): string {
   return row.change.movePath ?? row.change.path;
 }
 
+function isCoordinationWait(row: TimelineViewWorkRow): boolean {
+  if (row.workKind !== "tool" || row.toolName !== "wait") return false;
+  const receiverThreadIds = row.toolArgs?.receiverThreadIds;
+  return Array.isArray(receiverThreadIds) && receiverThreadIds.length === 0;
+}
+
 function summarizeTimelineWork(
   rows: readonly TimelineViewWorkRow[],
 ): TimelineWorkSummaryCounts {
@@ -206,6 +214,7 @@ function summarizeTimelineWork(
 
   const counts: TimelineWorkSummaryCounts = {
     commands: 0,
+    coordinationWaits: 0,
     createdFiles: 0,
     deletedFiles: 0,
     delegations: 0,
@@ -245,7 +254,11 @@ function summarizeTimelineWork(
         }
         break;
       case "tool":
-        counts.tools += 1;
+        if (isCoordinationWait(row)) {
+          counts.coordinationWaits += 1;
+        } else {
+          counts.tools += 1;
+        }
         break;
       case "file-read":
       case "search":
@@ -414,7 +427,7 @@ function getTimelineWorkSummaryCategory(
     case "command":
       return hasTimelineExplorationIntent(row) ? "exploration" : "commands";
     case "tool":
-      return "tools";
+      return isCoordinationWait(row) ? "coordination" : "tools";
     case "file-read":
     case "search":
       return "exploration";
@@ -505,6 +518,8 @@ function completedSummaryPhrase(
   exploration: string | null,
 ): string | null {
   switch (category) {
+    case "coordination":
+      return counts.coordinationWaits > 0 ? "Waited for coordination" : null;
     case "exploration":
       return exploration ? `Explored ${exploration}` : null;
     case "commands":
@@ -544,6 +559,8 @@ function activeSummaryPhrase(
   exploration: string | null,
 ): string | null {
   switch (category) {
+    case "coordination":
+      return counts.coordinationWaits > 0 ? "Waiting for coordination" : null;
     case "exploration":
       return exploration ? `Exploring ${exploration}` : null;
     case "commands":
@@ -758,7 +775,7 @@ function rowConcept(row: TimelineViewWorkRow): TimelineWorkSummaryCategory {
     case "command":
       return hasTimelineExplorationIntent(row) ? "exploration" : "commands";
     case "tool":
-      return "tools";
+      return isCoordinationWait(row) ? "coordination" : "tools";
     case "file-read":
     case "search":
       return "exploration";

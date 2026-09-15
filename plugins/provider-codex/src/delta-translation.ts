@@ -871,6 +871,7 @@ function translateCodexItemShape(
     }
     case "collabAgentToolCall": {
       const presentation = collabAgentPresentation({
+        hasReceivers: parsedItem.receiverThreadIds.length > 0,
         tool: parsedItem.tool,
         prompt: parsedItem.prompt,
       });

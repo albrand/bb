@@ -185,13 +185,20 @@ const COLLAB_AGENT_LABELS: Readonly<
 };
 
 export function collabAgentPresentation(args: {
+  hasReceivers?: boolean;
   tool: string;
   prompt: string | null;
 }): DeltaPresentation {
-  const label = COLLAB_AGENT_LABELS[args.tool] ?? {
-    pending: `Running ${args.tool}`,
-    completed: `Ran ${args.tool}`,
-  };
+  const label =
+    args.tool === "wait" && args.hasReceivers === false
+      ? {
+          pending: "Waiting for coordination",
+          completed: "Waited for coordination",
+        }
+      : (COLLAB_AGENT_LABELS[args.tool] ?? {
+          pending: `Running ${args.tool}`,
+          completed: `Ran ${args.tool}`,
+        });
   return withTitle(
     { label, icon: { glyph: "UserRound" } },
     args.prompt === null ? undefined : presentationTitle(args.prompt),
