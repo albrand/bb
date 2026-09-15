@@ -29,6 +29,7 @@ async function createFixture(
     installFailure?: Error;
     now?: () => number;
     serverUrl?: string;
+    serverHeaders?: Record<string, string>;
     useDefaultInstaller?: boolean;
   } = {},
 ) {
@@ -61,6 +62,7 @@ async function createFixture(
     logger: testLogger,
     now: args.now,
     serverUrl: args.serverUrl ?? "https://server.example.test",
+    serverHeaders: args.serverHeaders,
   });
   return {
     dataDir,
@@ -87,6 +89,31 @@ describe("protocol self-update", () => {
     );
     expect(test.fetchFn).toHaveBeenCalledTimes(2);
     expect(test.installTarball).toHaveBeenCalledOnce();
+  });
+
+  it("forwards private server access headers to both update requests", async () => {
+    const test = await createFixture({
+      serverHeaders: { "x-bb-connect-machine": "machine-credential" },
+    });
+
+    await expect(test.updater.handleProtocolMismatch()).resolves.toBe(
+      "updated",
+    );
+
+    expect(test.fetchFn).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({
+        headers: { "x-bb-connect-machine": "machine-credential" },
+      }),
+    );
+    expect(test.fetchFn).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({
+        headers: { "x-bb-connect-machine": "machine-credential" },
+      }),
+    );
   });
 
   it("verifies and persists the server artifact digest", async () => {

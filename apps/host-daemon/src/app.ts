@@ -818,6 +818,7 @@ export async function createHostDaemonApp(
       fetchFn: options.fetchFn,
       logger: options.logger,
       serverUrl: options.serverUrl,
+      serverHeaders: options.serverHeaders,
     }),
     onSelfUpdateInstalled: () => requestDaemonRestart(),
     onMachineShutdown: () => requestMachineShutdown(),
