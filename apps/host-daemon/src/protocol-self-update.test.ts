@@ -292,6 +292,16 @@ describe("protocol self-update", () => {
     expect(test.installTarball).toHaveBeenCalledOnce();
   });
 
+  it("allows auto-update over a tailnet-only Tailscale Serve HTTP name", async () => {
+    const test = await createFixture({
+      serverUrl: "http://alexandres-mac-studio.tail6118ef.ts.net:38886",
+    });
+    await expect(test.updater.handleProtocolMismatch()).resolves.toBe(
+      "updated",
+    );
+    expect(test.installTarball).toHaveBeenCalledOnce();
+  });
+
   it("refuses equal protocol reinstalls and downgrades", async () => {
     for (const protocolVersion of [
       HOST_DAEMON_PROTOCOL_VERSION,

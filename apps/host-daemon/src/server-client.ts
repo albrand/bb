@@ -220,6 +220,16 @@ export function usesSecureInternalFetchTransport(serverUrl: string): boolean {
     return true;
   }
 
+  // Tailscale Serve can intentionally expose the loopback server over plain
+  // HTTP on a tailnet-only `.ts.net` name. The tailnet provides the transport
+  // encryption and identity; keep rejecting arbitrary non-loopback HTTP.
+  if (
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "ts.net" || parsed.hostname.endsWith(".ts.net"))
+  ) {
+    return true;
+  }
+
   return (
     parsed.hostname === "127.0.0.1" ||
     parsed.hostname === "localhost" ||
