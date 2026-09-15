@@ -22,12 +22,14 @@ export function formatQueuedMessageCountdown(
   return `in ${Math.floor(remainingMs / DAY_MS)}d`;
 }
 
-export function isQueuedMessageSendNowAllowed(args: {
-  failureReason: string | null;
-  waitingOn: QueuedMessageWaitingOn | null;
-}): boolean {
+export function isQueuedMessageSendNowAllowed(
+  args: {
+    failureReason: string | null;
+    waitingOn: QueuedMessageWaitingOn | null;
+  },
+): boolean {
   if (args.failureReason !== null) return true;
-  const waitingOn = args.waitingOn;
+  const { waitingOn } = args;
   if (waitingOn === null) return true;
   switch (waitingOn.kind) {
     case "provisioning":
@@ -35,11 +37,12 @@ export function isQueuedMessageSendNowAllowed(args: {
     case "interaction":
     case "turn-starting":
       return false;
+    case "stopping":
+    case "workspace-busy":
+      return false;
     case "time":
     case "plugin":
     case "thread-busy":
-      return true;
-    case "workspace-busy":
       return true;
   }
 }
@@ -66,8 +69,7 @@ export function queuedMessageWaitIcon(args: {
   switch (args.waitingOn.kind) {
     case "thread-busy":
       return null;
-    case "workspace-busy":
-      return "Folder";
+    case "stopping":
     case "turn-starting":
       return "TimeSchedule";
     case "time":
@@ -78,8 +80,10 @@ export function queuedMessageWaitIcon(args: {
       return "CloudOff";
     case "interaction":
       return "CircleQuestion";
+    case "workspace-busy":
+      return "Folder";
     case "plugin":
-      return "Limitation";
+      return null;
   }
 }
 
@@ -130,10 +134,10 @@ export function describeQueuedMessageWait(
   switch (args.waitingOn.kind) {
     case "thread-busy":
       return null;
-    case "workspace-busy":
-      return "Waiting for another thread to finish using the shared workspace";
     case "turn-starting":
       return "Waiting for turn to start";
+    case "stopping":
+      return "Sending when the thread stops";
     case "time":
       return args.sendAt === null
         ? "Scheduled"
@@ -144,6 +148,8 @@ export function describeQueuedMessageWait(
       return `Waiting for ${args.waitingOn.hostName} to be ready`;
     case "interaction":
       return "Waiting for your reply";
+    case "workspace-busy":
+      return "Waiting for the shared workspace";
     case "plugin":
       return `Held by ${args.pluginDisplayName ?? args.waitingOn.pluginId} · ${args.waitingOn.reason}`;
   }

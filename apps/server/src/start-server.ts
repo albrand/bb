@@ -28,6 +28,7 @@ import {
   runPeriodicSweeps,
   runStartupRecoverySweep,
 } from "./services/system/periodic-sweeps.js";
+import { installProviderModelCatalogPrewarm } from "./services/providers/provider-model-catalog-prewarm.js";
 import { createProviderRegistryService } from "./services/providers/provider-registry.js";
 import { createTelemetryService } from "./services/system/telemetry.js";
 import { TerminalSessionLifecycle } from "./services/terminals/terminal-session-lifecycle.js";
@@ -131,6 +132,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     appVersion: serverConfig.BB_APP_VERSION,
     dataDir: serverConfig.BB_DATA_DIR,
     enabled: serverConfig.BB_TELEMETRY && isProduction,
+    telemetryEnabled: getAppSettings(db).telemetryEnabled,
     logger,
   });
 
@@ -215,6 +217,8 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     telemetry,
     terminalSessions,
   };
+  const providerModelCatalogPrewarm =
+    installProviderModelCatalogPrewarm(sweepDeps);
   await runStartupRecoverySweep(sweepDeps).catch((error) => {
     logger.error({ err: error }, "Startup recovery sweep failed");
   });
@@ -266,6 +270,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       return shutdownPromise;
     }
     shutdownPromise = (async () => {
+      providerModelCatalogPrewarm.stop();
       eventLoopStallMonitor.stop();
       stopWorkspaceWriteClaimHeartbeat({ db });
       clearInterval(sweepInterval);

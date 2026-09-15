@@ -613,6 +613,7 @@ function sendJson(args: ThreadSendArgs): SendMessageRequest {
     reasoningLevel: args.reasoningLevel,
     senderThreadId: args.senderThreadId,
     serviceTier: args.serviceTier,
+    pluginSubmission: args.pluginSubmission,
     executionInputSources: args.executionInputSources,
     sendAt: args.sendAt,
   };

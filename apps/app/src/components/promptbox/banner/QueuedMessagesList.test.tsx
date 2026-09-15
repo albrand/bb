@@ -33,6 +33,10 @@ import {
   QueuedEditorTypeaheadLayoutContext,
   type QueuedEditorTypeaheadLayout,
 } from "@/components/promptbox/queued-editor-typeahead-layout";
+import {
+  resetPluginLogoStoreForTest,
+  setPluginLogoUrls,
+} from "@/lib/plugin-logos";
 
 const bottomAnchorMocks = vi.hoisted(() => ({
   scrollElement: null as HTMLElement | null,
@@ -159,6 +163,7 @@ function renderQueuedMessagesWithOptions(
 
 afterEach(() => {
   cleanup();
+  resetPluginLogoStoreForTest();
   bottomAnchorMocks.scrollElement = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -503,6 +508,17 @@ describe("QueuedMessagesList", () => {
         expect(queryByRole("tooltip")).toBeNull();
       });
     }
+  });
+
+  it("limits collapsed action hiding to compact widths", () => {
+    const { container } = renderQueuedMessages([
+      makeQueuedMessage("q_one", "First queued message"),
+    ]);
+    const actions = container.querySelector("[data-queued-message-actions]");
+
+    expect(actions?.classList.contains("max-md:hidden")).toBe(true);
+    expect(actions?.classList.contains("hidden")).toBe(false);
+    expect(actions?.classList.contains("md:flex")).toBe(true);
   });
 
   it("expands one row's actions inline and resets them outside the queue", () => {
@@ -1771,6 +1787,40 @@ describe("QueuedMessagesList", () => {
 });
 
 describe("queued row affordances", () => {
+  it("uses the holding plugin's registered icon without a generic fallback", () => {
+    setPluginLogoUrls(
+      new Map([
+        [
+          "drafts",
+          {
+            displayName: "Drafts",
+            icon: "EditFile",
+            compactIconUrl: null,
+            logoUrl: null,
+            logoDarkUrl: null,
+            icons: new Map(),
+          },
+        ],
+      ]),
+    );
+    const { container, getByText } = renderQueuedMessages([
+      {
+        ...makeQueuedMessage("q_draft", "Draft message"),
+        waitingOn: {
+          kind: "plugin",
+          pluginId: "drafts",
+          reason: "Draft",
+        },
+      },
+    ]);
+
+    const waitLine = getByText("Held by Drafts · Draft").closest(
+      "[data-queued-message-wait]",
+    );
+    expect(waitLine?.querySelector("[data-icon=EditFile]")).not.toBeNull();
+    expect(container.querySelector("[data-icon=Limitation]")).toBeNull();
+  });
+
   it("explains the waits a reader cannot infer, and stays quiet otherwise", () => {
     const { getByText, queryByText, container } = renderQueuedMessages([
       {

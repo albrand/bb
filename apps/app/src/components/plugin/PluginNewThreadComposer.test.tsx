@@ -42,7 +42,6 @@ import {
 import { encodeReuseValue } from "@/components/pickers/environment-picker-value";
 import { useRootComposeReuseEnvironment } from "@/lib/root-compose-selection";
 import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
-import { buildThreadHandoffLocationState } from "@bb/client-core";
 import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
 import { makeProjectWithThreadsResponse } from "@/test/fixtures/projects";
 import { RootComposeView } from "@/views/RootComposeView";
@@ -732,6 +731,50 @@ describe("PluginNewThreadComposer seeding", () => {
     });
   });
 
+  it("selects a host immediately with the tab's current environment option", async () => {
+    const first = render(newThreadElement("proj_1"));
+    await act(async () => {
+      latestPromptBoxProps().modeConfig.environment.onSelectProvider(
+        MANAGED_WORKTREE_SUGAR_PROVIDER,
+        "host_1",
+      );
+    });
+    await act(async () => {
+      latestPromptBoxProps().modeConfig.environment.onSelectHost("host_2");
+    });
+    expect(latestPromptBoxProps().modeConfig.environment.value).toBe(
+      "provider:git-worktree",
+    );
+    expect(
+      latestPromptBoxProps().modeConfig.environment.selectedProviderHostId,
+    ).toBe("host_2");
+
+    first.unmount();
+    render(newThreadElement("proj_1"));
+    await waitFor(() => {
+      expect(latestPromptBoxProps().modeConfig.environment.value).toBe(
+        "provider:git-worktree",
+      );
+      expect(
+        latestPromptBoxProps().modeConfig.environment.selectedProviderHostId,
+      ).toBe("host_2");
+    });
+  });
+
+  it("selects an unconfigured host immediately and blocks submission", async () => {
+    render(newThreadElement("proj_2"));
+    await act(async () => {
+      latestPromptBoxProps().modeConfig.environment.onSelectHost("host_2");
+    });
+    expect(latestPromptBoxProps().modeConfig.environment.value).toBe(
+      "provider:project-checkout",
+    );
+    expect(
+      latestPromptBoxProps().modeConfig.environment.selectedProviderHostId,
+    ).toBe("host_2");
+    expect(latestPromptBoxProps().disabled).toBe(true);
+  });
+
   it.each(["host_deleted", "host_2"])(
     "falls back when remembered machine %s cannot run the project",
     async (hostId) => {
@@ -850,6 +893,32 @@ describe("PluginNewThreadComposer seeding", () => {
         "updated through the Composer API",
       );
     });
+  });
+
+  it("preserves plugin submission data through a new-thread composer", async () => {
+    const submitted: NewThreadRequest[] = [];
+    renderComposer(
+      STORED_REQUEST,
+      (request) => submitted.push(request),
+      "plugin-submission",
+    );
+
+    await waitFor(() => {
+      expect(latestPromptBoxProps().disabled).toBe(false);
+    });
+    const pluginSubmission = {
+      pluginId: "drafts",
+      data: { kind: "draft" } as const,
+    };
+    await act(async () => {
+      await latestPromptBoxProps().pluginComposerHost.submit(
+        { experimental_data: pluginSubmission.data },
+        pluginSubmission,
+      );
+    });
+
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toMatchObject({ pluginSubmission });
   });
 
   it("does not demote a project the replayed bootstrap does not know yet", async () => {
@@ -1447,71 +1516,6 @@ describe("PluginNewThreadComposer seeding", () => {
       );
     },
   );
-
-  it("keeps an unrelated draft attachment out of a RootComposeView handoff", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    window.localStorage.setItem("bb.root-compose.project-id", "proj_1");
-    getPromptDraftAccessor({ kind: "new-thread" }).setDraft({
-      text: "unrelated draft",
-      mentions: [],
-      attachments: [
-        {
-          type: "localFile",
-          name: "unrelated.txt",
-          path: ".bb/attachments/unrelated.txt",
-          mimeType: "text/plain",
-          sizeBytes: 5,
-        },
-      ],
-    });
-    const router = createMemoryRouter(
-      [{ path: "/", element: <RootComposeView /> }],
-      {
-        initialEntries: [
-          {
-            pathname: "/",
-            state: buildThreadHandoffLocationState({
-              environmentId: "env-handoff",
-              projectId: "proj_1",
-              sourceThreadId: "thr_source",
-              sourceThreadTitle: "Source thread",
-            }),
-          },
-        ],
-      },
-    );
-    render(
-      <Provider>
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>
-      </Provider>,
-    );
-
-    expect(mocks.promptBoxProps[0]?.modeConfig.environment.value).toBe(
-      "provider:personal-workspace",
-    );
-    expect(mocks.promptBoxProps[0]?.value).toBe("unrelated draft");
-    expect(mocks.promptBoxProps[0]?.attachments.items).toHaveLength(1);
-    await waitFor(() => {
-      expect(latestPromptBoxProps().value).toBe(
-        "Continue from @thread:thr_source",
-      );
-    });
-    await waitFor(() => {
-      expect(router.state.location.state).toBeNull();
-    });
-    expect(
-      mocks.promptBoxProps.some(
-        (props) =>
-          props.value === "Continue from @thread:thr_source" &&
-          props.attachments.items.length > 0,
-      ),
-    ).toBe(false);
-    expect(latestPromptBoxProps().attachments.items).toEqual([]);
-  });
 
   it("applies a replacing initial prompt from location state exactly once", async () => {
     const queryClient = new QueryClient({

@@ -38,6 +38,7 @@ describe("fork: telemetry is off by default", () => {
         appVersion: "0.42.1",
         dataDir: "/tmp/fork-telemetry-off",
         enabled: true,
+        telemetryEnabled: false,
         logger: {
           debug: () => {},
           error: () => {},

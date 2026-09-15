@@ -79,7 +79,10 @@ export interface AgentRuntimeOptions {
 
   onEvent: (event: ThreadEvent, delivery?: BridgeLineDelivery) => void;
 
-  onToolCall: (request: ToolCallRequest) => Promise<ToolCallResponse>;
+  onToolCall: (
+    request: ToolCallRequest,
+    signal?: AbortSignal,
+  ) => Promise<ToolCallResponse>;
 
   onInteractiveRequest?: (
     request: PendingInteractionCreate,

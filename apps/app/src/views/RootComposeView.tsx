@@ -88,10 +88,6 @@ import {
   FORK_THREAD_CREATE_SEED_LOCATION_STATE_KEY,
   type ForkThreadCreateSeed,
 } from "@bb/client-core";
-import {
-  buildThreadHandoffPromptDraft,
-  readThreadHandoffCreateSeedFromLocationState,
-} from "@bb/client-core";
 import { useNavigateToThreadAfterCreatePreference } from "@/lib/root-compose-create-preference";
 import {
   readInitialPromptFromSearch,
@@ -404,8 +400,7 @@ export function hasSingleUseRootComposeTargetState(state: unknown): boolean {
   return (
     readRootComposeSectionTargetFromLocationState(state) !== null ||
     readReuseEnvironmentIdFromLocationState(state) !== null ||
-    readForkThreadCreateSeedFromLocationState(state) !== null ||
-    readThreadHandoffCreateSeedFromLocationState(state) !== null
+    readForkThreadCreateSeedFromLocationState(state) !== null
   );
 }
 
@@ -553,6 +548,7 @@ export function RootComposeView() {
               input: request.input,
               model: request.model,
               permissionMode: request.permissionMode,
+              pluginSubmission: request.pluginSubmission,
               providerSupportsFork:
                 findCachedProviderInfo(queryClient, forkSeed.providerId)
                   ?.capabilities.supportsFork ?? false,
@@ -561,7 +557,12 @@ export function RootComposeView() {
             });
       if (createRequest === null) return;
       const thread = await createThread.mutateAsync(
-        sendAt === undefined ? createRequest : { ...createRequest, sendAt },
+        sendAt === undefined
+          ? createRequest
+          : {
+              ...createRequest,
+              ...(sendAt === undefined ? {} : { sendAt }),
+            },
       );
       setLastCreatedThreadId(thread.id);
       setForkSeed(null);
@@ -751,9 +752,6 @@ function RootComposeSurface({
     const nextForkSeed = readForkThreadCreateSeedFromLocationState(
       location.state,
     );
-    const nextHandoffSeed = readThreadHandoffCreateSeedFromLocationState(
-      location.state,
-    );
     if (!hasSingleUseRootComposeTargetState(location.state)) return;
     if (shouldStartComposingFromLocationState(location.state)) {
       setStartedComposing(true);
@@ -766,7 +764,7 @@ function RootComposeSurface({
     if (reuseEnvironmentId !== null) {
       seedEnvironmentSelectionValue(encodeReuseValue(reuseEnvironmentId));
     }
-    if (nextForkSeed !== null && nextHandoffSeed === null) {
+    if (nextForkSeed !== null) {
       setForkSeed(nextForkSeed);
       setRootComposeProjectId(nextForkSeed.projectId);
       setProviderModelReasoning(nextForkSeed);
@@ -775,17 +773,6 @@ function RootComposeSurface({
       seedEnvironmentSelectionValue(
         encodeReuseValue(nextForkSeed.environmentId),
       );
-    }
-    if (nextHandoffSeed !== null) {
-      setStartedComposing(true);
-      setRootComposeProjectId(nextHandoffSeed.projectId);
-      setForkSeed(null);
-      if (nextHandoffSeed.environmentId !== null) {
-        seedEnvironmentSelectionValue(
-          encodeReuseValue(nextHandoffSeed.environmentId),
-        );
-      }
-      setPromptDraft(buildThreadHandoffPromptDraft(nextHandoffSeed));
     }
     navigate(getRootComposeRoutePath() + location.search, {
       replace: true,
@@ -798,7 +785,6 @@ function RootComposeSurface({
     seedEnvironmentSelectionValue,
     setForkSeed,
     setPermissionMode,
-    setPromptDraft,
     setProviderModelReasoning,
     setRootComposeProjectId,
     setRootComposeSectionId,

@@ -91,6 +91,7 @@ export interface IntegrationHarness {
   api: PublicApiClient;
   cleanup(): Promise<void>;
   crashDaemon(): Promise<void>;
+  daemonDataDir: string;
   daemonApp: HostDaemonApp;
   db: DbConnection;
   hostId: string;
@@ -506,6 +507,7 @@ export async function createIntegrationHarness(
       api,
       cleanup,
       crashDaemon,
+      daemonDataDir,
       daemonApp: daemonResources.daemonApp,
       db: server.db,
       hostId: daemonResources.hostId,

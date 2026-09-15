@@ -2,7 +2,9 @@ import {
   getEnvironment,
   getHost,
   getSessionById,
+  getStoredProviderModelCatalog,
   getThread,
+  replaceStoredProviderModelCatalog,
   updateHost,
 } from "@bb/db";
 import {
@@ -468,6 +470,32 @@ describe("public host management", () => {
     });
   });
 
+  it("deletes a removed host's stored provider model catalogs", async () => {
+    await withTestHarness(async (harness) => {
+      const primary = seedHost(harness.deps, { id: "host_primary" });
+      seedPrimaryHost(harness.deps, primary.id);
+      const host = seedHost(harness.deps, { id: "host_remove_catalogs" });
+      const key = { hostId: host.id, providerId: "codex", scopeKey: "" };
+      replaceStoredProviderModelCatalog(harness.db, {
+        row: {
+          ...key,
+          fingerprint: "fingerprint",
+          modelsJson: "[]",
+          selectedOnlyModelsJson: "[]",
+          fetchedAt: 1,
+        },
+        pruneWorkspaceRowsFetchedBefore: null,
+      });
+
+      const response = await harness.app.request(`${API}/hosts/${host.id}`, {
+        method: "DELETE",
+      });
+
+      expect(response.status).toBe(200);
+      expect(getStoredProviderModelCatalog(harness.db, key)).toBeNull();
+    });
+  });
+
   it("refuses to remove the primary host", async () => {
     await withTestHarness(async (harness) => {
       const primary = seedHost(harness.deps, { id: "host_primary" });
@@ -503,6 +531,7 @@ describe("public host management", () => {
       });
       const revokeHandler = vi.fn(async () => ({ ok: true }));
       const revokeRecord = {
+        publication: null,
         inputSchema: z.object({ machineId: z.string() }),
         outputSchema: z.object({ ok: z.literal(true) }),
         handler: revokeHandler,

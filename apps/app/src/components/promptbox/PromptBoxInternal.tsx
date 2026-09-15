@@ -47,7 +47,7 @@ import {
   type VoiceUnsupportedReason,
 } from "@/hooks/voice-input-support";
 import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon, type IconName } from "@bb/shared-ui/icon";
 import {
   Tooltip,
   TooltipContent,
@@ -142,7 +142,7 @@ import {
 const PROMPTBOX_MIN_HEIGHT = 68;
 const PROMPTBOX_SELECTION_REVEAL_MARGIN = 12;
 const COMPACT_PROMPT_ACTION_BUTTON_CLASS =
-  "size-8 p-0 transition-all [&_svg]:size-4";
+  "size-8 p-0 transition-all [&_[data-icon-root]]:size-4";
 const RICH_PASTE_BLOCK_TAGS = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -228,6 +228,8 @@ export interface PromptBoxSubmissionConfig {
   isSubmitting?: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  label?: string;
+  icon?: IconName;
   title?: string;
   isRunning?: boolean;
   onStop?: () => void;
@@ -238,8 +240,10 @@ interface PromptSubmitButtonProps {
   canSubmit: boolean;
   className: string;
   disabledReason: string | undefined;
+  icon: IconName | undefined;
   isBusy: boolean;
   isCompact: boolean;
+  label: string | undefined;
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onTouchSubmit: () => void;
@@ -250,8 +254,10 @@ function PromptSubmitButton({
   canSubmit,
   className,
   disabledReason,
+  icon,
   isBusy,
   isCompact,
+  label,
   onClick,
   onPointerDown,
   onTouchSubmit,
@@ -319,12 +325,20 @@ function PromptSubmitButton({
         }
         onClick(event);
       }}
-      className={className}
+      className={cn(
+        className,
+        label !== undefined && !isCompact && "size-auto h-8 gap-1.5 px-2.5",
+      )}
     >
       {isBusy ? (
         <Icon name="Spinner" className="size-4 animate-spin" />
       ) : (
-        <Icon name="CornerDownLeft" className="size-4" />
+        <>
+          <Icon name={icon ?? "CornerDownLeft"} className="size-4" />
+          {label !== undefined && !isCompact ? (
+            <span data-promptbox-submit-label="">{label}</span>
+          ) : null}
+        </>
       )}
     </Button>
   );
@@ -447,6 +461,7 @@ interface PromptBoxInternalProps {
   textEffects?: readonly ComposerTextEffectSource[];
   onComposerLayoutChange?: (layout: ComposerView["layout"]) => void;
   header?: ReactNode;
+  modeHeader?: ReactNode;
   footerStart?: ReactNode;
   submission?: PromptBoxSubmissionConfig;
   minHeight?: number;
@@ -1164,6 +1179,7 @@ export function PromptBoxInternal({
   textEffects,
   onComposerLayoutChange,
   header,
+  modeHeader,
   footerStart,
   submission = {},
   minHeight = PROMPTBOX_MIN_HEIGHT,
@@ -1187,6 +1203,8 @@ export function PromptBoxInternal({
     isSubmitting = false,
     disabled: submitDisabled = false,
     disabledReason: submitDisabledReason,
+    label: submitLabel,
+    icon: submitIcon,
     title: submitTitle = "Submit (Enter)",
     isRunning = false,
     onStop,
@@ -3066,6 +3084,14 @@ export function PromptBoxInternal({
         className="hidden"
         onChange={handleAttachmentInputChange}
       />
+      {modeHeader ? (
+        <div
+          inert={showVoiceActionGroup ? true : undefined}
+          className="px-3 pt-1.5"
+        >
+          {modeHeader}
+        </div>
+      ) : null}
       <div
         data-promptbox-layout=""
         className={cn(COLLAPSING_GRID_CLASS, showCompactLayout && "relative")}
@@ -3363,6 +3389,8 @@ export function PromptBoxInternal({
                     ) : (
                       <PromptSubmitButton
                         canSubmit={canSubmit}
+                        icon={submitIcon}
+                        label={submitLabel}
                         className={cn(
                           showCompactLayout
                             ? COMPACT_PROMPT_ACTION_BUTTON_CLASS

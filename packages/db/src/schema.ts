@@ -587,6 +587,7 @@ export const threads = sqliteTable(
     pinnedAt: integer("pinned_at"),
     pinSortKey: text("pin_sort_key"),
     deletedAt: integer("deleted_at"),
+    storageDeletedAt: integer("storage_deleted_at"),
     lastReadAt: integer("last_read_at"),
     latestAttentionAt: integer("latest_attention_at").notNull(),
     createdAt: integer("created_at").notNull(),
@@ -1013,6 +1014,26 @@ export const hostDaemonSessions = sqliteTable(
       table.closedAt,
       table.id,
     ),
+  ],
+);
+
+export const providerModelCatalogs = sqliteTable(
+  "provider_model_catalogs",
+  {
+    hostId: text("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    modelsJson: text("models_json").notNull(),
+    selectedOnlyModelsJson: text("selected_only_models_json").notNull(),
+    fetchedAt: integer("fetched_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.hostId, table.providerId, table.scopeKey],
+    }),
   ],
 );
 

@@ -64,6 +64,12 @@ export interface ProviderRegistryService {
   getUserDefaultProviderId(): string | null;
   get(providerId: string): ProviderRegistration | null;
   getRegistrationRevision(): number;
+  lookupInstalled(key: ProviderHealthCacheKey): Promise<boolean> | undefined;
+  rememberInstalled(key: ProviderHealthCacheKey, value: Promise<boolean>): void;
+  revalidateInstalled(
+    key: ProviderHealthCacheKey,
+    probe: () => Promise<boolean>,
+  ): Promise<void>;
   lookupProviderHealthStatus(
     key: ProviderHealthCacheKey,
   ): Promise<ProviderDiscoveredHealthStatus> | undefined;
@@ -121,6 +127,18 @@ export function createProviderRegistryService(
         registrationRevision: number;
         expiresAt: number;
         value: Promise<ProviderDiscoveredHealthStatus>;
+      }
+    >
+  >();
+  const installedStatusByHostId = new Map<
+    string,
+    Map<
+      string,
+      {
+        registrationRevision: number;
+        expiresAt: number;
+        value: Promise<boolean>;
+        revalidating: boolean;
       }
     >
   >();
@@ -227,6 +245,57 @@ export function createProviderRegistryService(
       return registrationRevision;
     },
 
+    lookupInstalled(key) {
+      const entry = installedStatusByHostId
+        .get(key.hostId)
+        ?.get(key.providerId);
+      if (
+        entry === undefined ||
+        entry.registrationRevision !== registrationRevision ||
+        entry.expiresAt <= Date.now()
+      ) {
+        return undefined;
+      }
+      return entry.value;
+    },
+
+    rememberInstalled(key, value) {
+      let hostEntries = installedStatusByHostId.get(key.hostId);
+      if (hostEntries === undefined) {
+        hostEntries = new Map();
+        installedStatusByHostId.set(key.hostId, hostEntries);
+      }
+      hostEntries.set(key.providerId, {
+        registrationRevision,
+        expiresAt: Date.now() + PROVIDER_INSTALLED_CACHE_TTL_MS,
+        value,
+        revalidating: false,
+      });
+    },
+
+    revalidateInstalled(key, probe) {
+      const entry = installedStatusByHostId.get(key.hostId)?.get(key.providerId);
+      if (
+        entry === undefined ||
+        entry.revalidating ||
+        (entry.registrationRevision === registrationRevision &&
+          entry.expiresAt > Date.now())
+      ) {
+        return Promise.resolve();
+      }
+      entry.revalidating = true;
+      const isCurrent = () =>
+        installedStatusByHostId.get(key.hostId)?.get(key.providerId) === entry;
+      return probe().then(
+        (installed) => {
+          if (isCurrent()) this.rememberInstalled(key, Promise.resolve(installed));
+        },
+        () => {
+          if (isCurrent()) this.forgetInstalledKey(key);
+        },
+      );
+    },
+
     lookupProviderHealthStatus(key) {
       const hostEntries = installedByHostId.get(key.hostId);
       if (hostEntries === undefined) return undefined;
@@ -261,10 +330,14 @@ export function createProviderRegistryService(
       if (hostEntries === undefined) return;
       hostEntries.delete(key.providerId);
       if (hostEntries.size === 0) installedByHostId.delete(key.hostId);
+      const statusEntries = installedStatusByHostId.get(key.hostId);
+      statusEntries?.delete(key.providerId);
+      if (statusEntries?.size === 0) installedStatusByHostId.delete(key.hostId);
     },
 
     forgetAllInstalled() {
       installedByHostId.clear();
+      installedStatusByHostId.clear();
     },
 
     getServerCapabilities(providerId) {

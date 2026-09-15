@@ -193,7 +193,10 @@ export interface ServerClient {
     threadIds: readonly string[],
   ): Promise<Map<string, string | null>>;
   postDetachNotice(threadIds: readonly string[]): Promise<void>;
-  callTool(request: ToolCallRequest): Promise<HostDaemonToolCallResponse>;
+  callTool(
+    request: ToolCallRequest,
+    signal?: AbortSignal,
+  ): Promise<HostDaemonToolCallResponse>;
   registerInteractiveRequest(
     request: PendingInteractionCreate,
   ): Promise<HostDaemonInteractiveRequestResponse>;
@@ -609,6 +612,7 @@ export function createServerClient(
 
     async callTool(
       request: ToolCallRequest,
+      signal?: AbortSignal,
     ): Promise<HostDaemonToolCallResponse> {
       const payload: HostDaemonToolCallRequest = {
         threadId: request.threadId,
@@ -625,6 +629,7 @@ export function createServerClient(
         method: "POST",
         headers: headers(),
         body: JSON.stringify(payload),
+        signal,
       });
 
       if (!response.ok) {

@@ -19,7 +19,6 @@ import {
   type ResolveNewThreadSubmitDisabledReasonArgs,
 } from "@/components/promptbox/NewThreadComposer";
 import { getProjectStoredPromptAttachmentPaths } from "@bb/client-core";
-import { THREAD_HANDOFF_CREATE_SEED_LOCATION_STATE_KEY } from "@bb/client-core";
 import {
   buildRootComposeTerminalSessions,
   buildMobileRecentThreads,
@@ -41,8 +40,57 @@ import {
 import { makeTerminalSession as makeTerminalSessionFixture } from "@/test/fixtures/terminal-sessions";
 import {
   buildReuseThreadOptions,
+  resolveHostEnvironmentProvider,
   resolveRootComposeEffectiveEnvironmentValue,
 } from "./root-compose-environment-selection";
+
+describe("resolveHostEnvironmentProvider", () => {
+  const checkoutProvider = makeProjectProvider("project-checkout");
+  const worktreeProvider = makeProjectProvider("git-worktree");
+
+  it("keeps the tab's current environment option when the host supports it", () => {
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: worktreeProvider,
+        providers: [checkoutProvider, worktreeProvider],
+      }),
+    ).toBe(worktreeProvider);
+  });
+
+  it("falls back to the first usable option when the current one is unavailable", () => {
+    const unavailableWorktree = {
+      ...worktreeProvider,
+      availability: {
+        status: "unavailable" as const,
+        message: "Not installed",
+      },
+    };
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: unavailableWorktree,
+        providers: [checkoutProvider, unavailableWorktree],
+      }),
+    ).toBe(checkoutProvider);
+  });
+
+  it("keeps the current option so selecting an unconfigured host still takes effect", () => {
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: worktreeProvider,
+        providers: [],
+      }),
+    ).toBe(worktreeProvider);
+  });
+
+  it("returns no selection when neither the host nor the tab has a machine option", () => {
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: null,
+        providers: [],
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("root-compose project file routing", () => {
   it("uses a persisted opener host instead of the newly selected context", () => {
@@ -724,19 +772,6 @@ describe("hasSingleUseRootComposeTargetState", () => {
     expect(hasSingleUseRootComposeTargetState({ focusPrompt: true })).toBe(
       true,
     );
-  });
-
-  it("treats handoff seeds as single-use target state", () => {
-    expect(
-      hasSingleUseRootComposeTargetState({
-        [THREAD_HANDOFF_CREATE_SEED_LOCATION_STATE_KEY]: {
-          environmentId: "env_source",
-          projectId: "proj_source",
-          sourceThreadId: "thr_source",
-          sourceThreadTitle: "Source thread",
-        },
-      }),
-    ).toBe(true);
   });
 
   it("ignores non-target state", () => {

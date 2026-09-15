@@ -121,6 +121,9 @@ export const createThreadRequestSchema = z
     startedOnBehalfOf: startedOnBehalfOfSchema.nullable().default(null),
     originKind: threadOriginKindSchema.nullable().default(null),
     sendAt: z.number().int().nonnegative().optional(),
+    pluginSubmission: z
+      .object({ pluginId: pluginIdSchema, data: jsonValueSchema })
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.origin === "plugin" && value.originPluginId === undefined) {
@@ -239,6 +242,9 @@ const sendMessageRequestBaseSchema = z.object({
   mode: sendMessageModeSchema,
   senderThreadId: z.string().min(1).optional(),
   sendAt: z.number().int().nonnegative().optional(),
+  pluginSubmission: z
+    .object({ pluginId: pluginIdSchema, data: jsonValueSchema })
+    .optional(),
 });
 
 export const sendMessageRequestSchema = sendMessageRequestBaseSchema;
@@ -280,7 +286,7 @@ export const sendMessageResponseSchema = z.discriminatedUnion("delivery", [
 export type SendMessageResponse = z.infer<typeof sendMessageResponseSchema>;
 
 export const editMessageRequestSchema = sendMessageRequestBaseSchema
-  .omit({ mode: true, sendAt: true })
+  .omit({ mode: true, sendAt: true, pluginSubmission: true })
   .extend({
     operationId: z.string().min(1),
     expectedRequestSequence: z.number().int().nonnegative().optional(),
@@ -789,6 +795,7 @@ export const timelinePageMetadataSchema = z
     hasOlderRows: z.boolean(),
     olderCursor: timelinePaginationCursorSchema.nullable(),
     historySnapshot: z.string().optional(),
+    olderRowsSourceSeqEnd: z.number().int().nonnegative().nullable().optional(),
     contentPage: z
       .object({
         anchorSeq: z.number().int().positive(),

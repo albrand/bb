@@ -5,6 +5,8 @@ import {
   LOCAL_SUBAGENT_TASK_TYPE,
   LOCAL_WORKFLOW_TASK_TYPE,
   THREAD_CONTEXT_CLEAR_OPERATION,
+  encodeClientTurnRequestIdNumber,
+  parseStoredThreadEvent,
   threadScope,
   turnScope,
   type PromptInput,
@@ -16,10 +18,12 @@ import {
   appendStoredThreadEvent,
   appendStoredThreadEventInTransaction,
   appendStoredThreadEventsInTransaction,
+  copyStoredThreadEventsInTransaction,
   findStoredEventRow,
   findStoredTimelineWindowByteBudgetFloor,
   findTimelineWindowBudgetFloorSequence,
   getActiveStoredTurnId,
+  getFirstParentedTimelineBoundarySequence,
   getHighWaterMarks,
   getLastStoredProviderThreadId,
   getLatestCompletedThreadContextClearSequence,
@@ -29,7 +33,6 @@ import {
   getLatestThreadSequence,
   insertEvents,
   listContextWindowUsageRows,
-  listCompletedTurnsByThreadIds,
   listEvents,
   listLatestThreadStateEventRowsByThreadIds,
   listStoredConversationOutlineEventRows,
@@ -41,6 +44,7 @@ import {
   listStoredTimelineWindowEventRows,
   listStoredTurnInputAcceptedRowsByClientRequestIds,
   listStoredTurnRejectedRowsByClientRequestIds,
+  listStoredTurnCompletedKeys,
   MissingStoredTurnStartedError,
   listActiveBackgroundTaskCountsByThreadIds,
   listLatestBackgroundTaskStateRowsByItemIds,
@@ -55,7 +59,14 @@ import {
 } from "../../src/data/events.js";
 import { createEnvironment } from "../../src/data/environments.js";
 import { createProject } from "../../src/data/projects.js";
-import { createThread } from "../../src/data/threads.js";
+import {
+  createThread,
+  searchThreadsWithPendingInteractionState,
+} from "../../src/data/threads.js";
+import type {
+  AppendDaemonEventInput,
+  InsertEventInput,
+} from "../../src/data/events.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
@@ -105,6 +116,125 @@ function createTurnEventFields(args: CreateTurnEventFieldsArgs) {
 
 function textInput(text: string): PromptInput[] {
   return [{ type: "text", text, mentions: [] }];
+}
+
+function listSearchNeedleThreadIds(
+  db: ReturnType<typeof setup>["db"],
+  query: string,
+): string[] {
+  return searchThreadsWithPendingInteractionState(db, {
+    query,
+    limitPerGroup: 20,
+  }).active.results.map((result) => result.thread.id);
+}
+
+function searchNeedleDaemonEventInputs(
+  threadId: string,
+): AppendDaemonEventInput[] {
+  const turnFields = {
+    ...createTurnEventFields({ turnId: "turn-search" }),
+    environmentId: null,
+    providerThreadId: "provider-search",
+  };
+  return [
+    {
+      threadId,
+      type: "turn/started",
+      ...turnFields,
+      data: JSON.stringify({ providerThreadId: "provider-search" }),
+    },
+    {
+      threadId,
+      type: "client/turn/requested",
+      ...daemonThreadEventFields,
+      data: JSON.stringify({
+        direction: "outbound",
+        requestId: encodeClientTurnRequestIdNumber({ value: 1 }),
+        source: "tell",
+        initiator: "user",
+        senderThreadId: null,
+        input: textInput("userneedle"),
+        target: { kind: "new-turn" },
+        request: { method: "turn/start", params: {} },
+        execution: {
+          model: "gpt-5",
+          serviceTier: "default",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+          source: "client/turn/requested",
+        },
+      }),
+    },
+    {
+      threadId,
+      type: "item/agentMessage/delta",
+      ...turnFields,
+      itemId: "msg-search",
+      data: JSON.stringify({
+        providerThreadId: "provider-search",
+        itemId: "msg-search",
+        delta: "deltaneedle",
+      }),
+    },
+    {
+      threadId,
+      type: "item/completed",
+      ...turnFields,
+      itemId: "msg-search",
+      itemKind: "agentMessage",
+      data: JSON.stringify({
+        providerThreadId: "provider-search",
+        item: {
+          type: "agentMessage",
+          id: "msg-search",
+          text: "assistantneedle",
+        },
+      }),
+    },
+    {
+      threadId,
+      type: "item/completed",
+      ...turnFields,
+      itemId: "cmd-search",
+      itemKind: "commandExecution",
+      data: JSON.stringify({
+        providerThreadId: "provider-search",
+        item: {
+          type: "commandExecution",
+          id: "cmd-search",
+          command: "printf output",
+          cwd: "/tmp/project",
+          status: "completed",
+          approvalStatus: null,
+          aggregatedOutput: "toolneedle",
+        },
+      }),
+    },
+    {
+      threadId,
+      type: "system/manager/user_message",
+      ...daemonThreadEventFields,
+      data: JSON.stringify({ text: "managerneedle" }),
+    },
+  ];
+}
+
+function expectIndexedNeedles(
+  db: ReturnType<typeof setup>["db"],
+  threadId: string,
+): void {
+  for (const [query, indexed] of [
+    ["userneedle", true],
+    ["deltaneedle", false],
+    ["assistantneedle", true],
+    ["toolneedle", false],
+    ["managerneedle", true],
+  ] as const) {
+    expect({ query, threadIds: listSearchNeedleThreadIds(db, query) }).toEqual({
+      query,
+      threadIds: indexed ? [threadId] : [],
+    });
+  }
 }
 
 function clientTurnRequestData(requestId: string, text: string): string {
@@ -172,6 +302,61 @@ function createContextWindowUsageData(
 }
 
 describe("events", () => {
+  it("preserves reported cache counts through daemon append and stored event decoding", () => {
+    const { db, thread } = setup();
+    const scope = turnScope("turn-cache-test");
+    db.transaction((tx) =>
+      appendDaemonEventsInTransaction(tx, [
+        {
+          threadId: thread.id,
+          type: "turn/started",
+          ...daemonThreadEventFields,
+          scope,
+          providerThreadId: "provider-cache-test",
+          data: JSON.stringify({ providerThreadId: "provider-cache-test" }),
+        },
+      ]),
+    );
+    const legacy = {
+      totalTokens: 140,
+      inputTokens: 80,
+      cachedInputTokens: 40,
+      outputTokens: 20,
+      reasoningOutputTokens: 0,
+    };
+    const variants = [
+      legacy,
+      { ...legacy, cacheReadInputTokens: 31, cacheWriteInputTokens: 9 },
+      { ...legacy, cacheWriteInputTokens: 0 },
+    ];
+    for (const last of variants) {
+      db.transaction((tx) =>
+        appendDaemonEventsInTransaction(tx, [
+          {
+            threadId: thread.id,
+            type: "thread/tokenUsage/updated",
+            ...daemonThreadEventFields,
+            scope,
+            providerThreadId: "provider-cache-test",
+            data: JSON.stringify({
+              tokenUsage: { total: last, last, modelContextWindow: null },
+            }),
+          },
+        ]),
+      );
+    }
+    const rows = listEvents(db, { threadId: thread.id, afterSequence: 1 });
+    expect(rows).toHaveLength(variants.length);
+    rows.forEach((row, index) => {
+      expect(
+        parseStoredThreadEvent({ ...row, scope, data: JSON.parse(row.data) }),
+      ).toMatchObject({
+        tokenUsage: { total: variants[index], last: variants[index] },
+      });
+    });
+    db.$client.close();
+  });
+
   it("inserts events and returns count", () => {
     const { db, thread } = setup();
 
@@ -988,6 +1173,60 @@ describe("events", () => {
       .toEqual(["turn/started", "turn/input/accepted", "system/error"]);
   });
 
+  it("indexes daemon-appended messages without parsing deltas or tool outputs", () => {
+    const { db, thread } = setup();
+    const inputs = searchNeedleDaemonEventInputs(thread.id);
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      db.transaction((tx) => appendDaemonEventsInTransaction(tx, inputs), {
+        behavior: "immediate",
+      });
+      const parsedData = new Set(parse.mock.calls.map(([text]) => text));
+      expect(
+        inputs
+          .filter((input) => parsedData.has(input.data))
+          .map((input) => input.itemKind ?? input.type),
+      ).toEqual([
+        "client/turn/requested",
+        "agentMessage",
+        "system/manager/user_message",
+      ]);
+    } finally {
+      parse.mockRestore();
+    }
+
+    expectIndexedNeedles(db, thread.id);
+  });
+
+  it("indexes copied messages, including legacy rows without an item kind, when a fork copies events", () => {
+    const { db, project, thread } = setup();
+    const fork = createThread(db, noopNotifier, {
+      projectId: project.id,
+      providerId: "codex",
+    });
+    insertEvents(
+      db,
+      noopNotifier,
+      searchNeedleDaemonEventInputs(thread.id).map((input, index) => ({
+        ...input,
+        itemKind: null,
+        sequence: index + 1,
+      })),
+    );
+
+    db.transaction(
+      (tx) =>
+        copyStoredThreadEventsInTransaction(tx, {
+          rows: listStoredEventRows(db, { threadId: thread.id }),
+          targetEnvironmentId: null,
+          targetThreadId: fork.id,
+        }),
+      { behavior: "immediate" },
+    );
+
+    expectIndexedNeedles(db, fork.id);
+  });
+
   it("stores the provided createdAt timestamp", () => {
     const { db, thread } = setup();
     const createdAt = 1_700_000_000_000;
@@ -1426,6 +1665,114 @@ describe("events", () => {
       { rowId: `${thread.id}:user-seed:2`, sequence: 2 },
     ]);
   });
+
+  it.each<{
+    name: string;
+    overrides?: Record<number, Partial<InsertEventInput>>;
+    range?: { maxSeq?: number; sequenceStart?: number };
+    expected: number | null;
+  }>([
+    { name: "a user request inside a tool call span", expected: 3 },
+    {
+      name: "a delegation span",
+      overrides: { 2: { itemKind: "delegation" } },
+      expected: 3,
+    },
+    {
+      name: "a parent whose turn only starts as a nested turn",
+      overrides: { 1: { parentToolCallId: "call-outer" } },
+      expected: null,
+    },
+    {
+      name: "a parented tool call",
+      overrides: { 2: { parentToolCallId: "call-outer" } },
+      expected: null,
+    },
+    {
+      name: "an agent-initiated request",
+      overrides: {
+        3: {
+          data: JSON.stringify({
+            initiator: "agent",
+            input: textInput("agent message"),
+            target: { kind: "new-turn" },
+          }),
+        },
+      },
+      expected: null,
+    },
+    {
+      name: "a parent before sequenceStart",
+      range: { sequenceStart: 3 },
+      expected: null,
+    },
+    { name: "a child after maxSeq", range: { maxSeq: 3 }, expected: null },
+    {
+      name: "a root turn start after maxSeq",
+      overrides: { 1: { sequence: 5 } },
+      range: { maxSeq: 4 },
+      expected: null,
+    },
+  ])(
+    "finds the parented timeline boundary for $name",
+    ({ overrides = {}, range, expected }) => {
+      const { db, thread } = setup();
+      const rows: InsertEventInput[] = [
+        {
+          threadId: thread.id,
+          sequence: 1,
+          type: "turn/started",
+          ...createTurnEventFields({ turnId: "turn-a" }),
+          data: "{}",
+        },
+        {
+          threadId: thread.id,
+          sequence: 2,
+          type: "item/started",
+          scope: turnScope("turn-a"),
+          itemId: "call-a",
+          itemKind: "toolCall",
+          parentToolCallId: null,
+          data: "{}",
+        },
+        {
+          threadId: thread.id,
+          sequence: 3,
+          type: "client/turn/requested",
+          ...threadEventFields,
+          data: JSON.stringify({
+            initiator: "user",
+            input: textInput("user message"),
+            target: { kind: "new-turn" },
+          }),
+        },
+        {
+          threadId: thread.id,
+          sequence: 4,
+          type: "item/started",
+          scope: turnScope("nested-a"),
+          itemId: "child-a",
+          itemKind: "agentMessage",
+          parentToolCallId: "call-a",
+          data: "{}",
+        },
+      ];
+      insertEvents(
+        db,
+        noopNotifier,
+        rows.map((row) => ({ ...row, ...overrides[row.sequence] })),
+      );
+
+      expect(
+        getFirstParentedTimelineBoundarySequence(db, {
+          maxSeq: 10,
+          sequenceStart: 0,
+          ...range,
+          threadId: thread.id,
+        }),
+      ).toBe(expected);
+    },
+  );
 
   it("loads timeline event windows with sequence bounds and exclusions", () => {
     const { db, thread } = setup();
@@ -2552,7 +2899,7 @@ describe("events", () => {
     ).toEqual([1]);
   });
 
-  it("lists completed turns for a specific thread set", () => {
+  it("lists only requested turn keys that have a stored turn/completed", () => {
     const { db, project, thread } = setup();
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
@@ -2563,11 +2910,15 @@ describe("events", () => {
       {
         threadId: thread.id,
         sequence: 1,
-        scope: turnScope("turn_a"),
+        type: "turn/started",
+        ...createTurnEventFields({ turnId: "turn_a" }),
+        data: JSON.stringify({ providerThreadId: "provider_a" }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 2,
         type: "turn/completed",
-        itemId: null,
-        itemKind: null,
-        parentToolCallId: null,
+        ...createTurnEventFields({ turnId: "turn_a" }),
         data: JSON.stringify({
           providerThreadId: "provider_a",
           turnId: "turn_a",
@@ -2575,27 +2926,93 @@ describe("events", () => {
         }),
       },
       {
+        threadId: thread.id,
+        sequence: 3,
+        type: "turn/started",
+        ...createTurnEventFields({ turnId: "turn_open" }),
+        data: JSON.stringify({ providerThreadId: "provider_a" }),
+      },
+      {
         threadId: otherThread.id,
         sequence: 1,
-        scope: turnScope("turn_b"),
         type: "turn/completed",
-        itemId: null,
-        itemKind: null,
-        parentToolCallId: null,
+        ...createTurnEventFields({ turnId: "turn_b" }),
         data: JSON.stringify({
           providerThreadId: "provider_b",
           turnId: "turn_b",
           status: "completed",
         }),
       },
-    ]);
-
-    expect(listCompletedTurnsByThreadIds(db, [thread.id])).toEqual([
       {
-        threadId: thread.id,
-        turnId: "turn_a",
+        threadId: otherThread.id,
+        sequence: 2,
+        type: "turn/started",
+        ...createTurnEventFields({ turnId: "turn_a" }),
+        data: JSON.stringify({ providerThreadId: "provider_b" }),
       },
     ]);
+
+    expect(listStoredTurnCompletedKeys(db, { keys: [] })).toEqual([]);
+    expect(
+      listStoredTurnCompletedKeys(db, {
+        keys: [
+          { threadId: thread.id, turnId: "turn_a" },
+          { threadId: thread.id, turnId: "turn_a" },
+          { threadId: thread.id, turnId: "turn_open" },
+          { threadId: otherThread.id, turnId: "turn_a" },
+          { threadId: "thr_missing", turnId: "turn_b" },
+        ],
+      }),
+    ).toEqual([{ threadId: thread.id, turnId: "turn_a" }]);
+  });
+
+  it("lists stored turn/completed keys across lookup chunks", () => {
+    const { db, thread } = setup();
+    const turnIds = Array.from({ length: 520 }, (_, index) => `turn_${index}`);
+    insertEvents(
+      db,
+      noopNotifier,
+      turnIds.flatMap((turnId, index) => [
+        {
+          threadId: thread.id,
+          sequence: index * 2 + 1,
+          scope: turnScope(turnId),
+          type: "turn/started" as const,
+          ...emptyItemFields,
+          data: JSON.stringify({ providerThreadId: "provider_chunked" }),
+        },
+        ...(index % 3 === 0
+          ? []
+          : [
+              {
+                threadId: thread.id,
+                sequence: index * 2 + 2,
+                scope: turnScope(turnId),
+                type: "turn/completed" as const,
+                ...emptyItemFields,
+                data: JSON.stringify({
+                  providerThreadId: "provider_chunked",
+                  status: "completed",
+                }),
+              },
+            ]),
+      ]),
+    );
+
+    const completedKeys = listStoredTurnCompletedKeys(db, {
+      keys: turnIds.map((turnId) => ({ threadId: thread.id, turnId })),
+    });
+
+    expect(
+      completedKeys
+        .map((key) => key.turnId)
+        .sort((left, right) => left.localeCompare(right)),
+    ).toEqual(
+      turnIds
+        .filter((_, index) => index % 3 !== 0)
+        .sort((left, right) => left.localeCompare(right)),
+    );
+    expect(completedKeys.every((key) => key.threadId === thread.id)).toBe(true);
   });
 
   it("lists active turn and latest provider state for thread interruption", () => {

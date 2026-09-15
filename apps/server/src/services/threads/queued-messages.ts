@@ -668,6 +668,7 @@ async function sendClaimedQueuedMessageForThread(
       sendNow: args.sendNow,
     },
     queuePayload: queuedMessage.payload,
+    pluginSubmission: null,
     ...(queuedMessage.payload.kind === "retry"
       ? {
           retryOf: {
@@ -701,6 +702,8 @@ function describeCoreWait(waitingOn: QueuedMessageWaitingOn | null): string {
       return "the thread is waiting for you to answer a pending interaction";
     case "turn-starting":
       return "the current turn is still starting";
+    case "stopping":
+      return "the thread is still stopping";
     case "plugin":
       return `it is waiting on the "${waitingOn.pluginId}" plugin`;
     case "workspace-busy":

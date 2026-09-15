@@ -81,12 +81,16 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   }[];
 };
 
-export const testLogger = {
-  debug(): void {},
-  error(): void {},
-  info(): void {},
-  warn(): void {},
-};
+function createTestLogger() {
+  return {
+    debug(): void {},
+    error(): void {},
+    info(): void {},
+    warn(): void {},
+  };
+}
+
+export const testLogger = createTestLogger();
 
 interface TestDaemonKeyParts {
   hostId: string;
@@ -138,6 +142,7 @@ export async function createTestAppHarness(
     seedFirstPartyProviders = true,
     ...configOverrides
   } = overrides;
+  const logger = createTestLogger();
   const dataDir = await mkdtemp(join(tmpdir(), "bb-server-test-"));
   const db = providedDb ?? createTestDb();
   const hub = new NotificationHubImpl();
@@ -179,7 +184,7 @@ export async function createTestAppHarness(
   const machineAuth = await createMachineAuthService({
     dataDir,
     db,
-    logger: testLogger,
+    logger,
   });
   await machineAuth.ensureReady();
   const testMachineAuth = {
@@ -223,13 +228,13 @@ export async function createTestAppHarness(
     config,
     db,
     hub,
-    logger: testLogger,
+    logger,
     openTimeoutMs: 50,
   });
   const bbAppManagedConfig = await createBbAppManagedConfigReloader({
     config,
     hub,
-    logger: testLogger,
+    logger,
   });
   const telemetry = createNoopTelemetryService();
   const skillTreeRegistry = new SkillTreeRegistry();
@@ -239,7 +244,7 @@ export async function createTestAppHarness(
     db,
     hub,
     lifecycleDedupers,
-    logger: testLogger,
+    logger,
     machineAuth: testMachineAuth,
     providerRegistry,
     pluginHostArtifacts,
@@ -253,7 +258,7 @@ export async function createTestAppHarness(
     appVersionService ??
     createAppVersionService({
       config,
-      logger: testLogger,
+      logger,
     });
   const deps: ServerAppDeps = {
     appVersion,
@@ -262,7 +267,7 @@ export async function createTestAppHarness(
     db,
     hub,
     lifecycleDedupers,
-    logger: testLogger,
+    logger,
     machineAuth: testMachineAuth,
     pendingInteractions,
     providerRegistry,

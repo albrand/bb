@@ -198,6 +198,7 @@ export interface DispatchAttemptArgs {
   source: DispatchAttemptSource;
   startContext?: PendingThreadStartContext;
   queuePayload: QueuedMessagePayload;
+  pluginSubmission: import("@get-bb/plugin-sdk").MessageDispatchHookContext["experimental_submission"];
   retryOf?: TurnRequestRetryMarker;
   origin: ThreadCreateOrigin | null;
   originPluginId: string | null;
@@ -468,6 +469,7 @@ async function runDispatchAttempt(
         parentThreadId: thread.parentThreadId,
         queuedMessage:
           claimed?.[0] === undefined ? null : toThreadQueuedMessage(claimed[0]),
+        pluginSubmission: args.pluginSubmission,
         ...(firstDispatch
           ? {
               commitAdmission: async () => {

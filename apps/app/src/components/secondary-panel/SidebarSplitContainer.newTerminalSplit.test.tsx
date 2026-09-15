@@ -12,7 +12,11 @@ import {
 import { createTerminalFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 
 const PANEL_STATE_ID = "sidebar-split-new-terminal-test";
-const FIRST_TAB: SidebarSplitTabDescriptor = { id: "tab-a", label: "A" };
+const FIRST_TAB: SidebarSplitTabDescriptor = {
+  id: "tab-a",
+  label: "A",
+  restoresPlacementAfterRemoval: false,
+};
 const NEW_TERMINAL_ID = "term_new";
 const NEW_TERMINAL_TAB_ID = createTerminalFixedPanelTab({
   terminalId: NEW_TERMINAL_ID,
@@ -40,7 +44,11 @@ function Harness({ createTerminal }: { createTerminal: () => void }) {
             createTerminal();
             setTabs((current) => [
               ...current,
-              { id: NEW_TERMINAL_TAB_ID, label: "Terminal" },
+              {
+                id: NEW_TERMINAL_TAB_ID,
+                label: "Terminal",
+                restoresPlacementAfterRemoval: false,
+              },
             ]);
             return NEW_TERMINAL_ID;
           }}

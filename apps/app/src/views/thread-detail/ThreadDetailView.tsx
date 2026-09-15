@@ -18,7 +18,6 @@ import {
   type ThreadTimelineEditMessageTarget,
   type ThreadTimelineInlineMessageEditor,
   type ThreadTimelineForkMessageHandler,
-  type ThreadTimelineSendToMainMessageHandler,
   type ThreadTimelineLinkHandler,
   type ThreadTimelineLocalFileLink,
   type ThreadTimelineLocalFileLinkHandler,
@@ -30,7 +29,6 @@ import { serializePluginPanelParams } from "@/lib/plugin-json-value";
 import { ThreadProviderContext } from "@/components/thread/thread-provider-context";
 import {
   defaultAppSettings,
-  PERSONAL_PROJECT_ID,
   resolveEnvironmentMergeBaseBranch,
   type ThreadListEntry,
   type ThreadWithRuntime,
@@ -115,8 +113,8 @@ import {
 } from "@/hooks/queries/thread-terminal-queries";
 import {
   findEnvironmentDisplayProvider,
-  getEnvironmentWorkspaceSummaryDisplay,
-  shouldShowEnvironmentHostIdentity,
+  getEnvironmentSummaryChrome,
+  isHostAmbiguous,
 } from "@/lib/environment-workspace-display";
 import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
 import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
@@ -257,6 +255,7 @@ import type {
 } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
 import { useThreadGitActions } from "./useThreadGitActions";
+import { useSendSideChatMessageToMain } from "./useSendSideChatMessageToMain";
 import { useThreadReadTracking } from "@/hooks/useThreadReadTracking";
 import { useThreadUnreadDividerState } from "./useThreadUnreadDividerState";
 import {
@@ -954,9 +953,8 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   }, [environment?.hostId, hostsQuery.data]);
   const hasMultipleMachines =
     selectHosts(hostsQuery.data, "persistent").length > 1;
-  const threadEnvironmentHost = shouldShowEnvironmentHostIdentity(
+  const threadEnvironmentHost = isHostAmbiguous(
     hasMultipleMachines,
-    thread?.projectId === PERSONAL_PROJECT_ID,
     resolvedThreadEnvironmentHost?.type ?? null,
   )
     ? resolvedThreadEnvironmentHost
@@ -1201,26 +1199,12 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     },
     [addQuoteToComposer, dismissCompactKeyboard],
   );
-  const sendSideChatMessageToMain =
-    useCallback<ThreadTimelineSendToMainMessageHandler>(
-      (target) => {
-        if (
-          thread?.id === undefined ||
-          !isSideChatThread ||
-          threadSourceThreadId === null ||
-          createQueuedMessage.isPending
-        ) {
-          return;
-        }
-
-        createQueuedMessage.mutate({
-          id: threadSourceThreadId,
-          input: [{ type: "text", text: target.messageText, mentions: [] }],
-          senderThreadId: thread.id,
-        });
-      },
-      [createQueuedMessage, isSideChatThread, thread?.id, threadSourceThreadId],
-    );
+  const sendSideChatMessageToMain = useSendSideChatMessageToMain({
+    createQueuedMessage,
+    isSideChatThread,
+    threadId: thread?.id,
+    threadSourceThreadId,
+  });
   const handleSendToMainMessage =
     isSideChatThread && threadSourceThreadId !== null
       ? sendSideChatMessageToMain
@@ -2418,26 +2402,16 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
         providerLookup: threadEnvironmentProviderLookup,
       })
     : undefined;
-  const composerEnvironmentSummary = threadEnvironmentDisplay
-    ? getEnvironmentWorkspaceSummaryDisplay({
+  const composerEnvironmentChrome = threadEnvironmentDisplay
+    ? getEnvironmentSummaryChrome({
         display: threadEnvironmentDisplay,
         providerLookup: threadEnvironmentProviderLookup,
         environmentName: environment?.name ?? null,
         hasMultipleMachines,
-        hostName: resolvedThreadEnvironmentHost?.name ?? null,
-        hostType: resolvedThreadEnvironmentHost?.type ?? null,
-        isProjectless: thread.projectId === PERSONAL_PROJECT_ID,
+        host: resolvedThreadEnvironmentHost,
+        machineProviders: registeredMachineProviders,
       })
     : undefined;
-  const composerEnvironmentHost =
-    resolvedThreadEnvironmentHost !== null &&
-    environment?.name === null &&
-    composerEnvironmentSummary?.label === resolvedThreadEnvironmentHost?.name
-      ? resolvedThreadEnvironmentHost
-      : undefined;
-  const composerEnvironmentMachineProvider = registeredMachineProviders?.find(
-    (provider) => provider.id === composerEnvironmentHost?.machineProviderId,
-  );
   const isThreadOnReusableEnvironment =
     environment !== undefined &&
     environment.status === "ready" &&
@@ -2559,12 +2533,12 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       canUseGitUi={canUseGitUi}
       contextWindowUsage={contextWindowUsage}
       environmentCheckout={threadCheckoutDisplay}
-      environmentCompactLabel={composerEnvironmentSummary?.compactLabel}
-      environmentHost={composerEnvironmentHost}
-      environmentIcon={composerEnvironmentSummary?.icon}
-      environmentLabel={composerEnvironmentSummary?.label}
-      environmentMachineProvider={composerEnvironmentMachineProvider}
-      environmentTypeLabel={composerEnvironmentSummary?.typeLabel}
+      environmentCompactLabel={composerEnvironmentChrome?.environmentCompactLabel}
+      environmentHost={composerEnvironmentChrome?.environmentHost}
+      environmentIcon={composerEnvironmentChrome?.environmentIcon}
+      environmentLabel={composerEnvironmentChrome?.environmentLabel}
+      environmentMachineProvider={composerEnvironmentChrome?.environmentMachineProvider}
+      environmentProviderName={composerEnvironmentChrome?.environmentProviderName}
       environmentGoneStatus={threadEnvironmentGoneStatus}
       environmentHostId={environment?.hostId}
       isEnvironmentActionPending={requestEnvironmentAction.isPending}

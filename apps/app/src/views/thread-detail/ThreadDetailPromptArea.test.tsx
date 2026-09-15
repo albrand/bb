@@ -28,7 +28,6 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { workflowRow } from "@/test/fixtures/thread-timeline-rows";
-import { THREAD_HANDOFF_CREATE_SEED_LOCATION_STATE_KEY } from "@bb/client-core";
 import { BbHttpError } from "@/lib/sdk";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import { setComposerTextEffect } from "@/lib/composer-text-effects";
@@ -46,6 +45,7 @@ import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 const mocks = vi.hoisted(() => ({
   cancelThreadPlanMutate: vi.fn(),
   clearThreadGoalMutate: vi.fn(),
+  createThreadMutateAsync: vi.fn(),
   createQueuedMessageMutateAsync: vi.fn(),
   defaultExecutionOptions: null as ResolvedThreadExecutionOptions | null,
   deleteQueuedMessageMutateAsync: vi.fn(),
@@ -511,6 +511,7 @@ vi.mock("@/hooks/useThreadCreationOptions", () => ({
       reasoningOptions: [],
       selectedModel: "gpt-5",
       selectedProviderComposerActions: [],
+      providers: [],
       selectedProviderDisplayName: "Codex",
       selectedProviderId: "codex",
       serviceTier: undefined,
@@ -540,6 +541,10 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
   useClearThreadGoal: () => ({
     isPending: false,
     mutate: mocks.clearThreadGoalMutate,
+  }),
+  useCreateThread: () => ({
+    isPending: false,
+    mutateAsync: mocks.createThreadMutateAsync,
   }),
   useCreateThreadQueuedMessage: () => ({
     isPending: false,
@@ -1794,32 +1799,4 @@ describe("ThreadDetailPromptArea", () => {
     expect(screen.getByText("Model fallback")).toBeTruthy();
   });
 
-  it("opens root compose with a handoff seed for the current thread", () => {
-    renderPromptArea({
-      thread: makeThread({
-        environmentId: "env_1",
-        id: "thr_source",
-        projectId: "proj_source",
-        title: "Source thread",
-        titleFallback: null,
-      }),
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Handoff to new thread" }),
-    );
-
-    expect(mocks.navigate).toHaveBeenCalledWith("/projects/proj_source", {
-      state: {
-        focusPrompt: true,
-        reuseEnvironmentId: "env_1",
-        [THREAD_HANDOFF_CREATE_SEED_LOCATION_STATE_KEY]: {
-          environmentId: "env_1",
-          projectId: "proj_source",
-          sourceThreadId: "thr_source",
-          sourceThreadTitle: "Source thread",
-        },
-      },
-    });
-  });
 });
