@@ -1403,7 +1403,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         normalizedEvent.type === "turn/completed" &&
         normalizedEvent.scope.kind === "turn"
       ) {
-        toolCalls.cancelThread(targetThreadId, normalizedEvent.scope.turnId);
+        toolCalls.cancelCompletedTurn(
+          targetThreadId,
+          normalizedEvent.scope.turnId,
+        );
       }
       turnState.observe(normalizedEvent);
       backgroundWorkState.observe(normalizedEvent);
@@ -1539,6 +1542,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         getActiveTurnId: (threadId) => turnState.getActiveTurnId(threadId),
         getThreadExecutionOptions: (threadId) =>
           threadRuntimeConfigs.get(threadId)?.options,
+        getDynamicTools: (threadId) =>
+          threadRuntimeConfigs.get(threadId)?.dynamicTools,
         onInteractiveRequest: options.onInteractiveRequest,
         onToolCall: options.onToolCall,
         toolCalls,

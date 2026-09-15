@@ -27,9 +27,14 @@ describe("runtime tool cancellation ownership", () => {
     expect(next.signal.aborted).toBe(true);
   });
 
-  it("cancels only the finishing turn and cancels all requests on thread detach", () => {
+  it("preserves user-input calls when a turn completes but cancels them on detach", () => {
     const calls = new RuntimeToolCalls();
     const old = calls.start("process", request)!;
+    const question = calls.start(
+      "process",
+      { ...request, requestId: 4 },
+      { preserveAfterTurnCompletion: true },
+    )!;
     const next = calls.start("process", {
       ...request,
       requestId: 2,
@@ -40,11 +45,13 @@ describe("runtime tool cancellation ownership", () => {
       requestId: 3,
       threadId: "thread-b",
     })!;
-    calls.cancelThread("thread-a", "turn-a");
+    calls.cancelCompletedTurn("thread-a", "turn-a");
     expect(old.signal.aborted).toBe(true);
+    expect(question.signal.aborted).toBe(false);
     expect(next.signal.aborted).toBe(false);
     calls.cancelThread("thread-a");
     expect(next.signal.aborted).toBe(true);
+    expect(question.signal.aborted).toBe(true);
     expect(sibling.signal.aborted).toBe(false);
   });
 });

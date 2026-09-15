@@ -32,6 +32,7 @@ export default function plugin(bb: BbPluginApi) {
       icon: { glyph: "MessageQuestion" },
       suppress: true,
     },
+    waitsForUserInput: true,
     parameters: toolInputSchema,
     async execute(input, ctx) {
       const invalid = validateToolInput(input);

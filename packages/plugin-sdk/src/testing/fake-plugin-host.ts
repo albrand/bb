@@ -224,6 +224,7 @@ export interface FakeAgentToolRecord {
   presentation: PluginAgentToolPresentation | null;
   /** JSON-schema object the host would send providers. */
   inputSchema: unknown;
+  waitsForUserInput: boolean;
   parse(
     input: unknown,
   ): { ok: true; value: unknown } | { ok: false; error: string };
@@ -1031,6 +1032,7 @@ function createFakePluginHostInternal(
       description: string;
       instructions?: string;
       presentation?: PluginAgentToolPresentation;
+      waitsForUserInput?: boolean;
       parameters: unknown;
       execute(
         params: never,

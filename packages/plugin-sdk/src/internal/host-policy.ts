@@ -64,7 +64,6 @@ import type {
   StandardSchemaV1Result,
 } from "../rpc-contract.js";
 
-
 export { RESERVED_BB_CLI_COMMANDS };
 
 export function pluginCliCollisionWarning(
@@ -2554,9 +2553,10 @@ export function runPluginStorageMigrations(
     database.exec("ALTER TABLE _bb_migrations ADD COLUMN statement_hash TEXT");
   }
   const rows = database
-    .prepare<[], { id: number; statement_hash: string | null }>(
-      "SELECT id, statement_hash FROM _bb_migrations ORDER BY id",
-    )
+    .prepare<
+      [],
+      { id: number; statement_hash: string | null }
+    >("SELECT id, statement_hash FROM _bb_migrations ORDER BY id")
     .all();
   const applied = new Map<number, string | null>();
   for (const row of rows) applied.set(row.id, row.statement_hash);
@@ -2875,6 +2875,7 @@ export function normalizeAgentToolRegistration(args: {
     description: string;
     instructions?: string;
     presentation?: PluginAgentToolPresentation;
+    waitsForUserInput?: boolean;
     parameters: unknown;
     execute(
       params: never,
@@ -2887,6 +2888,7 @@ export function normalizeAgentToolRegistration(args: {
   presentation: PluginAgentToolPresentation | null;
   instructions: string | null;
   inputSchema: unknown;
+  waitsForUserInput: boolean;
   parse: AgentToolParse;
   execute: AgentToolExecute;
 } {
@@ -2922,6 +2924,12 @@ export function normalizeAgentToolRegistration(args: {
     throw new Error(
       `tool "${name}" instructions exceed the ${PLUGIN_AGENT_STATIC_INSTRUCTIONS_MAX_CHARS}-character limit`,
     );
+  }
+  if (
+    tool.waitsForUserInput !== undefined &&
+    typeof tool.waitsForUserInput !== "boolean"
+  ) {
+    throw new Error(`tool "${name}" waitsForUserInput must be a boolean`);
   }
   const presentation = parsePluginAgentToolPresentation(
     name,
@@ -2991,6 +2999,7 @@ export function normalizeAgentToolRegistration(args: {
         ? tool.instructions
         : null,
     inputSchema,
+    waitsForUserInput: tool.waitsForUserInput === true,
     parse,
     execute: (tool.execute as AgentToolExecute).bind(tool),
   };

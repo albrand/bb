@@ -172,5 +172,7 @@ export const dynamicToolSchema = z.object({
   description: z.string(),
   inputSchema: z.unknown(),
   presentation: threadEventItemPresentationSchema.optional(),
+  /** A tool awaiting a user-owned interaction may outlive turn completion. */
+  waitsForUserInput: z.boolean().optional(),
 });
 export type DynamicTool = z.infer<typeof dynamicToolSchema>;

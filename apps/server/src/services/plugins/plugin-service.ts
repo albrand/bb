@@ -737,6 +737,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         description: record.description,
         inputSchema,
         presentation: resolveAgentToolPresentation(pluginId, record),
+        ...(record.waitsForUserInput ? { waitsForUserInput: true } : {}),
       },
       instructions: record.instructions,
     };

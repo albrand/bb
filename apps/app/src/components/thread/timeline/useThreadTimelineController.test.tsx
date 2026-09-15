@@ -42,6 +42,7 @@ import {
 import { makeThreadTimelineResponse as makeTimelineResponse } from "@/test/fixtures/thread-responses";
 
 const readTimelineQueryResultKeys = vi.hoisted(() => new Set<PropertyKey>());
+const hideTimelineQueryData = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sdk")>();
@@ -60,6 +61,9 @@ vi.mock("@/hooks/queries/thread-queries", async (importOriginal) => {
       new Proxy(actual.useThreadTimeline(...args), {
         get(target, key, receiver) {
           readTimelineQueryResultKeys.add(key);
+          if (key === "data" && hideTimelineQueryData.value) {
+            return undefined;
+          }
           return Reflect.get(target, key, receiver);
         },
       }),
@@ -80,6 +84,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   readTimelineQueryResultKeys.clear();
+  hideTimelineQueryData.value = false;
 });
 
 const TIMELINE_QUERY_KEY = threadTimelineQueryKey("thread-1");
@@ -407,7 +412,11 @@ describe("useThreadTimelineController", () => {
     });
 
     act(() => {
-      queryClient.setQueryData(threadTimelineQueryKey("thread-1"), undefined);
+      hideTimelineQueryData.value = true;
+      queryClient.setQueryData(
+        threadTimelineQueryKey("thread-1"),
+        makeTimelineResponse({ rows: [oldRow], maxSeq: 2 }),
+      );
     });
     await waitFor(() => {
       expect(result.current.timelineRows.map((row) => row.id)).toEqual([
@@ -417,6 +426,7 @@ describe("useThreadTimelineController", () => {
 
     const replacementRow = makeUserRow("thread-1:user-seed:2", 2);
     act(() => {
+      hideTimelineQueryData.value = false;
       queryClient.setQueryData(
         threadTimelineQueryKey("thread-1"),
         makeTimelineResponse({ rows: [replacementRow], maxSeq: 2 }),

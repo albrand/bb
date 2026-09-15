@@ -7,6 +7,7 @@ import type {
   PendingInteractionPayload,
   PendingInteractionResolution,
   ToolCallRequest,
+  DynamicTool,
 } from "@bb/domain";
 import { isApprovalPendingInteractionPayload } from "@bb/domain";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
@@ -29,11 +30,16 @@ export class RuntimeToolCalls {
         controller: AbortController;
         threadId: string;
         turnId: string;
+        preserveAfterTurnCompletion: boolean;
       }
     >
   >();
 
-  start(scope: string, request: ToolCallRequest): AbortController | null {
+  start(
+    scope: string,
+    request: ToolCallRequest,
+    options?: { preserveAfterTurnCompletion?: boolean },
+  ): AbortController | null {
     let calls = this.pending.get(scope);
     if (!calls) {
       calls = new Map();
@@ -45,6 +51,8 @@ export class RuntimeToolCalls {
       controller,
       threadId: request.threadId,
       turnId: request.turnId,
+      preserveAfterTurnCompletion:
+        options?.preserveAfterTurnCompletion === true,
     });
     return controller;
   }
@@ -73,6 +81,20 @@ export class RuntimeToolCalls {
         if (
           call.threadId === threadId &&
           (turnId === undefined || call.turnId === turnId)
+        ) {
+          this.cancel(scope, requestId);
+        }
+      }
+    }
+  }
+
+  cancelCompletedTurn(threadId: string, turnId: string): void {
+    for (const [scope, calls] of this.pending) {
+      for (const [requestId, call] of calls) {
+        if (
+          call.threadId === threadId &&
+          call.turnId === turnId &&
+          !call.preserveAfterTurnCompletion
         ) {
           this.cancel(scope, requestId);
         }
@@ -108,6 +130,7 @@ interface HandleRuntimeProviderRequestArgs extends RuntimeProviderRequestArgs {
   getThreadExecutionOptions: (
     threadId: string,
   ) => AgentRuntimeExecutionOptions | undefined;
+  getDynamicTools?: (threadId: string) => readonly DynamicTool[] | undefined;
   onInteractiveRequest: AgentRuntimeOptions["onInteractiveRequest"];
   onToolCall: AgentRuntimeOptions["onToolCall"];
   toolCalls: RuntimeToolCalls;
@@ -208,7 +231,15 @@ function handleToolCallProviderRequest(
       : {}),
   };
   const scope = args.providerProcess.interactiveRequestScope;
-  const controller = args.toolCalls.start(scope, scopedToolCallReq);
+  const controller = args.toolCalls.start(scope, scopedToolCallReq, {
+    preserveAfterTurnCompletion:
+      args
+        .getDynamicTools?.(resolvedThreadId)
+        ?.some(
+          (tool) =>
+            tool.name === scopedToolCallReq.tool && tool.waitsForUserInput,
+        ) ?? false,
+  });
   if (!controller) return true;
   void Promise.resolve()
     .then(() => {

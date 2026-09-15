@@ -60,6 +60,16 @@ interface LoadedTimelineTracker {
   loaded: LoadedTimelineState;
 }
 
+function isTimelineSurfaceForBase(
+  surfaceKey: string,
+  baseSurfaceKey: string,
+): boolean {
+  return (
+    surfaceKey === baseSurfaceKey ||
+    surfaceKey.startsWith(`${baseSurfaceKey}:context-boundary:`)
+  );
+}
+
 interface ReconcileLoadedTimelineArgs {
   current: LoadedTimelineState;
   latestTimeline: ThreadTimelineResponse | undefined;
@@ -123,22 +133,34 @@ export function useThreadTimelineController({
     refetchOnMount: true,
   });
   const baseSurfaceKey = explicitSurfaceKey ?? threadId;
-  const contextBoundarySeq =
-    latestTimelineQuery.data?.contextBoundarySeq ?? null;
+  const queriedTimeline = latestTimelineQuery.data;
+  const initialContextBoundarySeq = queriedTimeline?.contextBoundarySeq ?? null;
+  const initialSurfaceKey =
+    initialContextBoundarySeq === null
+      ? baseSurfaceKey
+      : `${baseSurfaceKey}:context-boundary:${initialContextBoundarySeq}`;
+  const [loadedTimelineTracker, setLoadedTimelineTracker] =
+    useState<LoadedTimelineTracker>(() => ({
+      latestTimeline: queriedTimeline,
+      loaded: reconcileLoadedTimeline({
+        current: buildEmptyLoadedTimelineState(initialSurfaceKey),
+        latestTimeline: queriedTimeline,
+        surfaceKey: initialSurfaceKey,
+      }),
+    }));
+  const latestTimeline =
+    queriedTimeline ??
+    (isTimelineSurfaceForBase(
+      loadedTimelineTracker.loaded.surfaceKey,
+      baseSurfaceKey,
+    )
+      ? loadedTimelineTracker.latestTimeline
+      : undefined);
+  const contextBoundarySeq = latestTimeline?.contextBoundarySeq ?? null;
   const surfaceKey =
     contextBoundarySeq === null
       ? baseSurfaceKey
       : `${baseSurfaceKey}:context-boundary:${contextBoundarySeq}`;
-  const latestTimeline = latestTimelineQuery.data;
-  const [loadedTimelineTracker, setLoadedTimelineTracker] =
-    useState<LoadedTimelineTracker>(() => ({
-      latestTimeline,
-      loaded: reconcileLoadedTimeline({
-        current: buildEmptyLoadedTimelineState(surfaceKey),
-        latestTimeline,
-        surfaceKey,
-      }),
-    }));
   let loadedTimeline = loadedTimelineTracker.loaded;
   if (
     loadedTimelineTracker.latestTimeline !== latestTimeline ||

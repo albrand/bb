@@ -196,6 +196,7 @@ export interface PluginAgentToolRecord {
   presentation: PluginAgentToolPresentation | null;
   instructions: string | null;
   inputSchema: unknown;
+  waitsForUserInput?: boolean;
   parse(
     input: unknown,
   ): { ok: true; value: unknown } | { ok: false; error: string };
@@ -886,6 +887,7 @@ export function createPluginApi(options: {
       description: string;
       instructions?: string;
       presentation?: PluginAgentToolPresentation;
+      waitsForUserInput?: boolean;
       parameters: unknown;
       execute(
         params: never,

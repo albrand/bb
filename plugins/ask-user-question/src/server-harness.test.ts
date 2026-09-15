@@ -108,6 +108,16 @@ describe("provider gating", () => {
 });
 
 describe("asking a question", () => {
+  it("declares that its tool remains live for the user response", () => {
+    const host = createHost();
+    expect(host.harness.registrations.agentTools).toContainEqual(
+      expect.objectContaining({
+        name: TOOL_NAME,
+        waitsForUserInput: true,
+      }),
+    );
+  });
+
   it("opens an interaction and returns the answer in Claude's result shape", async () => {
     const host = createHost();
     const call = host.harness.callAgentTool(TOOL_NAME, { questions });

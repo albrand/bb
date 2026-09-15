@@ -1052,6 +1052,8 @@ export interface PluginAgentToolRegistrationBase {
    * BB's standard rendering. See docs/api_to_audit.md.
    */
   presentation?: PluginAgentToolPresentation;
+  /** Preserve an in-flight call across turn completion while it awaits the user. */
+  waitsForUserInput?: boolean;
 }
 
 /** Stable, plain-data context resolved by the server for one agent session. */
