@@ -443,6 +443,7 @@ export {
   getActivePendingInteractionForThread,
   getPendingInteraction,
   getPendingInteractionByProviderRequest,
+  reviveInterruptedProviderInteraction,
   interruptPendingInteractionsForThreadIds,
   interruptPendingInteractionsForThreads,
   interruptPendingInteractionsForPlugin,

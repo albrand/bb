@@ -37,6 +37,14 @@ export interface PendingInteractionProviderRequestIdentity {
   providerThreadId: string;
 }
 
+export interface ReviveInterruptedProviderInteractionArgs
+  extends PendingInteractionProviderRequestIdentity {
+  interruptionReason: string;
+  payload: string;
+  threadId: string;
+  turnId: string;
+}
+
 export interface ListPendingInteractionsArgs {
   limit?: number;
   statuses?: readonly PendingInteractionStatus[];
@@ -185,6 +193,58 @@ export function getPendingInteractionByProviderRequest(
           eq(pendingInteractions.providerRequestId, args.providerRequestId),
         ),
       )
+      .get() ?? null
+  );
+}
+
+/**
+ * Rebind an interaction that a daemon restart interrupted to the provider's
+ * replayed request. The interaction id remains stable for the UI and any
+ * already-rendered authorization surface.
+ */
+export function reviveInterruptedProviderInteraction(
+  db: PendingInteractionWriteConnection,
+  args: ReviveInterruptedProviderInteractionArgs,
+): PendingInteractionRow | null {
+  const candidate = db
+    .select()
+    .from(pendingInteractions)
+    .where(
+      and(
+        eq(pendingInteractions.originKind, "provider"),
+        eq(pendingInteractions.threadId, args.threadId),
+        eq(pendingInteractions.providerId, args.providerId),
+        eq(pendingInteractions.providerThreadId, args.providerThreadId),
+        eq(pendingInteractions.turnId, args.turnId),
+        eq(pendingInteractions.payload, args.payload),
+        eq(pendingInteractions.status, "interrupted"),
+        eq(pendingInteractions.statusReason, args.interruptionReason),
+      ),
+    )
+    .orderBy(desc(pendingInteractions.updatedAt))
+    .get();
+  if (!candidate) return null;
+
+  const now = Date.now();
+  return (
+    db
+      .update(pendingInteractions)
+      .set({
+        providerRequestId: args.providerRequestId,
+        resolution: null,
+        resolvedAt: null,
+        status: "pending",
+        statusReason: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(pendingInteractions.id, candidate.id),
+          eq(pendingInteractions.status, "interrupted"),
+          eq(pendingInteractions.statusReason, args.interruptionReason),
+        ),
+      )
+      .returning()
       .get() ?? null
   );
 }

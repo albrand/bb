@@ -39,9 +39,26 @@ async function waitForPendingInteraction(
   throw new Error(`No new pending interaction on ${threadId}`);
 }
 
+async function waitForPendingInteractionById(
+  harness: IntegrationHarness,
+  threadId: string,
+  interactionId: string,
+): Promise<PendingInteraction> {
+  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const interaction = (await listThreadInteractions(harness.api, threadId)).find(
+      (candidate) =>
+        candidate.status === "pending" && candidate.id === interactionId,
+    );
+    if (interaction !== undefined) return interaction;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Pending interaction ${interactionId} was not restored`);
+}
+
 describe.sequential("fake provider graceful restart while awaiting approval", () => {
   it(
-    "asks again after adoption, and the answer reaches the adopted provider",
+    "restores the same approval after adoption, and its answer reaches the adopted provider",
     () =>
       withHarness(async (harness) => {
         const { thread } = await createRecoveryThread(
@@ -67,7 +84,7 @@ describe.sequential("fake provider graceful restart while awaiting approval", ()
         await harness.startDaemon();
         await waitForHostConnected(harness.api, RECOVERY_TIMEOUT_MS);
 
-        const after = await waitForPendingInteraction(
+        const after = await waitForPendingInteractionById(
           harness,
           thread.id,
           before.id,

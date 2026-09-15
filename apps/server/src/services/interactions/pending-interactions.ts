@@ -4,6 +4,7 @@ import {
   getEnvironment,
   getPendingInteraction,
   getPendingInteractionByProviderRequest,
+  reviveInterruptedProviderInteraction,
   getThread,
   interruptPendingInteractionsForThreadIds,
   interruptPendingInteractionsForThreads,
@@ -64,8 +65,11 @@ type RegisterPendingInteractionResult =
     }
   | {
       outcome: "rejected";
-      reason: string;
-    };
+    reason: string;
+  };
+
+const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
+  "Host daemon restarted while awaiting user interaction; retry the thread to continue";
 
 interface RegisterPendingInteractionArgs {
   interaction: PendingInteractionCreate;
@@ -421,6 +425,19 @@ export class PendingInteractionLifecycle {
         };
       }
 
+      const revived = reviveInterruptedProviderInteraction(tx, {
+        interruptionReason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
+        payload,
+        providerId: interaction.providerId,
+        providerRequestId: interaction.providerRequestId,
+        providerThreadId: interaction.providerThreadId,
+        threadId: interaction.threadId,
+        turnId: interaction.turnId,
+      });
+      if (revived) {
+        return { outcome: "existing" as const, row: revived, revived: true };
+      }
+
       return {
         outcome: "created" as const,
         row: createPendingInteraction(tx, {
@@ -444,11 +461,15 @@ export class PendingInteractionLifecycle {
 
     if (registered.outcome === "created") {
       appendPendingInteractionTimelineEvent(this.deps, pendingInteraction);
+    }
+    if (registered.outcome === "created" || registered.revived === true) {
       notifyInteractionChanged({
         deps: this.deps,
         hasPendingInteraction: true,
         threadId: pendingInteraction.threadId,
       });
+    }
+    if (registered.outcome === "created") {
       emitPluginInteractionPending(thread, pendingInteraction);
     }
 
