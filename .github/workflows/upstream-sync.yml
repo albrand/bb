@@ -1,0 +1,62 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ours
+
+      - name: Fetch upstream
+        id: upstream
+        run: |
+          git remote add upstream https://github.com/get-bb/bb.git 2>/dev/null || true
+          git fetch --no-tags upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Fork already contains upstream/main."
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+
+      - name: Integrate upstream on a dedicated branch
+        if: steps.upstream.outputs.needs_sync == 'true'
+        run: |
+          git config user.name "bb upstream sync"
+          git config user.email "bb-upstream-sync@users.noreply.github.com"
+          git switch -C automation/upstream-main
+          if ! git merge --no-ff --no-commit upstream/main; then
+            git merge --abort
+            echo "Upstream merge conflicts require an explicit fork-quality reconciliation." >&2
+            exit 1
+          fi
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          git commit -m "chore: integrate upstream main"
+          git push --force-with-lease origin HEAD:automation/upstream-main
+
+      - name: Open or update the integration pull request
+        if: steps.upstream.outputs.needs_sync == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base ours \
+            --head automation/upstream-main \
+            --title "chore: integrate upstream main" \
+            --body "Automated upstream integration, ready for fork-quality review." \
+            || gh pr edit automation/upstream-main \
+              --title "chore: integrate upstream main" \
+              --body "Automated upstream integration, ready for fork-quality review."
