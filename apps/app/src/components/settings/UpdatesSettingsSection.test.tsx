@@ -711,6 +711,7 @@ The canonical release summary.
       name: "homelab",
       status: "disconnected",
       lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
+      lastSeenAt: Date.now() - 3 * 60 * 1000,
       updatedAt: Date.now() - 3 * 60 * 1000,
     });
     useUpdateInventoryMock.mockReturnValue(
@@ -795,6 +796,7 @@ The canonical release summary.
       name: "homelab",
       status: "disconnected",
       lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
+      lastSeenAt: Date.now() - 3 * 60 * 1000,
       updatedAt: Date.now() - 3 * 60 * 1000,
     });
     useUpdateInventoryMock.mockReturnValue(
@@ -889,6 +891,7 @@ The canonical release summary.
           name,
           status: "disconnected",
           lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
+          lastSeenAt: Date.now() - 3 * 60 * 1000,
           updatedAt: Date.now() - 3 * 60 * 1000,
         }),
     );

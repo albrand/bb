@@ -22,7 +22,10 @@ export function hostCanRetryUpdate(host: Host): boolean {
 export function hostUpdateIsStalled(host: Host, now: number): boolean {
   return (
     hostCanRetryUpdate(host) &&
-    now - host.updatedAt >= HOST_UPDATE_STALL_THRESHOLD_MS
+    // `updatedAt` changes on every rejected handshake, so it never measures
+    // how long the daemon has been unable to reconnect. `lastSeenAt` is the
+    // last accepted session and remains stable while an update is stalled.
+    now - host.lastSeenAt >= HOST_UPDATE_STALL_THRESHOLD_MS
   );
 }
 
