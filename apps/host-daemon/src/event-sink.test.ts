@@ -14,6 +14,17 @@ function permanentRejection(bodyMessage: string): ServerResponseError {
   });
 }
 
+function turnStartPendingRejection(bodyMessage: string): ServerResponseError {
+  return new ServerResponseError({
+    action: "post events",
+    bodyMessage,
+    code: "turn_start_pending",
+    retryable: true,
+    status: 503,
+    statusText: "Service Unavailable",
+  });
+}
+
 function createLogger(): CreateEventSinkOptions["logger"] {
   return {
     debug: vi.fn(),
@@ -269,6 +280,88 @@ describe("event sink", () => {
     postEvents.mockClear();
     await sink.flush();
     expect(postEvents).not.toHaveBeenCalled();
+  });
+
+  it("keeps turn-scoped events queued until the server stores turn/started", async () => {
+    const postEvents = vi
+      .fn<CreateEventSinkOptions["postEvents"]>()
+      .mockRejectedValueOnce(
+        turnStartPendingRejection(
+          "Cannot append provider/unhandled for turn turn_1 before turn/started is stored",
+        ),
+      )
+      .mockImplementation(async (events) => ({
+        acceptedEvents: events.map((event, eventIndex) => ({
+          eventIndex,
+          sequence: eventIndex + 1,
+          threadId: event.threadId,
+        })),
+        rejectedEvents: [],
+      }));
+    const onSettled = vi.fn();
+    const sink = createEventSink({
+      isSessionOpen: () => true,
+      logger: createLogger(),
+      postEvents,
+    });
+
+    sink.emit({
+      threadId: "thr_1",
+      event: systemErrorEvent("thr_1"),
+      delivery: { replayKey: "w1:pending:0", onSettled },
+    });
+    await sink.flush();
+
+    expect(postEvents).toHaveBeenCalledTimes(1);
+    expect(onSettled).not.toHaveBeenCalled();
+
+    await sink.flush();
+
+    expect(postEvents).toHaveBeenCalledTimes(2);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the whole batch when turn start is pending and drains it on the scheduled retry", async () => {
+    const logger = createLogger();
+    const postEvents = vi
+      .fn<CreateEventSinkOptions["postEvents"]>()
+      .mockRejectedValueOnce(
+        turnStartPendingRejection(
+          "Cannot append turn/completed for turn turn-1 before turn/started is stored",
+        ),
+      )
+      .mockImplementation(async (events) => ({
+        acceptedEvents: events.map((event, eventIndex) => ({
+          eventIndex,
+          sequence: eventIndex + 1,
+          threadId: event.threadId,
+        })),
+        rejectedEvents: [],
+      }));
+    const sink = createEventSink({
+      isSessionOpen: () => true,
+      logger,
+      postEvents,
+    });
+
+    sink.emit({ threadId: "thr_1", event: systemErrorEvent("thr_1") });
+    sink.emit({ threadId: "thr_2", event: systemErrorEvent("thr_2") });
+    await sink.flush();
+
+    expect(postEvents).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() => {
+      expect(postEvents).toHaveBeenCalledTimes(2);
+    });
+
+    expect(postEvents).toHaveBeenLastCalledWith([
+      { threadId: "thr_1", event: systemErrorEvent("thr_1") },
+      { threadId: "thr_2", event: systemErrorEvent("thr_2") },
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ batchSize: 2, retryDelayMs: 250 }),
+      expect.any(String),
+    );
   });
 
   it("keeps retrying a batch that fails for a retryable reason", async () => {

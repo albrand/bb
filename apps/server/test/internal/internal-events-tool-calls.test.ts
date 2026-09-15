@@ -545,9 +545,16 @@ describe("internal event and tool-call routes", () => {
         ],
       });
 
-      expect(response.status).toBe(409);
+      expect(response.status).toBe(503);
       await expect(readJson(response)).resolves.toMatchObject({
-        code: "invalid_request",
+        code: "turn_start_pending",
+        retryable: true,
+        details: {
+          eventType: "turn/completed",
+          scopeKind: "turn",
+          threadId: thread.id,
+          turnId: "turn-missing-start",
+        },
       });
       expect(
         harness.db

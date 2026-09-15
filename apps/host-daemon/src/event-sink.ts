@@ -10,6 +10,9 @@ import { ServerResponseError } from "./server-client.js";
 
 const DEFAULT_DEBOUNCE_MS = 100;
 
+const TURN_START_RETRY_INITIAL_MS = 250;
+const TURN_START_RETRY_MAX_MS = 10_000;
+
 const QUEUE_DEPTH_WARN_THRESHOLD = 512;
 const QUEUE_DEPTH_WARN_MIN_AGE_MS = 5_000;
 const QUEUE_AGE_WARN_THRESHOLD_MS = 30_000;
@@ -99,6 +102,14 @@ function isPermanentPostRejection(error: Error): boolean {
   );
 }
 
+function isTurnStartPendingRejection(error: Error): boolean {
+  return (
+    error instanceof ServerResponseError &&
+    error.status === 503 &&
+    error.code === "turn_start_pending"
+  );
+}
+
 function summarizeRejectedEvents(
   events: readonly HostDaemonRejectedEvent[],
 ): RejectedEventSummary[] {
@@ -118,6 +129,8 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
   let disposed = false;
   let backedUpSinceMs: number | null = null;
   let backpressureLogged = false;
+  let turnStartRetryDelayMs = TURN_START_RETRY_INITIAL_MS;
+  let turnStartRetryPending = false;
 
   function maybeLogQueuePressure(): void {
     if (backpressureLogged || backedUpSinceMs === null) {
@@ -176,6 +189,18 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       response = await options.postEvents([...batch]);
     } catch (error) {
       const normalized = normalizeCaughtError(error);
+      if (isTurnStartPendingRejection(normalized)) {
+        turnStartRetryPending = true;
+        options.logger.warn(
+          {
+            ...runtimeErrorLogFields(normalized),
+            batchSize: batch.length,
+            retryDelayMs: turnStartRetryDelayMs,
+          },
+          "Server has not stored turn/started yet; retaining batch for bounded retry",
+        );
+        return 0;
+      }
       if (!isPermanentPostRejection(normalized)) {
         options.logger.error(
           runtimeErrorLogFields(normalized),
@@ -215,6 +240,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
         "Server rejected daemon events",
       );
     }
+    turnStartRetryDelayMs = TURN_START_RETRY_INITIAL_MS;
     return batch.length;
   }
 
@@ -248,6 +274,16 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       await flushPromise;
     } finally {
       flushPromise = null;
+      if (turnStartRetryPending) {
+        turnStartRetryPending = false;
+        if (queue.length > 0 && !disposed) {
+          scheduleFlush(turnStartRetryDelayMs);
+          turnStartRetryDelayMs = Math.min(
+            turnStartRetryDelayMs * 2,
+            TURN_START_RETRY_MAX_MS,
+          );
+        }
+      }
     }
   }
 

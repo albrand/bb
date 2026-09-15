@@ -1135,9 +1135,12 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
               sessionId: session.id,
               ...runtimeErrorLogFields(deps.config, error),
             },
-            "Rejected daemon event before turn/started",
+            "Deferred daemon event batch until turn/started is stored",
           );
-          throw new ApiError(409, "invalid_request", error.message);
+          throw new ApiError(503, "turn_start_pending", error.message, {
+            details: error.details,
+            retryable: true,
+          });
         }
         throw error;
       }
