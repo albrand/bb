@@ -26,3 +26,12 @@ describe("resuming machine status", () => {
     expect(machineStatusTone(host)).toBe("attention");
   });
 });
+
+describe("restarting host status", () => {
+  const host = makeHost({ status: "restarting" });
+
+  it("shows a controlled restart as attention rather than offline", () => {
+    expect(machineStatusLabel({ host, now: Date.now() })).toBe("Restarting");
+    expect(machineStatusTone(host)).toBe("attention");
+  });
+});

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { permissionModeSchema } from "./shared-types.js";
 
-const hostStatusValues = ["connected", "disconnected"] as const;
+const hostStatusValues = ["connected", "restarting", "disconnected"] as const;
 export const hostStatusSchema = z.enum(hostStatusValues);
 
 export const machineLifecycleSchema = z.object({

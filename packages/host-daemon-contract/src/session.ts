@@ -660,6 +660,12 @@ const hostDaemonMachineShutdownAckMessageSchema = z
   })
   .strict();
 
+const hostDaemonRestartingMessageSchema = z
+  .object({
+    type: z.literal("daemon.restarting"),
+  })
+  .strict();
+
 const hostDaemonEnvironmentChangeMessageSchema =
   hostDaemonEnvironmentChangePayloadSchema
     .extend({
@@ -771,6 +777,7 @@ const hostDaemonTerminalErrorMessageSchema = z
 export const hostDaemonDaemonWsMessageSchema = z.union([
   desktopBrowserChangedSchema,
   hostDaemonMachineShutdownAckMessageSchema,
+  hostDaemonRestartingMessageSchema,
   hostDaemonHeartbeatMessageSchema,
   hostDaemonEnvironmentChangeMessageSchema,
   hostDaemonEnvironmentMetadataChangeMessageSchema,

@@ -28,7 +28,10 @@ type HostRow = NonNullable<ReturnType<typeof getHost>>;
 type ProjectRow = NonNullable<ReturnType<typeof getProject>>;
 type ThreadRow = NonNullable<ReturnType<typeof getThread>>;
 type StandardProject = ProjectRow & { kind: "standard" };
-type HostLookupHub = Pick<NotificationHub, "getDaemonSessionIdForHost">;
+type HostLookupHub = Pick<
+  NotificationHub,
+  "getDaemonSessionIdForHost" | "isHostRestarting"
+>;
 
 interface HostLookupDeps {
   db: DbConnection;
@@ -69,9 +72,8 @@ function toHostStatus(deps: HostLookupDeps, hostId: string): Host["status"] {
     return "disconnected";
   }
 
-  return getOpenDaemonSessionForHost(deps, hostId)
-    ? "connected"
-    : "disconnected";
+  if (getOpenDaemonSessionForHost(deps, hostId)) return "connected";
+  return deps.hub.isHostRestarting(hostId) ? "restarting" : "disconnected";
 }
 
 function toHostRecord(row: HostRow, status: Host["status"]): Host {

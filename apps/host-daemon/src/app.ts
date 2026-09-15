@@ -979,6 +979,7 @@ export async function createHostDaemonApp(
     },
   });
   requestDaemonRestart = () => {
+    sendServerMessage({ type: "daemon.restarting" });
     void daemon.shutdown("self-update", 0).catch((error) => {
       options.logger.error({ err: error }, "Self-update shutdown failed");
     });

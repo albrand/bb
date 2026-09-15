@@ -27,6 +27,7 @@ export function machineStatusTone(host: Host): MachineStatusTone {
     host.lifecycle.phase === "resuming"
   )
     return "attention";
+  if (host.status === "restarting") return "attention";
   return host.status === "connected" ? "online" : "offline";
 }
 
@@ -39,7 +40,14 @@ export function machineStatusLabel({
 }): string {
   const parts: string[] = [];
   const phase = machinePhaseLabel(host.lifecycle);
-  parts.push(phase ?? (host.status === "connected" ? "Online" : "Offline"));
+  parts.push(
+    phase ??
+      (host.status === "connected"
+        ? "Online"
+        : host.status === "restarting"
+          ? "Restarting"
+          : "Offline"),
+  );
   if (host.lifecycle.message !== null) parts.push(host.lifecycle.message);
   else if (host.status !== "connected" && host.lastSeenAt !== null) {
     parts.push(

@@ -237,6 +237,7 @@ export class NotificationHub implements DbNotifier {
     HostOnlineRpcWaiter
   >();
   private readonly hostProtocolUpdateRetryRequests = new Set<string>();
+  private readonly restartingHostIds = new Set<string>();
   private readonly changedMessageListeners = new Set<ChangedMessageListener>();
   private readonly pendingDaemonDisconnects = new Map<
     string,
@@ -538,6 +539,7 @@ export class NotificationHub implements DbNotifier {
   }
 
   registerDaemon(sessionId: string, hostId: string, socket: HubSocket): void {
+    this.restartingHostIds.delete(hostId);
     this.cancelPendingDaemonDisconnect(sessionId);
     const existingSessionId = this.daemonSessionIdsByHost.get(hostId);
     if (existingSessionId && existingSessionId !== sessionId) {
@@ -582,6 +584,19 @@ export class NotificationHub implements DbNotifier {
   hasDaemonForHost(hostId: string): boolean {
     const sessionId = this.daemonSessionIdsByHost.get(hostId);
     return sessionId !== undefined && this.daemonSessions.has(sessionId);
+  }
+
+  markHostRestarting(hostId: string): void {
+    this.restartingHostIds.add(hostId);
+    this.notifyHost(hostId, ["host-disconnected"]);
+  }
+
+  isHostRestarting(hostId: string): boolean {
+    return this.restartingHostIds.has(hostId);
+  }
+
+  clearHostRestarting(hostId: string): void {
+    this.restartingHostIds.delete(hostId);
   }
 
   getDaemonSessionIdForHost(hostId: string): string | null {

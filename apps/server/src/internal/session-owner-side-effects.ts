@@ -240,6 +240,7 @@ function completeDaemonDisconnectGrace(
   if (deps.hub.hasDaemonForHost(args.hostId)) {
     return;
   }
+  deps.hub.clearHostRestarting(args.hostId);
 
   interruptPendingInteractionsForHostThreads(deps, {
     hostId: args.hostId,

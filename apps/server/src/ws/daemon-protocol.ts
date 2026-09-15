@@ -236,6 +236,10 @@ export function onDaemonSocketMessage(
         args.socket.send(JSON.stringify({ type: "heartbeat-ack" }));
         return;
       }
+      if (message.type === "daemon.restarting") {
+        deps.hub.markHostRestarting(args.hostId);
+        return;
+      }
       if (message.type === "machine.shutdown-ack") {
         return;
       }
