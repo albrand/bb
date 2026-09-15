@@ -63,3 +63,35 @@ it("excludes turn history when it resumes a Codex thread", async () => {
     params: expect.objectContaining({ excludeTurns: true }),
   });
 });
+
+it("defers a selected model until the resumed thread's next turn", async () => {
+  harness.sendRequest(1, "thread/resume", {
+    threadId: THREAD_ID,
+    providerThreadId: PROVIDER_THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-5.6-terra" },
+  });
+  expect((await harness.waitForResponse(1)).error).toBeUndefined();
+
+  harness.sendRequest(2, "turn/start", {
+    threadId: THREAD_ID,
+    providerThreadId: PROVIDER_THREAD_ID,
+    clientRequestId: "creq_terramede2",
+    input: [{ type: "text", text: "continue", mentions: [] }],
+    options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-5.6-terra" },
+  });
+  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+
+  const requests = readFileSync(requestLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const resume = requests.find(
+    (request) => request.method === "thread/resume",
+  );
+  const turn = requests.find((request) => request.method === "turn/start");
+
+  expect(resume?.params).not.toHaveProperty("model");
+  expect(turn?.params).toMatchObject({ model: "gpt-5.6-terra" });
+});

@@ -1015,7 +1015,6 @@ async function constructThreadSession(
       sandbox: preparedGitRoots.permissionSettings.sandbox,
       cwd: args.cwd,
       ...instructionOverrides,
-      model: decoded.sessionOptions.model ?? undefined,
       serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
       config: preparedGitRoots.config ?? undefined,
       ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
@@ -1028,6 +1027,7 @@ async function constructThreadSession(
         method = "thread/start";
         const startParams: BbThreadStartParams = {
           ...sharedConstructionParams,
+          model: decoded.sessionOptions.model ?? undefined,
           ephemeral: false,
           experimentalRawEvents: true,
         };
@@ -1056,6 +1056,7 @@ async function constructThreadSession(
               }
             : {}),
           ...sharedConstructionParams,
+          model: decoded.sessionOptions.model ?? undefined,
         };
         params = forkParams;
         break;

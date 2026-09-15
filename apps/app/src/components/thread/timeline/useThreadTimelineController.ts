@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
 import {
   areTimelinePaginationCursorsEqual,
@@ -72,7 +72,22 @@ export function useThreadTimelineController({
   );
   const [isLoadingOlderTimelineRows, setIsLoadingOlderTimelineRows] =
     useState(false);
-  const latestTimeline = latestTimelineQuery.data;
+  const retainedTimelineRef = useRef<{
+    threadId: string;
+    timeline: ThreadTimelineResponse | undefined;
+  }>({ threadId, timeline: latestTimelineQuery.data });
+  if (retainedTimelineRef.current.threadId !== threadId) {
+    retainedTimelineRef.current = {
+      threadId,
+      timeline: latestTimelineQuery.data,
+    };
+  } else if (latestTimelineQuery.data !== undefined) {
+    retainedTimelineRef.current.timeline = latestTimelineQuery.data;
+  }
+  // A cache owner can briefly replace an observed query while reconnecting.
+  // Keep the last same-thread snapshot visible until its replacement resolves.
+  const latestTimeline =
+    latestTimelineQuery.data ?? retainedTimelineRef.current.timeline;
 
   useEffect(() => {
     if (!latestTimeline) {

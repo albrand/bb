@@ -102,6 +102,46 @@ describe("mergeLatestTimelineRows", () => {
 });
 
 describe("useThreadTimelineController", () => {
+  it("retains rendered rows while a same-thread timeline query is replaced", async () => {
+    const oldRow = makeUserRow("thread-1:user-seed:1", 1);
+    vi.mocked(sdk.threads.timeline).mockResolvedValue(
+      makeTimelineResponse({ rows: [oldRow], maxSeq: 1 }),
+    );
+
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => useThreadTimelineController({ threadId: "thread-1" }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.timelineRows.map((row) => row.id)).toEqual([
+        oldRow.id,
+      ]);
+    });
+
+    act(() => {
+      queryClient.setQueryData(threadTimelineQueryKey("thread-1"), undefined);
+    });
+    await waitFor(() => {
+      expect(result.current.timelineRows.map((row) => row.id)).toEqual([
+        oldRow.id,
+      ]);
+    });
+
+    const replacementRow = makeUserRow("thread-1:user-seed:2", 2);
+    act(() => {
+      queryClient.setQueryData(
+        threadTimelineQueryKey("thread-1"),
+        makeTimelineResponse({ rows: [replacementRow], maxSeq: 2 }),
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.timelineRows.map((row) => row.id)).toEqual([
+        replacementRow.id,
+      ]);
+    });
+  });
+
   it("replaces loaded rows when realtime data starts a new context epoch", async () => {
     const oldRow = makeUserRow("thread-1:user-seed:1", 1);
     const boundaryRow: TimelineRow = {
