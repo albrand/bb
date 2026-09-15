@@ -107,6 +107,7 @@ import { useLocalOpenTargets } from "@/hooks/useLocalOpenTargets";
 import { selectHosts, useHosts } from "@/hooks/queries/host-queries";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useConnectionAwareQueryState } from "@/hooks/queries/connection-aware-query-state";
+import { useRetainedThreadSnapshot } from "@/hooks/use-retained-thread-snapshot";
 import {
   useCloseThreadTerminal,
   useCreateThreadTerminal,
@@ -533,7 +534,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const hasThreadDetailBootstrapSettled =
     threadDetailBootstrapQuery.isSuccess || threadDetailBootstrapQuery.isError;
   const {
-    data: thread,
+    data: queriedThread,
     isFetching,
     isLoadingError,
     error,
@@ -544,6 +545,12 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     )
       ? false
       : "always",
+  });
+  // A reconnect can replace the same query cache entry with no data for one
+  // render. Do not unmount the entire detail surface into its loading skeleton.
+  const thread = useRetainedThreadSnapshot({
+    snapshot: queriedThread,
+    threadId,
   });
   const environmentQuery = useEnvironment(thread?.environmentId, {
     enabled: hasThreadDetailBootstrapSettled,

@@ -54,24 +54,6 @@ export function useThreadTimelineController({
     enabled,
     refetchOnMount: true,
   });
-  const baseSurfaceKey = explicitSurfaceKey ?? threadId;
-  const contextBoundarySeq =
-    latestTimelineQuery.data?.contextBoundarySeq ?? null;
-  const surfaceKey =
-    contextBoundarySeq === null
-      ? baseSurfaceKey
-      : `${baseSurfaceKey}:context-boundary:${contextBoundarySeq}`;
-  const [loadedTimeline, setLoadedTimeline] = useState<LoadedTimelineState>(
-    () =>
-      buildLoadedTimelineState({
-        latestWindowEndSequence: null,
-        latestRows: [],
-        olderCursor: null,
-        surfaceKey,
-      }),
-  );
-  const [isLoadingOlderTimelineRows, setIsLoadingOlderTimelineRows] =
-    useState(false);
   const retainedTimelineRef = useRef<{
     threadId: string;
     timeline: ThreadTimelineResponse | undefined;
@@ -88,6 +70,23 @@ export function useThreadTimelineController({
   // Keep the last same-thread snapshot visible until its replacement resolves.
   const latestTimeline =
     latestTimelineQuery.data ?? retainedTimelineRef.current.timeline;
+  const baseSurfaceKey = explicitSurfaceKey ?? threadId;
+  const contextBoundarySeq = latestTimeline?.contextBoundarySeq ?? null;
+  const surfaceKey =
+    contextBoundarySeq === null
+      ? baseSurfaceKey
+      : `${baseSurfaceKey}:context-boundary:${contextBoundarySeq}`;
+  const [loadedTimeline, setLoadedTimeline] = useState<LoadedTimelineState>(
+    () =>
+      buildLoadedTimelineState({
+        latestWindowEndSequence: null,
+        latestRows: [],
+        olderCursor: null,
+        surfaceKey,
+      }),
+  );
+  const [isLoadingOlderTimelineRows, setIsLoadingOlderTimelineRows] =
+    useState(false);
 
   useEffect(() => {
     if (!latestTimeline) {

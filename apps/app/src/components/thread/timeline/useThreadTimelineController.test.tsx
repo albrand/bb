@@ -142,6 +142,53 @@ describe("useThreadTimelineController", () => {
     });
   });
 
+  it("retains the context boundary while a same-thread timeline query is replaced", async () => {
+    const boundaryRow: TimelineRow = {
+      id: "context-clear-10",
+      kind: "system",
+      threadId: "thread-1",
+      turnId: null,
+      sourceSeqStart: 10,
+      sourceSeqEnd: 10,
+      startedAt: 10,
+      createdAt: 10,
+      systemKind: "operation",
+      operationKind: "generic",
+      title: "Context cleared",
+      detail: null,
+      status: "completed",
+      completedAt: 10,
+    };
+    vi.mocked(sdk.threads.timeline).mockResolvedValue(
+      makeTimelineResponse({
+        contextBoundarySeq: 10,
+        maxSeq: 10,
+        rows: [boundaryRow],
+      }),
+    );
+
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => useThreadTimelineController({ threadId: "thread-1" }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.contextBoundarySeq).toBe(10);
+      expect(result.current.timelineRows.map((row) => row.id)).toEqual([
+        boundaryRow.id,
+      ]);
+    });
+
+    act(() => {
+      queryClient.setQueryData(threadTimelineQueryKey("thread-1"), undefined);
+    });
+
+    expect(result.current.contextBoundarySeq).toBe(10);
+    expect(result.current.timelineRows.map((row) => row.id)).toEqual([
+      boundaryRow.id,
+    ]);
+  });
+
   it("replaces loaded rows when realtime data starts a new context epoch", async () => {
     const oldRow = makeUserRow("thread-1:user-seed:1", 1);
     const boundaryRow: TimelineRow = {
