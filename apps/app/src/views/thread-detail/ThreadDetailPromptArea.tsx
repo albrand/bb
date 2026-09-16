@@ -1009,7 +1009,6 @@ export function ThreadDetailPromptArea({
           serviceTier,
           supportsServiceTier,
           permissionMode,
-          executionInputSources,
         },
         draft: submittedDraft,
         seed: handoffSeed,
@@ -1044,7 +1043,6 @@ export function ThreadDetailPromptArea({
     [
       createThread,
       effectiveSelectedModel,
-      executionInputSources,
       handoffSeed,
       navigate,
       permissionMode,
