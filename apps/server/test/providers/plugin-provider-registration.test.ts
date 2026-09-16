@@ -73,6 +73,7 @@ describe("buildPluginProviderRegistration", () => {
           command: { trigger: "/", name: "goal", trailingText: " " },
         },
       ],
+      completedTurnDisplay: "collapse",
       reasoningLevels: [
         { id: "low", label: "Low" },
         { id: "medium", label: "Medium" },

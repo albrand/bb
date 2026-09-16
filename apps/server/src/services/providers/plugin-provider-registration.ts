@@ -38,6 +38,12 @@ const DEFAULT_SERVICE_TIERS: readonly ProviderOptionDescriptor[] = [
   { id: "fast", label: "Fast" },
 ];
 
+type CompletedTurnDisplay = "collapse" | "flat";
+
+type DeclarationWithCompletedTurnDisplay = PluginProviderDeclaration & {
+  completedTurnDisplay?: CompletedTurnDisplay;
+};
+
 function toOptionDescriptors(
   declared: readonly PluginProviderOptionDescriptor[],
 ): ProviderOptionDescriptor[] {
@@ -154,8 +160,14 @@ export function buildPluginProviderRegistration(args: {
   const strings = declaration.strings;
   const serviceTiers = projectServiceTiers(declaration);
   const extensionKinds = projectExtensionKinds(args.pluginId, declaration);
+  // Newer upstream servers require this field, while older fork declarations
+  // omit it. Keep the established collapse behavior when the declaration has
+  // not adopted the newer optional field yet.
+  const completedTurnDisplay =
+    (declaration as DeclarationWithCompletedTurnDisplay).completedTurnDisplay ??
+    "collapse";
 
-  const info: ProviderInfo = {
+  const info = {
     id: declaration.id,
     pluginId: args.pluginId,
     displayName: declaration.displayName,
@@ -187,6 +199,7 @@ export function buildPluginProviderRegistration(args: {
         : { reportsTokenUsage: capabilities.reportsTokenUsage }),
     },
     composerActions,
+    completedTurnDisplay,
     ...(strings === undefined
       ? {}
       : {
@@ -208,7 +221,7 @@ export function buildPluginProviderRegistration(args: {
     reasoningLevels: projectReasoningLevels(declaration),
     ...(serviceTiers === undefined ? {} : { serviceTiers }),
     ...(extensionKinds === undefined ? {} : { extensionKinds }),
-  };
+  } as ProviderInfo;
 
   const serverCapabilities: ProviderServerCapabilities = {
     reasoningLevels: [...capabilities.reasoningLevels],

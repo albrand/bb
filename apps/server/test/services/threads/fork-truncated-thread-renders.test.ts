@@ -142,13 +142,14 @@ describe("a thread whose rows retention already truncated still renders", () => 
     ]);
 
     const timeline = buildThreadTimelineWithProfile(db, thread, {
+      completedTurnDisplay: "collapse",
       eventBudget: 1_000_000,
       includeDiagnosticOperations: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
       maxSeq: getLatestThreadSequence(db, { threadId: thread.id }),
       page: { kind: "latest", segmentLimit: 20 },
-    }).response;
+    } as Parameters<typeof buildThreadTimelineWithProfile>[2]).response;
 
     const workRows = timeline.rows.filter((row) => row.kind === "work");
     expect(workRows.length).toBeGreaterThanOrEqual(3);
@@ -249,13 +250,14 @@ describe("a thread whose rows retention already truncated still renders", () => 
     ]);
 
     const timeline = buildThreadTimelineWithProfile(db, thread, {
+      completedTurnDisplay: "collapse",
       eventBudget: 1_000_000,
       includeDiagnosticOperations: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
       maxSeq: getLatestThreadSequence(db, { threadId: thread.id }),
       page: { kind: "latest", segmentLimit: 20 },
-    }).response;
+    } as Parameters<typeof buildThreadTimelineWithProfile>[2]).response;
 
     const row = timeline.rows.find((candidate) =>
       candidate.id.includes("cmd-pair"),
