@@ -50,7 +50,7 @@ export const usageProviderSchema = z.strictObject({
 export const usageMachineSchema = z.strictObject({
   id: nonemptyStringSchema,
   displayName: nonemptyStringSchema,
-  status: z.enum(["connected", "disconnected"]),
+  status: z.enum(["connected", "restarting", "disconnected"]),
   providers: z.array(usageProviderSchema),
   error: z.nullable(nonemptyStringSchema),
 });

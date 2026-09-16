@@ -24,6 +24,11 @@ export function offlineUsageMessage(
   machine: UsageMachine,
   hasUsage: boolean,
 ): string {
+  if (machine.status === "restarting") {
+    return hasUsage
+      ? `${machine.displayName} is restarting. Showing the last available update.`
+      : `${machine.displayName} is restarting. Usage will refresh when it reconnects.`;
+  }
   return hasUsage
     ? `${machine.displayName} is offline. Showing the last available update.`
     : `${machine.displayName} is offline. Usage will refresh when it reconnects.`;

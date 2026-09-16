@@ -89,7 +89,7 @@ interface Vault {
 interface Host {
   id: string;
   name: string;
-  status: "connected" | "disconnected";
+  status: "connected" | "restarting" | "disconnected";
 }
 
 interface VaultEntry {

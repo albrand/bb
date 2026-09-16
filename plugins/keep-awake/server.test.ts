@@ -32,7 +32,7 @@ function isRealtimeConnectionSubscription(
 
 function hostRecord(
   id: string,
-  status: "connected" | "disconnected" = "connected",
+  status: "connected" | "restarting" | "disconnected" = "connected",
 ): HostResponse {
   return makeHostResponse({ id, name: id, status });
 }

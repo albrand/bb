@@ -23,7 +23,9 @@ const DUE_AUTOMATION_BATCH_SIZE = 100;
 export const SWEEP_INTERVAL_MS = 10_000;
 
 const hostListSchema = z.array(
-  z.object({ status: z.enum(["connected", "disconnected"]) }).passthrough(),
+  z
+    .object({ status: z.enum(["connected", "restarting", "disconnected"]) })
+    .passthrough(),
 );
 type SweepApi = AgentRunApi & {
   sdk: { hosts: { list(): Promise<unknown> } };

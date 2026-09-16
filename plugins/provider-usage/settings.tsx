@@ -390,7 +390,7 @@ export function UsageSettingsContent({
     else groups.set(provider.providerId, [provider]);
   }
   const notice =
-    selected?.status === "disconnected"
+    selected?.status === "disconnected" || selected?.status === "restarting"
       ? offlineUsageMessage(selected, hasReportedUsage(selected.providers))
       : error || selected?.error
         ? hasReportedUsage(selected?.providers ?? [])

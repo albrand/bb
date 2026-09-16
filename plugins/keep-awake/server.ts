@@ -19,7 +19,7 @@ const hostSummarySchema = z
   .object({
     id: z.string().min(1),
     name: z.string(),
-    status: z.enum(["connected", "disconnected"]),
+    status: z.enum(["connected", "restarting", "disconnected"]),
   })
   .strict();
 const keepAwakeConfigurationSchema = z
