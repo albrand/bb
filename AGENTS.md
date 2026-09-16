@@ -21,6 +21,14 @@
 - Return raw host-local data from the daemon; assemble product behavior on the server. Move responsibility across this boundary only when the change requires it.
 - Increment `HOST_DAEMON_PROTOCOL_VERSION` for changes to server/daemon wire fields, including their types, requiredness, defaults, or meaning, unless compatibility with the previously shipped daemon is deliberately preserved and tested. This covers session payloads, WebSocket messages, and host RPC commands/results. Shared TypeScript builds do not verify compatibility with enrolled machines; the version bump triggers their update.
 
+### Restart and upgrade survival invariant
+
+- This fork's restart and upgrade path is survivable: daemon/app shutdown for a restart or upgrade must detach provider bridge workers, never stop them, so active agents and turns can be adopted by the next daemon.
+- Before changing restart, update, upgrade, shutdown, adoption, or worker-registry code, record a survivor packet containing the active thread/turn, worker PID/PGID, and registry entry. Validate that the old worker remains alive, the registry entry remains present, and the new daemon adopts the same worker and turn without replaying output or creating a second turn.
+- Never call an upgrade safe from an exit code, a new daemon PID, or a healthy-looking UI alone. Read back the active thread state, worker identity, registry/adoption state, and exactly-once completion events.
+- Do not manually stop agents to make a restart pass. The first-install registry-format migration is the documented exception and requires its no-running-thread gate; otherwise a failed adoption is a rollout blocker, not a reason to fall back to stop-and-restart.
+- Use [docs/fork/3143-agents-outlive-daemon.md](docs/fork/3143-agents-outlive-daemon.md) as the operational runbook and report real desktop Electron quit/reopen evidence separately from source-level or unit-test evidence.
+
 ## CLI And Plugin API
 
 - Every end-user feature must also be usable through the SDK and `bb` CLI; ship and document these surfaces with the UI.
