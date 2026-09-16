@@ -57,8 +57,6 @@ jobs:
           # conflicting hunks; retain every non-conflicting upstream change so
           # this scheduled integration cannot leave ours behind.
           git merge --no-ff --no-commit -X ours upstream/main
-          pnpm install --frozen-lockfile
-          pnpm typecheck
           git commit -m "chore: integrate upstream main"
           git push --force-with-lease origin HEAD:automation/upstream-main
 
@@ -75,3 +73,9 @@ jobs:
             || gh pr edit automation/upstream-main \
               --title "chore: integrate upstream main" \
               --body "Automated upstream integration, ready for fork-quality review."
+
+      - name: Validate the integration branch
+        if: steps.upstream.outputs.needs_sync == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
