@@ -6,6 +6,49 @@ import {
 import plugin from "./server.js";
 import { usageListMethod, usageFetchMethod } from "./usage-source-contract.js";
 
+it("preserves a restarting host status while usage is temporarily unavailable", async () => {
+  const host = createFakePluginHost({
+    pluginId: "provider-usage",
+    sdk: {
+      system: { config: async () => ({ primaryHostId: null }) },
+      hosts: {
+        list: async () => [
+          makeHostResponse({
+            id: "host",
+            name: "Studio",
+            status: "restarting",
+          }),
+        ],
+      },
+      providers: { list: async () => [] },
+      plugins: { experimental_discoverRpc: async () => [] },
+    },
+  });
+  plugin(host.bb);
+  try {
+    await expect(
+      host.harness.behavior.callRpc("getUsage", {
+        force: false,
+        machineIds: null,
+        providerId: null,
+        maxAgeMs: 60_000,
+      }),
+    ).resolves.toEqual({
+      machines: [
+        {
+          id: "host",
+          displayName: "Studio",
+          status: "restarting",
+          providers: [],
+          error: null,
+        },
+      ],
+    });
+  } finally {
+    await host.harness.lifecycle.dispose();
+  }
+});
+
 it("lists cheaply, fetches only the selected source/provider, preserves failed measurements, and evicts removed resources", async () => {
   let enabled = true;
   let failure = false;
