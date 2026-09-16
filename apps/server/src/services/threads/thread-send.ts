@@ -52,7 +52,6 @@ import {
   resolveThreadRuntimeState,
 } from "./thread-runtime-display.js";
 import { recordAcceptedPromptHistoryEntry } from "../prompt-history.js";
-import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import {
   LIVE_DAEMON_COMMAND_TIMEOUT_MS,
   startLiveHostCommand,
@@ -310,7 +309,10 @@ function ensureRuntimeCanAcceptActiveSend(
     environmentHostId: args.environment.hostId,
     status: args.thread.status,
   });
-  if (runtime.displayStatus === "active") {
+  if (
+    runtime.displayStatus === "active" ||
+    deps.hub.isHostRestarting(args.environment.hostId)
+  ) {
     return;
   }
 
@@ -773,9 +775,6 @@ async function sendThreadMessageWithoutContextClear(
     return acceptance === null ? NO_REFUSAL : { acceptance: acceptance.result };
   }
 
-  await ensureHostSessionReadyForWork(deps, {
-    hostId: readyEnvironment.hostId,
-  });
   const preparedCommand = await prepareTurnSubmitCommandPayload(deps, {
     thread,
     input,

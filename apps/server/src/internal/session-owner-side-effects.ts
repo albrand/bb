@@ -100,6 +100,7 @@ export async function handleHostSessionOpened(
 
   const sameDaemonInstance =
     args.previousSession?.instanceId === args.openedSession.instanceId;
+  const controlledRestart = deps.hub.isHostRestarting(args.hostId);
   if (
     args.previousSession &&
     args.previousSession.id !== args.openedSession.id
@@ -117,7 +118,7 @@ export async function handleHostSessionOpened(
       });
     }
 
-    if (!sameDaemonInstance) {
+    if (!sameDaemonInstance && !controlledRestart) {
       interruptPendingInteractionsForHostThreads(deps, {
         hostId: args.hostId,
         reason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
@@ -134,10 +135,12 @@ export async function handleHostSessionOpened(
     }
   }
   clearDetachedThreads(deps.db, { hostId: args.hostId });
-  closeItemsOrphanedByAdoption(deps, {
-    adoptedThreadIds: adopted.excepted,
-    runningTurnIds: adopted.runningTurnIds,
-  });
+  if (!controlledRestart) {
+    closeItemsOrphanedByAdoption(deps, {
+      adoptedThreadIds: adopted.excepted,
+      runningTurnIds: adopted.runningTurnIds,
+    });
+  }
 
   await reconcileDaemonReportedThreads(deps, {
     activeThreadIds: [
@@ -148,13 +151,16 @@ export async function handleHostSessionOpened(
     ],
     exceptThreadIds: adopted.excepted,
     hostId: args.hostId,
+    preserveMissingActiveThreads: controlledRestart,
     sameDaemonInstance,
   });
 
-  scheduleAdoptedThreadTurnCheck(deps, {
-    hostId: args.hostId,
-    threadIds: adopted.awaitingTurn,
-  });
+  if (!controlledRestart) {
+    scheduleAdoptedThreadTurnCheck(deps, {
+      hostId: args.hostId,
+      threadIds: adopted.awaitingTurn,
+    });
+  }
 }
 
 export function handleDaemonSocketClosed(
@@ -240,6 +246,9 @@ function completeDaemonDisconnectGrace(
   if (deps.hub.hasDaemonForHost(args.hostId)) {
     return;
   }
+  if (deps.hub.isHostRestarting(args.hostId)) {
+    return;
+  }
   deps.hub.clearHostRestarting(args.hostId);
 
   interruptPendingInteractionsForHostThreads(deps, {
@@ -266,6 +275,9 @@ function completeDaemonActiveWorkDisconnectGrace(
   args: CompleteDaemonActiveWorkDisconnectGraceArgs,
 ): void {
   if (deps.hub.hasDaemonForHost(args.hostId)) {
+    return;
+  }
+  if (deps.hub.isHostRestarting(args.hostId)) {
     return;
   }
 

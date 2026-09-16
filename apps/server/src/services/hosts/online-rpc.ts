@@ -58,10 +58,10 @@ export async function callHostOnlineRpcForWork(
   deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
 ): Promise<HostDaemonRpcResultForCommand> {
-  await prepareHostForWork(deps, args, false);
+  await prepareHostForWork(deps, args, true, args.timeoutMs);
   return callHostOnlineRpcWithRetry(deps, args, {
-    retryOnTransportFailure: false,
-    waitForTransportFailure: false,
+    retryOnTransportFailure: true,
+    waitForTransportFailure: true,
   });
 }
 
@@ -92,7 +92,7 @@ export async function callHostRetryableOnlineRpcForWork(
   deps: WorkSessionDeps,
   args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
 ): Promise<HostDaemonOnlineRpcResultForCommand> {
-  await prepareHostForWork(deps, args, true);
+  await prepareHostForWork(deps, args, true, args.timeoutMs);
   return callHostOnlineRpcWithRetry(deps, args, {
     retryOnTransportFailure: true,
     waitForTransportFailure: true,
@@ -144,6 +144,7 @@ async function prepareHostForWork(
   deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
   retryOnTransportFailure: boolean,
+  retryTimeoutMs = HOST_DAEMON_REGISTRATION_WAIT_MS,
 ): Promise<void> {
   if (isCleanupRpc(deps, args)) return;
   await ensureHostSessionReadyForWork(deps, { hostId: args.hostId }).catch(
@@ -151,7 +152,7 @@ async function prepareHostForWork(
       if (!retryOnTransportFailure || !isHostUnavailableApiError(error)) {
         throw error;
       }
-      await waitForRetryableHostRpcTransport(deps, args.hostId);
+      await waitForRetryableHostRpcTransport(deps, args.hostId, retryTimeoutMs);
     },
   );
   assertMachineLifecycleAdmission(deps, args.hostId);
@@ -173,6 +174,14 @@ async function prepareHostForWork(
 
 async function callHostOnlineRpcWithRetry(
   deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
+  options: {
+    retryOnTransportFailure: true;
+    waitForTransportFailure: boolean;
+  },
+): Promise<HostDaemonOnlineRpcResultForCommand>;
+async function callHostOnlineRpcWithRetry(
+  deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
   options: {
     retryOnTransportFailure: false;
@@ -181,12 +190,12 @@ async function callHostOnlineRpcWithRetry(
 ): Promise<HostDaemonRpcResultForCommand>;
 async function callHostOnlineRpcWithRetry(
   deps: WorkSessionDeps,
-  args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
   options: {
     retryOnTransportFailure: true;
-    waitForTransportFailure: boolean;
+    waitForTransportFailure: true;
   },
-): Promise<HostDaemonOnlineRpcResultForCommand>;
+): Promise<HostDaemonRpcResultForCommand>;
 async function callHostOnlineRpcWithRetry(
   deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
@@ -215,7 +224,13 @@ async function callHostOnlineRpcWithRetry(
     }
     if (error instanceof HostOnlineRpcUnavailableError) {
       if (!options.waitForTransportFailure) throwOnlineRpcError(error);
-      await waitForRetryableHostRpcTransport(deps, args.hostId);
+      await waitForRetryableHostRpcTransport(
+        deps,
+        args.hostId,
+        timeoutRetryDeadline === null
+          ? HOST_DAEMON_REGISTRATION_WAIT_MS
+          : Math.max(timeoutRetryDeadline - Date.now(), 1),
+      );
       return requestHostOnlineRpcResponse(deps, args).catch((retryError) => {
         throwOnlineRpcError(retryError);
       });
@@ -254,12 +269,13 @@ async function callHostOnlineRpcWithRetry(
 async function waitForRetryableHostRpcTransport(
   deps: WorkSessionDeps,
   hostId: string,
+  timeoutMs: number,
 ): Promise<void> {
   if (deps.hub.hasDaemonForHost(hostId)) {
     await ensureHostSessionReadyForWork(deps, { hostId });
     return;
   }
-  await deps.hub.waitForDaemonForHost(hostId, HOST_DAEMON_REGISTRATION_WAIT_MS);
+  await deps.hub.waitForDaemonForHost(hostId, timeoutMs);
   await ensureHostSessionReadyForWork(deps, { hostId });
 }
 

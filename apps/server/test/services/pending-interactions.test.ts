@@ -758,6 +758,62 @@ describe("pending interaction lifecycle", () => {
     });
   });
 
+  it("preserves pending interactions across a controlled daemon restart", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-pending-interaction-controlled-restart",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+      });
+      const created = registerPendingInteraction(
+        harness.deps,
+        harness.deps.pendingInteractions,
+        {
+          threadId: thread.id,
+          turnId: "turn-controlled-restart",
+          providerId: "codex",
+          providerThreadId: "provider-thread-controlled-restart",
+          providerRequestId: "request-controlled-restart",
+          payload: createUserQuestionPayload(),
+        },
+      );
+      if (created.outcome === "rejected") {
+        throw new Error(
+          `Expected interaction registration to succeed: ${created.reason}`,
+        );
+      }
+      const replacementSession = seedSession(harness.deps, host.id);
+      replacementSession.instanceId = "instance-controlled-restart";
+      harness.hub.markHostRestarting(host.id);
+      await handleHostSessionOpened(harness.deps, {
+        activeThreads: [],
+        adoptedThreads: [],
+        hostId: host.id,
+        openedSession: replacementSession,
+        previousSession: session,
+      });
+
+      const row = harness.db
+        .select()
+        .from(pendingInteractionTable)
+        .where(eq(pendingInteractionTable.id, created.interaction.id))
+        .get();
+      expect(row).toMatchObject({
+        status: "pending",
+        statusReason: null,
+      });
+    });
+  });
+
   it("rejects active provider request reuse with a different payload", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, {

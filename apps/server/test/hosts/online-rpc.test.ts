@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/errors.js";
 import {
   callHostOnlineRpc,
+  callHostOnlineRpcForWork,
   callHostRetryableOnlineRpc,
   callHostRetryableOnlineRpcForWork,
 } from "../../src/services/hosts/online-rpc.js";
@@ -170,7 +171,7 @@ describe("host online RPC retry semantics", () => {
     });
   });
 
-  it("waits briefly for retryable work when the session is active before the daemon websocket registers", async () => {
+  it("waits for work when the session is active before the daemon websocket registers", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-online-rpc-registration-race",
@@ -200,7 +201,7 @@ describe("host online RPC retry semantics", () => {
       }, 10);
 
       await expect(
-        callHostRetryableOnlineRpcForWork(harness.deps, {
+        callHostOnlineRpcForWork(harness.deps, {
           hostId: host.id,
           timeoutMs: 1_000,
           command: {

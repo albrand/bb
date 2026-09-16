@@ -1,6 +1,7 @@
 import { getActiveStoredTurnId, getThread } from "@bb/db";
 import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS } from "../../src/constants.js";
 import { ADOPTED_THREAD_TURN_REPLAY_GRACE_MS } from "../../src/internal/fork-adoption.js";
 import { handleDaemonSocketClosed } from "../../src/internal/session-owner-side-effects.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
@@ -56,6 +57,46 @@ async function restartWithNullAdoption(
   });
   return { atSessionOpen, observed, activeTurn };
 }
+
+it("does not interrupt an active thread during a controlled restart", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    await withTestHarness(async (harness) => {
+      const { host, session, thread } = seedThreadFixture(harness, {
+        thread: { status: "active" },
+      });
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+      harness.hub.markHostRestarting(host.id);
+
+      const response = await harness.app.request("/internal/session/open", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          hostId: host.id,
+          instanceId: "instance-controlled-restart",
+          hostName: host.name,
+          hasMachineCredential: false,
+          platform: "darwin",
+          dataDir: "/tmp/host-daemon-controlled-restart",
+          localApiPort: null,
+          protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+          activeThreads: [],
+          adoptedThreads: [],
+        }),
+      });
+      expect(response.status).toBe(201);
+
+      await vi.advanceTimersByTimeAsync(
+        DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS +
+          ADOPTED_THREAD_TURN_REPLAY_GRACE_MS +
+          1,
+      );
+      expect(getThread(harness.deps.db, thread.id)?.status).toBe("active");
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe("an adopted worker thread with no open turn", () => {
   afterEach(() => {

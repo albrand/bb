@@ -17,7 +17,7 @@ interface CreateDaemonOptions {
   logger: HostDaemonLogger;
   releaseLock: () => Promise<void>;
   flushEvents?: () => Promise<void>;
-  shutdownRuntimes?: () => Promise<void>;
+  shutdownRuntimes?: (reason: string) => Promise<void>;
   onStart?: () => Promise<void>;
   signalSource?: SignalSource;
   exitProcess?: (code: number) => void;
@@ -138,7 +138,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
         }
 
         try {
-          await step.run();
+          await step.run(reason);
         } catch (error) {
           const stepError = normalizeCaughtError(error);
           failure ??= stepError;

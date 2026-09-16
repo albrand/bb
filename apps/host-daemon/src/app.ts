@@ -950,7 +950,13 @@ export async function createHostDaemonApp(
     flushEvents: async () => {
       await eventSink.flush();
     },
-    shutdownRuntimes: async () => {
+    shutdownRuntimes: async (reason) => {
+      // A controlled daemon/app restart must be lossless: tell the server
+      // before the socket closes so it preserves active turns and interactions
+      // until the replacement daemon adopts them.
+      if (reason !== "machine-shutdown") {
+        sendServerMessage({ type: "daemon.restarting" });
+      }
       idleProviderSessionReaper.stop();
       memoryController.stop();
       eventLoopStallMonitor.stop();
