@@ -40,6 +40,9 @@ jobs:
         run: |
           git remote add upstream https://github.com/get-bb/bb.git 2>/dev/null || true
           git fetch --no-tags upstream main
+          git fetch --no-tags origin \
+            refs/heads/automation/upstream-main:refs/remotes/origin/automation/upstream-main \
+            2>/dev/null || true
           if git merge-base --is-ancestor upstream/main HEAD; then
             echo "Fork already contains upstream/main."
             echo "needs_sync=false" >> "$GITHUB_OUTPUT"
