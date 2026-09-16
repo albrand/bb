@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   createFakePluginHost,
   type FakePluginHost,
   makePluginAgentConfigurationContext,
 } from "@get-bb/plugin-sdk/testing";
 import plugin, { TOOL_NAME } from "./server.js";
-import { TOOL_INPUT_JSON_SCHEMA } from "./tool-definition.js";
+import * as toolDefinition from "./tool-definition.js";
 import {
   ASK_USER_QUESTION_RENDERER_ID,
   type InteractionPayload,
+  toolInputSchema,
   type ToolResult,
 } from "./contracts.js";
 
@@ -77,7 +79,11 @@ describe("provider gating", () => {
       expect(resolved.tools).toHaveLength(1);
       const [tool] = resolved.tools;
       expect(tool?.name).toBe(TOOL_NAME);
-      expect(tool?.inputSchema).toEqual(TOOL_INPUT_JSON_SCHEMA);
+      const expectedSchema =
+        "TOOL_INPUT_JSON_SCHEMA" in toolDefinition
+          ? toolDefinition.TOOL_INPUT_JSON_SCHEMA
+          : z.toJSONSchema(toolInputSchema, { io: "input" });
+      expect(tool?.inputSchema).toEqual(expectedSchema);
     },
   );
 
