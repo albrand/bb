@@ -61,19 +61,19 @@ jobs:
           # side; hunk-level auto-resolution can create invalid hybrids (for
           # example, mismatched JSX tags across adjacent conflict hunks).
           if ! git merge --no-ff --no-commit upstream/main; then
-            mapfile -t conflicted_paths < <(git diff --name-only --diff-filter=U)
-            if ((${#conflicted_paths[@]} == 0)); then
+            conflicted_paths="$(git diff --name-only --diff-filter=U)"
+            if [ -z "$conflicted_paths" ]; then
               echo "Upstream merge failed without a resolvable conflict list." >&2
               exit 1
             fi
-            for path in "${conflicted_paths[@]}"; do
-              if git cat-file -e "HEAD:$path" 2>/dev/null; then
-                git checkout --ours -- "$path"
-                git add -- "$path"
+            while IFS= read -r conflict_path; do
+              if git cat-file -e "HEAD:$conflict_path" 2>/dev/null; then
+                git checkout --ours -- "$conflict_path"
+                git add -- "$conflict_path"
               else
-                git rm -f -- "$path"
+                git rm -f -- "$conflict_path"
               fi
-            done
+            done <<< "$conflicted_paths"
           fi
           # GitHub's workflow token cannot publish changes to workflow files.
           # These fork-owned control-plane files are authoritative anyway, so
