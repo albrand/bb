@@ -62,6 +62,7 @@ const REGISTRATION_FIELDS = {
   reportsTokenUsage: "capabilities.reportsTokenUsage",
   maintenance: "maintenance",
   composerActions: "composerActions",
+  completedTurnDisplay: "completedTurnDisplay",
   extensionKinds: "extensionKinds",
   models: "models",
   env: "env",

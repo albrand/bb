@@ -78,6 +78,7 @@ export default function plugin(bb: BbPluginApi) {
       { id: "max", label: "Max" },
     ],
     composerActions: ["plan"],
+    completedTurnDisplay: "flat",
     env: { passthrough: ["BB_CLAUDE_CODE_EXECUTABLE"] },
     models: {
       scope: "host",

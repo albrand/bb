@@ -35,6 +35,7 @@ export function makeThreadTimelineResponse(
   const response: ThreadTimelineResponse = {
     rows: [],
     contextBoundarySeq: null,
+    completedTurnDisplay: "collapse",
     activePromptMode: null,
     activeThinking: null,
     activeWorkflows: [],

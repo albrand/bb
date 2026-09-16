@@ -15,8 +15,11 @@ import {
 } from "@bb/db";
 import type { Hono } from "hono";
 import {
+  DEFAULT_COMPLETED_TURN_DISPLAY,
   PROMPT_HISTORY_ENTRY_LIMIT,
   threadEventTypeSchema,
+  type AppSettings,
+  type CompletedTurnDisplay,
   type ThreadEventType,
 } from "@bb/domain";
 import {
@@ -105,6 +108,18 @@ function resolveThreadProviderDisplayName(
   providerId: string,
 ): string | undefined {
   return deps.providerRegistry.get(providerId)?.info.displayName;
+}
+
+function resolveThreadCompletedTurnDisplay(
+  deps: Pick<AppDeps, "providerRegistry">,
+  settings: AppSettings,
+  providerId: string,
+): CompletedTurnDisplay {
+  return (
+    settings.providerCompletedTurnDisplay[providerId] ??
+    deps.providerRegistry.get(providerId)?.info.completedTurnDisplay ??
+    DEFAULT_COMPLETED_TURN_DISPLAY
+  );
 }
 
 function validateFilePath(filePath: string): void {
@@ -398,9 +413,13 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       deps,
       thread.providerId,
     );
-    const includeDiagnosticOperations = getAppSettings(
-      deps.db,
-    ).showDiagnosticEvents;
+    const settings = getAppSettings(deps.db);
+    const includeDiagnosticOperations = settings.showDiagnosticEvents;
+    const completedTurnDisplay = resolveThreadCompletedTurnDisplay(
+      deps,
+      settings,
+      thread.providerId,
+    );
     const maxSeq = getLatestThreadSequence(deps.db, {
       threadId: thread.id,
     });
@@ -414,6 +433,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       includeNestedRows,
       summaryOnly,
       includeDiagnosticOperations,
+      completedTurnDisplay,
     };
     const full = timelineCache.getOrBuild(
       thread.id,
@@ -423,6 +443,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           deps.db,
           thread,
           {
+            completedTurnDisplay,
             eventBudget,
             includeDiagnosticOperations,
             includeNestedRows,
@@ -483,12 +504,21 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       deps,
       thread.providerId,
     );
+    const outlineOptions = {
+      completedTurnDisplay: resolveThreadCompletedTurnDisplay(
+        deps,
+        getAppSettings(deps.db),
+        thread.providerId,
+      ),
+      maxSeq,
+      ...(providerDisplayName === undefined ? {} : { providerDisplayName }),
+    };
     const cacheKey = JSON.stringify([
       thread.id,
       buildThreadConversationOutlineProjectionKey(
         thread,
         outlineSequence,
-        providerDisplayName,
+        outlineOptions,
       ),
     ]);
     const cached = conversationOutlineCache.get(cacheKey);
@@ -498,9 +528,8 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       return context.json({ items: cached, maxSeq });
     }
     const response = loadThreadConversationOutline(deps.db, thread, {
-      maxSeq,
+      ...outlineOptions,
       outlineSequence,
-      ...(providerDisplayName === undefined ? {} : { providerDisplayName }),
     });
     conversationOutlineCache.set(cacheKey, response.items);
     while (
@@ -517,13 +546,16 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
 
   get(routes.timelineTurnSummaryDetails, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    const includeDiagnosticOperations = getAppSettings(
-      deps.db,
-    ).showDiagnosticEvents;
+    const settings = getAppSettings(deps.db);
     return context.json(
       buildTimelineTurnSummaryDetails(deps.db, thread, {
         beforeCursor: query.beforeCursor,
-        includeDiagnosticOperations,
+        completedTurnDisplay: resolveThreadCompletedTurnDisplay(
+          deps,
+          settings,
+          thread.providerId,
+        ),
+        includeDiagnosticOperations: settings.showDiagnosticEvents,
         providerDisplayName: resolveThreadProviderDisplayName(
           deps,
           thread.providerId,
