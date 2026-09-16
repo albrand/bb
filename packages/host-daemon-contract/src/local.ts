@@ -156,6 +156,46 @@ export type StatusResponse = z.infer<typeof statusResponseSchema>;
 export const healthResponseSchema = z.string().min(1);
 type HealthResponse = z.infer<typeof healthResponseSchema>;
 
+export const hostMemorySnapshotSchema = z
+  .object({
+    daemonRssBytes: z.number().int().nonnegative(),
+    totalMemoryBytes: z.number().int().nonnegative(),
+    freeMemoryBytes: z.number().int().nonnegative(),
+    leaseCount: z.number().int().nonnegative(),
+    runningLeaseCount: z.number().int().nonnegative(),
+    reclaimableLeaseCount: z.number().int().nonnegative(),
+    protectedThreadCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type HostMemorySnapshot = z.infer<typeof hostMemorySnapshotSchema>;
+
+export const hostMemoryCollectionSchema = z
+  .object({
+    before: hostMemorySnapshotSchema,
+    after: hostMemorySnapshotSchema,
+    reclaimed: z.array(
+      z
+        .object({
+          runId: z.string().min(1),
+          threadId: z.string().min(1),
+          pid: z.number().int().positive(),
+          stopped: z.boolean(),
+        })
+        .strict(),
+    ),
+    skipped: z.array(
+      z
+        .object({ runId: z.string().min(1), reason: z.string().min(1) })
+        .strict(),
+    ),
+  })
+  .strict();
+export type HostMemoryCollection = z.infer<typeof hostMemoryCollectionSchema>;
+
+export const hostMemoryGcQuerySchema = z.object({
+  force: z.enum(["true", "false"]).optional(),
+});
+
 const providerCliKeySchema = z.string().min(1);
 export type ProviderCliKey = z.infer<typeof providerCliKeySchema>;
 
@@ -264,6 +304,13 @@ export type ProviderCliInstallEvent = z.infer<
 export type HostDaemonLocalSchema = {
   [DEFAULT_HOST_DAEMON_LOCAL_HEALTH_PATH]: {
     $get: Endpoint<EmptyInput, HealthResponse>;
+  };
+  "/memory": {
+    $get: Endpoint<EmptyInput, HostMemorySnapshot>;
+    $post: Endpoint<
+      { query?: z.infer<typeof hostMemoryGcQuerySchema> },
+      HostMemoryCollection
+    >;
   };
   "/workspace-open-targets": {
     $get: Endpoint<

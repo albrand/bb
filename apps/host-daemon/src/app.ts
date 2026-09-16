@@ -13,6 +13,7 @@ import {
 } from "./interactive-request-registry.js";
 import { startEventLoopStallMonitor } from "./event-loop-stall-monitor.js";
 import { startHostDaemonHealthMonitor } from "./host-daemon-health-monitor.js";
+import { startHostDaemonMemoryController } from "./memory-controller.js";
 import { startLocalApiServer, type LocalApiServer } from "./local-api.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import type { HostDaemonLogger } from "./logger.js";
@@ -902,6 +903,16 @@ export async function createHostDaemonApp(
   handleServerSessionInvalidated = (args) =>
     connection.handleSessionInvalidated(args);
 
+  const memoryController = startHostDaemonMemoryController({
+    dataDir: options.dataDir,
+    logger: options.logger,
+    getProtectedThreadIds: () => [
+      ...runtimeManager.listActiveThreads().map((thread) => thread.threadId),
+      ...runtimeManager
+        .listAdoptedBridgeThreads()
+        .map((thread) => thread.threadId),
+    ],
+  });
   const localApi = options.localApiConfig
     ? await startLocalApiServer({
         dataDir: options.dataDir,
@@ -913,6 +924,7 @@ export async function createHostDaemonApp(
         appUrl: options.appUrl,
         getConnected: () => connection.sessionId != null,
         shellEnv: () => runtimeManager.getShellEnv(),
+        memoryController,
       })
     : null;
   const eventLoopStallMonitor = startEventLoopStallMonitor({
@@ -940,6 +952,7 @@ export async function createHostDaemonApp(
     },
     shutdownRuntimes: async () => {
       idleProviderSessionReaper.stop();
+      memoryController.stop();
       eventLoopStallMonitor.stop();
       hostDaemonHealthMonitor.stop();
       await announceDetachedThreads({

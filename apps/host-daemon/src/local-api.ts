@@ -15,6 +15,7 @@ import { assignIfDefined } from "@bb/config/objects";
 import {
   healthResponseSchema,
   HOST_DAEMON_PROTOCOL_VERSION,
+  hostMemoryGcQuerySchema,
   openInTargetRequestSchema,
   typedRoutes,
   workspaceOpenTargetsQuerySchema,
@@ -37,6 +38,7 @@ import { isFsErrorWithCode } from "./fs-errors.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
+import type { HostDaemonMemoryController } from "./memory-controller.js";
 
 type WorkspaceOpenTargetListHandler = (
   query: WorkspaceOpenTargetsQuery,
@@ -55,6 +57,7 @@ interface StartLocalApiServerOptions {
   listWorkspaceOpenTargets?: WorkspaceOpenTargetListHandler;
   openInTarget?: OpenInTargetHandler;
   shellEnv?: () => NodeJS.ProcessEnv;
+  memoryController?: HostDaemonMemoryController;
 }
 
 export interface LocalApiServer {
@@ -267,6 +270,56 @@ export async function startLocalApiServer(
       platform,
     }),
   );
+
+  get("/memory", async (c) => {
+    if (options.memoryController === undefined) {
+      return c.json({
+        daemonRssBytes: 0,
+        totalMemoryBytes: 0,
+        freeMemoryBytes: 0,
+        leaseCount: 0,
+        runningLeaseCount: 0,
+        reclaimableLeaseCount: 0,
+        protectedThreadCount: 0,
+      });
+    }
+    return c.json(await options.memoryController.status());
+  });
+
+  post("/memory", async (c) => {
+    if (options.memoryController === undefined) {
+      return c.json({
+        before: {
+          daemonRssBytes: 0,
+          totalMemoryBytes: 0,
+          freeMemoryBytes: 0,
+          leaseCount: 0,
+          runningLeaseCount: 0,
+          reclaimableLeaseCount: 0,
+          protectedThreadCount: 0,
+        },
+        after: {
+          daemonRssBytes: 0,
+          totalMemoryBytes: 0,
+          freeMemoryBytes: 0,
+          leaseCount: 0,
+          runningLeaseCount: 0,
+          reclaimableLeaseCount: 0,
+          protectedThreadCount: 0,
+        },
+        reclaimed: [],
+        skipped: [],
+      });
+    }
+    const query = hostMemoryGcQuerySchema.parse({
+      force: c.req.query("force"),
+    });
+    return c.json(
+      await options.memoryController.collect({
+        force: query.force === "true",
+      }),
+    );
+  });
 
   get(
     "/workspace-open-targets",

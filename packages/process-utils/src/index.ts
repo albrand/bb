@@ -218,6 +218,63 @@ export function isProcessGroupAlive(child: {
   }
 }
 
+/** Return whether a specific process identity is still present. */
+export function isProcessAlive(pid: number | undefined): boolean {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Stop a detached process group by its recorded leader PID.
+ * The caller must have independently established ownership of the PID.
+ */
+export async function stopProcessGroupByPid(args: {
+  pid: number;
+  timeoutMs?: number;
+  killGraceMs?: number;
+}): Promise<{ existed: boolean; stopped: boolean }> {
+  const timeoutMs = args.timeoutMs ?? 5_000;
+  const killGraceMs = args.killGraceMs ?? 2_000;
+  const child = {
+    pid: args.pid,
+    kill: (signal: NodeJS.Signals) => {
+      try {
+        process.kill(args.pid, signal);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+  const existed = isProcessGroupAlive(child) || isProcessAlive(args.pid);
+  if (!existed) return { existed: false, stopped: true };
+  killProcessGroup({ child, signal: "SIGTERM" });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessGroupAlive(child) && !isProcessAlive(args.pid)) {
+      return { existed: true, stopped: true };
+    }
+    await new Promise<void>((resolveStop) => setTimeout(resolveStop, 100));
+  }
+  killProcessGroup({ child, signal: "SIGKILL" });
+  const killDeadline = Date.now() + killGraceMs;
+  while (Date.now() < killDeadline) {
+    if (!isProcessGroupAlive(child) && !isProcessAlive(args.pid)) {
+      return { existed: true, stopped: true };
+    }
+    await new Promise<void>((resolveStop) => setTimeout(resolveStop, 100));
+  }
+  return {
+    existed: true,
+    stopped: !isProcessGroupAlive(child) && !isProcessAlive(args.pid),
+  };
+}
+
 function hasChildExited(child: ProcessGroupLeader): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
@@ -371,15 +428,6 @@ export async function listProcessesWithCwdUnder(
     (entry) =>
       entry.pid !== process.pid && isPathUnderDirectory(entry.cwd, directory),
   );
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function delay(ms: number): Promise<void> {

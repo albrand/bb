@@ -278,6 +278,9 @@ configures the machine with optional configured `preset` and `image` names;
 - `bb spend list`
 - `bb spend backfill`
 - `bb spend analyze`
+- `bb memory`
+- `bb memory status`
+- `bb memory gc`
 
 ## guide
 

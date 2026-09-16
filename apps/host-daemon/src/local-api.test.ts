@@ -13,6 +13,7 @@ import { startLocalApiServer, type LocalApiServer } from "./local-api.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import { WorkspaceOpenTargetError } from "@bb/local-open-targets";
+import type { HostDaemonMemoryController } from "./memory-controller.js";
 
 describe("local API server", () => {
   let server: LocalApiServer | null = null;
@@ -193,6 +194,49 @@ describe("local API server", () => {
     });
     const healthResponse = await client.health.$get();
     expect(await healthResponse.text()).toBe("ok");
+  });
+
+  it("exposes measured memory status and bounded collection over localhost", async () => {
+    const snapshot = {
+      daemonRssBytes: 10,
+      totalMemoryBytes: 100,
+      freeMemoryBytes: 40,
+      leaseCount: 2,
+      runningLeaseCount: 1,
+      reclaimableLeaseCount: 1,
+      protectedThreadCount: 1,
+    };
+    const memory = {
+      status: vi.fn(async () => snapshot),
+      collect: vi.fn(async () => ({
+        before: snapshot,
+        after: snapshot,
+        reclaimed: [],
+        skipped: [{ runId: "run-1", reason: "active-or-adopted-thread" }],
+      })),
+      stop: vi.fn(),
+    } satisfies HostDaemonMemoryController;
+    server = await startLocalApiServer({
+      hostId: "host-memory",
+      localApiConfig: createLocalApiConfig(),
+      serverUrl: "http://server.test",
+      serverPort: 3334,
+      getConnected: () => true,
+      memoryController: memory,
+    });
+    const client = createHostDaemonLocalClient(
+      `http://localhost:${server.port}`,
+    );
+    expect(await (await client.memory.$get()).json()).toMatchObject({
+      reclaimableLeaseCount: 1,
+    });
+    expect(
+      await (await client.memory.$post({ query: { force: "true" } })).json(),
+    ).toMatchObject({
+      skipped: [{ reason: "active-or-adopted-thread" }],
+    });
+    expect(memory.status).toHaveBeenCalled();
+    expect(memory.collect).toHaveBeenCalledOnce();
   });
 
   it("explains how to resolve a local API port collision", async () => {

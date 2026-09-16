@@ -57,6 +57,11 @@ export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
     (m) => (program, deps) => m.registerSpendCommands(program, deps.getUrl),
   ),
   group(
+    "memory",
+    () => import("./commands/memory.js"),
+    (m) => (program) => m.registerMemoryCommands(program),
+  ),
+  group(
     "manager",
     () => import("./commands/manager.js"),
     (m) => (program) => m.registerManagerCommands(program),
