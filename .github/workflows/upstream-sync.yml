@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
 
 env:
   NODE_VERSION: "22.x"
@@ -58,6 +57,19 @@ jobs:
           # conflicting hunks; retain every non-conflicting upstream change so
           # this scheduled integration cannot leave ours behind.
           git merge --no-ff --no-commit -X ours upstream/main
+          # GitHub's workflow token cannot publish changes to workflow files.
+          # These fork-owned control-plane files are authoritative anyway, so
+          # retain existing fork workflows and drop upstream-only additions.
+          workflow_paths="$(git diff --name-only HEAD upstream/main -- .github/workflows)"
+          if [ -n "$workflow_paths" ]; then
+            while IFS= read -r path; do
+              if git cat-file -e "HEAD:$path" 2>/dev/null; then
+                git restore --source=HEAD --staged --worktree -- "$path"
+              else
+                git rm -f -- "$path"
+              fi
+            done <<< "$workflow_paths"
+          fi
           git commit -m "chore: integrate upstream main"
           git push --force-with-lease origin HEAD:automation/upstream-main
 
