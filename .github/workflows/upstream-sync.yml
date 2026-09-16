@@ -96,16 +96,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh pr create \
+          existing_pr="$(gh pr list \
+            --base ours \
+            --head automation/upstream-main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            echo "Integration pull request #$existing_pr already exists; branch was updated."
+          elif ! gh pr create \
             --base ours \
             --head automation/upstream-main \
             --title "chore: integrate upstream main" \
             --body "Automated upstream integration, ready for fork-quality review."; then
-            if ! gh pr edit automation/upstream-main \
-              --title "chore: integrate upstream main" \
-              --body "Automated upstream integration, ready for fork-quality review."; then
-              echo "::warning::Integration branch published, but this repository policy does not permit the workflow token to create or edit pull requests."
-            fi
+            echo "::warning::Integration branch published, but this repository policy does not permit the workflow token to create the pull request."
           fi
 
       - name: Validate the integration branch
