@@ -78,14 +78,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create \
+          if ! gh pr create \
             --base ours \
             --head automation/upstream-main \
             --title "chore: integrate upstream main" \
-            --body "Automated upstream integration, ready for fork-quality review." \
-            || gh pr edit automation/upstream-main \
+            --body "Automated upstream integration, ready for fork-quality review."; then
+            if ! gh pr edit automation/upstream-main \
               --title "chore: integrate upstream main" \
-              --body "Automated upstream integration, ready for fork-quality review."
+              --body "Automated upstream integration, ready for fork-quality review."; then
+              echo "::warning::Integration branch published, but this repository policy does not permit the workflow token to create or edit pull requests."
+            fi
+          fi
 
       - name: Validate the integration branch
         if: steps.upstream.outputs.needs_sync == 'true'
