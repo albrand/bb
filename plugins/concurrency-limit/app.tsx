@@ -219,9 +219,13 @@ function ConcurrencyLimitSettings() {
                         ? host.availableParallelism === null
                           ? "Offline"
                           : `${host.availableParallelism} processors · Offline`
-                        : host.availableParallelism === null
-                          ? "Detecting processors…"
-                          : `${host.availableParallelism} processors`}
+                        : host.status === "restarting"
+                          ? host.availableParallelism === null
+                            ? "Restarting…"
+                            : `${host.availableParallelism} processors · Restarting…`
+                          : host.availableParallelism === null
+                            ? "Detecting processors…"
+                            : `${host.availableParallelism} processors`}
                     </div>
                   </div>
                   <Input

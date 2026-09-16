@@ -63,7 +63,7 @@ const hostConfigurationSchema = z
         .object({
           id: z.string().min(1),
           name: z.string(),
-          status: z.enum(["connected", "disconnected"]),
+          status: z.enum(["connected", "restarting", "disconnected"]),
           availableParallelism: z.number().int().positive().nullable(),
           automaticLimit: limitSchema,
           effectiveLimit: limitSchema,
@@ -161,7 +161,7 @@ function setHostOverride(
 
 function formatHostLine(host: {
   name: string;
-  status: "connected" | "disconnected";
+  status: "connected" | "restarting" | "disconnected";
   availableParallelism: number | null;
   effectiveLimit: number;
   override: number | null;

@@ -31,7 +31,7 @@ function isHostChangedSubscription(
 const PLUGIN_ID = "concurrency-limit";
 function hostRecord(
   id: string,
-  status: "connected" | "disconnected" = "connected",
+  status: "connected" | "restarting" | "disconnected" = "connected",
   name = id,
 ): HostResponse {
   return makeHostResponse({ id, name, status });
@@ -152,6 +152,7 @@ describe("configuration", () => {
     const { harness } = await setup({
       hosts: [
         hostRecord("host-a", "connected", "Laptop"),
+        hostRecord("host-c", "restarting", "Studio restart"),
         hostRecord("host-b", "disconnected", "Studio"),
       ],
       capacities: [
@@ -172,6 +173,15 @@ describe("configuration", () => {
             availableParallelism: 8,
             automaticLimit: 8,
             effectiveLimit: 8,
+            override: null,
+          },
+          {
+            id: "host-c",
+            name: "Studio restart",
+            status: "restarting",
+            availableParallelism: null,
+            automaticLimit: 1,
+            effectiveLimit: 1,
             override: null,
           },
           {
