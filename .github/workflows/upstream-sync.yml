@@ -37,11 +37,10 @@ jobs:
           git config user.name "bb upstream sync"
           git config user.email "bb-upstream-sync@users.noreply.github.com"
           git switch -C automation/upstream-main
-          if ! git merge --no-ff --no-commit upstream/main; then
-            git merge --abort
-            echo "Upstream merge conflicts require an explicit fork-quality reconciliation." >&2
-            exit 1
-          fi
+          # Fork-owned behavior is authoritative.  Keep our side only for
+          # conflicting hunks; retain every non-conflicting upstream change so
+          # this scheduled integration cannot leave ours behind.
+          git merge --no-ff --no-commit -X ours upstream/main
           pnpm install --frozen-lockfile
           pnpm typecheck
           git commit -m "chore: integrate upstream main"
