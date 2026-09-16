@@ -56,10 +56,25 @@ jobs:
           git config user.name "bb upstream sync"
           git config user.email "bb-upstream-sync@users.noreply.github.com"
           git switch -C automation/upstream-main
-          # Fork-owned behavior is authoritative.  Keep our side only for
-          # conflicting hunks; retain every non-conflicting upstream change so
-          # this scheduled integration cannot leave ours behind.
-          git merge --no-ff --no-commit -X ours upstream/main
+          # Fork-owned behavior is authoritative. Retain every non-conflicting
+          # upstream file, but resolve a conflicting file as a whole from our
+          # side; hunk-level auto-resolution can create invalid hybrids (for
+          # example, mismatched JSX tags across adjacent conflict hunks).
+          if ! git merge --no-ff --no-commit upstream/main; then
+            mapfile -t conflicted_paths < <(git diff --name-only --diff-filter=U)
+            if ((${#conflicted_paths[@]} == 0)); then
+              echo "Upstream merge failed without a resolvable conflict list." >&2
+              exit 1
+            fi
+            for path in "${conflicted_paths[@]}"; do
+              if git cat-file -e "HEAD:$path" 2>/dev/null; then
+                git checkout --ours -- "$path"
+                git add -- "$path"
+              else
+                git rm -f -- "$path"
+              fi
+            done
+          fi
           # GitHub's workflow token cannot publish changes to workflow files.
           # These fork-owned control-plane files are authoritative anyway, so
           # retain existing fork workflows and drop upstream-only additions.
