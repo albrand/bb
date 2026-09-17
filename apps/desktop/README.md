@@ -71,12 +71,15 @@ pnpm exec turbo run smoke:packaged --filter=@bb/desktop
 Artifacts are written under `apps/desktop/release/`. The macOS build is Apple
 Silicon arm64-only; Intel Macs are not a target. Without signing secrets, local builds
 sign with a code-signing identity auto-discovered from the keychain and skip
-notarization. A valid signature matters even for local builds: macOS
+notarization. When no usable identity is installed, the local ad-hoc fallback
+uses the stable bundle-identifier designated requirement from
+`scripts/stable-macos-signing.cjs`, so macOS Automation approvals survive
+rebuilds. A valid signature matters even for local builds: macOS
 provenance-tracks unsigned apps, forcing syspolicyd to evaluate every exec in
 the app's process tree, which can stall process launches system-wide. On
 machines with no keychain identity (or with `CSC_IDENTITY_AUTO_DISCOVERY=false`,
-as CI sets for workflow-artifact-only builds), artifacts remain unsigned and
-macOS shows the normal Gatekeeper warning on first launch.
+as CI sets for workflow-artifact-only builds), the stable local ad-hoc signature
+is used and macOS may still show the normal Gatekeeper warning on first launch.
 
 For local verification without publishing, use
 `pnpm exec turbo run package --filter=@bb/desktop` on macOS, or
