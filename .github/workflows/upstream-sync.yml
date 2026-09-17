@@ -7,14 +7,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A scheduled run and a manual retry must never rebuild/push the same
-  # integration branch concurrently.
+  # A scheduled run and a manual retry must never merge/push ours concurrently.
   group: upstream-sync-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pull-requests: write
 
 env:
   NODE_VERSION: "22.x"
@@ -47,9 +45,6 @@ jobs:
         run: |
           git remote add upstream https://github.com/get-bb/bb.git 2>/dev/null || true
           git fetch --no-tags upstream main
-          git fetch --no-tags origin \
-            refs/heads/automation/upstream-main:refs/remotes/origin/automation/upstream-main \
-            2>/dev/null || true
           if git merge-base --is-ancestor upstream/main HEAD; then
             echo "Fork already contains upstream/main."
             echo "needs_sync=false" >> "$GITHUB_OUTPUT"
@@ -57,17 +52,16 @@ jobs:
           fi
           echo "needs_sync=true" >> "$GITHUB_OUTPUT"
 
-      - name: Integrate upstream on a dedicated branch
+      - name: Integrate upstream directly on ours
         if: steps.upstream.outputs.needs_sync == 'true'
         run: |
           git config user.name "bb upstream sync"
           git config user.email "bb-upstream-sync@users.noreply.github.com"
-          git switch -C automation/upstream-main
           # Fork-owned behavior is authoritative. Retain every non-conflicting
           # upstream file. Semantic conflicts are not safe to resolve in CI:
           # choosing either side can drop fork reliability behavior or create an
-          # invalid API hybrid. Leave the fork branch untouched and publish the
-          # exact conflict manifest in the run summary for explicit integration.
+          # invalid API hybrid. Leave ours untouched and publish the exact
+          # conflict manifest for explicit reconciliation.
           if ! git merge --no-ff --no-commit upstream/main; then
             conflicted_paths="$(git diff --name-only --diff-filter=U)"
             if [ -z "$conflicted_paths" ]; then
@@ -79,7 +73,7 @@ jobs:
               echo
               echo "The fork was not published or changed. Conflicted paths:"
               while IFS= read -r conflict_path; do
-                printf -- '- `%s`\n' "$conflict_path"
+                printf -- '- %s\n' "$conflict_path"
               done <<< "$conflicted_paths"
             } >> "$GITHUB_STEP_SUMMARY"
             printf '%s\n' "$conflicted_paths" >&2
@@ -100,7 +94,7 @@ jobs:
           fi
           git commit -m "chore: integrate upstream main"
 
-      - name: Validate the integration branch
+      - name: Validate the direct merge
         if: steps.upstream.outputs.needs_sync == 'true'
         run: |
           # Fork-owned conflict resolution can retain an older lockfile while
@@ -109,29 +103,17 @@ jobs:
           # of failing every sync on ERR_PNPM_OUTDATED_LOCKFILE.
           pnpm install --no-frozen-lockfile
           pnpm typecheck
+          unexpected="$(git status --porcelain | awk "\$2 != \"pnpm-lock.yaml\" {print}")"
+          if [ -n "$unexpected" ]; then
+            echo "Validation generated unexpected tracked changes:" >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
           if ! git diff --quiet -- pnpm-lock.yaml; then
             git add pnpm-lock.yaml
             git commit -m "chore: refresh integration lockfile"
           fi
 
-      - name: Publish validated integration branch
+      - name: Publish validated merge directly to ours
         if: steps.upstream.outputs.needs_sync == 'true'
-        run: git push --force-with-lease origin HEAD:automation/upstream-main
-
-      - name: Open or update the integration pull request
-        if: steps.upstream.outputs.needs_sync == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          existing_pr="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=ours&head=${GITHUB_REPOSITORY_OWNER}:automation%2Fupstream-main" \
-            --jq '.[0].number // empty')"
-          if [ -n "$existing_pr" ]; then
-            echo "Integration pull request #$existing_pr already exists; branch was updated."
-          elif ! gh pr create \
-            --base ours \
-            --head automation/upstream-main \
-            --title "chore: integrate upstream main" \
-            --body "Automated upstream integration, ready for fork-quality review."; then
-            echo "::warning::Integration branch published, but this repository policy does not permit the workflow token to create the pull request."
-          fi
+        run: git push origin HEAD:ours
