@@ -100,8 +100,16 @@ jobs:
       - name: Validate the integration branch
         if: steps.upstream.outputs.needs_sync == 'true'
         run: |
-          pnpm install --frozen-lockfile
+          # Fork-owned conflict resolution can retain an older lockfile while
+          # upstream adds a dependency to a non-conflicting workspace manifest.
+          # Reconcile that deterministic metadata before the typecheck instead
+          # of failing every sync on ERR_PNPM_OUTDATED_LOCKFILE.
+          pnpm install --no-frozen-lockfile
           pnpm typecheck
+          if ! git diff --quiet -- pnpm-lock.yaml; then
+            git add pnpm-lock.yaml
+            git commit -m "chore: refresh integration lockfile"
+          fi
 
       - name: Publish validated integration branch
         if: steps.upstream.outputs.needs_sync == 'true'
