@@ -270,7 +270,6 @@ function ThreadSecondaryPanelContent({
   const {
     gitDiffDisplayMode,
     handleGitDiffDisplayModeChange,
-    handleSecondaryPanelResizeStart,
     handleSecondaryPanelWidthChange,
   } = useResponsiveGitDiffPanelDisplay({ isSecondaryPanelOpen: isOpen });
   const {
@@ -282,7 +281,6 @@ function ThreadSecondaryPanelContent({
   } = useSecondaryPanelResize({
     isSecondaryPanelOpen: isOpen,
     onPanelWidthChange: handleSecondaryPanelWidthChange,
-    onResizeStart: handleSecondaryPanelResizeStart,
   });
   const hasPanelExpandedRef = useRef(false);
   useLayoutEffect(() => {

@@ -1777,7 +1777,7 @@ export function listStoredDelegatingItemRowsByItemIds(
 
 export function isTimelineCursorSequencePresent(
   db: DbConnection,
-  args: TimelineSegmentAnchorLookupArgs,
+  args: TimelineCursorSequenceLookupArgs,
 ): boolean {
   const row = db
     .select({ sequence: events.sequence })
@@ -2828,61 +2828,30 @@ export function listStoredConversationOutlineEventRows(
   return rows.sort((left, right) => left.sequence - right.sequence);
 }
 
-export interface StandardTimelineSegmentAnchorRow {
-  rowId: string;
+export interface TimelineWindowHint {
   sequence: number;
 }
 
-function timelineSegmentAnchorSelection() {
-  return {
-    rowId: sql<string>`CASE
-      WHEN ${events.type} = 'system/operation' THEN ${events.id}
-      ELSE ${events.threadId} || ':user-seed:' || ${events.sequence}
-    END`,
-    sequence: events.sequence,
-  };
-}
-
-function timelineSegmentAnchorConditions(threadId: string): SQL | undefined {
-  return and(
-    eq(events.threadId, threadId),
-    or(
-      and(
-        eq(events.type, "client/turn/requested"),
-        sql`(
-          COALESCE(json_extract(${events.data}, '$.target.kind'), 'new-turn')
-            IN ('thread-start', 'new-turn')
-          OR (
-            json_extract(${events.data}, '$.target.kind') IN ('auto', 'steer')
-            AND json_extract(${events.data}, '$.target.expectedTurnId') IS NULL
-          )
-        )`,
-        sql`EXISTS (
-          SELECT 1
-          FROM json_each(${events.data}, '$.input') AS input_part
-          WHERE (
-            json_extract(input_part.value, '$.type') = 'text'
-            AND COALESCE(json_extract(input_part.value, '$.text'), '') <> ''
-          )
-          OR json_extract(input_part.value, '$.type')
-            IN ('image', 'localImage', 'localFile')
-        )`,
-      ),
-      and(
-        eq(events.type, "system/operation"),
-        sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
-        sql`json_extract(${events.data}, '$.status') = 'completed'`,
-      ),
-    ),
-  );
-}
-
-export interface ListTimelineSegmentAnchorsDescendingArgs {
+export interface ListTimelineWindowHintsDescendingArgs {
   threadId: string;
-  beforeSequence?: number;
+  beforeSequence: number;
   limit: number;
   sequenceStart: number;
 }
+
+const visibleTimelineRequestInputSql = sql`EXISTS (
+  SELECT 1
+  FROM json_each(events.data, '$.input') AS input_part
+  WHERE COALESCE(json_extract(input_part.value, '$.visibility'), '') <> 'agent-only'
+    AND (
+      (
+        json_extract(input_part.value, '$.type') = 'text'
+        AND COALESCE(json_extract(input_part.value, '$.text'), '') <> ''
+      )
+      OR json_extract(input_part.value, '$.type')
+        IN ('image', 'localImage', 'localFile')
+    )
+)`;
 
 export interface FindTimelineWindowBudgetFloorSequenceArgs {
   excludeDiagnosticEvents?: boolean;
@@ -2959,6 +2928,10 @@ export function listTimelineOrderingContext(
       initiator: sql<
         string | null
       >`json_extract(${events.data}, '$.initiator')`,
+      expectedTurnId: sql<
+        string | null
+      >`json_extract(${events.data}, '$.target.expectedTurnId')`,
+      hasInput: sql<number>`CASE WHEN ${events.type} = 'client/turn/requested' AND ${visibleTimelineRequestInputSql} THEN 1 ELSE 0 END`,
     })
     .from(sql`${events} INDEXED BY events_thread_type_sequence_idx`)
     .where(
@@ -3063,34 +3036,38 @@ export function getFirstParentedTimelineBoundarySequence(
     FROM events INNER JOIN spans
       ON ${events.sequence} > spans.start AND ${events.sequence} < spans.end
     WHERE ${events.type} = 'client/turn/requested'
-      AND ${timelineSegmentAnchorConditions(args.threadId)}
+      AND ${events.threadId} = ${args.threadId}
+      AND ${visibleTimelineRequestInputSql}
+      AND (
+        COALESCE(json_extract(${events.data}, '$.target.kind'), 'new-turn')
+          IN ('thread-start', 'new-turn')
+        OR (
+          json_extract(${events.data}, '$.target.kind') IN ('auto', 'steer')
+          AND json_extract(${events.data}, '$.target.expectedTurnId') IS NULL
+        )
+      )
       AND json_extract(${events.data}, '$.initiator') = 'user'
   `);
   return result?.sequence ?? null;
 }
 
-export function listTimelineSegmentAnchorsDescending(
+export function listTimelineWindowHintsDescending(
   db: DbConnection,
-  args: ListTimelineSegmentAnchorsDescendingArgs,
-): StandardTimelineSegmentAnchorRow[] {
-  const conditions = and(
-    timelineSegmentAnchorConditions(args.threadId),
-    gte(events.sequence, args.sequenceStart),
-  );
-  const where =
-    args.beforeSequence === undefined
-      ? conditions
-      : and(conditions, lt(events.sequence, args.beforeSequence));
-  return db
-    .select(timelineSegmentAnchorSelection())
-    .from(events)
-    .where(where)
-    .orderBy(desc(events.sequence))
-    .limit(args.limit)
-    .all();
+  args: ListTimelineWindowHintsDescendingArgs,
+): TimelineWindowHint[] {
+  return db.all<TimelineWindowHint>(sql`
+    SELECT sequence
+    FROM events INDEXED BY events_thread_type_sequence_idx
+    WHERE thread_id = ${args.threadId}
+      AND type = 'client/turn/requested'
+      AND sequence >= ${args.sequenceStart}
+      AND sequence < ${args.beforeSequence}
+    ORDER BY sequence DESC
+    LIMIT ${args.limit}
+  `);
 }
 
-export interface TimelineSegmentAnchorLookupArgs {
+export interface TimelineCursorSequenceLookupArgs {
   threadId: string;
   sequence: number;
 }
