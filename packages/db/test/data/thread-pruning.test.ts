@@ -12,6 +12,7 @@ import { createThread } from "../../src/data/threads.js";
 import {
   advanceThreadPruning,
   getNextThreadPruningPolicy,
+  THREAD_EVENT_KEEP_RECENT_BY_MODE,
 } from "../../src/data/thread-pruning.js";
 import type { ThreadPruningPolicy } from "../../src/data/thread-pruning.js";
 import {
@@ -63,6 +64,20 @@ function seed(
     })
     .run();
 }
+function seedWindow(
+  f: Fixture,
+  from: number,
+  count: number,
+  values: Partial<typeof events.$inferInsert>,
+) {
+  f.db.transaction(() => {
+    for (let i = 0; i < count; i++) seed(f, from + i, values);
+  });
+  return range(from, from + count - 1);
+}
+function range(first: number, last: number) {
+  return Array.from({ length: last - first + 1 }, (_, i) => first + i);
+}
 function cycle(f: Fixture, policy: ThreadPruningPolicy) {
   const results = [];
   for (let i = 0; i < 2000; i++) {
@@ -105,6 +120,15 @@ describe("thread pruning", () => {
         });
       }
       seed(f, 201, { type: "turn/completed" });
+      const activeWindow = seedWindow(
+        f,
+        202,
+        THREAD_EVENT_KEEP_RECENT_BY_MODE.active,
+        {
+          type: "thread/contextWindowUsage/updated",
+          data: '{"contextWindowUsage":{"usedTokens":1,"modelContextWindow":null}}',
+        },
+      );
       const policies = [];
       for (let i = 0; i < 160; i++) {
         const policy = getNextThreadPruningPolicy(f.db, new Set(), f.thread.id);
@@ -129,7 +153,7 @@ describe("thread pruning", () => {
         "turn-diffs",
         "resolved-items",
       ]);
-      expect(sequences(f)).toEqual([1, 200, 201]);
+      expect(sequences(f)).toEqual([1, 200, 201, ...activeWindow]);
       expect(
         f.db
           .select()
@@ -586,8 +610,18 @@ describe("thread pruning", () => {
       expect(sequences(f)).toEqual([1, 2, 3, 4]);
       expect(getLastStoredProviderThreadId(f.db, f.thread.id)).toBeNull();
       cycle(f, "turn-diffs");
-      expect(sequences(f)).toEqual([1, 2, 4]);
-      expect(getHighWaterMarks(f.db, [f.thread.id])[f.thread.id]).toBe(4);
+      expect(sequences(f)).toEqual([1, 2, 3, 4]);
+      const idleWindow = seedWindow(
+        f,
+        5,
+        THREAD_EVENT_KEEP_RECENT_BY_MODE.idle,
+        { type: "turn/diff/updated", data: "{}" },
+      );
+      cycle(f, "turn-diffs");
+      expect(sequences(f)).toEqual([1, 2, 4, ...idleWindow]);
+      expect(getHighWaterMarks(f.db, [f.thread.id])[f.thread.id]).toBe(
+        idleWindow.at(-1),
+      );
     } finally {
       f.db.$client.close();
     }
@@ -610,8 +644,11 @@ describe("thread pruning", () => {
       );
       expect(getHighWaterMarks(f.db, [f.thread.id])[f.thread.id]).toBe(999);
       cycle(f, "turn-diffs");
-      expect(sequences(f)).toEqual([999]);
+      const firstVisitCutoff = 1200 - THREAD_EVENT_KEEP_RECENT_BY_MODE.idle;
+      expect(sequences(f)).toEqual(range(firstVisitCutoff + 1, 999));
       expect(getHighWaterMarks(f.db, [f.thread.id])[f.thread.id]).toBe(999);
+      cycle(f, "turn-diffs");
+      expect(sequences(f)).toEqual(range(firstVisitCutoff + 1, 999));
     } finally {
       f.db.$client.close();
     }
@@ -648,14 +685,23 @@ describe("thread pruning", () => {
       });
       seed(f, 7, { type: "system/error", providerThreadId: null, data: "{}" });
       cycle(f, "turn-diffs");
-      expect(sequences(f)).toEqual([1, 2, 4, 6, 7]);
+      expect(sequences(f)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      const idleWindow = seedWindow(
+        f,
+        8,
+        THREAD_EVENT_KEEP_RECENT_BY_MODE.idle,
+        { type: "turn/diff/updated", data: "{}" },
+      );
+      cycle(f, "turn-diffs");
+      expect(sequences(f)).toEqual([1, 2, 4, 6, 7, ...idleWindow]);
       expect(getLastStoredProviderThreadId(f.db, f.thread.id)).toBe("new");
       expect(
         listThreadTurnInterruptionEventStates(f.db, {
           threadIds: [f.thread.id],
         })[0]?.latestProviderThreadId,
       ).toBe("new");
-      seed(f, 8, {
+      const nextSequence = (idleWindow.at(-1) ?? 0) + 1;
+      seed(f, nextSequence, {
         type: "system/operation",
         data: JSON.stringify({
           operation: THREAD_CONTEXT_CLEAR_OPERATION,
@@ -663,7 +709,7 @@ describe("thread pruning", () => {
         }),
       });
       expect(getLastStoredProviderThreadId(f.db, f.thread.id)).toBeNull();
-      seed(f, 9, {
+      seed(f, nextSequence + 1, {
         type: "thread/identity",
         providerThreadId: "replacement",
         data: "{}",
@@ -805,10 +851,20 @@ describe("thread pruning", () => {
         });
         seed(f, 15, { type: "thread/tokenUsage/updated", turnId: "nested" });
         cycle(f, "usage");
-        expect(sequences(f)).toEqual([2, 6, 12, 13, 15]);
-        seed(f, 16, { type: "turn/completed" });
+        expect(sequences(f)).toEqual(range(1, 15));
+        const window = seedWindow(
+          f,
+          16,
+          THREAD_EVENT_KEEP_RECENT_BY_MODE[archivedAt === null ? "idle" : "archived"],
+          {
+            type: "thread/tokenUsage/updated",
+            data: '{"tokenUsage":{"modelContextWindow":null}}',
+          },
+        );
         cycle(f, "usage");
-        expect(sequences(f)).toEqual([2, 6, 12, 13, 16]);
+        expect(sequences(f)).toEqual([2, 6, 12, 13, ...window]);
+        cycle(f, "usage");
+        expect(sequences(f)).toEqual([2, 6, 12, 13, ...window]);
       } finally {
         f.db.$client.close();
       }
