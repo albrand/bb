@@ -2,8 +2,15 @@ name: Upstream sync
 
 on:
   schedule:
-    - cron: "17 4 * * *"
+    # Poll hourly so upstream changes do not sit behind a once-daily window.
+    - cron: "17 * * * *"
   workflow_dispatch:
+
+concurrency:
+  # A scheduled run and a manual retry must never rebuild/push the same
+  # integration branch concurrently.
+  group: upstream-sync-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -89,7 +96,16 @@ jobs:
             done <<< "$workflow_paths"
           fi
           git commit -m "chore: integrate upstream main"
-          git push --force-with-lease origin HEAD:automation/upstream-main
+
+      - name: Validate the integration branch
+        if: steps.upstream.outputs.needs_sync == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+
+      - name: Publish validated integration branch
+        if: steps.upstream.outputs.needs_sync == 'true'
+        run: git push --force-with-lease origin HEAD:automation/upstream-main
 
       - name: Open or update the integration pull request
         if: steps.upstream.outputs.needs_sync == 'true'
@@ -108,9 +124,3 @@ jobs:
             --body "Automated upstream integration, ready for fork-quality review."; then
             echo "::warning::Integration branch published, but this repository policy does not permit the workflow token to create the pull request."
           fi
-
-      - name: Validate the integration branch
-        if: steps.upstream.outputs.needs_sync == 'true'
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm typecheck
