@@ -181,12 +181,34 @@ describe("customAcpAgentDefinition", () => {
 });
 
 describe("acpProviderDeclaration", () => {
-  it("declares that ACP agents do not report token usage (get-bb/bb#2397)", () => {
+  it("leaves token usage unknown for every shipped ACP agent (get-bb/bb#2397)", () => {
     for (const agent of KNOWN_ACP_AGENTS) {
-      expect(acpProviderDeclaration(agent).capabilities.reportsTokenUsage).toBe(
-        false,
+      expect(acpProviderDeclaration(agent).capabilities).not.toHaveProperty(
+        "reportsTokenUsage",
       );
     }
+  });
+
+  it("declares token usage only from the agent's own definition", () => {
+    const [known] = KNOWN_ACP_AGENTS;
+    if (known === undefined) throw new Error("expected a shipped agent");
+    for (const value of [false, true]) {
+      expect(
+        acpProviderDeclaration({ ...known, reportsTokenUsage: value })
+          .capabilities.reportsTokenUsage,
+      ).toBe(value);
+    }
+  });
+
+  it("leaves token usage unknown for a configured agent", () => {
+    const [agent] = parseCustomAcpAgents({
+      entries: [{ id: "amp", displayName: "Amp", command: "amp" }],
+      reservedProviderIds: reserved,
+    }).agents;
+    if (agent === undefined) throw new Error("expected the agent to parse");
+    expect(
+      acpProviderDeclaration(customAcpAgentDefinition(agent)).capabilities,
+    ).not.toHaveProperty("reportsTokenUsage");
   });
 
   it("declares a configured agent's native skill roots", () => {
