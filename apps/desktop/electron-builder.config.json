@@ -6,6 +6,7 @@
     "appimage": "1.0.3"
   },
   "afterPack": "scripts/prepare-native-modules.cjs",
+  "afterSign": "scripts/stable-macos-signing.cjs",
   "asar": true,
   "asarUnpack": ["dist/bb-app-bridge.mjs", "node_modules/**"],
   "directories": {
