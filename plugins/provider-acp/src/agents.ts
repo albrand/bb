@@ -27,6 +27,13 @@ export interface AcpAgentDefinition {
   iconTint?: { light: string; dark: string };
   supportsManualCompaction?: boolean;
   fork?: "none" | "tip";
+  /**
+   * Declared per agent, never for ACP as a whole. The standard ACP surface
+   * carries no token counts, but some agents (cursor-agent) produce them on
+   * another transport, so "not over ACP" is not "cannot report". Leave this
+   * unset unless the agent has been checked (get-bb/bb#2397).
+   */
+  reportsTokenUsage?: boolean;
   reasoningLevels?: readonly PluginProviderReasoningLevel[];
   providerUsage?: boolean;
   providerInstallation?: boolean;

@@ -329,7 +329,6 @@ describe("first-party provider plugins", () => {
             supportsFork: false,
             supportsSessionRewind: false,
             modelCatalogScope: "host",
-            reportsTokenUsage: false,
           },
           composerActions: [skills],
         });
