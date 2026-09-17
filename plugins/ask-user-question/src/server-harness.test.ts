@@ -87,17 +87,63 @@ describe("provider gating", () => {
     },
   );
 
-  it("advertises multiSelect as required even though execution defaults it", async () => {
+  it.each(["codex", "pi", "acp-cursor"])(
+    "does not prescribe provider-specific plan tools to %s",
+    async (providerId) => {
+      const host = createHost();
+      const resolved = await host.harness.resolveAgentConfiguration(
+        configurationContext(providerId),
+      );
+      expect(resolved.tools).toHaveLength(1);
+      expect(resolved.tools[0]?.description).not.toMatch(
+        /EnterPlanMode|ExitPlanMode/,
+      );
+    },
+  );
+
+  it("advertises multiSelect as optional and defaults it during execution", async () => {
     const host = createHost();
     const resolved = await host.harness.resolveAgentConfiguration(
       configurationContext("codex"),
     );
-    const schema = resolved.tools[0]?.inputSchema as {
+    expect(resolved.tools[0]?.inputSchema).toMatchObject({
+      additionalProperties: false,
+      required: ["questions"],
       properties: {
-        questions: { items: { required: string[] } };
-      };
-    };
-    expect(schema.properties.questions.items.required).toContain("multiSelect");
+        questions: {
+          minItems: 1,
+          maxItems: 4,
+          items: {
+            additionalProperties: false,
+            required: ["question", "header", "options"],
+            properties: {
+              question: { minLength: 1, description: expect.any(String) },
+              header: { minLength: 1, description: expect.any(String) },
+              multiSelect: { type: "boolean", default: false },
+              options: {
+                minItems: 2,
+                maxItems: 4,
+                items: {
+                  additionalProperties: false,
+                  required: ["label", "description"],
+                  properties: {
+                    label: { minLength: 1, description: expect.any(String) },
+                    description: {
+                      minLength: 1,
+                      description: expect.any(String),
+                    },
+                    preview: {
+                      maxLength: 4096,
+                      description: expect.any(String),
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
     const answered = host.harness.callAgentTool(TOOL_NAME, {
       questions: [{ ...questions[0], multiSelect: undefined }],
@@ -109,7 +155,8 @@ describe("provider gating", () => {
     host.harness.submitInteraction(pending.id, {
       answers: { q0: { selected: ["q0o1"] } },
     });
-    await answered;
+    const result = JSON.parse(await resultText(await answered)) as ToolResult;
+    expect(result.questions[0]?.multiSelect).toBe(false);
   });
 });
 
