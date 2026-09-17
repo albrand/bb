@@ -244,18 +244,18 @@ export function disconnectImportedDaemonSessions(
   if (args.sessions.length === 0) {
     return;
   }
-  const hostIds = new Set<string>();
+  const sessionIdByHostId = new Map<string, string>();
   for (const session of args.sessions) {
     deps.terminalSessions.handleDaemonSessionClosed({ sessionId: session.id });
     closeSession(deps.db, deps.hub, session.id, "daemon-disconnect");
-    hostIds.add(session.hostId);
+    sessionIdByHostId.set(session.hostId, session.id);
   }
-  for (const hostId of hostIds) {
+  for (const [hostId, sessionId] of sessionIdByHostId) {
     completeDaemonDisconnectGrace(deps, { hostId });
-    completeDaemonActiveWorkDisconnectGrace(deps, { hostId });
+    completeDaemonActiveWorkDisconnectGrace(deps, { hostId, sessionId });
   }
   deps.logger.info(
-    { hosts: hostIds.size, sessions: args.sessions.length },
+    { hosts: sessionIdByHostId.size, sessions: args.sessions.length },
     "Closed the daemon sessions an imported server snapshot left active",
   );
 }

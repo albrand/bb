@@ -69,6 +69,7 @@ import {
 import { createEventId } from "../ids.js";
 import { COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS } from "../retained-event-output.js";
 import { truncatedEventDataColumn } from "./event-output-truncation.js";
+import { bumpThreadEventRewriteGeneration } from "./event-rewrite-generation.js";
 import { deriveStoredEventItemFieldsFromSource } from "../stored-event-item-fields.js";
 import {
   upsertThreadSearchSegments,
@@ -383,6 +384,9 @@ export function deleteThreadEventSuffixInTransaction(
       ),
     )
     .run();
+  if (result.changes > 0) {
+    bumpThreadEventRewriteGeneration(args.threadId);
+  }
   return { deletedEventCount: result.changes };
 }
 
@@ -489,6 +493,9 @@ export function insertEvents(
     (tx) => {
       let insertedCount = 0;
       const insertedInputIndexes: number[] = [];
+      const highWaterMarks = getHighWaterMarks(tx, [
+        ...new Set(eventInputs.map((input) => input.threadId)),
+      ]);
       for (const [index, input] of eventInputs.entries()) {
         const createdAt = input.createdAt ?? Date.now();
         const turnId = getThreadEventScopeTurnId(input.scope) ?? null;
@@ -511,6 +518,10 @@ export function insertEvents(
         if (insertResult.inserted) {
           insertedCount += 1;
           insertedInputIndexes.push(index);
+          const highWaterMark = highWaterMarks[input.threadId];
+          if (highWaterMark !== undefined && input.sequence <= highWaterMark) {
+            bumpThreadEventRewriteGeneration(input.threadId);
+          }
           const eventTypes = eventTypesByThreadId.get(input.threadId);
           if (eventTypes) {
             eventTypes.add(input.type);
@@ -691,6 +702,21 @@ function listThreadSearchSegmentsForStoredEventArgs(args: {
       });
     default:
       return [];
+  }
+}
+
+function canProduceThreadSearchSegments(args: {
+  itemKind: ThreadEventItemType | null;
+  type: ThreadEventType;
+}): boolean {
+  switch (args.type) {
+    case "client/turn/requested":
+    case "system/manager/user_message":
+      return true;
+    case "item/completed":
+      return args.itemKind === "agentMessage" || args.itemKind === null;
+    default:
+      return false;
   }
 }
 

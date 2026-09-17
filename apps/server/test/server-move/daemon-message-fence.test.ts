@@ -12,6 +12,7 @@ const SNAPSHOT_FENCE_CLASSIFICATION: Record<
   "fenced" | "unfenced"
 > = {
   "connect-tunnel.identity": "unfenced",
+  "daemon.restarting": "unfenced",
   "desktop-browser.changed": "fenced",
   "environment-change": "unfenced",
   "environment-metadata-change": "fenced",

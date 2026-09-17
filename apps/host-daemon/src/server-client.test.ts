@@ -141,6 +141,7 @@ describe("createServerClient", () => {
           instanceId: "instance-1",
           localApiPort: null,
           activeThreads: [],
+          adoptedThreads: [],
           loadedEnvironments: [],
         }),
       ).rejects.toMatchObject({
@@ -208,6 +209,7 @@ describe("createServerClient", () => {
           sessionId: "session-1",
           heartbeatIntervalMs: 30_000,
           leaseTimeoutMs: 90_000,
+          machineEnvironment: { revision: 0, entries: [] },
         },
         { status: 201 },
       );
