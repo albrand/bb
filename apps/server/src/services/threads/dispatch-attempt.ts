@@ -234,14 +234,7 @@ async function runDispatchAttempt(
   reattempted: boolean,
 ): Promise<DispatchAttemptOutcome> {
   const { payload, thread } = args;
-  const initialHost = dispatchEnvironmentAndHost(
-    deps,
-    thread.environmentId,
-  ).host;
-  ensureThreadIsWritable(
-    thread,
-    initialHost !== null && isMachineWaitingForExecution(deps, initialHost.id),
-  );
+  ensureThreadIsWritable(thread, true);
   if (args.trigger === "user" && args.source.kind === "inline") {
     await validatePromptAttachmentReferences({
       db: deps.db,
@@ -313,6 +306,10 @@ async function runDispatchAttempt(
   const sendAt = payload.sendAt ?? null;
   if (!sendNow && sendAt !== null && sendAt > Date.now()) {
     return waitOn({ kind: "time" }, sendAt);
+  }
+
+  if (thread.status === "stopping") {
+    return waitOn({ kind: "stopping" }, null);
   }
 
   const { environment: dispatchEnvironment, host: dispatchHost } =

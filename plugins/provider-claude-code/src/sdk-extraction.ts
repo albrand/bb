@@ -337,6 +337,9 @@ function toTokenUsageBreakdown(
     totalTokens: inputTokens + outputTokens + cachedInputTokens,
     inputTokens,
     cachedInputTokens,
+    ...(usage.cache_read_input_tokens === undefined
+      ? {}
+      : { cacheReadInputTokens: usage.cache_read_input_tokens }),
     cacheWriteInputTokens: cacheCreationTokens,
     outputTokens,
     reasoningOutputTokens: 0,

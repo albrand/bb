@@ -81,7 +81,7 @@ import { recordQueuedMessageDrainFailure } from "./queue-drain-failure.js";
 import {
   appendPluginMentionContext,
   captureUserMessageSentTelemetry,
-  ensureThreadIsWritable,
+  ensureThreadQueueIsWritable,
   formatAgentThreadInput,
   resolveMessageSenderThreadId,
 } from "./thread-send.js";
@@ -148,6 +148,7 @@ export function createAutomaticQueuedMessageGroupEligibility(
         case "time":
           return member.sendAt !== null && member.sendAt <= args.now;
         case "thread-busy":
+        case "stopping":
           return (
             args.thread.status === "idle" || args.thread.status === "pending"
           );
@@ -198,7 +199,7 @@ function admitQueuedMessage(
   db: DbQueryConnection,
   thread: Thread,
 ): { hasProviderSession: boolean } {
-  ensureThreadIsWritable(thread);
+  ensureThreadQueueIsWritable(thread);
   const hasProviderSession =
     getStoredProviderSession(db, thread.id).kind !== "none";
   if (thread.environmentId === null) {
@@ -224,7 +225,7 @@ export async function createQueuedMessageForThread(
   args: CreateQueuedMessageForThreadArgs,
 ): Promise<ThreadQueuedMessage> {
   const { payload, thread } = args;
-  ensureThreadIsWritable(thread);
+  ensureThreadQueueIsWritable(thread);
   await validatePromptAttachmentReferences({
     db: deps.db,
     dataDir: deps.config.dataDir,
@@ -254,7 +255,10 @@ export async function createQueuedMessageForThread(
           reasoningLevel: execution.reasoningLevel,
           permissionMode: execution.permissionMode,
           serviceTier: execution.serviceTier,
-          waitingOn: { kind: "thread-busy" },
+          waitingOn:
+            currentThread.status === "stopping"
+              ? { kind: "stopping" }
+              : { kind: "thread-busy" },
           sendAt: null,
           payload: { kind: "inline" },
           systemNotice: null,
@@ -685,7 +689,12 @@ async function sendClaimedQueuedMessageForThread(
     startedOnBehalfOf: null,
     trigger: "auto-dispatch",
   });
-  if (args.sendNow && args.mode !== "steer" && outcome.kind === "queued") {
+  if (
+    args.sendNow &&
+    args.mode !== "steer" &&
+    outcome.kind === "queued" &&
+    outcome.entry.waitingOn?.kind !== "stopping"
+  ) {
     throw new ApiError(
       409,
       "queued_message_still_waiting",

@@ -243,14 +243,19 @@ function partitionQueuedMessageGroups(
   return groups;
 }
 
-const IDLE_DRAINABLE_WAIT_KINDS = ["thread-busy", "turn-starting"] as const;
+const ORDINARY_TURN_END_WAIT_KINDS = ["thread-busy", "turn-starting"] as const;
+
+const IDLE_DRAINABLE_WAIT_KINDS = [
+  ...ORDINARY_TURN_END_WAIT_KINDS,
+  "stopping",
+] as const;
 
 function hasOrdinaryTurnEndWait(row: QueuedThreadMessageRow): boolean {
   if (row.waitingOn === null) return true;
   try {
     const parsed = JSON.parse(row.waitingOn) as { kind?: unknown };
-    return (
-      parsed.kind === "thread-busy" || parsed.kind === "turn-starting"
+    return ORDINARY_TURN_END_WAIT_KINDS.some(
+      (waitKind) => waitKind === parsed.kind,
     );
   } catch {
     return false;
@@ -744,6 +749,19 @@ export function isThreadQueueAutoSendPaused(
   return manuallyStoppedQueuePauseQuery(db, threadId).get() !== undefined;
 }
 
+function notOrdinaryTurnEndQueuedThreadMessage() {
+  return or(
+    isNotNull(queuedThreadMessages.systemNotice),
+    and(
+      isNotNull(queuedThreadMessages.waitingOn),
+      notInArray(
+        sql<string>`json_extract(${queuedThreadMessages.waitingOn}, '$.kind')`,
+        [...ORDINARY_TURN_END_WAIT_KINDS],
+      ),
+    ),
+  );
+}
+
 export function listIdleThreadsWithQueuedMessages(
   db: DbConnection,
 ): QueuedMessageThreadRow[] {
@@ -762,7 +780,7 @@ export function listIdleThreadsWithQueuedMessages(
         isNull(threads.deletedAt),
         or(
           notExists(manuallyStoppedQueuePauseQuery(db, threads.id)),
-          isNotNull(queuedThreadMessages.systemNotice),
+          notOrdinaryTurnEndQueuedThreadMessage(),
         ),
         or(
           isNull(threads.environmentId),
