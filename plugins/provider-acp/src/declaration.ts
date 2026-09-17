@@ -12,7 +12,6 @@ const ACP_BASE_CAPABILITIES: PluginProviderCapabilities = {
   supportsThreadArchive: false,
   supportsThreadRename: false,
   fork: "none",
-  reportsTokenUsage: false,
   permissionModes: ["accept-edits", "full"],
   reasoningLevels: ["low", "medium", "high", "xhigh", "max"],
 };
@@ -94,6 +93,9 @@ export function acpProviderDeclaration(
       ...(agent.supportsManualCompaction === true
         ? { supportsManualCompaction: true }
         : {}),
+      ...(agent.reportsTokenUsage === undefined
+        ? {}
+        : { reportsTokenUsage: agent.reportsTokenUsage }),
       reasoningLevels:
         agent.reasoningLevels === undefined
           ? [...ACP_BASE_CAPABILITIES.reasoningLevels]
