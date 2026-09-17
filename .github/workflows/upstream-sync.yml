@@ -64,23 +64,26 @@ jobs:
           git config user.email "bb-upstream-sync@users.noreply.github.com"
           git switch -C automation/upstream-main
           # Fork-owned behavior is authoritative. Retain every non-conflicting
-          # upstream file, but resolve a conflicting file as a whole from our
-          # side; hunk-level auto-resolution can create invalid hybrids (for
-          # example, mismatched JSX tags across adjacent conflict hunks).
+          # upstream file. Semantic conflicts are not safe to resolve in CI:
+          # choosing either side can drop fork reliability behavior or create an
+          # invalid API hybrid. Leave the fork branch untouched and publish the
+          # exact conflict manifest in the run summary for explicit integration.
           if ! git merge --no-ff --no-commit upstream/main; then
             conflicted_paths="$(git diff --name-only --diff-filter=U)"
             if [ -z "$conflicted_paths" ]; then
               echo "Upstream merge failed without a resolvable conflict list." >&2
               exit 1
             fi
-            while IFS= read -r conflict_path; do
-              if git cat-file -e "HEAD:$conflict_path" 2>/dev/null; then
-                git checkout --ours -- "$conflict_path"
-                git add -- "$conflict_path"
-              else
-                git rm -f -- "$conflict_path"
-              fi
-            done <<< "$conflicted_paths"
+            {
+              echo "### Upstream integration requires explicit reconciliation"
+              echo
+              echo "The fork was not published or changed. Conflicted paths:"
+              while IFS= read -r conflict_path; do
+                printf -- '- `%s`\n' "$conflict_path"
+              done <<< "$conflicted_paths"
+            } >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "$conflicted_paths" >&2
+            exit 1
           fi
           # GitHub's workflow token cannot publish changes to workflow files.
           # These fork-owned control-plane files are authoritative anyway, so
