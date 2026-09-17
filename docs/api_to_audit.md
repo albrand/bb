@@ -2300,10 +2300,10 @@ options.
    registered services (a picker needs per-service model lists, which the
    contract does not carry yet).
 2. **Payload cap.** A plugin-served transcription travels as base64 inside one
-   host RPC call (8 MiB JSON cap → 5 MB audio), a regression from the 25 MB
-   the server-direct path accepts for long recordings (owner decision: keep
-   for now). The alternative is a host pull: the server stores the audio
-   under a short-lived token and the call carries the token, so the host
+   host RPC call (32 MiB JSON input cap → 20 MB audio), below the 25 MB
+   the server-direct path accepts for long recordings. The daemon retains
+   its existing 32 MiB aggregate active-input budget. The alternative is a host
+   pull: the server stores the audio under a short-lived token and the call carries the token, so the host
    worker fetches the bytes over the internal route instead of receiving
    them inline; decide whether that or a streamed path replaces the cap.
 3. **Failure vocabulary.** Confirm the six codes are enough for core's policy
@@ -2577,6 +2577,26 @@ controls without crowding the address field, whether ordering needs a user
 preference, and whether plugins need browser instance or environment identity
 instead of resolving it server-side from the thread and tab ids.
 
+## `ExperimentalPluginBrowserToolbarActionProps.experimental_page` (`@get-bb/plugin-sdk/app`)
+
+**What it does.** Gives a Browser toolbar action script access to its tab's
+top-level document without a CDP lease. `evaluate(expression, { world })` runs
+an expression through Electron `executeJavaScript` (`main`) or in BB's isolated
+world 1717 (`isolated`, the default), awaits it, and resolves the JSON-cloned
+value. Isolated-world expressions receive `bb.postMessage(data)`, backed by a
+Browser-tab preload that exposes the bridge only to that world; messages reach
+`onMessage` listeners scoped to the calling plugin id and tab. The value is
+`null` outside the desktop app.
+
+**Audit before stabilizing.** Decide whether any enabled plugin may evaluate in
+personal-profile tabs or whether this needs a user gesture, capability grant,
+or origin allowlist. Plugins share one isolated world, so a plugin can post on
+another plugin's channel; decide whether per-plugin worlds are required.
+Confirm message size and rate bounds, subframe support, behavior during
+navigation and renderer crashes, whether `evaluate` should time out while a
+page is still loading, and whether an SDK or `bb` CLI surface is needed for
+automation outside the toolbar component.
+
 ## `PluginMentionProviderRegistration.resolve().experimental_images` (`@get-bb/plugin-sdk`)
 
 **What it does.** Lets a mention provider resolve a picked composer mention to
@@ -2588,6 +2608,14 @@ the same image paths and URLs used by ordinary prompt inputs before dispatch.
 providers need, the 50-image boundary is appropriate, and local image access
 should remain governed by the thread dispatch validator rather than an earlier
 plugin-specific check.
+
+## Composer mention removal and successful submission subscriptions
+
+`PluginComposerApi.experimental_removeMention({ provider, id })` removes all matching mentions owned by the calling plugin from the current unsent draft, deletes their label text, rebases other mentions, and preserves attachments. It does not delete server records or alter sent messages.
+
+`PluginComposerApi.experimental_onSubmitted(listener)` observes successful local thread-send, queue-create, and new-thread-create mutations in the matching composer scope. It returns an unsubscribe function; host teardown also disposes subscriptions. Failed requests, draft clearing, and editing an existing queued message do not notify. This is a local UI notification, not a cross-device server event.
+
+Before stabilization, audit side-chat and handoff scope routing, decide whether to include the submitted structured draft in notifications to distinguish annotations created while a request is pending, and verify disposal, failure restoration, mention rebasing, and callback failure isolation across every composer host.
 
 ## `useComposer().experimental_submit` and dispatch `experimental_submission`
 
@@ -2955,6 +2983,40 @@ returns a credential only while that host is creating.
 Before stabilizing, verify creation cancellation through host removal,
 same-host restoration, serialized removal, plugin callers and UI/CLI parity.
 
+## Moving the server (`bb.sdk.experimental_server`, `hosts.experimental_deleteOldServerCopy`)
+
+`experimental_server.checkMove({ targetHostId, serverUrl })` returns the pre-move
+checklist (`ServerMoveCheckResponse`): blockers, warnings, whether a new server
+address is required, and any standalone bb data on the target that must be
+archived. `startMove({ targetHostId, serverUrl, stopRunningWork: true,
+archiveExistingTargetServerData })` freezes the server, stops running work,
+copies server-owned data to the target, starts the new server there, switches
+machines over, and retires this server process. `moveStatus()` returns the
+active move and the last completed move (`lastMove`). A move whose activation
+was never confirmed reports `recovery_required`: this server stays up and
+frozen until the target confirms (activation retry or `<serverUrl>/health`
+reporting ready). In direct mode the status carries `destinationStatusUrl`, the
+new server's CORS-readable `/health`, so a client can follow the destination
+after this server retires; it is null for bb connect. `cancelMove()` works
+until the switch starts, and in `recovery_required` it abandons the move and
+rolls the switch back. `export({ signal })` streams an unencrypted gzip server
+archive and returns its `fileName`, `body`, and the `sha256` digest the server
+sent. `hosts.experimental_deleteOldServerCopy({
+hostId })` deletes the locked old server data on that machine. All refuse
+requests authenticated by a machine credential. `checkMove`, `startMove`,
+`export`, and old-copy deletion also require the default-off `serverMove`
+experiment and otherwise fail with 403 `server_move_experiment_disabled`. The CLI equivalents are
+`bb server move|export|import|unlock|allow-connect|delete-old-copy`.
+
+Before stabilization, audit: authorization for plugin backends (`bb.sdk` runs
+with owner access, so a plugin can export every secret or move the server);
+the switch ordering against the bb connect tunnel and daemons that miss
+`server.moved`; archive size limits and streaming memory use; cancellation
+and failure recovery at every step, including a server restart mid-move;
+behavior when the target runs a provider-managed machine; and whether
+`startMove` should return immediately or expose progress through a durable
+operation id instead of the in-memory status.
+
 ## `app.experimental_icons.register` and `experimental_Icon`
 
 Plugins register inline React artwork during app setup with `{ name, component }`.
@@ -3030,3 +3092,13 @@ the plugin uses `experimental_suspend` to request a new pause. Core schedules
 no provider polling. Validate concurrent resume/removal, failure reporting,
 long-running caller behavior, and the scope of supported states before
 stabilizing this API. Exposed as `bb machine reconcile`.
+
+## Lifecycle ownership on thread creation
+
+`bb.sdk.threads.spawn` and `bb.sdk.threads.fork` accept `lifecycleOwnerThreadId`;
+thread responses expose its nullable value. This adds data fields to existing
+SDK methods, not a new `BbPluginApi` property, app export or slot method, so no
+new unprefixed public API member is introduced. Audit before stabilization:
+immutable cross-project ownership, cross-host cleanup, archive/delete retries,
+creation races, and preservation of existing unowned threads. The Plugin Guide SDK card
+describes the public behavior.

@@ -578,6 +578,7 @@ async function sendThreadMessageWithoutContextClear(
     }
   };
   await validatePromptAttachmentReferences({
+    db: deps.db,
     dataDir: deps.config.dataDir,
     input,
     projectId: thread.projectId,

@@ -92,6 +92,7 @@ export function makeThreadResponse(
     sectionId: null,
     status: "idle",
     parentThreadId: null,
+    lifecycleOwnerThreadId: null,
     sourceThreadId: null,
     originKind: null,
     originPluginId: null,

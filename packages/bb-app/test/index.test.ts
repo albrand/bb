@@ -54,6 +54,7 @@ import type {
   ManagedProcessRun,
   NamedProcessExitResult,
   ProcessExitResult,
+  ReadServerMovedFileFn,
 } from "../src/launcher.js";
 
 interface DelayArgs {
@@ -246,6 +247,12 @@ function delay(args: DelayArgs): Promise<DelayResult> {
 const immediateDelay: DelayMillisecondsFn = () => {
   return Promise.resolve();
 };
+
+const noServerMovedFile: ReadServerMovedFileFn = async () => null;
+
+async function unexpectedServerMove(): Promise<FullStackSupervisionResult> {
+  throw new Error("Unexpected server move");
+}
 
 function createTestStartContext(): BbAppStartContext {
   return {
@@ -1971,7 +1978,9 @@ describe("bb-app launcher", () => {
       delayMilliseconds: immediateDelay,
       isHealthyServerAnswering: async () => false,
       isShutdownRequested: supervisor.shutdownRequested,
+      onServerMoved: unexpectedServerMove,
       processes: supervisor.processes,
+      readServerMovedFile: noServerMovedFile,
       startDaemon: supervisor.daemonStart,
       startServer: supervisor.serverStart,
     });
@@ -2004,7 +2013,9 @@ describe("bb-app launcher", () => {
       delayMilliseconds: immediateDelay,
       isHealthyServerAnswering: async () => false,
       isShutdownRequested: supervisor.shutdownRequested,
+      onServerMoved: unexpectedServerMove,
       processes: supervisor.processes,
+      readServerMovedFile: noServerMovedFile,
       startDaemon: supervisor.daemonStart,
       startServer: supervisor.serverStart,
     });
@@ -2037,7 +2048,9 @@ describe("bb-app launcher", () => {
       delayMilliseconds: immediateDelay,
       isHealthyServerAnswering: async () => false,
       isShutdownRequested: supervisor.shutdownRequested,
+      onServerMoved: unexpectedServerMove,
       processes: supervisor.processes,
+      readServerMovedFile: noServerMovedFile,
       startDaemon: supervisor.daemonStart,
       startServer: supervisor.serverStart,
     });
@@ -2117,7 +2130,9 @@ describe("bb-app launcher", () => {
       delayMilliseconds: immediateDelay,
       isHealthyServerAnswering: async () => false,
       isShutdownRequested: supervisor.shutdownRequested,
+      onServerMoved: unexpectedServerMove,
       processes: supervisor.processes,
+      readServerMovedFile: noServerMovedFile,
       startDaemon: supervisor.daemonStart,
       startServer: supervisor.serverStart,
     });
@@ -2153,7 +2168,9 @@ describe("bb-app launcher", () => {
       delayMilliseconds: (args) => restartThrottle.delayMilliseconds(args),
       isHealthyServerAnswering: async () => false,
       isShutdownRequested: supervisor.shutdownRequested,
+      onServerMoved: unexpectedServerMove,
       processes: supervisor.processes,
+      readServerMovedFile: noServerMovedFile,
       startDaemon: supervisor.daemonStart,
       startServer: supervisor.serverStart,
     });

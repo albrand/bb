@@ -375,14 +375,17 @@ export interface TypeaheadMentionConfig {
 }
 
 export interface TypeaheadCommandConfig {
-  trigger: PromptMentionCommandTrigger | null;
+  triggers: readonly PromptMentionCommandTrigger[];
   suggestions: readonly ProviderCommandSuggestion[];
   isLoading: boolean;
   isError: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => void;
-  onQueryChange: (query: string | null) => void;
+  onQueryChange: (
+    query: string | null,
+    trigger: PromptMentionCommandTrigger | null,
+  ) => void;
   onEditorFocus?: () => void;
 }
 
@@ -392,7 +395,7 @@ export interface TypeaheadConfig {
 }
 
 export const INERT_TYPEAHEAD_COMMAND_CONFIG: TypeaheadCommandConfig = {
-  trigger: null,
+  triggers: [],
   suggestions: [],
   isLoading: false,
   isError: false,
@@ -1219,7 +1222,7 @@ export function PromptBoxInternal({
     resolveLink: mentionResolveLink,
   } = typeahead.mention;
   const {
-    trigger: commandTriggerChar,
+    triggers: commandTriggerChars,
     suggestions: commandSuggestions,
     isLoading: commandLoading,
     isError: commandError,
@@ -1558,26 +1561,29 @@ export function PromptBoxInternal({
       char,
       kind: "mention" as const,
     }));
-    if (commandTriggerChar === null) {
+    if (commandTriggerChars.length === 0) {
       return mentionTriggers;
     }
-    return [...mentionTriggers, { char: commandTriggerChar, kind: "command" }];
-  }, [commandTriggerChar, mentionTriggerChars]);
+    return [
+      ...mentionTriggers,
+      ...commandTriggerChars.map((char) => ({ char, kind: "command" as const })),
+    ];
+  }, [commandTriggerChars, mentionTriggerChars]);
 
   const dispatchTriggerQuery = useCallback(
     (active: ActiveTrigger | null) => {
       if (active?.kind === "mention") {
         onMentionQueryChange(active.query, active.char);
-        onCommandQueryChange(null);
+        onCommandQueryChange(null, null);
         return;
       }
       if (active?.kind === "command") {
-        onCommandQueryChange(active.query);
+        onCommandQueryChange(active.query, active.char);
         onMentionQueryChange(null, null);
         return;
       }
       onMentionQueryChange(null, null);
-      onCommandQueryChange(null);
+      onCommandQueryChange(null, null);
     },
     [onCommandQueryChange, onMentionQueryChange],
   );
@@ -1708,7 +1714,7 @@ export function PromptBoxInternal({
             }
             setActiveTrigger(null);
             onMentionQueryChange(null, null);
-            onCommandQueryChange(null);
+            onCommandQueryChange(null, null);
             return false;
           },
           cut: () => {
@@ -2329,7 +2335,7 @@ export function PromptBoxInternal({
     (item: ProviderCommandSuggestion) => {
       const currentEditor = editorRef.current;
       if (!currentEditor || activeTrigger === null) return;
-      if (activeTrigger.char !== "/") return;
+      if (activeTrigger.kind !== "command") return;
 
       const trailingText = mentionPillTrailingText(
         currentEditor.state.doc,
@@ -2352,7 +2358,7 @@ export function PromptBoxInternal({
           }),
           hasLeftRange: false,
         },
-        clearQuery: () => onCommandQueryChange(null),
+        clearQuery: () => onCommandQueryChange(null, null),
       });
     },
     [activeTrigger, insertPromptMentionPill, onCommandQueryChange],
@@ -2380,7 +2386,7 @@ export function PromptBoxInternal({
     }
     setActiveTrigger(null);
     onMentionQueryChange(null, null);
-    onCommandQueryChange(null);
+    onCommandQueryChange(null, null);
   }, [activeTrigger, onCommandQueryChange, onMentionQueryChange]);
 
   const focusEnd = useCallback(() => {
@@ -2520,7 +2526,7 @@ export function PromptBoxInternal({
           serializedText: commandAction.serializedText,
           trailingText: commandAction.trailingText,
           dismissedTrigger: null,
-          clearQuery: () => onCommandQueryChange(null),
+          clearQuery: () => onCommandQueryChange(null, null),
         });
         return;
       }

@@ -44,6 +44,7 @@ export type CreateReconnectingWebSocket = (
 export type HostDaemonServerTerminalMessage = Exclude<
   HostDaemonServerWsMessage,
   | { type: "machine.shutdown" }
+  | { type: "server.moved" }
   | { type: "session-close" }
   | { type: "heartbeat-ack" }
   | { type: "machine-environment.replace" }
@@ -51,6 +52,20 @@ export type HostDaemonServerTerminalMessage = Exclude<
   | HostDaemonWatchSetReplaceMessage
   | HostDaemonConnectSharesReplaceMessage
 >;
+
+export type ServerMovedNotice =
+  | {
+      source: "message";
+      serverUrl: string;
+      headers: Record<string, string>;
+    }
+  | {
+      source: "session-open";
+      serverUrl: string;
+      headers: Record<string, string> | null;
+      toHostName: string;
+      movedAt: number;
+    };
 
 export interface ServerConnectionOptions {
   serverUrl: string;
@@ -93,6 +108,7 @@ export interface ServerConnectionOptions {
     environment: HostDaemonSessionOpenResponse["machineEnvironment"],
   ) => void;
   onMachineShutdown?: () => void | Promise<void>;
+  onServerMoved?: (move: ServerMovedNotice) => Promise<void>;
   createWebSocket?: CreateReconnectingWebSocket;
   startupTimeoutMs?: number;
 }

@@ -244,6 +244,7 @@ async function runDispatchAttempt(
   );
   if (args.trigger === "user" && args.source.kind === "inline") {
     await validatePromptAttachmentReferences({
+      db: deps.db,
       dataDir: deps.config.dataDir,
       input: payload.input,
       projectId: thread.projectId,

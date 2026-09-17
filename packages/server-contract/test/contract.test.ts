@@ -108,6 +108,14 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
+      "Lifecycle ownership is explicitly assigned at creation; omission creates an independent thread.",
+    fields: [
+      "createThreadRequestSchema.lifecycleOwnerThreadId",
+      "forkThreadRequestSchema.lifecycleOwnerThreadId",
+    ],
+  },
+  {
+    reason:
       'pluginMetadata is accepted only when origin is "plugin"; plugin submission data is present only for experimental composer submissions and queued payloads that preserve them.',
     fields: [
       "createThreadRequestSchema.pluginMetadata",
@@ -950,6 +958,7 @@ describe("server-contract canonical schemas", () => {
           status: "idle",
           parentThreadId: null,
           sourceThreadId: null,
+          lifecycleOwnerThreadId: null,
           originKind: null,
           originPluginId: null,
           visibility: "visible",
@@ -986,6 +995,7 @@ describe("server-contract canonical schemas", () => {
     ).toMatchObject([
       {
         id: "thr_123",
+        lifecycleOwnerThreadId: null,
         hasPendingInteraction: true,
         environmentHostId: "host_123",
         environmentName: null,

@@ -162,7 +162,7 @@ function buildTypeaheadConfig({
       onQueryChange: onMentionQueryChange,
     },
     command: {
-      trigger: "/",
+      triggers: ["/"],
       suggestions: commandSuggestions,
       isLoading: false,
       isError: false,
@@ -2435,7 +2435,9 @@ describe("PromptBoxInternal compact layout", () => {
         const voiceButton = screen.getByRole("button", {
           name: "Start voice input",
         });
-        expect(screen.getByRole("button", { name: "Submit (Enter)" })).toBeTruthy();
+        expect(
+          screen.getByRole("button", { name: "Submit (Enter)" }),
+        ).toBeTruthy();
         fireEvent.pointerDown(voiceButton, {
           button: 0,
           pointerType: "touch",
@@ -4086,7 +4088,7 @@ describe("PromptBoxInternal prompt actions", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(getPromptEditorElement()),
     );
-    expect(onCommandQueryChange).toHaveBeenCalledWith("");
+    expect(onCommandQueryChange).toHaveBeenCalledWith("", "/");
   });
 
   it("does not duplicate the skills trigger when it is already active", async () => {
@@ -4519,7 +4521,7 @@ describe("PromptBoxInternal command typeahead submit", () => {
               onQueryChange: () => {},
             },
             command: {
-              trigger: "/",
+              triggers: ["/"],
               suggestions: [suggestion],
               isLoading: false,
               isError: false,

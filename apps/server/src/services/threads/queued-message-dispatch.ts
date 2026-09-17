@@ -1,5 +1,6 @@
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import { isMachineWaitingForExecution } from "../machines/lifecycle.js";
+import { isServerMoveFrozen } from "../server-move/freeze-state.js";
 import { waitForMachineMaintenance } from "../machines/provider-orchestration.js";
 import {
   getQueuedThreadMessage,
@@ -188,6 +189,9 @@ export function requestQueuedMessageDispatch(
   deps: QueueDispatchDeps,
   wake: QueuedMessageDispatchWake,
 ): void {
+  if (isServerMoveFrozen(deps.db)) {
+    return;
+  }
   if (
     wake.kind === "host-connected" &&
     isMachineWaitingForExecution(deps, wake.hostId)
@@ -208,6 +212,9 @@ export async function runQueuedMessageDispatch(
   deps: QueueDispatchDeps,
   wake: QueuedMessageDispatchWake,
 ): Promise<void> {
+  if (isServerMoveFrozen(deps.db)) {
+    return;
+  }
   for (const prepared of prepareQueuedMessageDispatchWake(deps, wake)) {
     await executePreparedQueuedMessageDispatch(deps, prepared);
   }

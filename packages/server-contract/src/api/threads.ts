@@ -106,6 +106,7 @@ export const createThreadRequestSchema = z
     origin: threadCreateOriginSchema,
     originPluginId: z.string().min(1).optional(),
     pluginMetadata: pluginMetadataSchema.optional(),
+    lifecycleOwnerThreadId: z.string().min(1).optional(),
     visibility: threadVisibilitySchema.optional(),
     title: z.string().min(1).optional(),
     input: z.array(promptInputSchema),
@@ -194,6 +195,7 @@ export const forkThreadRequestSchema = z
     origin: threadCreateOriginSchema.default("sdk"),
     originPluginId: z.string().min(1).optional(),
     pluginMetadata: pluginMetadataSchema.optional(),
+    lifecycleOwnerThreadId: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
