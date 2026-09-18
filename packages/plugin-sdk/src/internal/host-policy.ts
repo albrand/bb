@@ -26,7 +26,7 @@ import {
 import { PLUGIN_CLI_OUTPUT_MAX_BYTES } from "../backend-contract.js";
 import type {
   PluginAgentToolContext,
-  PluginAgentToolPresentation,
+  PluginRowPresentation,
   PluginAgentToolResult,
   PluginAiServiceDeclaration,
   PluginAiServiceKind,
@@ -1918,18 +1918,26 @@ function rejectStaleAgentToolFields(toolName: string, tool: object): void {
   }
 }
 
-export function parsePluginAgentToolPresentation(
-  toolName: string,
+/**
+ * The declared shape of `presentation`, copied field by field so
+ * a plugin's object cannot smuggle prototypes or extra markup into the
+ * persisted row. Labels share the status-label length cap. The production
+ * host and the fake host both call this, so a presentation that registers
+ * in a plugin unit test registers in bb, and one bb rejects is rejected
+ * with the same message.
+ */
+export function parsePluginRowPresentation(
+  subject: string,
   value: unknown,
-): PluginAgentToolPresentation | null {
+): PluginRowPresentation | null {
   if (value === undefined) {
     return null;
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`tool "${toolName}" presentation must be an object`);
+    throw new Error(`${subject} presentation must be an object`);
   }
   const declared = value as Record<string, unknown>;
-  const presentation: PluginAgentToolPresentation = {};
+  const presentation: PluginRowPresentation = {};
   if (declared.label !== undefined) {
     const label = declared.label;
     if (
@@ -1939,7 +1947,7 @@ export function parsePluginAgentToolPresentation(
       typeof (label as { completed?: unknown }).completed !== "string"
     ) {
       throw new Error(
-        `tool "${toolName}" presentation.label must provide pending and completed strings`,
+        `${subject} presentation.label must provide pending and completed strings`,
       );
     }
     const { pending, completed } = label as {
@@ -1953,7 +1961,7 @@ export function parsePluginAgentToolPresentation(
       completed.length > PLUGIN_AGENT_STATUS_LABEL_MAX_CHARS
     ) {
       throw new Error(
-        `tool "${toolName}" presentation.label strings must be non-empty and at most ${PLUGIN_AGENT_STATUS_LABEL_MAX_CHARS} characters`,
+        `${subject} presentation.label strings must be non-empty and at most ${PLUGIN_AGENT_STATUS_LABEL_MAX_CHARS} characters`,
       );
     }
     presentation.label = { pending, completed };
@@ -1966,17 +1974,13 @@ export function parsePluginAgentToolPresentation(
       typeof (icon as { glyph?: unknown }).glyph !== "string" ||
       (icon as { glyph: string }).glyph.trim().length === 0
     ) {
-      throw new Error(
-        `tool "${toolName}" presentation.icon must be { glyph: string }`,
-      );
+      throw new Error(`${subject} presentation.icon must be { glyph: string }`);
     }
     presentation.icon = { glyph: (icon as { glyph: string }).glyph };
   }
   if (declared.suppress !== undefined) {
     if (typeof declared.suppress !== "boolean") {
-      throw new Error(
-        `tool "${toolName}" presentation.suppress must be a boolean`,
-      );
+      throw new Error(`${subject} presentation.suppress must be a boolean`);
     }
     presentation.suppress = declared.suppress;
   }
@@ -1989,7 +1993,7 @@ export function parsePluginAgentToolPresentation(
       typeof (tint as { dark?: unknown }).dark !== "string"
     ) {
       throw new Error(
-        `tool "${toolName}" presentation.tint must provide light and dark strings`,
+        `${subject} presentation.tint must provide light and dark strings`,
       );
     }
     presentation.tint = {
@@ -2839,6 +2843,7 @@ export function normalizeCliRegistration(
   name: string;
   summary: string;
   commands: PluginCliCommandInfo[];
+  rendersHelp: boolean;
   run: PluginCliRegistration["run"];
 } {
   if (alreadyRegistered) {
@@ -2886,6 +2891,7 @@ export function normalizeCliRegistration(
     name,
     summary: registration.summary,
     commands: validatedCommands,
+    rendersHelp: registration.rendersHelp === true,
     run: registration.run.bind(registration),
   };
 }
@@ -2906,7 +2912,7 @@ export function normalizeAgentToolRegistration(args: {
     name: string;
     description: string;
     instructions?: string;
-    presentation?: PluginAgentToolPresentation;
+    presentation?: PluginRowPresentation;
     waitsForUserInput?: boolean;
     parameters: unknown;
     execute(
@@ -2917,7 +2923,7 @@ export function normalizeAgentToolRegistration(args: {
 }): {
   name: string;
   description: string;
-  presentation: PluginAgentToolPresentation | null;
+  presentation: PluginRowPresentation | null;
   instructions: string | null;
   inputSchema: unknown;
   waitsForUserInput: boolean;
@@ -2963,8 +2969,8 @@ export function normalizeAgentToolRegistration(args: {
   ) {
     throw new Error(`tool "${name}" waitsForUserInput must be a boolean`);
   }
-  const presentation = parsePluginAgentToolPresentation(
-    name,
+  const presentation = parsePluginRowPresentation(
+    `tool "${name}"`,
     tool.presentation,
   );
   if (presentation?.icon !== undefined) {
@@ -3081,15 +3087,21 @@ export function normalizeMentionProviderRegistration(
   };
 }
 
-export function normalizeInteractionRequest(
-  request: PluginInteractionRequest,
-): {
+export interface NormalizedPluginInteractionRequest {
   threadId: string;
   rendererId: string;
   title: string;
   payload: JsonValue;
   timeoutMs: number;
-} {
+  presentation: PluginRowPresentation | null;
+  describeSubmission: NonNullable<
+    PluginInteractionRequest["describeSubmission"]
+  > | null;
+}
+
+export function normalizeInteractionRequest(
+  request: PluginInteractionRequest,
+): NormalizedPluginInteractionRequest {
   if (!request || typeof request !== "object") {
     throw new Error("ui.requestInput requires an options object");
   }
@@ -3137,12 +3149,23 @@ export function normalizeInteractionRequest(
   ) {
     throw new Error("ui.requestInput timeoutMs must be between 1 and 3600000");
   }
+  if (
+    request.describeSubmission !== undefined &&
+    typeof request.describeSubmission !== "function"
+  ) {
+    throw new Error("ui.requestInput describeSubmission must be a function");
+  }
   return {
     threadId: request.threadId,
     rendererId: request.rendererId,
     title: request.title.trim(),
     payload,
     timeoutMs,
+    presentation: parsePluginRowPresentation(
+      `ui.requestInput form "${request.rendererId}"`,
+      request.presentation,
+    ),
+    describeSubmission: request.describeSubmission ?? null,
   };
 }
 

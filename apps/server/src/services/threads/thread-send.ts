@@ -46,6 +46,7 @@ import {
   dispatchTurnDuringReprovision,
   requireReadyThreadEnvironment,
 } from "./thread-turn-dispatch.js";
+import { resolveDispatchAuthor } from "./dispatch-author.js";
 import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import {
   buildThreadStatusChangeMetadata,
@@ -212,7 +213,7 @@ export function ensureThreadIsNotAwaitingUserInteraction(
   deps: Pick<AppDeps, "pendingInteractions">,
   threadId: string,
 ): void {
-  if (!deps.pendingInteractions.hasPendingThreadInteraction(threadId)) {
+  if (!deps.pendingInteractions.hasTurnBoundPendingThreadInteraction(threadId)) {
     return;
   }
 
@@ -583,8 +584,16 @@ async function sendThreadMessageWithoutContextClear(
     input,
     projectId: thread.projectId,
   });
-  const initiator: ThreadTurnInitiator =
-    args.retryOf !== undefined ? "system" : senderThreadId ? "agent" : "user";
+  // Agent-originated CLI sends still appear as normal turn requests in the
+  // timeline, while initiator lets policy distinguish the source. A retry is
+  // `system` whatever the original was: nobody asked for it a second time, and
+  // counting it as a user message would inflate every "messages sent" figure by
+  // however many times the provider happened to be rate limited.
+  const { initiator } = resolveDispatchAuthor({
+    retrying: args.retryOf !== undefined,
+    senderThreadId,
+    startedOnBehalfOf: null,
+  });
   const shouldCaptureUserMessageSent =
     args.trigger === "user" && initiator === "user" && input.length > 0;
   const expectedSteerTurnId =

@@ -219,9 +219,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         summary:
           "Pauses an agent mid-turn to ask the person a question, and hands their answer back to the agent. With this, a plugin can:",
         bullets: [
-          "Replace the prompt box with a form while the agent waits for an answer",
+          "Replace the prompt box with a form the plugin draws, even after the agent's turn has ended",
           "Receive the submitted answer, or a cancellation and its reason",
-          "Supply the component that draws the form",
+          "Leave a row in the thread timeline: the plugin names its header and describes what a submission shows, so the transcript keeps exactly what the plugin chooses",
         ],
         apiSymbols: ["PluginUi", "PluginPendingInteractionRegistration"],
         firstParty: ["Ask User Question", "Secrets"],
@@ -626,8 +626,18 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Be invoked the same way by a person at a terminal and by an agent mid-task",
           "Receive the thread and project it was invoked from, when bb knows them",
           "Make the plugin usable from scripts and automations, not only from the UI",
+          "Declare commands, arguments and options once and get parsing, `--help`, nearest-name suggestions and JSON errors",
         ],
-        apiSymbols: ["PluginCli", "PluginCliResult"],
+        apiSymbols: [
+          "PluginCli",
+          "PluginCliResult",
+          "defineCli",
+          "cliCommand",
+          "PluginCliError",
+          "PluginCliSpec",
+          "PluginCliCommand",
+          "PluginCliOption",
+        ],
         firstParty: [
           "Automations",
           "Custom instructions",
@@ -760,6 +770,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "Let a dispatch proceed, queue it with a user-visible reason, or refuse it outright",
           "See the thread, project, machine, prompt and resolved execution tuple before the turn runs",
+          "Read each queued message, its author, origin, and originPluginId in queuedMessages, with an empty array for inline attempts",
+          "Read the shared initiator category or mixed for a grouped dispatch, and the shared senderThreadId, null when nobody sent it, or mixed",
+          "Read the shared origin and originPluginId, each independently mixed when grouped messages differ",
           "Read plugin-owned JSON attached by experimental_submit, including on queued re-attempts",
           "Hold work until a moment it names, then ask core to re-decide every queued message when its condition changes",
         ],

@@ -307,6 +307,7 @@ function summarizeTimelineWork(
         counts.delegations += 1;
         break;
       case "question":
+      case "form":
       case "approval":
       case "workflow":
         break;
@@ -382,6 +383,7 @@ function approvalStatusSummaryLabel(
         break;
       case "approval":
       case "question":
+      case "form":
       case "delegation":
       case "extension":
       case "file-read":
@@ -448,6 +450,7 @@ function getTimelineWorkSummaryCategory(
       return "delegations";
     case "approval":
     case "question":
+    case "form":
     case "workflow":
       return null;
     default:
@@ -796,6 +799,7 @@ function rowConcept(row: TimelineViewWorkRow): TimelineWorkSummaryCategory {
       return "imageViews";
     case "approval":
     case "question":
+    case "form":
     case "workflow":
       return "tools";
     default:

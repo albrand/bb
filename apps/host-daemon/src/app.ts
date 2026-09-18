@@ -998,6 +998,7 @@ export async function createHostDaemonApp(
       await watchManager.shutdown();
       disposeParcelWatcherBackend();
       await terminalManager.shutdownAll();
+      terminalManager.dispose();
       machineEnvironment.replace([]);
     },
     onStart: async () => {

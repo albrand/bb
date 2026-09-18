@@ -17,11 +17,15 @@ interface SplitLayoutStore {
 
 interface OpenThreadInSplitArgs {
   store: SplitLayoutStore;
-  navigate: (route: string, options?: { replace?: boolean }) => void;
+  navigate: (
+    route: string,
+    options?: { replace?: boolean; state?: Record<string, unknown> },
+  ) => void;
   projectId: string;
   threadId: string;
   isCompact: boolean;
   side?: SplitSide;
+  state?: Record<string, unknown>;
 }
 
 export function openThreadInSplit({
@@ -31,11 +35,12 @@ export function openThreadInSplit({
   threadId,
   isCompact,
   side = "right",
+  state,
 }: OpenThreadInSplitArgs): SplitOpenResult {
   const route = getThreadRoutePath({ projectId, threadId });
   const layout = store.get(splitLayoutAtom);
   if (isCompact || layout === null) {
-    navigate(route);
+    navigate(route, state === undefined ? undefined : { state });
     return "navigated";
   }
   const existing = findPaneByThread(layout.root, projectId, threadId);
@@ -44,7 +49,10 @@ export function openThreadInSplit({
     if (next !== layout) {
       store.set(splitLayoutAtom, next);
     }
-    navigate(route, { replace: true });
+    navigate(route, {
+      replace: true,
+      ...(state === undefined ? {} : { state }),
+    });
     return "focused-existing";
   }
   if (isAtPaneLimit(layout)) {
@@ -55,6 +63,6 @@ export function openThreadInSplit({
   if (next !== layout) {
     store.set(splitLayoutAtom, next);
   }
-  navigate(route);
+  navigate(route, state === undefined ? undefined : { state });
   return "opened";
 }

@@ -46,6 +46,7 @@ import {
 import { isCommandTimeoutError } from "../lib/error-log-fields.js";
 import {
   parseStoredQueuedThreadMessageWaitingOn,
+  storedQueuedThreadMessageRequestedBy,
   toThreadQueuedMessage,
 } from "./thread-queued-messages.js";
 import {
@@ -684,9 +685,9 @@ async function sendClaimedQueuedMessageForThread(
           },
         }
       : {}),
-    origin: null,
-    originPluginId: null,
-    startedOnBehalfOf: null,
+    origin: lead.origin,
+    originPluginId: lead.originPluginId,
+    startedOnBehalfOf: storedQueuedThreadMessageRequestedBy(lead),
     trigger: "auto-dispatch",
   });
   if (

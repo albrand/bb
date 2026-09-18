@@ -9,6 +9,9 @@ Read the installed declarations for exact current signatures.
 - `PLUGIN_CLI_OUTPUT_MAX_BYTES`
 - `defineRpcContract`
 - `experimental_defineHostEntry`
+- `defineCli`
+- `cliCommand`
+- `PluginCliError`
 - `BbContext`
 - `BbNavigate`
 - `BbPluginApi`
@@ -102,8 +105,6 @@ Read the installed declarations for exact current signatures.
 - `PluginAgentConfigurationContext`
 - `PluginAgentToolContentPart`
 - `PluginAgentToolContext`
-- `PluginAgentToolLabels`
-- `PluginAgentToolPresentation`
 - `PluginAgentToolRegistrationBase`
 - `PluginAgentToolResult`
 - `PluginAgentToolSelection`
@@ -121,21 +122,34 @@ Read the installed declarations for exact current signatures.
 - `PluginBbSdk` — `bb.sdk`; thread plugin metadata calls default `pluginId`
   (see backend-sdk.md)
 - `PluginCli`
+- `PluginCliBooleanOption`
+- `PluginCliCommand`
 - `PluginCliCommandInfo`
+- `PluginCliConstraint`
 - `PluginCliContext`
+- `PluginCliDurationOption`
+- `PluginCliDurationUnit`
+- `PluginCliEnumOption`
+- `PluginCliErrorCode`
 - `PluginCliExecutionResult`
+- `PluginCliIntegerOption`
+- `PluginCliOption`
+- `PluginCliOptionValues`
 - `PluginCliOutputLimitError`
+- `PluginCliPositional`
+- `PluginCliPositionalValues`
 - `PluginCliRegistration`
 - `PluginCliResult`
+- `PluginCliRunInput`
+- `PluginCliSpec`
+- `PluginCliStringOption`
 - `PluginCodeThemeData`
 - `PluginCodeThemeState`
 - `PluginCodeThemeTokenRule`
 - `PluginAppCommands`
 - `PluginCommandContext`
-- `PluginCommandPaletteActionContext` (deprecated alias)
 - `PluginCommandShortcut`
 - `PluginCommandRegistration`
-- `PluginCommandPaletteActionRegistration` (deprecated alias)
 - `PluginComposerApi`
 - `PluginComposerMention`
 - `PluginComposerScope`
@@ -159,6 +173,7 @@ Read the installed declarations for exact current signatures.
 - `PluginHttpAuthMode`
 - `PluginHttpHandler`
 - `PluginInteractionCancelReason`
+- `PluginInteractionDescription`
 - `PluginInteractionRequest`
 - `PluginInteractionResult`
 - `PluginKvStorage`
@@ -207,6 +222,8 @@ Read the installed declarations for exact current signatures.
 - `PluginProvidersState`
 - `PluginRealtime`
 - `PluginRealtimeConnectionState`
+- `PluginRowLabels`
+- `PluginRowPresentation`
 - `PluginRpc`
 - `PluginRpcCallArgs`
 - `PluginRpcClient`

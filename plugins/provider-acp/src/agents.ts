@@ -60,6 +60,7 @@ export const customAcpAgentSchema = z
     nativeSkillRoots: launchSpecFields.nativeSkillRoots,
     permissionCli: launchSpecFields.permissionCli,
     supportsManualCompaction: z.boolean().default(false),
+    providerUsage: z.boolean().optional(),
   })
   .strict();
 export type CustomAcpAgent = z.infer<typeof customAcpAgentSchema>;
@@ -94,6 +95,7 @@ export function customAcpAgentDefinition(
         ? {}
         : { permissionCli: agent.permissionCli }),
     },
+    ...(agent.providerUsage ? { providerUsage: true } : {}),
     ...(agent.dialect === undefined ? {} : { dialect: agent.dialect }),
     ...(shipped?.nativeRootsResolver === undefined
       ? {}

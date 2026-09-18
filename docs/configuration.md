@@ -155,6 +155,14 @@ signal it, so a stale file left by a crash cannot stop an unrelated process.
 | `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent Account Pooler hub. Paired with `BB_ACCOUNT_POOL_PARENT_URL`; both must be well formed or proxying stays off. Not a `bb-app config` key.                                                                                                                                                                                                               |
 | `OPENAI_API_KEY`               | `bb-app env`                                       | OpenAI opt-in routes    | Required only when selecting explicit OpenAI provider routes such as `openai/gpt-4o-mini` or `openai/gpt-transcribe`.                                                                                                                                                                                                                                                                                          |
 
+The `bb` CLI records each failed invocation on the machine that ran it, in
+`<data dir>/logs/cli-errors.jsonl`: the time, CLI version, command path, error
+code, exit code, current thread ID, and the unknown command or flag. It never
+records argument values or error text. The file rotates to `cli-errors.jsonl.1`
+at 2 MB. `bb diagnostics cli-errors [--since 7d] [--json]` tallies it and
+`--clear` deletes it. Set `BB_CLI_ERROR_LOG=0` in the environment that runs `bb`
+to turn recording off.
+
 By default, helper inference and voice transcription use Codex credentials from
 the host daemon. Run `codex login` on the host for the default path. Set
 provider env keys only when opting into a non-Codex provider route.
@@ -1340,7 +1348,12 @@ before you share them.
 Agents use `bb browser-automation` through its bundled skill. Screenshot results
 contain temporary JPEG paths and the browser host ID; remote captures can be
 fetched with `bb file read <path> --host <host-id> --json`. Read or copy images
-before closing the session, which deletes its temporary files.
+before closing the session, which deletes its temporary files. Opening a
+local headless session also returns a `previewDirective` that the agent pastes
+into its message; BB renders it inline as a live preview that expands into a
+lightbox. Desktop sessions return none, because
+that browser is already visible in the app. There is no setting for it;
+collapse the card to pause it.
 
 The Browser Automation plugin supports desktop attachment and headless Chrome on enrolled hosts. Cloud browsers are deferred. The plugin pins one exact `dev-browser` npm release (currently 1.0.0-rc.3) with per-platform binary digests in `plugins/browser-automation/runtime-pin.ts`; the pin, the verification steps, and the bump procedure are documented in `plugins/browser-automation/README.md`.
 
