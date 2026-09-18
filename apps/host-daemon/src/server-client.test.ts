@@ -78,6 +78,39 @@ describe("createServerClient", () => {
     });
   });
 
+  it("names the turn a turn_start_pending rejection is waiting on", async () => {
+    const fetchFn = vi.fn<FetchFn>(async () =>
+      Response.json(
+        {
+          code: "turn_start_pending",
+          message:
+            "Cannot append item/started for turn turn-1 before turn/started is stored",
+          retryable: true,
+          details: {
+            eventType: "item/started",
+            scopeKind: "turn",
+            threadId: "thr_1",
+            turnId: "turn-1",
+          },
+        },
+        { status: 503 },
+      ),
+    );
+    const client = createServerClient({
+      fetchFn,
+      getSessionId: () => "session-1",
+      hostKey: "host-key",
+      logger: createLogger(),
+      serverUrl: "https://bb.example.test",
+    });
+
+    await expect(client.postEvents([])).rejects.toMatchObject({
+      status: 503,
+      code: "turn_start_pending",
+      turnStartPending: { threadId: "thr_1", turnId: "turn-1" },
+    });
+  });
+
   it.each([
     {
       name: "with headers",

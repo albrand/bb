@@ -55,12 +55,24 @@ export type ServerMovedResponseDetails = z.infer<
   typeof serverMovedResponseDetailsSchema
 >;
 
+const TURN_START_PENDING_ERROR_CODE = "turn_start_pending";
+
+const turnStartPendingResponseDetailsSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+});
+
+export type TurnStartPendingResponseDetails = z.infer<
+  typeof turnStartPendingResponseDetailsSchema
+>;
+
 interface ApiErrorResponseBody {
   code: string;
   message: string;
   protocolUpdateRetryRequested: boolean;
   retryable?: boolean;
   serverMoved: ServerMovedResponseDetails | null;
+  turnStartPending: TurnStartPendingResponseDetails | null;
 }
 
 interface ServerResponseErrorArgs {
@@ -72,6 +84,7 @@ interface ServerResponseErrorArgs {
   serverMoved?: ServerMovedResponseDetails | null;
   status: number;
   statusText: string;
+  turnStartPending?: TurnStartPendingResponseDetails | null;
 }
 
 export class ServerResponseError extends Error {
@@ -83,6 +96,7 @@ export class ServerResponseError extends Error {
   readonly serverMoved: ServerMovedResponseDetails | null;
   readonly status: number;
   readonly statusText: string;
+  readonly turnStartPending: TurnStartPendingResponseDetails | null;
 
   constructor(args: ServerResponseErrorArgs) {
     const detail = args.bodyMessage ? ` - ${args.bodyMessage}` : "";
@@ -99,6 +113,7 @@ export class ServerResponseError extends Error {
     this.serverMoved = args.serverMoved ?? null;
     this.status = args.status;
     this.statusText = args.statusText;
+    this.turnStartPending = args.turnStartPending ?? null;
   }
 }
 
@@ -137,6 +152,10 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
     record.code === SERVER_MOVED_ERROR_CODE
       ? (serverMovedResponseDetailsSchema.safeParse(details).data ?? null)
       : null;
+  const turnStartPending =
+    record.code === TURN_START_PENDING_ERROR_CODE
+      ? (turnStartPendingResponseDetailsSchema.safeParse(details).data ?? null)
+      : null;
 
   if (typeof record.retryable === "boolean") {
     return {
@@ -145,6 +164,7 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
       protocolUpdateRetryRequested,
       retryable: record.retryable,
       serverMoved,
+      turnStartPending,
     };
   }
 
@@ -153,6 +173,7 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
     message: record.message,
     protocolUpdateRetryRequested,
     serverMoved,
+    turnStartPending,
   };
 }
 
@@ -470,6 +491,7 @@ export function createServerClient(
       serverMoved: body?.serverMoved ?? null,
       status: response.status,
       statusText: response.statusText,
+      turnStartPending: body?.turnStartPending ?? null,
     });
   }
 

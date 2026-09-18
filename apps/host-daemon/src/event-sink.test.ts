@@ -1,4 +1,5 @@
 import { threadScope, turnScope } from "@bb/domain";
+import type { HostDaemonEventEnvelope } from "@bb/host-daemon-contract";
 import { describe, expect, it, vi } from "vitest";
 import { createEventSink, type CreateEventSinkOptions } from "./event-sink.js";
 import { ServerResponseError } from "./server-client.js";
@@ -42,6 +43,76 @@ function acceptingPostEvents() {
     })),
     rejectedEvents: [],
   }));
+}
+
+function serverRequiringTurnStarts() {
+  const startedTurnKeys = new Set<string>();
+  const stored: HostDaemonEventEnvelope[] = [];
+  const postEvents = vi.fn<CreateEventSinkOptions["postEvents"]>(
+    async (events) => {
+      const batchStarted = new Set(startedTurnKeys);
+      for (const envelope of events) {
+        const { scope } = envelope.event;
+        if (scope.kind !== "turn") {
+          continue;
+        }
+        const key = `${envelope.threadId}/${scope.turnId}`;
+        if (envelope.event.type === "turn/started") {
+          batchStarted.add(key);
+        } else if (!batchStarted.has(key)) {
+          throw new ServerResponseError({
+            action: "post events",
+            bodyMessage: `Cannot append ${envelope.event.type} for turn ${scope.turnId} before turn/started is stored`,
+            code: "turn_start_pending",
+            retryable: true,
+            status: 503,
+            statusText: "Service Unavailable",
+            turnStartPending: {
+              threadId: envelope.threadId,
+              turnId: scope.turnId,
+            },
+          });
+        }
+      }
+      for (const key of batchStarted) {
+        startedTurnKeys.add(key);
+      }
+      stored.push(...events);
+      return {
+        acceptedEvents: events.map((event, eventIndex) => ({
+          eventIndex,
+          sequence: stored.length - events.length + eventIndex + 1,
+          threadId: event.threadId,
+        })),
+        rejectedEvents: [],
+      };
+    },
+  );
+  return { postEvents, stored };
+}
+
+function agentMessageDeltaEvent(threadId: string, turnId: string) {
+  return {
+    type: "item/agentMessage/delta",
+    threadId,
+    providerThreadId: "provider-thread-1",
+    itemId: `${turnId}-i1`,
+    delta: "working",
+    scope: turnScope(turnId),
+  } as const;
+}
+
+function turnCompletedWithoutProviderThreadEvent(
+  threadId: string,
+  turnId: string,
+) {
+  return {
+    type: "turn/completed",
+    threadId,
+    providerThreadId: null,
+    status: "completed",
+    scope: turnScope(turnId),
+  } as const;
 }
 
 function systemErrorEvent(threadId: string) {
@@ -395,6 +466,267 @@ describe("event sink", () => {
       expect.objectContaining({ batchSize: 2, retryDelayMs: 250 }),
       expect.any(String),
     );
+  });
+
+  it("does not let a turn whose turn/started never arrives wedge every thread", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const logger = createLogger();
+      const server = serverRequiringTurnStarts();
+      const sink = createEventSink({
+        isSessionOpen: () => true,
+        logger,
+        now: () => now,
+        postEvents: server.postEvents,
+      });
+
+      sink.emit({
+        threadId: "thr_orphan",
+        event: agentMessageDeltaEvent("thr_orphan", "turn-lost"),
+      });
+      sink.emit({
+        threadId: "thr_other",
+        event: systemErrorEvent("thr_other"),
+      });
+      await sink.flush();
+      expect(server.stored).toEqual([]);
+
+      now += 29_000;
+      await sink.flush();
+      expect(server.stored).toEqual([]);
+
+      now += 2_000;
+      await sink.flush();
+
+      expect(server.stored).toEqual([
+        {
+          threadId: "thr_orphan",
+          event: {
+            type: "turn/started",
+            threadId: "thr_orphan",
+            providerThreadId: "provider-thread-1",
+            scope: turnScope("turn-lost"),
+          },
+        },
+        {
+          threadId: "thr_orphan",
+          event: agentMessageDeltaEvent("thr_orphan", "turn-lost"),
+        },
+        { threadId: "thr_other", event: systemErrorEvent("thr_other") },
+      ]);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "thr_orphan",
+          turnId: "turn-lost",
+        }),
+        expect.stringContaining("synthesized"),
+      );
+
+      sink.emit({
+        threadId: "thr_orphan",
+        event: agentMessageDeltaEvent("thr_orphan", "turn-lost"),
+      });
+      await sink.flush();
+      expect(server.stored).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("repairs a lost turn/started on its own retry schedule without another flush", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = serverRequiringTurnStarts();
+      const sink = createEventSink({
+        isSessionOpen: () => true,
+        logger: createLogger(),
+        now: () => Date.now(),
+        postEvents: server.postEvents,
+      });
+
+      sink.emit({
+        threadId: "thr_orphan",
+        event: agentMessageDeltaEvent("thr_orphan", "turn-lost"),
+      });
+      sink.emit({
+        threadId: "thr_other",
+        event: systemErrorEvent("thr_other"),
+      });
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(server.stored).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(server.stored.map((envelope) => envelope.event.type)).toEqual([
+        "turn/started",
+        "item/agentMessage/delta",
+        "system/error",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wedge when a turn_start_pending rejection carries no details", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored: HostDaemonEventEnvelope[] = [];
+      const postEvents = vi.fn<CreateEventSinkOptions["postEvents"]>(
+        async (events) => {
+          if (events.some((envelope) => envelope.threadId === "thr_orphan")) {
+            throw turnStartPendingRejection(
+              "Cannot append item/agentMessage/delta for turn turn-lost before turn/started is stored",
+            );
+          }
+          stored.push(...events);
+          return {
+            acceptedEvents: events.map((event, eventIndex) => ({
+              eventIndex,
+              sequence: eventIndex + 1,
+              threadId: event.threadId,
+            })),
+            rejectedEvents: [],
+          };
+        },
+      );
+      const sink = createEventSink({
+        isSessionOpen: () => true,
+        logger: createLogger(),
+        now: () => Date.now(),
+        postEvents,
+      });
+
+      sink.emit({
+        threadId: "thr_before",
+        event: systemErrorEvent("thr_before"),
+      });
+      sink.emit({
+        threadId: "thr_orphan",
+        event: agentMessageDeltaEvent("thr_orphan", "turn-lost"),
+      });
+      sink.emit({
+        threadId: "thr_after",
+        event: systemErrorEvent("thr_after"),
+      });
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(stored).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(stored).toEqual([
+        { threadId: "thr_before", event: systemErrorEvent("thr_before") },
+        { threadId: "thr_after", event: systemErrorEvent("thr_after") },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a turn it cannot repair and keeps dropping its later events without stalling", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const logger = createLogger();
+      const server = serverRequiringTurnStarts();
+      const orphanSettled = vi.fn();
+      const laterSettled = vi.fn();
+      const sink = createEventSink({
+        isSessionOpen: () => true,
+        logger,
+        now: () => now,
+        postEvents: server.postEvents,
+      });
+
+      sink.emit({
+        threadId: "thr_orphan",
+        event: turnCompletedWithoutProviderThreadEvent(
+          "thr_orphan",
+          "turn-lost",
+        ),
+        delivery: { replayKey: "w1:orphan:0", onSettled: orphanSettled },
+      });
+      sink.emit({
+        threadId: "thr_other",
+        event: systemErrorEvent("thr_other"),
+      });
+      await sink.flush();
+      now += 31_000;
+      await sink.flush();
+
+      expect(server.stored).toEqual([
+        { threadId: "thr_other", event: systemErrorEvent("thr_other") },
+      ]);
+      expect(orphanSettled).toHaveBeenCalledTimes(1);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ turnId: "turn-lost", dropped: 1 }),
+        expect.stringContaining("Dropped"),
+      );
+
+      const postsBefore = server.postEvents.mock.calls.length;
+      sink.emit({
+        threadId: "thr_orphan",
+        event: turnCompletedWithoutProviderThreadEvent(
+          "thr_orphan",
+          "turn-lost",
+        ),
+        delivery: { replayKey: "w1:orphan:1", onSettled: laterSettled },
+      });
+      sink.emit({
+        threadId: "thr_other",
+        event: systemErrorEvent("thr_other"),
+      });
+      await sink.flush();
+
+      expect(laterSettled).toHaveBeenCalledTimes(1);
+      expect(server.postEvents.mock.calls.length).toBe(postsBefore + 1);
+      expect(server.stored).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still waits for a turn/started that is only late", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const server = serverRequiringTurnStarts();
+      const sink = createEventSink({
+        isSessionOpen: () => true,
+        logger: createLogger(),
+        now: () => now,
+        postEvents: server.postEvents,
+      });
+
+      sink.emit({
+        threadId: "thr_1",
+        event: agentMessageDeltaEvent("thr_1", "turn-late"),
+      });
+      await sink.flush();
+      now += 5_000;
+      await sink.flush();
+      expect(server.stored).toEqual([]);
+
+      await server.postEvents([
+        {
+          threadId: "thr_1",
+          event: {
+            type: "turn/started",
+            threadId: "thr_1",
+            providerThreadId: "provider-thread-1",
+            scope: turnScope("turn-late"),
+          },
+        },
+      ]);
+      await sink.flush();
+
+      expect(server.stored.map((envelope) => envelope.event.type)).toEqual([
+        "turn/started",
+        "item/agentMessage/delta",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps retrying a batch that fails for a retryable reason", async () => {
