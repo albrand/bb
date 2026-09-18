@@ -500,6 +500,7 @@ vi.mock("@/hooks/useThreadCreationOptions", () => ({
       executionInputSources: {},
       hasMultipleProviders: false,
       isLoadingModels: false,
+      modelCatalogIsSettled: true,
       modelLoadError: null,
       modelLoadFailed: false,
       modelOptions: [],
@@ -1230,6 +1231,23 @@ describe("ThreadDetailPromptArea", () => {
         queuedMessageId: "qmsg_1",
       });
     });
+  });
+
+  it("gives the queued-message editor no pickers to set", () => {
+    mocks.queuedMessages = [makeQueuedMessage()];
+    renderPromptArea();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit queued message 1" }),
+    );
+    const inlineEditor = within(
+      screen.getByTestId("inline-queued-message-editor"),
+    );
+    fireEvent.click(
+      inlineEditor.getByRole("button", { name: "Capture plugin host" }),
+    );
+
+    expect(mocks.pluginComposerHost?.scope.kind).toBe("queued-message");
+    expect(mocks.pluginComposerHost?.setSelection).toBeUndefined();
   });
 
   it("keeps back-to-back plugin updates in the active queued draft", () => {
