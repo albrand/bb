@@ -1,4 +1,5 @@
 import { installDefaultEnvironmentProviders } from "./environment-provider.js";
+import { registerTestHarnessWarmup } from "./test-harness-warmup.js";
 import { setPluginEnvironmentProviderBridge } from "../../src/services/plugins/plugin-environment-provider-registry.js";
 import { clearAllThreadProvisionSchedules } from "../../src/services/threads/thread-startup-store.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -42,6 +43,7 @@ import {
 
 const TEST_MACHINE_KEY_PREFIX = "test-daemon-key";
 const TEST_SERVER_HOST = "127.0.0.1";
+const TEST_TERMINAL_RPC_TIMEOUT_MS = 10_000;
 
 export interface TestAppHarness {
   app: ReturnType<typeof createApp>["app"];
@@ -77,7 +79,9 @@ export async function installTestBuiltinPlugin(
 export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   appVersionService?: AppVersionService;
   db?: DbConnection;
+  terminalAttachTimeoutMs?: number;
   terminalCloseTimeoutMs?: number;
+  terminalOpenTimeoutMs?: number;
   nativeRootsClock?: () => number;
   seedFirstPartyProviders?: boolean;
   extraProviders?: readonly {
@@ -142,7 +146,9 @@ export async function createTestAppHarness(
   const {
     appVersionService,
     db: providedDb,
+    terminalAttachTimeoutMs = TEST_TERMINAL_RPC_TIMEOUT_MS,
     terminalCloseTimeoutMs,
+    terminalOpenTimeoutMs = TEST_TERMINAL_RPC_TIMEOUT_MS,
     nativeRootsClock,
     seedFirstPartyProviders = true,
     ...configOverrides
@@ -226,7 +232,7 @@ export async function createTestAppHarness(
     ...configOverrides,
   };
   const terminalSessions = new TerminalSessionLifecycle({
-    attachTimeoutMs: 50,
+    attachTimeoutMs: terminalAttachTimeoutMs,
     ...(terminalCloseTimeoutMs === undefined
       ? {}
       : { closeTimeoutMs: terminalCloseTimeoutMs }),
@@ -234,7 +240,7 @@ export async function createTestAppHarness(
     db,
     hub,
     logger,
-    openTimeoutMs: 50,
+    openTimeoutMs: terminalOpenTimeoutMs,
   });
   const bbAppManagedConfig = await createBbAppManagedConfigReloader({
     config,
@@ -304,7 +310,12 @@ export async function createTestAppHarness(
       clearAllThreadProvisionSchedules();
       setPluginEnvironmentProviderBridge(undefined);
       await pluginService.stop();
-      await rm(dataDir, { recursive: true, force: true });
+      await rm(dataDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 50,
+      });
     },
   };
 }
@@ -335,6 +346,8 @@ export async function withTestHarness<T>(
     await harness.cleanup();
   }
 }
+
+registerTestHarnessWarmup(() => withTestHarness(async () => undefined));
 
 export async function startTestServer(
   overrides: TestAppHarnessConfigOverrides = {},

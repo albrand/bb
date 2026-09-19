@@ -2250,6 +2250,9 @@ export interface NormalizedPluginEnvironmentProvider {
   validate: NonNullable<
     PluginEnvironmentProviderDeclaration["validate"]
   > | null;
+  experimental_existingPath: NonNullable<
+    PluginEnvironmentProviderDeclaration["experimental_existingPath"]
+  > | null;
   create: PluginEnvironmentProviderDeclaration["create"];
   remove: PluginEnvironmentProviderDeclaration["remove"];
   policy: import("../environment-provider.js").PluginEnvironmentProviderPolicy;
@@ -2395,6 +2398,12 @@ export function validatePluginEnvironmentProviderDeclaration(
     declaration.availability,
     "availability",
   );
+  assertOptionalFunction(
+    "environment provider",
+    id,
+    declaration.experimental_existingPath,
+    "experimental_existingPath",
+  );
   return {
     id,
     displayName,
@@ -2405,6 +2414,7 @@ export function validatePluginEnvironmentProviderDeclaration(
     inputsJsonSchema: inputs === null ? null : inputs.jsonSchema,
     availability: declaration.availability ?? null,
     validate: declaration.validate ?? null,
+    experimental_existingPath: declaration.experimental_existingPath ?? null,
     create: declaration.create,
     remove: declaration.remove,
     policy: environmentProviderPolicySchema.parse(declaration.policy ?? {}),
