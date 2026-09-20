@@ -2011,6 +2011,9 @@ importers:
 
   packages/plugin-api-map:
     dependencies:
+      '@bb/shared-ui':
+        specifier: workspace:*
+        version: link:../shared-ui
       '@hugeicons/core-free-icons':
         specifier: ^4.3.4
         version: 4.3.4
@@ -3903,6 +3906,9 @@ importers:
       '@bb/plugin-api-map':
         specifier: workspace:*
         version: link:../../packages/plugin-api-map
+      '@bb/shared-ui':
+        specifier: workspace:*
+        version: link:../../packages/shared-ui
     devDependencies:
       '@bb/plugin-build':
         specifier: workspace:*
