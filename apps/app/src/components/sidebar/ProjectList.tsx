@@ -1522,6 +1522,7 @@ function ProjectListComponent({
       <SidebarHeaderControls
         label={label}
         onNewThread={handleCreateProjectlessThread}
+        showNewProject={sectionId === "threads"}
         open={openSidebarMenu === menuId}
         onOpenChange={(open) => setSidebarMenuOpen(menuId, open)}
       />
