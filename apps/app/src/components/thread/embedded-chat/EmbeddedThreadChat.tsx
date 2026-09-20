@@ -388,10 +388,12 @@ function EmbeddedThreadChatWithComposer({
     setBottomAttachmentError,
     handleAttachBottomFiles,
     isAttachingBottomFiles,
+    bottomPendingUploads,
     inlineAttachmentError,
     setInlineAttachmentError,
     handleAttachInlineFiles,
     isAttachingInlineFiles,
+    inlinePendingUploads,
   } = useComposerAttachmentUploads({
     projectId,
     addDraftAttachment: promptDraft.addAttachment,
@@ -869,6 +871,7 @@ function EmbeddedThreadChatWithComposer({
       items: currentPromptDraft.attachments,
       projectId,
       isAttaching: isAttachingBottomFiles,
+      pendingUploads: bottomPendingUploads,
       error: bottomAttachmentError,
       onAttachFiles: handleAttachBottomFiles,
       onRemove: promptDraft.removeAttachment,
@@ -878,6 +881,7 @@ function EmbeddedThreadChatWithComposer({
       currentPromptDraft.attachments,
       handleAttachBottomFiles,
       isAttachingBottomFiles,
+      bottomPendingUploads,
       projectId,
       promptDraft.removeAttachment,
     ],
@@ -887,6 +891,7 @@ function EmbeddedThreadChatWithComposer({
       items: activeComposerDraft.attachments,
       projectId,
       isAttaching: isAttachingInlineFiles,
+      pendingUploads: inlinePendingUploads,
       error: inlineAttachmentError,
       onAttachFiles: handleAttachInlineFiles,
       onRemove: removeActiveComposerAttachment,
@@ -896,6 +901,7 @@ function EmbeddedThreadChatWithComposer({
       inlineAttachmentError,
       handleAttachInlineFiles,
       isAttachingInlineFiles,
+      inlinePendingUploads,
       projectId,
       removeActiveComposerAttachment,
     ],
@@ -1083,7 +1089,9 @@ function EmbeddedThreadChatWithComposer({
           resolveMentionLink={resolveMentionLink}
           inlineEditor={inlineEditor}
           sendAction={isProvisioning ? "steer-when-ready" : "send-now"}
-          sendDisabled={queuedMessageActionPending}
+          sendDisabled={
+            submitMode.kind === "blocked" || queuedMessageActionPending
+          }
           actionDisabled={queuedMessageActionPending}
           processingMessageId={processingQueuedMessage?.id ?? null}
           processingAction={processingQueuedMessage?.action ?? null}
@@ -1108,6 +1116,7 @@ function EmbeddedThreadChatWithComposer({
       queuedMessageActionPending,
       queuedMessages,
       resolveMentionLink,
+      submitMode.kind,
     ],
   );
 
