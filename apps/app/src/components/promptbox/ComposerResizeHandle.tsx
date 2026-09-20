@@ -110,7 +110,6 @@ export function ComposerResizeHandle({
       aria-valuemin={floorPx}
       aria-valuemax={Math.max(floorPx, maxPx)}
       aria-valuenow={Math.round(userHeight ?? floorPx)}
-      title="Drag to resize. Double-click to reset."
       data-promptbox-resize-handle=""
       data-promptbox-resize-dragging={dragging ? "" : undefined}
       onPointerDown={handlePointerDown}

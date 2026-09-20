@@ -1,13 +1,19 @@
 import { useState } from "react";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { AppSettings, ProviderInfo } from "@bb/domain";
+import type {
+  AppSettings,
+  CompletedTurnDisplay,
+  ProviderInfo,
+} from "@bb/domain";
 import { Button } from "@bb/shared-ui/button";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { Switch } from "@bb/shared-ui/switch";
 import {
   SettingsBadge,
   SettingsRow,
+  SettingsRowList,
   SettingsSection,
 } from "@/components/ui/settings-section";
 import {
@@ -20,6 +26,80 @@ import {
   SortableSettingsRowList,
   useSortableSettingsRow,
 } from "./sortable-settings-rows";
+
+function withProviderCompletedTurnDisplay(
+  settings: AppSettings,
+  provider: ProviderInfo,
+  display: CompletedTurnDisplay,
+): AppSettings {
+  const overrides = Object.fromEntries(
+    Object.entries(settings.providerCompletedTurnDisplay).filter(
+      ([providerId]) => providerId !== provider.id,
+    ),
+  );
+  return {
+    ...settings,
+    providerCompletedTurnDisplay:
+      display === provider.completedTurnDisplay
+        ? overrides
+        : { ...overrides, [provider.id]: display },
+  };
+}
+
+interface CompletedTurnDisplayRowProps {
+  disabled: boolean;
+  generalSettings: AppSettings;
+  onGeneralSettingsChange: (next: AppSettings) => Promise<unknown> | void;
+  provider: ProviderInfo;
+}
+
+function CompletedTurnDisplayRow({
+  disabled,
+  generalSettings,
+  onGeneralSettingsChange,
+  provider,
+}: CompletedTurnDisplayRowProps) {
+  const ProviderIcon = getProviderIconInfo(
+    "agent",
+    provider.id,
+    provider,
+  )?.icon;
+  const display =
+    generalSettings.providerCompletedTurnDisplay[provider.id] ??
+    provider.completedTurnDisplay;
+  return (
+    <SettingsRow>
+      <span className="flex size-5 items-center justify-center">
+        {ProviderIcon ? (
+          <ProviderIconMark
+            provider={provider}
+            icon={ProviderIcon}
+            className={COARSE_POINTER_ICON_SIZE_CLASS}
+          />
+        ) : (
+          <Icon name="Zap" className="text-muted-foreground" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium">
+        {provider.displayName}
+      </span>
+      <Switch
+        checked={display === "collapse"}
+        disabled={disabled}
+        aria-label={`Collapse finished ${provider.displayName} turns`}
+        onCheckedChange={(checked) =>
+          onGeneralSettingsChange(
+            withProviderCompletedTurnDisplay(
+              generalSettings,
+              provider,
+              checked ? "collapse" : "flat",
+            ),
+          )
+        }
+      />
+    </SettingsRow>
+  );
+}
 
 interface ProvidersSettingsSectionProps {
   disabled: boolean;
@@ -205,38 +285,59 @@ export function ProvidersSettingsSection({
   };
 
   return (
-    <SettingsSection
-      title="Providers"
-      description="Set the default agent and its order in provider pickers. Configure each provider on its plugin page under Plugins."
-    >
-      {providersQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">Loading providers…</p>
-      ) : providers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No agent provider is enabled. Enable a provider plugin under Plugins.
-        </p>
-      ) : (
-        <SortableSettingsRowList
-          ids={ids}
-          disabled={disabled}
-          onReorder={handleReorder}
+    <>
+      <SettingsSection
+        title="Providers"
+        description="Set the default agent and its order in provider pickers. Configure each provider on its plugin page under Plugins."
+      >
+        {providersQuery.isPending ? (
+          <p className="text-sm text-muted-foreground">Loading providers…</p>
+        ) : providers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No agent provider is enabled. Enable a provider plugin under
+            Plugins.
+          </p>
+        ) : (
+          <SortableSettingsRowList
+            ids={ids}
+            disabled={disabled}
+            onReorder={handleReorder}
+          >
+            {providers.map((provider, index) => (
+              <SortableProviderRow
+                key={provider.id}
+                disabled={disabled}
+                generalSettings={generalSettings}
+                index={index}
+                onGeneralSettingsChange={onGeneralSettingsChange}
+                provider={provider}
+                signIn={resolveProviderSignIn(
+                  provider,
+                  providerStateById.get(provider.id),
+                )}
+              />
+            ))}
+          </SortableSettingsRowList>
+        )}
+      </SettingsSection>
+      {providers.length === 0 ? null : (
+        <SettingsSection
+          title="Collapse finished turns"
+          description="When a turn finishes, fold its work into one Worked for row and keep the final answer visible. Turn a provider off to keep every step of its finished turns visible."
         >
-          {providers.map((provider, index) => (
-            <SortableProviderRow
-              key={provider.id}
-              disabled={disabled}
-              generalSettings={generalSettings}
-              index={index}
-              onGeneralSettingsChange={onGeneralSettingsChange}
-              provider={provider}
-              signIn={resolveProviderSignIn(
-                provider,
-                providerStateById.get(provider.id),
-              )}
-            />
-          ))}
-        </SortableSettingsRowList>
+          <SettingsRowList>
+            {providers.map((provider) => (
+              <CompletedTurnDisplayRow
+                key={provider.id}
+                disabled={disabled}
+                generalSettings={generalSettings}
+                onGeneralSettingsChange={onGeneralSettingsChange}
+                provider={provider}
+              />
+            ))}
+          </SettingsRowList>
+        </SettingsSection>
       )}
-    </SettingsSection>
+    </>
   );
 }

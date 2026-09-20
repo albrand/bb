@@ -545,8 +545,6 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       ? false
       : "always",
   });
-  // A reconnect can replace the same query cache entry with no data for one
-  // render. Do not unmount the entire detail surface into its loading skeleton.
   const thread = useRetainedThreadSnapshot({
     snapshot: queriedThread,
     threadId,

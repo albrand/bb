@@ -22,7 +22,7 @@ concurrency:
 jobs:
   checks:
     name: Checks (ubuntu-latest, Node 22.x)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     # `actions: read` is what lets the cache-usage check call the Actions API;
@@ -97,7 +97,7 @@ jobs:
   # the same 4 vCPUs, which made tests the critical path of every run.
   tests:
     name: Tests (${{ matrix.shard }}, ubuntu-latest, Node 22.x)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     strategy:
@@ -154,8 +154,7 @@ jobs:
       - name: Test
         run: pnpm exec turbo run test ${{ matrix.filter }} --cache-dir=.turbo/cache --output-logs=new-only --concurrency=4 ${{ matrix.args }}
 
-  # The macOS legs run without the Turbo cache. Blacksmith's transparent cache
-  # only backs their Linux runners, so on macOS the cache moves over GitHub's
+  # The macOS legs run without the Turbo cache. The cache moves over GitHub's
   # own service at ~50 MB/s: restoring and saving the ~2 GB directory cost about
   # two minutes per run and returned 0 of 8 task hits, because the six ~2 GB
   # entries it wrote also blew past the repository's 10 GB cache quota and
@@ -170,10 +169,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ubuntu-latest
             node-version: "22.x"
             turbo-cache: "true"
-          - os: blacksmith-6vcpu-macos-15
+          - os: macos-15
             node-version: "22.x"
             turbo-cache: "false"
 
@@ -216,16 +215,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ubuntu-latest
             node-version: "24.x"
             turbo-cache: "true"
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ubuntu-latest
             node-version: "26.x"
             turbo-cache: "true"
-          - os: blacksmith-6vcpu-macos-15
+          - os: macos-15
             node-version: "24.x"
             turbo-cache: "false"
-          - os: blacksmith-6vcpu-macos-15
+          - os: macos-15
             node-version: "26.x"
             turbo-cache: "false"
 

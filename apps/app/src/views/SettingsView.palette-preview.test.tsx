@@ -71,6 +71,8 @@ describe("palette hover preview", () => {
       "solarized",
       "gruvbox",
       "catppuccin",
+      "conductor",
+      "conductor-black",
       "mine",
       "plugin:pack:ocean",
     ]);

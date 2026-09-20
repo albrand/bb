@@ -5,11 +5,6 @@ interface UseRetainedThreadSnapshotArgs<TSnapshot> {
   threadId: string;
 }
 
-/**
- * A cache owner may briefly remove a query while replacing it after reconnect.
- * Keep the last snapshot for that exact thread visible until the replacement
- * arrives, but never carry it into a different thread route.
- */
 export function useRetainedThreadSnapshot<TSnapshot>({
   snapshot,
   threadId,

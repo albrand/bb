@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   sendMessageMutateAsync: vi.fn(),
   shellProbeRenders: vi.fn(),
   updateQueuedMessageMutateAsync: vi.fn(),
+  updateThread: { isPending: false, mutate: vi.fn(), variables: null },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -246,6 +247,7 @@ vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
     mutate: vi.fn(),
     variables: null,
   }),
+  useUpdateThread: () => mocks.updateThread,
 }));
 
 vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({

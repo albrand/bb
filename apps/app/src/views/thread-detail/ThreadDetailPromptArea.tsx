@@ -1601,7 +1601,6 @@ export function ThreadDetailPromptArea({
       selectedProviderId,
       serviceTier,
       serviceTierSupportByProvider,
-      setReasoningLevel,
       handleReasoningLevelChange,
       setServiceTier,
       supportsServiceTier,
