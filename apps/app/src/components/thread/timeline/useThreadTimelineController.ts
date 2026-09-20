@@ -10,6 +10,7 @@ import {
   mergeLoadedTimelineWithLatest,
   prependOlderTimelineRows,
   recoverLoadedTimelineAfterStaleCursor,
+  resolveLoadedTimelineSurfaceKey,
   type LoadedTimelineState,
 } from "@bb/client-core";
 import { useConnectionAwareQueryState } from "@/hooks/queries/connection-aware-query-state";
@@ -65,8 +66,7 @@ function isTimelineSurfaceForBase(
   baseSurfaceKey: string,
 ): boolean {
   return (
-    surfaceKey === baseSurfaceKey ||
-    surfaceKey.startsWith(`${baseSurfaceKey}:context-boundary:`)
+    surfaceKey === baseSurfaceKey || surfaceKey.startsWith(`${baseSurfaceKey}:`)
   );
 }
 
@@ -134,11 +134,10 @@ export function useThreadTimelineController({
   });
   const baseSurfaceKey = explicitSurfaceKey ?? threadId;
   const queriedTimeline = latestTimelineQuery.data;
-  const initialContextBoundarySeq = queriedTimeline?.contextBoundarySeq ?? null;
-  const initialSurfaceKey =
-    initialContextBoundarySeq === null
-      ? baseSurfaceKey
-      : `${baseSurfaceKey}:context-boundary:${initialContextBoundarySeq}`;
+  const initialSurfaceKey = resolveLoadedTimelineSurfaceKey(
+    baseSurfaceKey,
+    queriedTimeline,
+  );
   const [loadedTimelineTracker, setLoadedTimelineTracker] =
     useState<LoadedTimelineTracker>(() => ({
       latestTimeline: queriedTimeline,
@@ -157,10 +156,10 @@ export function useThreadTimelineController({
       ? loadedTimelineTracker.latestTimeline
       : undefined);
   const contextBoundarySeq = latestTimeline?.contextBoundarySeq ?? null;
-  const surfaceKey =
-    contextBoundarySeq === null
-      ? baseSurfaceKey
-      : `${baseSurfaceKey}:context-boundary:${contextBoundarySeq}`;
+  const surfaceKey = resolveLoadedTimelineSurfaceKey(
+    baseSurfaceKey,
+    latestTimeline,
+  );
   let loadedTimeline = loadedTimelineTracker.loaded;
   if (
     loadedTimelineTracker.latestTimeline !== latestTimeline ||

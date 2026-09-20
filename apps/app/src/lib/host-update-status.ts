@@ -23,9 +23,6 @@ export function hostUpdateIsStalled(host: Host, now: number): boolean {
   const lastSeenAt = host.lastSeenAt;
   return (
     hostCanRetryUpdate(host) &&
-    // `updatedAt` changes on every rejected handshake, so it never measures
-    // how long the daemon has been unable to reconnect. `lastSeenAt` is the
-    // last accepted session and remains stable while an update is stalled.
     (lastSeenAt === null || now - lastSeenAt >= HOST_UPDATE_STALL_THRESHOLD_MS)
   );
 }
