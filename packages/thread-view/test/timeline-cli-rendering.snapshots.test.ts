@@ -587,6 +587,20 @@ describe("timeline CLI rendering snapshots", () => {
     expect(timeline.text).not.toContain("steer pending");
   });
 
+  it("shows a failed turn completion error in the thread log", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const timeline = renderIdleTimeline([
+      event.turnStarted(),
+      event.turnCompleted({
+        errorMessage: "Agent stopped the turn: refusal",
+        status: "failed",
+      }),
+    ]);
+
+    expect(timeline.text).toContain("Error");
+    expect(timeline.text).toContain("Agent stopped the turn: refusal");
+  });
+
   it("closes a legacy unmatched steer after its command failure", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const timeline = renderIdleTimeline([

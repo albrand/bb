@@ -74,6 +74,7 @@ export interface EventFactoryRowOptions {
 }
 
 interface ProviderTurnEventOptions extends EventFactoryRowOptions {
+  errorMessage?: string;
   parentToolCallId?: string;
   providerThreadId?: string;
   turnId?: string;
@@ -1305,6 +1306,9 @@ export function createTimelineEventFactory(
         data: {
           ...providerFields(args),
           status: args?.status ?? "completed",
+          ...(args?.errorMessage
+            ? { error: { message: args.errorMessage } }
+            : {}),
         },
       };
     },

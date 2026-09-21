@@ -364,6 +364,7 @@ export {
   getLastStoredTurnRequestEvent,
   getStoredTurnRequestEventForTurn,
   getLatestThreadOutputEventRow,
+  getLatestThreadErrorEventRow,
   getLatestStoredConversationOutlineSequence,
   getLatestCompletedThreadContextClearSequence,
   getLatestThreadSystemErrorEventRow,

@@ -1,8 +1,8 @@
 import {
   canHydrateRetainedEventOutputRowsWithinDataByteLimit,
   findStoredEventRow as findStoredEventRowRecord,
+  getLatestThreadErrorEventRow,
   getLatestThreadOutputEventRow,
-  getLatestThreadSystemErrorEventRow,
   hydrateRetainedEventOutputRows,
   listStoredEventRows as listStoredEventRowRecords,
 } from "@bb/db";
@@ -191,8 +191,11 @@ export function getLastThreadErrorMessage(
   db: DbConnection,
   threadId: string,
 ): string | null {
-  const row = getLatestThreadSystemErrorEventRow(db, { threadId });
+  const row = getLatestThreadErrorEventRow(db, { threadId });
   if (!row) return null;
   const eventRow = parseStoredEventRow(row);
-  return eventRow.type === "system/error" ? eventRow.data.message : null;
+  if (eventRow.type === "system/error") return eventRow.data.message;
+  return eventRow.type === "turn/completed"
+    ? (eventRow.data.error?.message ?? null)
+    : null;
 }

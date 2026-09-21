@@ -213,6 +213,106 @@ describe("plugin thread lifecycle events", () => {
     }
   });
 
+  it("delivers thread.failed with a turn/completed error message", async () => {
+    const recorded: RecordedThreadPayload[] = [];
+    globals.__failedEvents = recorded;
+    const { harness, cleanup } = await setUpPluginHarness(`
+      export default function plugin(bb: any) {
+        bb.events.on("thread.failed", (payload: any) => {
+          (globalThis as any).__failedEvents.push(payload);
+        });
+      }
+    `);
+    try {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { status: "active" },
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        turnId: "turn-failed-event",
+        providerThreadId: "provider-failed-event",
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-failed-event",
+        scope: turnScope("turn-failed-event"),
+        sequence: 2,
+        type: "turn/completed",
+        data: {
+          status: "failed",
+          error: { message: "Agent stopped the turn: refusal" },
+        },
+      });
+
+      const outcome = applyLoggedThreadLifecycleEvent(lifecycleDeps(harness), {
+        threadId: thread.id,
+        event: { type: "run.failed" },
+      });
+      expect(outcome.applied).toBe(true);
+
+      await vi.waitFor(() => expect(recorded).toHaveLength(1));
+      expect(recorded[0]?.error).toBe("Agent stopped the turn: refusal");
+    } finally {
+      delete globals.__failedEvents;
+      await cleanup();
+    }
+  });
+
+  it("uses the most recent error message across system/error and turn/completed", async () => {
+    const recorded: RecordedThreadPayload[] = [];
+    globals.__failedEvents = recorded;
+    const { harness, cleanup } = await setUpPluginHarness(`
+      export default function plugin(bb: any) {
+        bb.events.on("thread.failed", (payload: any) => {
+          (globalThis as any).__failedEvents.push(payload);
+        });
+      }
+    `);
+    try {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { status: "active" },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        scope: threadScope(),
+        sequence: 1,
+        type: "system/error",
+        data: { code: "provider_error", message: "older error" },
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        turnId: "turn-latest-error",
+        providerThreadId: "provider-latest-error",
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-latest-error",
+        scope: turnScope("turn-latest-error"),
+        sequence: 3,
+        type: "turn/completed",
+        data: {
+          status: "failed",
+          error: { message: "newer turn error" },
+        },
+      });
+
+      const outcome = applyLoggedThreadLifecycleEvent(lifecycleDeps(harness), {
+        threadId: thread.id,
+        event: { type: "run.failed" },
+      });
+      expect(outcome.applied).toBe(true);
+
+      await vi.waitFor(() => expect(recorded).toHaveLength(1));
+      expect(recorded[0]?.error).toBe("newer turn error");
+    } finally {
+      delete globals.__failedEvents;
+      await cleanup();
+    }
+  });
+
   it("delivers interaction.pending after the interaction is committed", async () => {
     const recorded: RecordedInteractionPayload[] = [];
     globals.__pendingInteractionEvents = recorded;
