@@ -108,8 +108,23 @@ import {
 import { errorMessage } from "../lib/error-log-fields.js";
 import { perDbRegistry } from "../lib/per-db-registry.js";
 import { isHostUnavailableApiError } from "../hosts/online-rpc.js";
+import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "./environment-provider-ids.js";
 
 type Deps = ThreadProvisioningDeps;
+
+function providerRetireGraceMs(
+  row: EnvironmentRow,
+  record: PluginEnvironmentProviderRecord,
+): number | null {
+  if (
+    row.providerOwnsPath &&
+    row.environmentProviderId ===
+      DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout
+  ) {
+    return null;
+  }
+  return record.provider.policy.retireGraceMs;
+}
 
 export interface ProviderOperationContext {
   thread: ThreadResponse;
@@ -777,17 +792,20 @@ async function sweepProviderEnvironmentInSlot(
       });
     return;
   }
+  const grace = providerRetireGraceMs(row, record);
+  if (
+    !cancelled &&
+    row.teardownStatus === null &&
+    grace === null &&
+    row.status !== "destroyed"
+  ) {
+    if (row.retireAt !== null)
+      writeEnvironment(deps, environmentId, { retireAt: null });
+    return;
+  }
   if (row.retireAt === null) {
-    if (
-      !cancelled &&
-      record.provider.policy.retireGraceMs === null &&
-      row.status !== "destroyed"
-    )
-      return;
     const retireAt =
-      row.status === "destroyed" || cancelled
-        ? now
-        : now + (record.provider.policy.retireGraceMs ?? 0);
+      row.status === "destroyed" || cancelled ? now : now + (grace ?? 0);
     writeEnvironment(deps, environmentId, { retireAt });
     row = { ...row, retireAt };
   }
@@ -843,6 +861,20 @@ export async function sweepProviderLifecycles(deps: Deps): Promise<void> {
       );
     }
   }
+  for (const row of listProviderLifecycleEnvironments(deps.db, null)) {
+    pending.push(
+      Promise.resolve()
+        .then(() => {
+          requestEnvironmentRemoval(deps, row.id);
+        })
+        .catch((error) => {
+          deps.logger.warn(
+            { environmentId: row.id, error: errorMessage(error) },
+            "Legacy environment removal will retry",
+          );
+        }),
+    );
+  }
   await Promise.all(pending);
   releaseFinishedEnvironmentPreparationOwners(deps.db);
 }
@@ -872,7 +904,7 @@ export function refreshProviderRetirement(
     return;
   const provider = getEnvironmentProvider(row.environmentProviderId);
   if (provider === undefined) return;
-  const grace = provider.provider.policy.retireGraceMs;
+  const grace = providerRetireGraceMs(row, provider);
   const retireAt =
     grace === null || environmentHasLiveThreads(deps.db, environmentId)
       ? null

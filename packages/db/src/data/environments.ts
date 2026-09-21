@@ -81,6 +81,56 @@ export function getEnvironment(db: EnvironmentReadConnection, id: string) {
   );
 }
 
+export function reviveDestroyedEnvironment(
+  db: EnvironmentWriteConnection,
+  notifier: DbNotifier,
+  args: {
+    environmentId: string;
+    path: string;
+    projectCheckoutProviderId: string;
+  },
+) {
+  const updated = db.transaction(
+    (tx) =>
+      tx
+        .update(environments)
+        .set({
+          path: args.path,
+          status: "ready",
+          teardownStatus: null,
+          teardownMessage: null,
+          retireAt: null,
+          updatedAt: Date.now(),
+        })
+        .where(
+          and(
+            eq(environments.id, args.environmentId),
+            eq(environments.status, "destroyed"),
+            or(
+              isNull(environments.environmentProviderId),
+              and(
+                eq(
+                  environments.environmentProviderId,
+                  args.projectCheckoutProviderId,
+                ),
+                eq(environments.providerOwnsPath, false),
+              ),
+            ),
+          ),
+        )
+        .returning()
+        .get() ?? null,
+    { behavior: "immediate" },
+  );
+  if (updated !== null) {
+    notifier.notifyEnvironment(updated.id, [
+      "metadata-changed",
+      "status-changed",
+    ]);
+  }
+  return updated;
+}
+
 export function findProjectEnvironmentByHostPath(
   db: DbConnection,
   projectId: string,
@@ -534,8 +584,20 @@ export function updatePreparingEnvironment(db: EnvironmentWriteConnection, row: 
   return db.update(environments).set({ ...row, updatedAt: Date.now() }).where(and(eq(environments.id, row.id), row.ownerThreadId === null ? isNull(environments.ownerThreadId) : eq(environments.ownerThreadId, row.ownerThreadId), eq(environments.attempt, row.attempt))).run().changes > 0;
 }
 
-export function listProviderLifecycleEnvironments(db: EnvironmentWriteConnection, providerId: string) {
-  return db.select().from(environments).where(and(eq(environments.environmentProviderId, providerId), or(isNull(environments.ownerThreadId), sql`${environments.teardownStatus} is not null`), sql`(${environments.retireAt} is not null or ${environments.teardownStatus} is not null or not exists (select 1 from ${threads} where ${threads.environmentId} = ${environments.id} and ${threads.archivedAt} is null and ${threads.deletedAt} is null))`, or(ne(environments.status, "destroyed"), isNull(environments.teardownStatus), ne(environments.teardownStatus, "removed")))).all();
+export function listProviderLifecycleEnvironments(
+  db: EnvironmentWriteConnection,
+  providerId: string | null,
+) {
+  return db.select().from(environments).where(and(
+    providerId === null
+      ? isNull(environments.environmentProviderId)
+      : eq(environments.environmentProviderId, providerId),
+    providerId === null
+      ? undefined
+      : or(isNull(environments.ownerThreadId), sql`${environments.teardownStatus} is not null`),
+    sql`(${environments.retireAt} is not null or ${environments.teardownStatus} is not null or not exists (select 1 from ${threads} where ${threads.environmentId} = ${environments.id} and ${threads.archivedAt} is null and ${threads.deletedAt} is null))`,
+    or(ne(environments.status, "destroyed"), isNull(environments.teardownStatus), ne(environments.teardownStatus, "removed")),
+  )).all();
 }
 
 export function environmentHasLiveThreads(db: EnvironmentWriteConnection, environmentId: string): boolean {

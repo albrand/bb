@@ -69,6 +69,7 @@ import {
   SERVER_MOVE_FROZEN_RETRY_MS,
   isServerMoveFrozen,
 } from "../server-move/freeze-state.js";
+import { requireThreadCommandEnvironment } from "../threads/thread-command-environment.js";
 
 type RegisterPendingInteractionResult =
   | {
@@ -658,6 +659,11 @@ export class PendingInteractionLifecycle {
   }): Promise<PendingInteraction> {
     const current = this.getThreadInteraction(args);
     if (isPluginExtensionPendingInteraction(current)) {
+      const thread = getThread(this.deps.db, args.threadId);
+      if (thread === null) {
+        throw new ApiError(404, "thread_not_found", "Thread not found");
+      }
+      await requireThreadCommandEnvironment(this.deps, { thread });
       return this.resolvePendingInteraction({
         interactionId: args.interactionId,
         threadId: args.threadId,

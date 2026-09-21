@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { requirePublicThread } from "../../services/lib/entity-lookup.js";
+import { requireThreadCommandEnvironment } from "../../services/threads/thread-command-environment.js";
 
 const pendingInteractionIdSchema = z
   .string()
@@ -55,8 +56,9 @@ export function registerThreadInteractionRoutes(
     );
   });
 
-  post(routes.resolveInteraction, (context, payload) => {
+  post(routes.resolveInteraction, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    await requireThreadCommandEnvironment(deps, { thread });
     return context.json(
       deps.pendingInteractions.resolvePendingInteraction({
         threadId: thread.id,

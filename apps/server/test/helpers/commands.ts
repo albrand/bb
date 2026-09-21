@@ -108,6 +108,7 @@ interface RegisterTestHostRpcCaptureArgs {
   onInspectGitSource?: (
     command: Extract<HostDaemonRpcCommand, { type: "host.inspect_git_source" }>,
   ) => void;
+  pathsExistResult?: HostDaemonOnlineRpcResult<"host.paths_exist">;
 }
 
 export interface TestHostRpcSocket {
@@ -474,6 +475,27 @@ export function registerTestHostRpcCapture(
             result:
               args.gitSourceInspectionResult ??
               buildDefaultGitSourceInspectionResult(),
+          }),
+          sessionId: args.sessionId,
+        });
+        return;
+      }
+      if (
+        command.type === "host.paths_exist" &&
+        args.pathsExistResult !== undefined
+      ) {
+        deps.hub.recordHostOnlineRpcResponse({
+          message: hostDaemonOnlineRpcResponseMessageSchema.parse({
+            type: "host-rpc.response",
+            requestId: message.requestId,
+            commandType: command.type,
+            ok: true,
+            result:
+              args.pathsExistResult ?? {
+                existence: Object.fromEntries(
+                  command.paths.map((path) => [path, true]),
+                ),
+              },
           }),
           sessionId: args.sessionId,
         });
