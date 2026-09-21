@@ -32,7 +32,7 @@ import { setServerMoveFrozen } from "../../src/services/server-move/freeze-state
 const BASE_NOW = 1_800_000_000_000;
 const HOUR = 60 * 60_000;
 const PASS_FINISHED = "Provider model catalog prewarm pass finished";
-const ALWAYS_VISIBLE_PROVIDER_IDS = [
+const PREWARMED_PROVIDER_IDS = [
   "acp-cursor",
   "claude-code",
   "codex",
@@ -102,7 +102,10 @@ function registerResponder(
       switch (command.type) {
         case "provider.health":
           return (
-            args.health?.(command, args.hostId) ?? healthAnswer("not_installed")
+            args.health?.(command, args.hostId) ??
+            healthAnswer(
+              command.providerId === "acp-cursor" ? "ready" : "not_installed",
+            )
           );
         case "provider.list_models":
           return (
@@ -219,13 +222,16 @@ describe("provider model catalog prewarm", () => {
           ...host,
           health: (command) =>
             healthAnswer(
-              command.providerId === "acp-opencode" ? "ready" : "not_installed",
+              command.providerId === "acp-opencode" ||
+              command.providerId === "acp-cursor"
+                ? "ready"
+                : "not_installed",
             ),
         });
         await waitForPasses(logLines, 1);
 
         expect(responder.listedProviderIds()).toEqual(
-          [...ALWAYS_VISIBLE_PROVIDER_IDS, "acp-opencode"].sort(),
+          [...PREWARMED_PROVIDER_IDS, "acp-opencode"].sort(),
         );
         expect(
           responder.listRequests().filter((command) => "cwd" in command),
@@ -320,21 +326,21 @@ describe("provider model catalog prewarm", () => {
 
       await withPrewarm(harness, async () => {
         const singleResponder = connect(single!);
-        await releaseHeldOneByOne(hold, ALWAYS_VISIBLE_PROVIDER_IDS.length);
+        await releaseHeldOneByOne(hold, PREWARMED_PROVIDER_IDS.length);
         await waitForPasses(logLines, 1);
         expect(hold.maxOutstanding()).toBe(2);
 
         const responders = others.map(connect);
         await releaseHeldOneByOne(
           hold,
-          responders.length * ALWAYS_VISIBLE_PROVIDER_IDS.length,
+          responders.length * PREWARMED_PROVIDER_IDS.length,
         );
         await waitForPasses(logLines, 4);
 
         expect(hold.maxOutstanding()).toBe(4);
         for (const responder of [singleResponder, ...responders]) {
           expect(responder.listedProviderIds()).toEqual(
-            ALWAYS_VISIBLE_PROVIDER_IDS,
+            PREWARMED_PROVIDER_IDS,
           );
           expect(hold.maxOutstandingForHost(responder.hostId)).toBe(2);
         }
@@ -372,7 +378,7 @@ describe("provider model catalog prewarm", () => {
           sessionId: openDaemonSession(harness, host.hostId),
         });
         await waitForPasses(logLines, 2);
-        expect(next.listedProviderIds()).toEqual(ALWAYS_VISIBLE_PROVIDER_IDS);
+        expect(next.listedProviderIds()).toEqual(PREWARMED_PROVIDER_IDS);
       });
     });
   });
@@ -403,7 +409,7 @@ describe("provider model catalog prewarm", () => {
         await waitForPasses(logLines, 2);
 
         expect(first.listRequests()).toHaveLength(2);
-        expect(second.listedProviderIds()).toEqual(ALWAYS_VISIBLE_PROVIDER_IDS);
+        expect(second.listedProviderIds()).toEqual(PREWARMED_PROVIDER_IDS);
       });
     });
   });
@@ -455,7 +461,7 @@ describe("provider model catalog prewarm", () => {
           expect(responder.commands).toEqual([]);
         }
         expect(resumed.listedProviderIds()).toEqual(
-          ALWAYS_VISIBLE_PROVIDER_IDS,
+          PREWARMED_PROVIDER_IDS,
         );
         expect(logLines(PASS_FINISHED).map(({ hostId }) => hostId)).toEqual([
           resumed.hostId,
@@ -468,7 +474,7 @@ describe("provider model catalog prewarm", () => {
         harness.hub.notifyHost(creating.hostId, ["host-connected"]);
         await waitForPasses(logLines, 2);
         expect(creating.listedProviderIds()).toEqual(
-          ALWAYS_VISIBLE_PROVIDER_IDS,
+          PREWARMED_PROVIDER_IDS,
         );
       });
     });
@@ -495,7 +501,7 @@ describe("provider model catalog prewarm", () => {
         registry.markRegistrationsSettled();
         await waitForPasses(logLines, 1);
         expect(responder.listedProviderIds()).toEqual(
-          ALWAYS_VISIBLE_PROVIDER_IDS,
+          PREWARMED_PROVIDER_IDS,
         );
       });
     });
@@ -517,13 +523,13 @@ describe("provider model catalog prewarm", () => {
         });
         harness.hub.notifyHost(responder.hostId, ["host-connected"]);
         harness.hub.notifyHost(responder.hostId, ["host-connected"]);
-        await releaseHeldOneByOne(hold, ALWAYS_VISIBLE_PROVIDER_IDS.length);
+        await releaseHeldOneByOne(hold, PREWARMED_PROVIDER_IDS.length);
         await waitForPasses(logLines, 2);
         await settleTimers();
 
         expect(logLines(PASS_FINISHED)).toHaveLength(2);
         expect(responder.listRequests()).toHaveLength(
-          ALWAYS_VISIBLE_PROVIDER_IDS.length,
+          PREWARMED_PROVIDER_IDS.length,
         );
       });
     });
@@ -576,7 +582,7 @@ describe("provider model catalog prewarm", () => {
           harness.hub.notifyHost(host.hostId, ["host-connected"]);
           await waitForPasses(logLines, 1);
           expect(responder.listedProviderIds()).toEqual(
-            [...ALWAYS_VISIBLE_PROVIDER_IDS].sort(),
+            [...PREWARMED_PROVIDER_IDS].sort(),
           );
         });
       } finally {
