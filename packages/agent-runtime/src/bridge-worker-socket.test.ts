@@ -419,12 +419,17 @@ describe("socket bridge workers", () => {
   }, 20_000);
 
   it("keeps output the server has not accepted when it reconnects after a dropped socket", async () => {
-    const { registered } = await startStreamingTurn({ settle: false });
+    const { events, registered } = await startStreamingTurn({ settle: false });
     try {
       const unaccepted = await firstFrameReplayedAfterResume(
         registered.socketPath,
         0,
       );
+      await waitForRuntimeState({
+        label: "streamed output after the reconnect",
+        predicate: () => JSON.stringify(events).includes("chunk2"),
+        timeoutMs: 10_000,
+      });
       const afterReconnect = await firstFrameReplayedAfterResume(
         registered.socketPath,
         0,
@@ -433,7 +438,7 @@ describe("socket bridge workers", () => {
     } finally {
       retire(registered);
     }
-  }, 20_000);
+  }, 30_000);
 
   it("keeps only an unanswered request for replay, not the output other threads produced after it", async () => {
     let requested = false;
@@ -841,14 +846,28 @@ async function firstFrameReplayedAfterResume(
   afterWseq: number,
 ): Promise<{ wseq: number; line: string }> {
   const socket = connect(socketPath);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   const frame = new Promise<{ wseq: number; line: string }>(
     (resolve, reject) => {
-      socket.once("error", reject);
+      timeout = setTimeout(() => {
+        reject(
+          new Error(
+            `timed out waiting for bridge replay frame after wseq ${afterWseq}`,
+          ),
+        );
+      }, 10_000);
+      socket.once("error", (error) => {
+        if (timeout !== undefined) clearTimeout(timeout);
+        reject(error);
+      });
       readBoundedLines({
         input: socket,
         onLine: (raw) => {
           const decoded = decodeBridgeFrame(raw);
-          if (decoded !== null) resolve(decoded);
+          if (decoded !== null) {
+            clearTimeout(timeout);
+            resolve(decoded);
+          }
         },
         onOverflow: () => undefined,
       });
@@ -860,6 +879,7 @@ async function firstFrameReplayedAfterResume(
   try {
     return await frame;
   } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
     socket.destroy();
   }
 }
