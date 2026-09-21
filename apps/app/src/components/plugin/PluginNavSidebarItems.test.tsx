@@ -885,7 +885,7 @@ describe("PluginNavSidebarItems", () => {
 
     expect(onCompactCustomizeModeChange).toHaveBeenCalledWith(true);
     expect(
-      screen.getByTestId("sidebar-navigation-customize-inline"),
+      await screen.findByTestId("sidebar-navigation-customize-inline"),
     ).not.toBeNull();
     expect(
       screen
@@ -948,7 +948,7 @@ describe("PluginNavSidebarItems", () => {
     );
 
     expect(
-      screen.getByTestId("sidebar-navigation-customize-inline"),
+      await screen.findByTestId("sidebar-navigation-customize-inline"),
     ).not.toBeNull();
     expect(store.get(pluginNavVisiblePanelKeysAtom)).toEqual([]);
 
@@ -981,7 +981,7 @@ describe("PluginNavSidebarItems", () => {
         .getAttribute("data-sidebar-navigation-customize-mode"),
     ).toBe("true");
     expect(
-      screen.getByTestId("sidebar-navigation-customize-inline"),
+      await screen.findByTestId("sidebar-navigation-customize-inline"),
     ).not.toBeNull();
     expect(screen.queryByTestId("sidebar-navigation-more-row")).toBeNull();
     expect(
@@ -1013,7 +1013,7 @@ describe("PluginNavSidebarItems", () => {
       screen.getByRole("button", { name: "New thread" }),
     );
     fireEvent.keyDown(
-      screen.getByTestId("sidebar-navigation-customize-inline"),
+      await screen.findByTestId("sidebar-navigation-customize-inline"),
       { key: "Escape" },
     );
 
