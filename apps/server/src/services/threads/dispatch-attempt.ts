@@ -310,213 +310,230 @@ async function runDispatchAttempt(
     return { kind: "queued", entry };
   };
 
-  const sendAt = payload.sendAt ?? null;
-  if (!sendNow && sendAt !== null && sendAt > Date.now()) {
-    return waitOn({ kind: "time" }, sendAt);
-  }
+  const admitted: { value: PendingThreadAdmission | null } = {
+    value: null,
+  };
+  const continued: {
+    outcome: DispatchAttemptOutcome | null;
+    reattemptThread: Thread | null;
+  } = {
+    outcome: null,
+    reattemptThread: null,
+  };
 
-  if (thread.status === "stopping") {
-    return waitOn({ kind: "stopping" }, null);
-  }
+  const continueThroughCoreWaits = async (): Promise<void> => {
+    const sendAt = payload.sendAt ?? null;
+    if (!sendNow && sendAt !== null && sendAt > Date.now()) {
+      continued.outcome = waitOn({ kind: "time" }, sendAt);
+      return;
+    }
 
-  const { environment: dispatchEnvironment, host: dispatchHost } =
-    dispatchEnvironmentAndHost(deps, thread.environmentId);
-  if (
-    dispatchHost !== null &&
-    isMachineWaitingForExecution(deps, dispatchHost.id)
-  ) {
-    cancelPreparingMachinePause(deps, dispatchHost.id);
-    const outcome = waitOn(
-      { kind: "host-offline", hostName: dispatchHost.name },
-      null,
-    );
-    requestQueuedMachineReadiness(deps, dispatchHost.id);
-    return outcome;
-  }
+    if (thread.status === "stopping") {
+      continued.outcome = waitOn({ kind: "stopping" }, null);
+      return;
+    }
 
-  if (thread.status === "active" && attempt === "start-turn") {
-    if (payload.mode === "start") {
-      throwThreadNotWritable(
-        thread,
-        "already_active",
-        "Thread is already active",
+    const { environment: dispatchEnvironment, host: dispatchHost } =
+      dispatchEnvironmentAndHost(deps, thread.environmentId);
+    if (
+      dispatchHost !== null &&
+      isMachineWaitingForExecution(deps, dispatchHost.id)
+    ) {
+      cancelPreparingMachinePause(deps, dispatchHost.id);
+      continued.outcome = waitOn(
+        { kind: "host-offline", hostName: dispatchHost.name },
+        null,
       );
+      requestQueuedMachineReadiness(deps, dispatchHost.id);
+      return;
     }
-    return waitOn({ kind: "thread-busy" }, null);
-  }
 
-  if (
-    dispatchEnvironment !== null &&
-    goneThreadEnvironmentDetails(dispatchEnvironment) === null &&
-    dispatchHost?.status === "disconnected"
-  ) {
-    return waitOn({ kind: "host-offline", hostName: dispatchHost.name }, null);
-  }
-
-  if (payload.mode !== "start" && isManualCompactionActive(deps, thread)) {
-    return waitOn({ kind: "thread-busy" }, null);
-  }
-  const currentThread = getThread(deps.db, thread.id);
-  if (currentThread === null) {
-    throw new ApiError(404, "thread_not_found", "Thread not found");
-  }
-  if (
-    currentThread.status !== thread.status ||
-    currentThread.archivedAt !== thread.archivedAt ||
-    currentThread.deletedAt !== thread.deletedAt
-  ) {
-    return reattemptDispatchForThreadChange(
-      deps,
-      args,
-      currentThread,
-      reattempted,
-    );
-  }
-  if (
-    currentThread.status === "active" &&
-    resolveDispatchAttemptKind(currentThread, payload.mode) === "join-turn" &&
-    getActiveTurnId(deps, thread.id) === null
-  ) {
-    const outcome = queueInputForStartingTurn(deps, {
-      claimed,
-      input: queuedMessage,
-      threadId: thread.id,
-    });
-    if (outcome.kind === "queued" || outcome.kind === "dispatched") {
-      return outcome;
-    }
-    if (outcome.kind === "retry") {
-      return reattemptDispatchForThreadChange(
-        deps,
-        args,
-        outcome.thread,
-        reattempted,
-      );
-    }
-  }
-  if (!firstDispatch && isPreStartThreadStatus(thread.status)) {
-    return waitOn({ kind: "provisioning" }, null);
-  }
-  if (
-    payload.mode !== "start" &&
-    deps.pendingInteractions.hasTurnBoundPendingThreadInteraction(thread.id)
-  ) {
-    return waitOn({ kind: "interaction" }, null);
-  }
-
-  const workspaceClaim = claimWorkspaceForTurn(deps, {
-    environment: dispatchEnvironment,
-    threadId: thread.id,
-  });
-  const activeWorkspaceNeighbourId =
-    dispatchEnvironment === null
-      ? null
-      : (listSharedWorkspaceActiveThreadIds(deps.db, dispatchEnvironment).find(
-          (threadId) => threadId !== thread.id,
-        ) ?? null);
-  const workspaceOwnerThreadId = workspaceClaim.acquired
-    ? activeWorkspaceNeighbourId
-    : workspaceClaim.holderThreadId;
-  if (workspaceOwnerThreadId !== null) {
-    const instruction: PromptInput = {
-      type: "text",
-      text: `${SHARED_WORKSPACE_ISOLATION_INSTRUCTION} The current shared-workspace owner is ${workspaceOwnerThreadId}.`,
-      mentions: [],
-      visibility: "agent-only",
-    };
-    const input = resolvedPayload.input.some(
-      (item) =>
-        item.type === "text" &&
-        item.visibility === "agent-only" &&
-        item.text.includes(SHARED_WORKSPACE_ISOLATION_INSTRUCTION),
-    )
-      ? resolvedPayload.input
-      : [instruction, ...resolvedPayload.input];
-    resolvedPayload = {
-      ...resolvedPayload,
-      input,
-    };
-    queuedMessage.input = resolvedPayload.input;
-  }
-
-  try {
-    const admitted: { ran: boolean; value: PendingThreadAdmission | null } = {
-      ran: false,
-      value: null,
-    };
-
-    if (!sendNow && hasMessageDispatchHooks()) {
-      const outcome = await runMessageDispatchHookPass(deps, {
-        thread,
-        threadResponse: toThreadResponseFromThread(deps, { thread }),
-        project: requirePublicProject(deps.db, thread.projectId),
-        environmentId: thread.environmentId,
-        intendedHostId:
-          thread.environmentId !== null
-            ? null
-            : intendedThreadHostId(deps, thread.id),
-        environmentIntent: intendedThreadEnvironmentIntent(deps, thread),
-        input: resolvedPayload.input,
-        requestedExecution: {
-          providerId: thread.providerId,
-          model: execution.model,
-          reasoningLevel: execution.reasoningLevel,
-          serviceTier: execution.serviceTier,
-          permissionMode: execution.permissionMode,
-        },
-        executionSources: dispatchExecutionSources(
-          payload.executionInputSources ?? {},
-        ),
-        attempt,
-        initiator: author.initiator,
-        senderThreadId: author.senderThreadId,
-        origin: args.origin,
-        originPluginId: args.originPluginId,
-        startedOnBehalfOf: args.startedOnBehalfOf,
-        parentThreadId: thread.parentThreadId,
-        queuedMessages: claimed?.map(toThreadQueuedMessage) ?? [],
-        pluginSubmission: args.pluginSubmission,
-        ...(firstDispatch
-          ? {
-              commitAdmission: async () => {
-                admitted.ran = true;
-                admitted.value = await admitPendingThread(deps, {
-                  claimed,
-                  payload: resolvedPayload,
-                  respectManualStopPause,
-                  startContext: args.startContext ?? retryStartContext,
-                  thread,
-                });
-              },
-            }
-          : {}),
-      });
-      if (outcome.kind === "wait") {
-        releaseWorkspaceForThread(deps, thread);
-        if (claimed !== null) {
-          noteDispatchRequeued(thread.id);
-        }
-        return waitOn(
-          {
-            kind: "plugin",
-            pluginId: outcome.waiter.pluginId,
-            reason: dispatchWaitReasonForPass(outcome),
-          },
-          outcome.waiter.sendAt,
+    if (thread.status === "active" && attempt === "start-turn") {
+      if (payload.mode === "start") {
+        throwThreadNotWritable(
+          thread,
+          "already_active",
+          "Thread is already active",
         );
       }
+      continued.outcome = waitOn({ kind: "thread-busy" }, null);
+      return;
+    }
+
+    if (
+      dispatchEnvironment !== null &&
+      goneThreadEnvironmentDetails(dispatchEnvironment) === null &&
+      dispatchHost?.status === "disconnected"
+    ) {
+      continued.outcome = waitOn(
+        { kind: "host-offline", hostName: dispatchHost.name },
+        null,
+      );
+      return;
+    }
+
+    if (payload.mode !== "start" && isManualCompactionActive(deps, thread)) {
+      continued.outcome = waitOn({ kind: "thread-busy" }, null);
+      return;
+    }
+    const currentThread = getThread(deps.db, thread.id);
+    if (currentThread === null) {
+      throw new ApiError(404, "thread_not_found", "Thread not found");
+    }
+    if (
+      currentThread.status !== thread.status ||
+      currentThread.archivedAt !== thread.archivedAt ||
+      currentThread.deletedAt !== thread.deletedAt
+    ) {
+      continued.reattemptThread = currentThread;
+      return;
+    }
+    if (
+      currentThread.status === "active" &&
+      resolveDispatchAttemptKind(currentThread, payload.mode) === "join-turn" &&
+      getActiveTurnId(deps, thread.id) === null
+    ) {
+      const outcome = queueInputForStartingTurn(deps, {
+        claimed,
+        input: queuedMessage,
+        threadId: thread.id,
+      });
+      if (outcome.kind === "queued" || outcome.kind === "dispatched") {
+        continued.outcome = outcome;
+        return;
+      }
+      if (outcome.kind === "retry") {
+        continued.reattemptThread = outcome.thread;
+        return;
+      }
+    }
+    if (!firstDispatch && isPreStartThreadStatus(thread.status)) {
+      continued.outcome = waitOn({ kind: "provisioning" }, null);
+      return;
+    }
+    if (
+      payload.mode !== "start" &&
+      deps.pendingInteractions.hasTurnBoundPendingThreadInteraction(thread.id)
+    ) {
+      continued.outcome = waitOn({ kind: "interaction" }, null);
+      return;
+    }
+
+    const workspaceClaim = claimWorkspaceForTurn(deps, {
+      environment: dispatchEnvironment,
+      threadId: thread.id,
+    });
+    const activeWorkspaceNeighbourId =
+      dispatchEnvironment === null
+        ? null
+        : (listSharedWorkspaceActiveThreadIds(
+            deps.db,
+            dispatchEnvironment,
+          ).find((threadId) => threadId !== thread.id) ?? null);
+    const workspaceOwnerThreadId = workspaceClaim.acquired
+      ? activeWorkspaceNeighbourId
+      : workspaceClaim.holderThreadId;
+    if (workspaceOwnerThreadId !== null) {
+      const instruction: PromptInput = {
+        type: "text",
+        text: `${SHARED_WORKSPACE_ISOLATION_INSTRUCTION} The current shared-workspace owner is ${workspaceOwnerThreadId}.`,
+        mentions: [],
+        visibility: "agent-only",
+      };
+      const input = resolvedPayload.input.some(
+        (item) =>
+          item.type === "text" &&
+          item.visibility === "agent-only" &&
+          item.text.includes(SHARED_WORKSPACE_ISOLATION_INSTRUCTION),
+      )
+        ? resolvedPayload.input
+        : [instruction, ...resolvedPayload.input];
+      resolvedPayload = {
+        ...resolvedPayload,
+        input,
+      };
+      queuedMessage.input = resolvedPayload.input;
     }
 
     if (firstDispatch) {
-      const admission = admitted.ran
-        ? admitted.value
-        : await admitPendingThread(deps, {
-            claimed,
-            payload: resolvedPayload,
-            respectManualStopPause,
-            startContext: args.startContext ?? retryStartContext,
-            thread,
-          });
+      admitted.value = await admitPendingThread(deps, {
+        claimed,
+        payload: resolvedPayload,
+        respectManualStopPause,
+        startContext: args.startContext ?? retryStartContext,
+        thread,
+      });
+      if (admitted.value === null) {
+        continued.reattemptThread = getThread(deps.db, thread.id);
+      }
+    }
+  };
+
+  if (!sendNow && hasMessageDispatchHooks()) {
+    const outcome = await runMessageDispatchHookPass(deps, {
+      thread,
+      threadResponse: toThreadResponseFromThread(deps, { thread }),
+      project: requirePublicProject(deps.db, thread.projectId),
+      environmentId: thread.environmentId,
+      intendedHostId:
+        thread.environmentId !== null
+          ? null
+          : intendedThreadHostId(deps, thread.id),
+      environmentIntent: intendedThreadEnvironmentIntent(deps, thread),
+      input: resolvedPayload.input,
+      requestedExecution: {
+        providerId: thread.providerId,
+        model: execution.model,
+        reasoningLevel: execution.reasoningLevel,
+        serviceTier: execution.serviceTier,
+        permissionMode: execution.permissionMode,
+      },
+      executionSources: dispatchExecutionSources(
+        payload.executionInputSources ?? {},
+      ),
+      attempt,
+      initiator: author.initiator,
+      senderThreadId: author.senderThreadId,
+      origin: args.origin,
+      originPluginId: args.originPluginId,
+      startedOnBehalfOf: args.startedOnBehalfOf,
+      parentThreadId: thread.parentThreadId,
+      queuedMessages: claimed?.map(toThreadQueuedMessage) ?? [],
+      pluginSubmission: args.pluginSubmission,
+      continueAfterHooks: continueThroughCoreWaits,
+    });
+    if (outcome.kind === "wait") {
+      if (claimed !== null) {
+        noteDispatchRequeued(thread.id);
+      }
+      return waitOn(
+        {
+          kind: "plugin",
+          pluginId: outcome.waiter.pluginId,
+          reason: dispatchWaitReasonForPass(outcome),
+        },
+        outcome.waiter.sendAt,
+      );
+    }
+  } else {
+    await continueThroughCoreWaits();
+  }
+
+  if (continued.outcome !== null) {
+    return continued.outcome;
+  }
+  if (continued.reattemptThread !== null) {
+    return reattemptDispatchForThreadChange(
+      deps,
+      args,
+      continued.reattemptThread,
+      reattempted,
+    );
+  }
+
+  try {
+    if (firstDispatch) {
+      const admission = admitted.value;
       if (admission === null) {
         const current = getThread(deps.db, thread.id);
         return reattemptDispatchForThreadChange(
@@ -537,15 +554,18 @@ async function runDispatchAttempt(
       thread,
       trigger: args.trigger,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-      ...(claimed === null
-        ? {}
-        : {
-            beforeAppendInTransaction: consumeClaimedRows(
-              claimed,
-              thread.id,
-              respectManualStopPause,
-            ),
-          }),
+      beforeAppendInTransaction: ({ tx }) => {
+        if (getThread(tx, thread.id)?.status !== thread.status) {
+          throw new DispatchThreadStatusChangedError();
+        }
+        if (claimed !== null) {
+          consumeClaimedRows(
+            claimed,
+            thread.id,
+            respectManualStopPause,
+          )({ tx });
+        }
+      },
     });
     if (claimed !== null) {
       settleQueueRowDispatched({ row: claimed[0]! });
@@ -553,9 +573,19 @@ async function runDispatchAttempt(
     return { kind: "dispatched", refusal: sent.refusal };
   } catch (error) {
     releaseWorkspaceForThread(deps, thread);
+    if (error instanceof DispatchThreadStatusChangedError) {
+      return reattemptDispatchForThreadChange(
+        deps,
+        args,
+        getThread(deps.db, thread.id),
+        reattempted,
+      );
+    }
     throw error;
   }
 }
+
+class DispatchThreadStatusChangedError extends Error {}
 
 function reattemptDispatchForThreadChange(
   deps: LoggedPendingInteractionWorkSessionDeps,

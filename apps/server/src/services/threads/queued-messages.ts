@@ -62,8 +62,8 @@ import {
 import { appendClientTurnEventInTransaction } from "./thread-events.js";
 import {
   getActiveTurnId,
-  getLastProviderThreadId,
   isManualCompactionActive,
+  requireDispatchableProviderThreadId,
 } from "./thread-events.js";
 import { recoverThreadModelOverride } from "./thread-execution-override.js";
 import { requireReadyThreadEnvironment } from "./thread-turn-dispatch.js";
@@ -455,7 +455,7 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   if (thread.status !== "idle") {
     return null;
   }
-  const providerThreadId = getLastProviderThreadId(deps, thread.id);
+  const providerThreadId = requireDispatchableProviderThreadId(deps, thread.id);
   if (!providerThreadId) {
     return null;
   }
