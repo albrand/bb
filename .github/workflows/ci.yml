@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - ours
   pull_request:
   workflow_dispatch:
 
@@ -13,11 +14,11 @@ env:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # Superseded pull request pushes are wasted work, but superseded main pushes
+  # Superseded pull request pushes are wasted work, but superseded main/ours pushes
   # are not: a cancelled run never reaches its post step, so it never saves a
   # Turbo cache. Cancelling them let a burst of merges leave every pull request
   # restoring from a main commit well behind HEAD.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/ours' }}
 
 jobs:
   checks:
