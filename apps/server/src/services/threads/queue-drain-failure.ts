@@ -11,6 +11,7 @@ import {
   QUEUED_MESSAGE_FAILURE_REASON_MAX_LENGTH,
   type Thread,
 } from "@bb/domain";
+import { sliceUtf16Head } from "@bb/text-utils";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { dispatchEnvironmentAndHost } from "./dispatch-hooks.js";
@@ -29,6 +30,18 @@ export function queuedMessageRetryDelayMs(attempt: number): number {
   );
 }
 
+export const QUEUED_MESSAGE_RETRY_DELAYS_MS: readonly number[] = Array.from(
+  { length: QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS - 1 },
+  (_, index) => queuedMessageRetryDelayMs(index + 1),
+);
+
+/**
+ * What a failed dispatch says to the person whose message did not go.
+ *
+ * `ApiError` messages are already written for a caller, so they pass through.
+ * Anything else is an internal fault whose message was written for a log, so
+ * the row gets a sentence that is true without pretending to diagnose.
+ */
 export function describeDispatchFailure(error: unknown): string {
   const message =
     error instanceof ApiError
@@ -36,7 +49,7 @@ export function describeDispatchFailure(error: unknown): string {
       : "The message could not be sent.";
   return message.length <= QUEUED_MESSAGE_FAILURE_REASON_MAX_LENGTH
     ? message
-    : `${message.slice(0, QUEUED_MESSAGE_FAILURE_REASON_MAX_LENGTH - 1)}…`;
+    : `${sliceUtf16Head(message, QUEUED_MESSAGE_FAILURE_REASON_MAX_LENGTH - 1)}…`;
 }
 
 const TERMINAL_DISPATCH_FAILURE_CODES = new Set([
@@ -67,10 +80,30 @@ function isTerminalDispatchFailure(
   );
 }
 
+/**
+ * Settles a DRAIN attempt that neither dispatched nor queued.
+ *
+ * Two outcomes, and which one applies is decided by asking the world rather
+ * than by pattern-matching the error: if the thread's host has no live daemon
+ * session *right now*, the attempt did not fail so much as arrive at a machine
+ * that is not there, and the row re-queues on a `host-offline` wait that the
+ * host-reconnect drain clears when the machine comes back. Any other failure
+ * is recorded as the row's failure reason, leaving its existing wait alone —
+ * the row is still waiting on whatever it was waiting on, and what went wrong
+ * last time is a different fact from what it is waiting for — and spends one
+ * of the row's attempts, booking the next on
+ * {@link QUEUED_MESSAGE_RETRY_DELAYS_MS}. The row gives up only once that
+ * budget runs out.
+ *
+ * Only the drain calls this. An inline attempt has a caller still listening
+ * and surfaces its error to them instead, which is why a queued row never
+ * shows a failure the sender was already told about to their face.
+ */
 export function recordQueuedMessageDrainFailure(
   deps: QueueDrainFailureDeps,
   args: {
     error: unknown;
+    now: number;
     row: { id: string; threadId: string };
     thread: Thread;
   },
@@ -83,7 +116,6 @@ export function recordQueuedMessageDrainFailure(
       waitingOn: { kind: "host-offline", hostName: host.name },
       sendAt: null,
     });
-    clearQueuedMessageDispatchRetry(deps.db, args.row.id);
     return;
   }
 
@@ -95,18 +127,19 @@ export function recordQueuedMessageDrainFailure(
       recordQueuedMessageDispatchRetry(deps.db, {
         attempt,
         lastError: failureReason,
-        nextAttemptAt: Date.now() + queuedMessageRetryDelayMs(attempt),
+        nextAttemptAt: args.now + queuedMessageRetryDelayMs(attempt),
         queuedMessageId: args.row.id,
         threadId: args.row.threadId,
       });
       return;
     }
   }
-
   setQueuedThreadMessageFailureReason(deps.db, deps.hub, {
     id: args.row.id,
     threadId: args.row.threadId,
     failureReason,
+    now: args.now,
+    retryDelaysMs: [],
   });
   clearQueuedMessageDispatchRetry(deps.db, args.row.id);
 }

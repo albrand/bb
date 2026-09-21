@@ -585,10 +585,13 @@ runs. When both files exist, `<dataDir>/AGENTS.md` is appended first and
 `<workspace>/.bb/AGENTS.md` second. An empty or whitespace-only file is treated
 as absent.
 
-No agent loads `.bb/AGENTS.md` natively, and provider-native instruction files
-(`CLAUDE.md` for Claude Code, a repo-root `AGENTS.md` for Codex) remain
-provider-specific. bb reads the files above itself and injects them, so use them
-for guidance you want every bb thread to receive regardless of provider.
+No agent loads `.bb/AGENTS.md` natively. Provider-native instruction files
+remain separate. Codex reads a repo-root `AGENTS.md`. Claude Code 2.1.277 and
+later also reads `AGENTS.md` when no project or ancestor `CLAUDE.md` or
+`CLAUDE.local.md` takes precedence. Older Claude Code versions and sessions
+without its built-in `AGENTS.md` support still require `CLAUDE.md`. bb reads
+the files above itself and injects them, so use them for guidance you want every
+bb thread to receive regardless of provider.
 
 ## Skills
 
@@ -720,17 +723,34 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 | `sidebar.navigationProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
 | `sidebar.threadListProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
 
-Custom (`chronological`) is the default for `sidebar.organizationMode` when no
-value is saved. Existing server and legacy browser choices are preserved.
+New installations default to Custom (`chronological`) for `sidebar.organizationMode`.
+Migrated installations with existing projects, threads, or UI preferences fall back
+to By project (`project`). Explicit server choices take precedence over legacy
+browser choices, which take precedence over this installation fallback. Reset
+saves the installation fallback as an explicit choice.
+
+The built-in sidebar defaults to Active, including threads with saved messages.
+Filter selects Active and Archived and remembers the selection in this browser,
+not in the server-backed preferences or SDK/CLI. There is no separate
+Drafts section or filter; saved messages remain in their owning thread. The
+selected archived threads retain their section, project, machine, and pin placement.
+Choose Filter in a sidebar header's combined actions menu to change the selection.
+The combined menu offers Organize, Sort by, and Filter.
+Organize retains its Sections choices and Groups → By environment toggle.
+Desktop archived rows have a persistent Unarchive icon
+that restores the thread without navigating away.
+Archived loads pages only while selected.
+Plugin sidebar replacements own their rendering.
 
 `sidebar.threadGrouping.environment` decides whether two or more sibling threads
 that share one worktree environment collapse into a single worktree row inside
 their section. `true` groups them and `false` keeps every thread on its own row,
 in every organization mode. The default, `auto`, groups them in **By project**
 and **By machine** and leaves them flat in **Custom**, which is how each mode
-behaved before the preference existed. The thread-list header's Organize menu
-exposes it under Groups as the By environment toggle, which writes `true` or
-`false` and so applies to every mode once you use it.
+behaved before the preference existed. Set this preference through Organize →
+Groups → By environment, settings, or
+`bb settings ui set sidebar.threadGrouping.environment true`; an explicit
+`true` or `false` applies to every mode.
 
 Each `sidebar.threadGrouping.*` key toggles one grouping dimension
 independently, so a future dimension adds a key rather than changing this one.
@@ -1192,7 +1212,7 @@ retries structured provider overloads with exponential backoff and jitter.
 Prior output or tool activity does not block recovery. If the provider accepted
 the failed input, core sends an agent-only continuation; if it rejected the
 input before starting, core re-sends the original message as agent-only. Disable
-the plugin under Settings → Installed plugins or with
+the plugin under Plugins → Installed plugins or with
 `bb plugin disable provider-retry`.
 
 It never blocks a send. A remembered rate limit is a stale picture of the
@@ -1222,7 +1242,7 @@ nothing, because waiting does not fix them.
 ### Workflows plugin
 
 The builtin Workflows plugin is disabled on fresh installations. Enable it
-under Settings → Installed plugins or with `bb plugin enable workflows`. Its six
+under Plugins → Installed plugins or with `bb plugin enable workflows`. Its six
 settings are bounded integers, edited with numeric inputs under Plugins →
 Installed plugins or with `bb plugin config workflows set <key> <value>`:
 
@@ -1412,7 +1432,13 @@ For isolated development smoke tests only, `DEV_BROWSER_SMOKE_BINARY` selects th
 
 ## Agent guidance plugin settings
 
-BB guide is installed and enabled by default. In Settings → Installed plugins
+Settings → Plugins lists every installed plugin, including disabled plugins and
+plugins without configuration. Selecting a plugin always opens Details.
+Configure opens its configuration in place when available; Back to details
+returns to the same plugin. Existing direct configuration links still open
+Configuration.
+
+BB guide is installed and enabled by default. In Settings → Plugins
 → BB guide, `introduction` controls the BB introduction, `skills` controls all
 four bundled skills, and `bbCli`, `pluginAuthoring`, `skillCreator`, and `submitPlugin` control
 individual skills. All default to true. Disabling BB guide removes its

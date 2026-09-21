@@ -28,8 +28,11 @@ Workspace instructions (.bb/AGENTS.md):
   Only the plural AGENTS.md is read, only from the exact data-dir and
   workspace-root .bb/ locations above (bb does not walk parent directories), and
   an empty file is ignored. This is bb's own provider-agnostic instruction
-  injection, separate from provider-native files such as CLAUDE.md or a
-  repo-root AGENTS.md.
+  injection, separate from provider-native instruction files. Codex reads a
+  repo-root AGENTS.md. Claude Code 2.1.277 and later also reads AGENTS.md when
+  no project or ancestor CLAUDE.md or CLAUDE.local.md takes precedence. Older
+  Claude Code versions and sessions without its built-in AGENTS.md support
+  still require CLAUDE.md.
 
 Skills (.bb/skills/):
 
@@ -79,8 +82,8 @@ Skills (.bb/skills/):
 BB guide plugin:
 
   The enabled-by-default BB guide plugin owns the BB introduction and the
-  bb-cli, bb-plugin-authoring, skill-creator, and submit-a-plugin skills. Settings → Installed
-  plugins → BB guide exposes introduction, a master skills switch, and one
+  bb-cli, bb-plugin-authoring, skill-creator, and submit-a-plugin skills. Settings →
+  Plugins → BB guide exposes introduction, a master skills switch, and one
   switch per skill. All default to true. Use:
 
     bb plugin config bb-guide set introduction false
@@ -95,7 +98,7 @@ BB guide plugin:
 
 Connect agent instructions:
 
-  Settings → Installed plugins → Connect → Tell agents about remote access
+  Settings → Plugins → Connect → Tell agents about remote access
   controls the message telling remotely used agents to expose public server
   links. It defaults to true and still requires active/recent remote usage.
   Use `bb plugin config connect set sendRemoteInstructions false` to turn it

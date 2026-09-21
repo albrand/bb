@@ -241,6 +241,7 @@ describe("queued message dispatch retry", () => {
 
       recordQueuedMessageDrainFailure(harness.deps, {
         error: new Error("boom"),
+        now: Date.now(),
         row,
         thread,
       });

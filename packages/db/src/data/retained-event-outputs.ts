@@ -4,7 +4,7 @@ import {
   type ThreadEventItemType,
   type ThreadEventType,
 } from "@bb/domain";
-import { sliceUtf16HeadAndTail } from "@bb/domain/utf16";
+import { sliceUtf16HeadAndTail } from "@bb/text-utils";
 import type { DbQueryConnection } from "../connection.js";
 import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
@@ -465,9 +465,7 @@ function projectedHydratedDataBytes<TRow extends HydratableStoredEventRow>(
       return total + Buffer.byteLength(row.data);
     }
     return (
-      total +
-      hydratedEventDataBaseBytes(row, size.outputPath) +
-      size.valueBytes
+      total + hydratedEventDataBaseBytes(row, size.outputPath) + size.valueBytes
     );
   }, 0);
 }

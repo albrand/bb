@@ -1310,8 +1310,9 @@ describe("message.dispatch grouped authors", () => {
             kind: "automatic",
             isGroupEligible: createAutomaticQueuedMessageGroupEligibility(
               harness.deps,
-              { now: Date.now(), thread },
+              { now: Date.now(), retryingFailure: false, thread },
             ),
+            retryingFailure: false,
           },
         });
         expect(seen).toHaveLength(2);

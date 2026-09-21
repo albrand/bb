@@ -3,8 +3,6 @@ import { clearTimelineOrderingContextCache } from "../../services/threads/timeli
 import path from "node:path";
 import {
   getAppSettings,
-  listThreadImageMetadata,
-  saveThreadImageMetadata,
   getThreadPluginMetadata,
   patchThreadPluginMetadata,
   getLatestCompletedThreadContextClearSequence,
@@ -327,7 +325,7 @@ async function serveThreadWorktreeRawFile(
 }
 
 export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
-  const { get, patch, put } = typedRoutes<PublicApiSchema>(app, {
+  const { get, patch } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
@@ -351,12 +349,6 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     ThreadConversationOutlineResponse["items"]
   >();
   const CONVERSATION_OUTLINE_CACHE_MAX_ENTRIES = 128;
-
-  put(routes.saveImageMetadata, (context, payload) => {
-    const thread = requirePublicThread(deps.db, context.req.param("id"));
-    saveThreadImageMetadata(deps.db, { threadId: thread.id, ...payload });
-    return context.json({ ok: true as const });
-  });
 
   get(routes.pluginMetadata.get, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
@@ -495,10 +487,9 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       rows: full.rows,
     });
 
-    return context.json({
-      ...(delta === undefined ? full : { ...full, rows: [], delta }),
-      imageMetadata: listThreadImageMetadata(deps.db, thread.id),
-    });
+    return context.json(
+      delta === undefined ? full : { ...full, rows: [], delta },
+    );
   });
 
   get(routes.conversationOutline, (context) => {

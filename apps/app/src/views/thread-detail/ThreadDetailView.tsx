@@ -1216,6 +1216,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const createThreadInEnvironment = useCreateThreadInEnvironment({
     projectId,
     environmentId: thread?.environmentId ?? "",
+    sectionId: thread?.sectionId ?? null,
   });
   const { providers: registeredEnvironmentProviders } =
     useSystemEnvironmentProviders();

@@ -75,14 +75,14 @@ Server-backed General settings
 
 Settings → General includes app-wide preferences stored server-side so every
 window and restart sees the same value. Keep Awake is instead owned by its
-builtin plugin: use its autosaving page under Settings → Installed plugins or run
+builtin plugin: use its autosaving page under Settings → Plugins or run
 `bb keep-awake enable` or `bb keep-awake disable`. Choose every host with `bb
 keep-awake hosts all`, or name individual host ids after `bb keep-awake hosts`.
 On macOS it prevents system idle sleep while bb is running; closing the lid or
 choosing Sleep still sleeps the Mac.
 
 Concurrency limit is also owned by its builtin plugin. Its autosaving page
-under Settings → Installed plugins leaves the overall limit unlimited by default and
+under Settings → Plugins leaves the overall limit unlimited by default and
 uses an automatic per-host limit of one thread per available processor. Use
 `bb concurrency-limit global [unlimited|<limit>]` and `bb
 concurrency-limit host <host-id> [auto|<limit>]`; 0 pauses new work.
@@ -299,14 +299,25 @@ lists and `null`; it reads the current revision, writes with it, and retries
 once on a conflict. `reset` writes the default. The SDK offers
 `sdk.system.uiPreferences.list()`, `.set()`, and `.reset()`.
 
-Custom (`chronological`) is the default for `sidebar.organizationMode` when no
-value is saved. Existing server and legacy browser choices are preserved.
+New installations default to Custom (`chronological`) for `sidebar.organizationMode`.
+Migrated installations with existing projects, threads, or UI preferences fall back
+to By project (`project`). Explicit server choices take precedence over legacy
+browser choices, which take precedence over this installation fallback. Reset
+saves the installation fallback as an explicit choice.
+
+The built-in sidebar's Filter selects Active and Archived, defaulting to Active.
+The selection is browser-local, not a server-backed preference or SDK/CLI setting.
+Active includes threads with saved messages; there is no separate
+Drafts section or filter. Archived threads use their preserved placement and a
+restore action. Archived pages load only while selected.
+Plugin sidebar replacements own their filters.
 
 Every thread-list header's actions menu offers New project, New section,
-Organize, and Sort by. Organize selects By project, By machine, or Custom, and
-its By environment toggle decides whether sibling threads sharing one worktree
-collapse into a single worktree row inside their section, in every organization
-mode. `sidebar.threadGrouping.environment` defaults to `auto`, which groups them
+Organize, Sort by, and Filter. Organize selects By project,
+By machine, or Custom and retains Groups → By environment.
+The separate `sidebar.threadGrouping.environment` preference
+decides whether sibling threads sharing one worktree collapse into a single row.
+It defaults to `auto`, which groups them
 everywhere except Custom: `bb settings ui set sidebar.threadGrouping.environment
 false` keeps every thread on its own row, and `true` groups them in every mode.
 Sort by selects a field, and selecting it again reverses its arrow/direction.

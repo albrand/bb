@@ -322,7 +322,22 @@ describe("acpProviderDeclaration", () => {
     });
     expect(byId.get("acp-grok")?.experimental_bridgeOptions).toMatchObject({
       acpDialect: "grok",
+      reasoningProbePriorityModelIds: ["grok-4.6", "grok-4.5"],
+      acpLaunchSpec: {
+        command: "grok",
+        args: ["agent", "stdio"],
+        permissionCli: {
+          full: ["--always-approve"],
+          insertAfterArgs: 1,
+        },
+      },
     });
+    expect(
+      byId.get("acp-grok")?.experimental_bridgeOptions?.["acpLaunchSpec"],
+    ).not.toHaveProperty("modelCli");
+    expect(
+      byId.get("acp-grok")?.experimental_bridgeOptions?.["acpLaunchSpec"],
+    ).not.toHaveProperty("reasoningCli");
     expect(byId.get("acp-opencode")?.experimental_bridgeOptions).toMatchObject({
       acpDialect: "opencode",
     });
@@ -342,6 +357,8 @@ describe("acpProviderDeclaration", () => {
       "low",
       "medium",
       "high",
+      "xhigh",
+      "max",
     ]);
     expect(grok.experimental_visibility).toBe("installed");
 

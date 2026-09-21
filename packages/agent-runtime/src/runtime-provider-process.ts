@@ -82,6 +82,7 @@ interface RuntimeProviderProcessManagerArgs {
 
 interface EnsureRuntimeProviderArgs {
   bridgeLaunch: AgentRuntimeBridgeLaunch;
+  skillRoots?: readonly AgentRuntimeSkillRoot[];
   processKey: string;
   providerId: string;
 }
@@ -238,10 +239,11 @@ export class RuntimeProviderProcessManager {
           providerProcess.child.recordCapabilities(adapter.handshake);
         }
 
-        if (this.args.skillRoots.length > 0) {
+        const skillRoots = args.skillRoots ?? this.args.skillRoots;
+        if (skillRoots.length > 0) {
           const skillRootsCmd = adapter.buildCommandPlan({
             type: "skills/configure",
-            skillRoots: this.args.skillRoots,
+            skillRoots,
           });
           if (skillRootsCmd.kind === "request") {
             await sendJsonRpcRequest({

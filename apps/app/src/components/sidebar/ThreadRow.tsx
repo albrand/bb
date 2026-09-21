@@ -10,6 +10,7 @@ import {
   useRef,
 } from "react";
 import { useSetAtom } from "jotai";
+import { useIsMutating } from "@tanstack/react-query";
 import type { ThreadListEntry } from "@bb/domain";
 import type { PluginComposerThreadRowStatus } from "@get-bb/plugin-sdk";
 import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
@@ -155,12 +156,13 @@ const NEST_TARGET_STATE_CLASS: Record<SidebarNestTargetState, string> = {
   unchanged: "ring-1 ring-inset ring-sidebar-border",
 };
 
-const REORDER_PLACEMENT_CLASS: Record<SidebarReorderPlacement, string> = {
-  before:
-    "before:pointer-events-none before:absolute before:inset-x-1 before:-top-px before:h-0.5 before:rounded-full before:bg-sidebar-ring before:content-['']",
-  after:
-    "after:pointer-events-none after:absolute after:inset-x-1 after:-bottom-px after:h-0.5 after:rounded-full after:bg-sidebar-ring after:content-['']",
-};
+export const REORDER_PLACEMENT_CLASS: Record<SidebarReorderPlacement, string> =
+  {
+    before:
+      "before:pointer-events-none before:absolute before:inset-x-1 before:-top-px before:h-0.5 before:rounded-full before:bg-sidebar-ring before:content-['']",
+    after:
+      "after:pointer-events-none after:absolute after:inset-x-1 after:-bottom-px after:h-0.5 after:rounded-full after:bg-sidebar-ring after:content-['']",
+  };
 
 function getThreadRowStyle(depth: number): CSSProperties {
   return {
@@ -261,6 +263,34 @@ function ThreadTrailingIndicator({
       )}
     >
       <ThreadStatusGlyph {...statusProps} pluginStatus={pluginStatus} />
+    </span>
+  );
+}
+
+function ThreadRestoreStatusAction({ thread }: { thread: ThreadListEntry }) {
+  const pending = useIsMutating({
+    mutationKey: ["unarchive-thread"],
+    predicate: (mutation) => {
+      const variables = mutation.state.variables;
+      return (
+        typeof variables === "object" &&
+        variables !== null &&
+        "id" in variables &&
+        variables.id === thread.id
+      );
+    },
+  });
+  return (
+    <span
+      className="relative z-10 pointer-events-auto"
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <ThreadArchiveQuickAction
+        thread={thread}
+        disabled={pending > 0}
+        className={SIDEBAR_CONTROL_BUTTON_CLASS}
+      />
     </span>
   );
 }
@@ -412,9 +442,7 @@ function ThreadRowComponent({
   );
   const rowStyle = getThreadRowStyle(options.depth);
   const parentGuideLeft =
-    options.depth > 0
-      ? getSidebarThreadGroupLineLeft(options.depth - 1)
-      : null;
+    options.depth > 0 ? getSidebarThreadGroupLineLeft(options.depth - 1) : null;
   const isActionsOpen = isDropdownActionsOpen || isContextActionsOpen;
   const handleRowClickCapture = useCallback<ThreadRowClickCaptureHandler>(
     (event) => {
@@ -430,38 +458,6 @@ function ThreadRowComponent({
   const rowLinkRef = useRef<HTMLAnchorElement>(null);
   const rowContent = (
     <>
-      <NavLink
-        ref={rowLinkRef}
-        to={getThreadRoutePath({ projectId, threadId: thread.id })}
-        data-sidebar-thread-shortcut-target=""
-        data-sidebar-thread-id={thread.id}
-        data-sidebar-project-id={projectId}
-        data-sidebar-rename-anchor=""
-        onClick={(event) => {
-          if (isEditing) {
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          setConversationCollapsed(false);
-          if (splitAvailable && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            openInSplit();
-            return;
-          }
-          if (consumeSidebarTitleDoubleClick(thread.id)) {
-            event.preventDefault();
-            event.stopPropagation();
-            startEditing();
-            return;
-          }
-          onProjectSelect?.();
-        }}
-        onDoubleClick={isEditing ? undefined : startTitleEditing}
-        aria-label={linkLabel}
-        aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
-        className="absolute inset-0 rounded-md outline-none"
-      />
       {parentOptions?.stickyLevel !== undefined && parentGuideLeft !== null ? (
         <span
           aria-hidden="true"
@@ -481,8 +477,7 @@ function ThreadRowComponent({
                 parentGuideLeft === null
                   ? "relative"
                   : "absolute top-1/2 -translate-x-1/2 -translate-y-1/2",
-                !showActive &&
-                  "group-hover/thread-row:bg-sidebar-accent",
+                !showActive && "group-hover/thread-row:bg-sidebar-accent",
                 !showActive && isActionsOpen && "bg-sidebar-accent",
                 !showActive &&
                   splitIndicator.isOpenInSplit &&
@@ -508,7 +503,7 @@ function ThreadRowComponent({
       ) : null}
       <span
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-1.5",
+          "flex min-w-0 flex-1 items-center gap-1.5 self-stretch",
           !shortcut &&
             !isEditing &&
             (parentOptions && hasChildren
@@ -516,19 +511,58 @@ function ThreadRowComponent({
               : SIDEBAR_HOVER_ACTIONS_INSET_CLASS),
         )}
       >
-        {isEditing ? (
-          <span className="relative z-10 min-w-0 flex-1 overflow-visible">
-            {editor}
-          </span>
-        ) : (
-          <span
-            className="bb-thread-title"
-            title={labelTitle}
-            onDoubleClick={startTitleEditing}
-          >
-            <ThreadTitleMentions title={threadTitle} />
-          </span>
-        )}
+        <span
+          className={cn(
+            "relative flex min-w-0 items-center self-stretch",
+            (!parentOptions || !hasChildren || isEditing) && "flex-1",
+          )}
+        >
+          <NavLink
+            ref={rowLinkRef}
+            to={getThreadRoutePath({ projectId, threadId: thread.id })}
+            data-sidebar-thread-shortcut-target=""
+            data-sidebar-thread-id={thread.id}
+            data-sidebar-project-id={projectId}
+            data-sidebar-rename-anchor=""
+            onClick={(event) => {
+              if (isEditing) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
+              setConversationCollapsed(false);
+              if (splitAvailable && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                openInSplit();
+                return;
+              }
+              if (consumeSidebarTitleDoubleClick(thread.id)) {
+                event.preventDefault();
+                event.stopPropagation();
+                startEditing();
+                return;
+              }
+              onProjectSelect?.();
+            }}
+            onDoubleClick={isEditing ? undefined : startTitleEditing}
+            aria-label={linkLabel}
+            aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
+            className="absolute inset-0 rounded-md outline-none"
+          />
+          {isEditing ? (
+            <span className="relative z-10 min-w-0 flex-1 overflow-visible">
+              {editor}
+            </span>
+          ) : (
+            <span
+              className="bb-thread-title"
+              title={labelTitle}
+              onDoubleClick={startTitleEditing}
+            >
+              <ThreadTitleMentions title={threadTitle} />
+            </span>
+          )}
+        </span>
         {parentOptions && hasChildren ? (
           <SidebarChildToggleChevron
             disabled={isEditing}
@@ -547,7 +581,29 @@ function ThreadRowComponent({
           isEditing && "hidden",
         )}
       >
-        {shortcut ? (
+        {thread.archivedAt !== null ? (
+          <span className="relative flex items-center max-md:pointer-coarse:hidden">
+            <div
+              data-sidebar-hover-actions-open={
+                isActionsOpen ? "true" : undefined
+              }
+              className={cn(
+                SIDEBAR_HOVER_ACTIONS_CLASS,
+                "absolute right-full z-10 max-md:pointer-coarse:hidden",
+              )}
+            >
+              <ThreadActionsMenu
+                thread={thread}
+                triggerClassName={SIDEBAR_CONTROL_BUTTON_CLASS}
+                onOpenInSplit={splitAvailable ? openInSplit : undefined}
+                onOpenChange={setIsDropdownActionsOpen}
+                onRename={rename.startEditingFromMenu}
+                onCloseAutoFocus={rename.onCloseAutoFocus}
+              />
+            </div>
+            <ThreadRestoreStatusAction thread={thread} />
+          </span>
+        ) : shortcut ? (
           <AppCommandShortcutPill shortcut={shortcut} />
         ) : (
           <span

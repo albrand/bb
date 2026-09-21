@@ -1,8 +1,11 @@
 import {
   useCallback,
+  lazy,
+  Suspense,
   useState,
   type PointerEventHandler,
   type ReactNode,
+  type ComponentProps,
 } from "react";
 import { Button } from "@bb/shared-ui/button";
 import { Icon } from "@bb/shared-ui/icon";
@@ -314,5 +317,20 @@ export function SidebarOverflowItem({
         </div>
       </div>
     </div>
+  );
+}
+const LazySidebarVisibilityCustomize = lazy(() =>
+  import("./SidebarVisibilityCustomize").then(({ SidebarVisibilityCustomize }) => ({
+    default: SidebarVisibilityCustomize,
+  })),
+);
+
+export function SidebarVisibilityCustomize(
+  props: ComponentProps<typeof LazySidebarVisibilityCustomize>,
+) {
+  return (
+    <Suspense fallback={<span role="status">Loading…</span>}>
+      <LazySidebarVisibilityCustomize {...props} />
+    </Suspense>
   );
 }

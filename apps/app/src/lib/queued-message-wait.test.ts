@@ -233,6 +233,34 @@ describe("isQueuedMessageSendNowAllowed", () => {
       ).toBe(true);
     }
   });
+
+  it.each([
+    { waitingOn: null, allowed: true },
+    { waitingOn: { kind: "time" }, allowed: true },
+    {
+      waitingOn: { kind: "plugin", pluginId: "limiter", reason: "busy" },
+      allowed: true,
+    },
+    { waitingOn: { kind: "thread-busy" }, allowed: true },
+    { waitingOn: { kind: "stopping" }, allowed: false },
+    { waitingOn: { kind: "turn-starting" }, allowed: false },
+    { waitingOn: { kind: "provisioning" }, allowed: false },
+    { waitingOn: { kind: "interaction" }, allowed: false },
+    { waitingOn: { kind: "host-offline", hostName: "M4" }, allowed: false },
+  ] as const)(
+    "allows manual recovery for $waitingOn",
+    ({ waitingOn, allowed }) => {
+      expect(
+        isQueuedMessageSendNowAllowed({ waitingOn, failureReason: null }),
+      ).toBe(allowed);
+      expect(
+        isQueuedMessageSendNowAllowed({
+          waitingOn,
+          failureReason: "Provider unavailable",
+        }),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("formatQueuedMessageCountdown", () => {

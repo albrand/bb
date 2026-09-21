@@ -33,6 +33,10 @@ import {
 import { isTransientReadError } from "@/hooks/queries/query-helpers";
 import { stripProjectThreads } from "@/hooks/queries/project-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
+import {
+  SidebarThreadLifecycles,
+  useSidebarThreadLifecycles,
+} from "./SidebarThreadLifecycles";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useReorderPinnedThread } from "@/hooks/mutations/thread-state-mutations";
 import {
@@ -59,7 +63,7 @@ import {
   type ProjectThreadNode,
 } from "@bb/client-core";
 import { useSectionThreadDnd } from "./useSectionThreadDnd";
-import { useRenderedSectionThreadDnd } from "./useRenderedSectionThreadDnd";
+import { useNestDropPreview } from "./useNestDropPreview";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
 import { getThreadDisplayTitle } from "@/lib/thread-title";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
@@ -646,13 +650,10 @@ function useGroupedModeThreadDnd({
     pinnedRootNodes: pinned.pinnedRootNodes,
     onReorderPinnedThread: pinned.onReorderPinnedThread,
   });
-  return useRenderedSectionThreadDnd({
+  return useNestDropPreview({
     compareThreads,
     draftThreadIds,
-    groups: true,
     pinnedRootNodes: pinned.pinnedRootNodes,
-    pinnedThreads: pinned.pinnedThreads,
-    rootItems,
     sectionDnd: threadDnd,
     sections: EMPTY_SECTION_DEFINITIONS,
     threads,
@@ -1409,6 +1410,7 @@ export function MachineModeSections({
                   onToggleCollapsed: () => toggleMachineCollapsed(section.key),
                 }}
                 consumeClickSuppression={consumeClickSuppression}
+                dropParentKey={sectionId}
               >
                 <ProjectThreadTree
                   dndParentKey={sectionId}
@@ -1448,7 +1450,7 @@ function ProjectListComponent({
     () => sidebarNavigation?.projects.map(stripProjectThreads),
     [sidebarNavigation],
   );
-  const threads = useMemo(() => {
+  const unarchivedThreads = useMemo(() => {
     if (!sidebarNavigation) {
       return [];
     }
@@ -1459,6 +1461,8 @@ function ProjectListComponent({
     sidebarThreads.push(...sidebarNavigation.personalProject.threads);
     return sidebarThreads;
   }, [sidebarNavigation]);
+  const lifecycles = useSidebarThreadLifecycles(unarchivedThreads);
+  const { threads } = lifecycles;
   const draftThreadIds = usePromptDraftInputThreadIds(threads);
   const titleMentionResources = useThreadTitleMentionResources();
   const uiPreferencesReady = useUiPreferencesReady();
@@ -1471,6 +1475,12 @@ function ProjectListComponent({
     ),
   });
   const { threadId: selectedThreadId } = useRouteState();
+  const hierarchyStatus =
+    projectsState.status === "ready" &&
+    lifecycles.value.includes("archived") &&
+    !lifecycles.value.includes("active")
+      ? lifecycles.archivedStatus
+      : projectsState.status;
   const {
     isPending: isPinnedReorderPending,
     mutate: reorderPinnedThreadMutate,
@@ -1798,76 +1808,28 @@ function ProjectListComponent({
       }}
     >
       <ProjectListShell>
-        <ActiveSidebarModeSections
-          mode={organizationMode}
-          renderMachine={() => (
-            <MachineModeSections
-              threads={threads}
-              draftThreadIds={draftThreadIds}
-              effectivePinnedThreadIds={
-                pinnedSidebarState.effectivePinnedThreadIds
-              }
-              status={projectsState.status}
-              showPinnedSection={hasPinnedSection}
-              pinnedSection={pinnedSection}
-              pinnedReorderPending={isPinnedReorderPending}
-              pinnedRootNodes={pinnedSidebarState.rootNodes}
-              pinnedThreads={pinnedRootThreads}
-              onReorderPinnedThread={handleReorderPinnedRoot}
-              threadsSection={threadsSection}
-              selectedThreadId={selectedThreadId}
-              collapsedSectionIds={collapsedSidebarSectionIds}
-              collapsedThreadIds={collapsedThreadIds}
-              collapsedEnvironmentIds={collapsedEnvironmentIds}
-              compareThreads={sidebarThreadComparator}
-              renderSectionDisplayOptions={renderSectionDisplayOptions}
-              isSectionDisplayOptionsOpen={isSectionDisplayOptionsOpen}
-              onProjectSelect={onProjectSelect}
-              onToggleCollapsed={toggleSidebarSectionCollapsed}
-              onToggleThreadCollapsed={toggleThreadCollapsed}
-              onToggleEnvironmentCollapsed={toggleEnvironmentCollapsed}
-            />
-          )}
-          renderChronological={() => (
-            <>
-              <SectionModeSections
-                threads={threads}
-                effectivePinnedThreadIds={
-                  pinnedSidebarState.effectivePinnedThreadIds
-                }
-                status={projectsState.status}
-                showPinnedSection={hasPinnedSection}
-                sections={sections}
-                pinnedSection={pinnedSection}
-                pinnedReorderPending={isPinnedReorderPending}
-                pinnedRootNodes={pinnedSidebarState.rootNodes}
-                pinnedThreads={pinnedRootThreads}
-                onReorderPinnedThread={handleReorderPinnedRoot}
-                threadsSection={threadsSection}
-                selectedThreadId={selectedThreadId}
-                collapsedSectionIds={collapsedSidebarSectionIds}
-                collapsedThreadIds={collapsedThreadIds}
-                collapsedEnvironmentIds={collapsedEnvironmentIds}
-                compareThreads={sidebarThreadComparator}
-                onProjectSelect={onProjectSelect}
-                onCreateThreadInSection={handleCreateThreadInSection}
-                onRemoveSection={handleRemoveThreadSection}
-                onToggleCollapsed={toggleSidebarSectionCollapsed}
-                onToggleThreadCollapsed={toggleThreadCollapsed}
-                onToggleEnvironmentCollapsed={toggleEnvironmentCollapsed}
-              />
-            </>
-          )}
-          renderProject={() => (
-            <>
-              <ProjectModeSections
-                projects={projects ?? EMPTY_PROJECTS}
+        <SidebarThreadLifecycles
+          lifecycles={lifecycles}
+          treeProps={{
+            compareThreads: sidebarThreadComparator,
+            selectedThreadId,
+            collapsedThreadIds,
+            collapsedEnvironmentIds,
+            onProjectSelect,
+            onToggleThreadCollapsed: toggleThreadCollapsed,
+            onToggleEnvironmentCollapsed: toggleEnvironmentCollapsed,
+          }}
+        >
+          <ActiveSidebarModeSections
+            mode={organizationMode}
+            renderMachine={() => (
+              <MachineModeSections
                 threads={threads}
                 draftThreadIds={draftThreadIds}
                 effectivePinnedThreadIds={
                   pinnedSidebarState.effectivePinnedThreadIds
                 }
-                status={projectsState.status}
+                status={hierarchyStatus}
                 showPinnedSection={hasPinnedSection}
                 pinnedSection={pinnedSection}
                 pinnedReorderPending={isPinnedReorderPending}
@@ -1880,15 +1842,76 @@ function ProjectListComponent({
                 collapsedThreadIds={collapsedThreadIds}
                 collapsedEnvironmentIds={collapsedEnvironmentIds}
                 compareThreads={sidebarThreadComparator}
+                renderSectionDisplayOptions={renderSectionDisplayOptions}
+                isSectionDisplayOptionsOpen={isSectionDisplayOptionsOpen}
                 onProjectSelect={onProjectSelect}
-                onCreateProjectThread={handleCreateProjectThread}
                 onToggleCollapsed={toggleSidebarSectionCollapsed}
                 onToggleThreadCollapsed={toggleThreadCollapsed}
                 onToggleEnvironmentCollapsed={toggleEnvironmentCollapsed}
               />
-            </>
-          )}
-        />
+            )}
+            renderChronological={() => (
+              <>
+                <SectionModeSections
+                  threads={threads}
+                  effectivePinnedThreadIds={
+                    pinnedSidebarState.effectivePinnedThreadIds
+                  }
+                  status={hierarchyStatus}
+                  showPinnedSection={hasPinnedSection}
+                  sections={sections}
+                  pinnedSection={pinnedSection}
+                  pinnedReorderPending={isPinnedReorderPending}
+                  pinnedRootNodes={pinnedSidebarState.rootNodes}
+                  pinnedThreads={pinnedRootThreads}
+                  onReorderPinnedThread={handleReorderPinnedRoot}
+                  threadsSection={threadsSection}
+                  selectedThreadId={selectedThreadId}
+                  collapsedSectionIds={collapsedSidebarSectionIds}
+                  collapsedThreadIds={collapsedThreadIds}
+                  collapsedEnvironmentIds={collapsedEnvironmentIds}
+                  compareThreads={sidebarThreadComparator}
+                  onProjectSelect={onProjectSelect}
+                  onCreateThreadInSection={handleCreateThreadInSection}
+                  onRemoveSection={handleRemoveThreadSection}
+                  onToggleCollapsed={toggleSidebarSectionCollapsed}
+                  onToggleThreadCollapsed={toggleThreadCollapsed}
+                  onToggleEnvironmentCollapsed={toggleEnvironmentCollapsed}
+                />
+              </>
+            )}
+            renderProject={() => (
+              <>
+                <ProjectModeSections
+                  projects={projects ?? EMPTY_PROJECTS}
+                  threads={threads}
+                  draftThreadIds={draftThreadIds}
+                  effectivePinnedThreadIds={
+                    pinnedSidebarState.effectivePinnedThreadIds
+                  }
+                  status={hierarchyStatus}
+                  showPinnedSection={hasPinnedSection}
+                  pinnedSection={pinnedSection}
+                  pinnedReorderPending={isPinnedReorderPending}
+                  pinnedRootNodes={pinnedSidebarState.rootNodes}
+                  pinnedThreads={pinnedRootThreads}
+                  onReorderPinnedThread={handleReorderPinnedRoot}
+                  threadsSection={threadsSection}
+                  selectedThreadId={selectedThreadId}
+                  collapsedSectionIds={collapsedSidebarSectionIds}
+                  collapsedThreadIds={collapsedThreadIds}
+                  collapsedEnvironmentIds={collapsedEnvironmentIds}
+                  compareThreads={sidebarThreadComparator}
+                  onProjectSelect={onProjectSelect}
+                  onCreateProjectThread={handleCreateProjectThread}
+                  onToggleCollapsed={toggleSidebarSectionCollapsed}
+                  onToggleThreadCollapsed={toggleThreadCollapsed}
+                  onToggleEnvironmentCollapsed={toggleEnvironmentCollapsed}
+                />
+              </>
+            )}
+          />
+        </SidebarThreadLifecycles>
       </ProjectListShell>
       {sectionCreateDialog}
       {sectionDeleteDialogContent}
