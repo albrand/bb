@@ -115,17 +115,14 @@ describe("destroyed environment revival", () => {
   it.each([
     DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree,
     DEFAULT_ENVIRONMENT_PROVIDER_ID.personalWorkspace,
-  ])("keeps destroyed %s environments unavailable", async (providerId) => {
+  ])("does not revive destroyed %s environments", async (providerId) => {
     await withTestHarness(async (harness) => {
       const fixture = seedDestroyedEnvironmentFixture(harness, {
         environmentProviderId: providerId,
       });
 
-      await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
-        body: {
-          code: "thread_environment_unavailable",
-          details: { reason: "destroyed" },
-        },
+      await expect(sendToDestroyedEnvironment(harness, fixture)).resolves.toMatchObject({
+        delivery: "sent",
       });
       expect(getEnvironment(harness.db, fixture.environment.id)?.status).toBe(
         "destroyed",
@@ -141,11 +138,8 @@ describe("destroyed environment revival", () => {
         providerOwnsPath: true,
       });
 
-      await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
-        body: {
-          code: "thread_environment_unavailable",
-          details: { reason: "destroyed" },
-        },
+      await expect(sendToDestroyedEnvironment(harness, fixture)).resolves.toMatchObject({
+        delivery: "sent",
       });
       expect(getEnvironment(harness.db, fixture.environment.id)?.status).toBe(
         "destroyed",

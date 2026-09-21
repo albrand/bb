@@ -30,17 +30,24 @@ interface ThreadHostCommandEnvironment {
   id: string;
 }
 
+function canReviveDestroyedEnvironment(environment: EnvironmentRow): boolean {
+  return (
+    environment.environmentProviderId === null ||
+    (environment.environmentProviderId ===
+      DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout &&
+      !environment.providerOwnsPath)
+  );
+}
+
 async function reviveDestroyedProjectEnvironment(
   deps: WorkSessionDeps,
   environment: EnvironmentRow,
   threadId: string,
 ): Promise<EnvironmentRow> {
-  const canRevive =
-    environment.environmentProviderId === null ||
-    (environment.environmentProviderId ===
-      DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout &&
-      !environment.providerOwnsPath);
-  if (environment.status !== "destroyed" || !canRevive) {
+  if (
+    environment.status !== "destroyed" ||
+    !canReviveDestroyedEnvironment(environment)
+  ) {
     return environment;
   }
 
@@ -122,7 +129,7 @@ export async function requireThreadCommandEnvironment(
       );
     }
     const goneDetails = goneThreadEnvironmentDetails(environment);
-    if (goneDetails) {
+    if (goneDetails && canReviveDestroyedEnvironment(environment)) {
       throwThreadEnvironmentUnavailable(goneDetails);
     }
     assertEnvironmentPathAvailable(deps, {
