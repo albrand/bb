@@ -35,6 +35,7 @@ import type {
   ProviderRegistryService,
 } from "../providers/provider-registry.js";
 import { getSupportedReasoningLevelsForProvider } from "../threads/thread-reasoning-policy.js";
+import { resolvePluginProviderEnvHealth } from "../plugins/plugin-agent-contributions.js";
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
 import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurrency.js";
@@ -142,6 +143,30 @@ function canOmitProviderDiscoveryForError(error: unknown): error is ApiError {
   );
 }
 
+async function omitProvidersThatCannotStartAThread(
+  deps: LoggedWorkSessionDeps,
+  hostId: string | null,
+  providers: ProviderInfo[],
+): Promise<ProviderInfo[]> {
+  if (hostId === null) return providers;
+  const usable = await Promise.all(
+    providers.map(async (provider) => {
+      const status = await deps.providerRegistry.lookupProviderHealthStatus({
+        hostId,
+        providerId: provider.id,
+      });
+      if (status !== "unauthenticated") return true;
+      const contributed = await resolvePluginProviderEnvHealth({
+        providerId: provider.id,
+        hostId,
+      });
+      return contributed !== null;
+    }),
+  );
+  const offered = providers.filter((_, index) => usable[index]);
+  return offered.length > 0 ? offered : providers;
+}
+
 async function listInstalledPluginProviderInfos(
   deps: LoggedWorkSessionDeps,
   hostId: string,
@@ -177,17 +202,37 @@ async function listInstalledPluginProviderInfos(
             bridgeLaunch,
           },
         });
-        return result.supported && result.health.status !== "not_installed";
+        return result.supported ? result.health.status : null;
       };
-      const cached = deps.providerRegistry.lookupInstalled(cacheKey);
+      const cachedInstalled = deps.providerRegistry.lookupInstalled(cacheKey);
+      const cachedStatus =
+        deps.providerRegistry.lookupProviderHealthStatus(cacheKey);
       try {
-        const installed = cached ?? probe(budget);
-        if (cached === undefined) {
+        const status =
+          cachedStatus ??
+          (cachedInstalled === undefined
+            ? probe(budget)
+            : cachedInstalled.then((installed) =>
+                installed ? "ready" : "not_installed",
+              ));
+        const installed = status.then(
+          (discovered) =>
+            discovered !== null && discovered !== "not_installed",
+        );
+        if (cachedStatus === undefined) {
+          deps.providerRegistry.rememberProviderHealthStatus(cacheKey, status);
+        }
+        if (cachedInstalled === undefined) {
           deps.providerRegistry.rememberInstalled(cacheKey, installed);
         } else {
-          void deps.providerRegistry.revalidateInstalled(cacheKey, () =>
-            probe(createProviderListingBudget()),
-          );
+          void deps.providerRegistry.revalidateInstalled(cacheKey, async () => {
+            const discovered = await probe(createProviderListingBudget());
+            deps.providerRegistry.rememberProviderHealthStatus(
+              cacheKey,
+              Promise.resolve(discovered),
+            );
+            return discovered !== null && discovered !== "not_installed";
+          });
         }
         return (await installed) ? registration.info : null;
       } catch (error) {
@@ -449,6 +494,11 @@ async function resolveExecutionOptions(
     await earlyModelResultPromise?.catch(() => undefined);
     throw error;
   }
+  providers = await omitProvidersThatCannotStartAThread(
+    deps,
+    hostId,
+    providers,
+  );
   providers = includeRequestedRegisteredProvider(
     deps,
     providers,
