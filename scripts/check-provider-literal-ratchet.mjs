@@ -39,9 +39,16 @@
  * file to be on that list (delete the reference or allowlist it) and every
  * entry to still match the live count (stale entries are removed, not kept).
  */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 export const SCAN_ROOTS = ["apps", "packages", "plugins"];
@@ -218,6 +225,20 @@ export function scanTree(root, roots = SCAN_ROOTS) {
   return { files: sorted, total, hits };
 }
 
+function scanGitTree(root, ref) {
+  const archive = execFileSync("git", ["archive", ref, "--", ...SCAN_ROOTS], {
+    cwd: root,
+    maxBuffer: 128 * 1024 * 1024,
+  });
+  const extracted = mkdtempSync(join(tmpdir(), "bb-provider-ratchet-"));
+  try {
+    execFileSync("tar", ["-x", "-C", extracted], { input: archive });
+    return scanTree(extracted);
+  } finally {
+    rmSync(extracted, { recursive: true, force: true });
+  }
+}
+
 function baselineFromGit(root, ref) {
   const raw = execFileSync(
     "git",
@@ -313,9 +334,10 @@ function main() {
       base = null;
     }
     if (base) {
+      const baseScan = scanGitTree(ROOT, baseRef);
       const bad = [];
       for (const [rel, n] of Object.entries(scan.files)) {
-        const was = base.files[rel] ?? 0;
+        const was = baseScan.files[rel] ?? 0;
         if (n > was) bad.push(`  ↑ ${rel}: ${was} → ${n}`);
       }
       if (bad.length) {
