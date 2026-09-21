@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
 import {
   appendDaemonEventsInTransaction,
@@ -1213,7 +1214,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       }
 
       deferEventFollowUpBatch(deps, followUps);
-      return context.json({
+      const responseBody = {
         acceptedEvents: appendResult.acceptedEvents.map(
           (acceptedEvent, acceptedIndex) => {
             const inputIndex = appendResult.insertedInputIndexes[acceptedIndex];
@@ -1234,6 +1235,9 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           },
         ),
         rejectedEvents,
+      };
+      return context.json(responseBody, 200, {
+        "content-length": String(Buffer.byteLength(JSON.stringify(responseBody))),
       });
     },
   );
