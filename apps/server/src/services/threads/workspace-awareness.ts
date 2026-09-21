@@ -31,7 +31,21 @@ function environmentProviderOwnsPath(
   return environment.providerOwnsPath ?? environment.managed;
 }
 
-const cache = new Map<string, WorkspaceAwarenessCacheEntry>();
+let cachesByDatabase = new WeakMap<
+  object,
+  Map<string, WorkspaceAwarenessCacheEntry>
+>();
+
+function getCache(
+  db: Pick<DbConnection, "$client">,
+): Map<string, WorkspaceAwarenessCacheEntry> {
+  const database = db.$client as object;
+  const existing = cachesByDatabase.get(database);
+  if (existing) return existing;
+  const cache = new Map<string, WorkspaceAwarenessCacheEntry>();
+  cachesByDatabase.set(database, cache);
+  return cache;
+}
 
 function cacheKey(environment: WorkspaceAwarenessEnvironment): string | null {
   return environment.path === null
@@ -112,6 +126,7 @@ export function workspaceAwarenessInput(
     return [];
   }
   const now = args.now ?? Date.now();
+  const cache = getCache(db);
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) return cached.note;
   const note = buildNote(
@@ -143,7 +158,7 @@ export function workspaceAwarenessInstructions(
 }
 
 export function clearWorkspaceAwarenessCache(): void {
-  cache.clear();
+  cachesByDatabase = new WeakMap();
 }
 
 export function listSharedWorkspaceActiveThreadIds(
