@@ -226,7 +226,15 @@ export function scanTree(root, roots = SCAN_ROOTS) {
 }
 
 function scanGitTree(root, ref) {
-  const archive = execFileSync("git", ["archive", ref, "--", ...SCAN_ROOTS], {
+  const roots = SCAN_ROOTS.filter(
+    (candidate) =>
+      execFileSync("git", ["ls-tree", "--name-only", ref, "--", candidate], {
+        cwd: root,
+        encoding: "utf8",
+      }).trim() === candidate,
+  );
+  if (roots.length === 0) return { files: {} };
+  const archive = execFileSync("git", ["archive", ref, "--", ...roots], {
     cwd: root,
     maxBuffer: 128 * 1024 * 1024,
   });
