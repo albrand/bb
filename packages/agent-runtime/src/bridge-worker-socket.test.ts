@@ -419,29 +419,17 @@ describe("socket bridge workers", () => {
   }, 20_000);
 
   it("keeps output the server has not accepted when it reconnects after a dropped socket", async () => {
-    const { events, registered } = await startStreamingTurn({ settle: false });
+    const { registered } = await startStreamingTurn({ settle: false });
     try {
-      let unaccepted: { wseq: number; line: string } | undefined;
-      const deadline = Date.now() + 10_000;
-      while (unaccepted === undefined && Date.now() < deadline) {
-        unaccepted = (
-          await framesReplayedAfterResume(registered.socketPath, 0)
-        ).at(0);
-      }
-      if (unaccepted === undefined) throw new Error("no unaccepted frame");
-      await waitForRuntimeState({
-        label: "streamed output after the reconnect",
-        predicate: () => JSON.stringify(events).includes("chunk2"),
-        timeoutMs: 10_000,
-      });
-
-      const afterReconnect = await framesReplayedAfterResume(
+      const unaccepted = await firstFrameReplayedAfterResume(
         registered.socketPath,
         0,
       );
-      expect(afterReconnect.map((frame) => frame.wseq)).toContain(
-        unaccepted.wseq,
+      const afterReconnect = await firstFrameReplayedAfterResume(
+        registered.socketPath,
+        0,
       );
+      expect(afterReconnect.wseq).toBe(unaccepted.wseq);
     } finally {
       retire(registered);
     }
@@ -846,6 +834,34 @@ async function framesReplayedAfterResume(
   await new Promise((resolve) => setTimeout(resolve, 300));
   socket.destroy();
   return frames;
+}
+
+async function firstFrameReplayedAfterResume(
+  socketPath: string,
+  afterWseq: number,
+): Promise<{ wseq: number; line: string }> {
+  const socket = connect(socketPath);
+  const frame = new Promise<{ wseq: number; line: string }>(
+    (resolve, reject) => {
+      socket.once("error", reject);
+      readBoundedLines({
+        input: socket,
+        onLine: (raw) => {
+          const decoded = decodeBridgeFrame(raw);
+          if (decoded !== null) resolve(decoded);
+        },
+        onOverflow: () => undefined,
+      });
+      socket.write(
+        `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
+      );
+    },
+  );
+  try {
+    return await frame;
+  } finally {
+    socket.destroy();
+  }
 }
 
 function adoptedWorker(args: {
