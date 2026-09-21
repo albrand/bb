@@ -27,6 +27,7 @@ import {
 } from "../services/threads/thread-lifecycle.js";
 import { buildThreadStatusChangeMetadataByThreadId } from "../services/threads/thread-runtime-display.js";
 import { settleDanglingBackgroundTasks } from "../services/threads/background-task-reconciliation.js";
+import { interruptEnvironmentProvisioningForHost } from "../services/environments/environment-engine.js";
 import {
   closeItemsOrphanedByAdoption,
   scheduleAdoptedThreadTurnCheck,
@@ -36,6 +37,8 @@ const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
   "Host daemon restarted while awaiting user interaction; retry the thread to continue";
 const DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON =
   "Host daemon disconnected while awaiting user interaction; retry the thread to continue";
+const DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON =
+  "The connection to the host was lost while preparing the workspace. Retry provisioning to continue.";
 
 type HostSessionOpenedDeps = LoggedPendingInteractionWorkSessionDeps;
 type DaemonSocketClosedDeps = Pick<
@@ -307,6 +310,10 @@ function completeDaemonActiveWorkDisconnectGrace(
     hostId: args.hostId,
     reason: "host-daemon-restarted",
     cause: "host-connection-lost",
+  });
+  interruptEnvironmentProvisioningForHost(deps, {
+    hostId: args.hostId,
+    reason: DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON,
   });
   settleDanglingBackgroundTasks(deps, {
     exceptThreadIds: detachedThreadIds,
