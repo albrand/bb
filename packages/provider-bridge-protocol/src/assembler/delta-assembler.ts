@@ -114,6 +114,52 @@ function asTextDeltaEvent(
   }
 }
 
+function orderTurnStartsBeforeScopedEvents(events: ThreadEvent[]): ThreadEvent[] {
+  const firstEventByTurn = new Map<string, number>();
+  const firstStartByTurn = new Map<string, number>();
+  for (const [index, event] of events.entries()) {
+    if (event.scope.kind !== "turn") {
+      continue;
+    }
+    const key = JSON.stringify([event.threadId, event.scope.turnId]);
+    firstEventByTurn.set(key, firstEventByTurn.get(key) ?? index);
+    if (event.type === "turn/started") {
+      firstStartByTurn.set(key, firstStartByTurn.get(key) ?? index);
+    }
+  }
+  if (firstStartByTurn.size === 0) {
+    return events;
+  }
+  const startsToMove = new Set<number>();
+  const startAtFirstEvent = new Map<number, ThreadEvent>();
+  for (const [key, startIndex] of firstStartByTurn) {
+    const firstEventIndex = firstEventByTurn.get(key);
+    if (firstEventIndex === undefined || startIndex === firstEventIndex) {
+      continue;
+    }
+    const start = events[startIndex];
+    if (start !== undefined) {
+      startsToMove.add(startIndex);
+      startAtFirstEvent.set(firstEventIndex, start);
+    }
+  }
+  if (startsToMove.size === 0) {
+    return events;
+  }
+  const ordered: ThreadEvent[] = [];
+  for (const [index, event] of events.entries()) {
+    if (startsToMove.has(index)) {
+      continue;
+    }
+    const start = startAtFirstEvent.get(index);
+    if (start !== undefined) {
+      ordered.push(start);
+    }
+    ordered.push(event);
+  }
+  return ordered;
+}
+
 interface PendingTextState {
   event: TextDeltaThreadEvent;
   text: string;
@@ -2175,7 +2221,7 @@ export function createDeltaAssembler(
         }
         handleDelta(stateFor(args.threadId), delta, sink);
       }
-      return events;
+      return orderTurnStartsBeforeScopedEvents(events);
     },
 
     seedOpenTurn(args) {

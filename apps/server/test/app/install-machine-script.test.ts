@@ -1482,7 +1482,7 @@ fi
     writeServerInstallTools(fixture, 200);
     const dropInDir = join(
       fixture.homeDir,
-      ".config/systemd/user/bb-host-daemon-machine-getbb-app.service.d",
+      ".config/systemd/user/bb-host-daemon-machine-getbb-app-host-test.service.d",
     );
     mkdirSync(dropInDir, { recursive: true });
     const override = "[Service]\nEnvironment=HOST_OWNED=1\n";
@@ -1496,7 +1496,7 @@ fi
       join(fixture.binDir, "systemctl"),
       `#!/bin/sh
 printf '%s %s\n' "$*" "$(cat "${join(dropInDir, "10-bb-killmode.conf")}" 2>/dev/null | tr '\n' '|')" >>"${join(fixture.dataDir, "systemctl.log")}"
-if [ "$*" = "--user restart bb-host-daemon-machine-getbb-app.service" ]; then
+if [ "$*" = "--user restart bb-host-daemon-machine-getbb-app-host-test.service" ]; then
   port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
   BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
   echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
@@ -1523,8 +1523,8 @@ fi
         .split("\n"),
     ).toEqual([
       "--user daemon-reload [Service]|KillMode=process|",
-      "--user enable bb-host-daemon-machine-getbb-app.service [Service]|KillMode=process|",
-      "--user restart bb-host-daemon-machine-getbb-app.service [Service]|KillMode=process|",
+      "--user enable bb-host-daemon-machine-getbb-app-host-test.service [Service]|KillMode=process|",
+      "--user restart bb-host-daemon-machine-getbb-app-host-test.service [Service]|KillMode=process|",
     ]);
   });
 });

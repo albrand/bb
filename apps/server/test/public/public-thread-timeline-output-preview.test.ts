@@ -4,6 +4,7 @@ import { threadEventRowSchema, turnScope } from "@bb/domain";
 import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   events,
+  getCompletedEventOutputTruncationLimits,
   migrateNextLegacyImageGenerationOutput,
 } from "@bb/db";
 import {
@@ -25,6 +26,8 @@ import type { TestAppHarness } from "../helpers/test-app.js";
 
 const BIG_OUTPUT = `HEAD${"a".repeat(TIMELINE_INLINE_OUTPUT_PREVIEW_THRESHOLD_CHARS * 3)}TAIL`;
 const SMALL_OUTPUT = "small output";
+const COMMAND_RETAINED_OUTPUT_LIMITS =
+  getCompletedEventOutputTruncationLimits("commandExecution");
 
 function hasUnpairedSurrogate(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -181,13 +184,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
       );
       expect(big.output.startsWith(BIG_OUTPUT.slice(0, 64))).toBe(true);
       expect(big.output.endsWith("TAIL")).toBe(true);
-      expect(big.output).toContain(
-        `${(
-          BIG_OUTPUT.length -
-          TIMELINE_INLINE_OUTPUT_PREVIEW_HEAD_CHARS -
-          TIMELINE_INLINE_OUTPUT_PREVIEW_TAIL_CHARS
-        ).toLocaleString("en-US")} characters omitted`,
-      );
+      expect(big.output).toContain("characters omitted from preview");
 
       const small = findCommandRow(timeline.rows, "small");
       expect(small.outputPreview).toBeUndefined();
@@ -247,7 +244,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
     });
   });
 
-  it("nested-row consumers still receive the full inline output", async () => {
+  it("nested-row consumers receive the retained inline output", async () => {
     await withTestHarness(async (harness) => {
       const { threadId } = seedRunningTurnWithCommands(harness);
       const timeline = await getTimeline(
@@ -256,8 +253,22 @@ describe("GET /threads/:id/timeline inline output preview", () => {
         "?includeNestedRows=true",
       );
       const big = findCommandRow(timeline.rows, "big");
-      expect(big.outputPreview).toBeUndefined();
-      expect(big.output).toBe(BIG_OUTPUT);
+      expect(big.output).not.toBe(BIG_OUTPUT);
+      expect(
+        big.output.startsWith(
+          BIG_OUTPUT.slice(0, COMMAND_RETAINED_OUTPUT_LIMITS.retainedHeadChars),
+        ),
+      ).toBe(true);
+      expect(
+        big.output.endsWith(
+          BIG_OUTPUT.slice(-COMMAND_RETAINED_OUTPUT_LIMITS.retainedTailChars),
+        ),
+      ).toBe(true);
+      expect(big.output).toContain("output truncated by retention policy");
+      expect(big.outputPreview).toEqual({
+        experimental_fullOutputAvailability: "available",
+        totalChars: BIG_OUTPUT.length,
+      });
     });
   });
 

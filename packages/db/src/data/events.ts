@@ -3018,7 +3018,7 @@ export function getFirstParentedTimelineBoundarySequence(
         AND parent_tool_call_id IS NULL
         AND sequence >= ${args.sequenceStart} AND sequence <= ${args.maxSeq}
         AND EXISTS (
-          SELECT 1 FROM events AS root_start
+          SELECT 1 FROM events AS root_start INDEXED BY events_thread_turn_type_item_sequence_idx
           WHERE root_start.thread_id = events.thread_id
             AND root_start.turn_id = events.turn_id
             AND root_start.type = 'turn/started'

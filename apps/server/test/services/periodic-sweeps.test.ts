@@ -702,7 +702,7 @@ describe("runPeriodicSweeps", () => {
             .from(events)
             .where(eq(events.threadId, thread.id))
             .all(),
-        ).toEqual([{ sequence: 2 }]);
+        ).toEqual([{ sequence: 1 }, { sequence: 2 }]);
         harness.db
           .insert(events)
           .values({
@@ -724,7 +724,11 @@ describe("runPeriodicSweeps", () => {
             .from(events)
             .where(eq(events.threadId, thread.id))
             .all(),
-        ).toEqual([{ sequence: 3 }]);
+        ).toEqual([
+          { sequence: 1 },
+          { sequence: 2 },
+          { sequence: 3 },
+        ]);
       } finally {
         clock.mockRestore();
       }

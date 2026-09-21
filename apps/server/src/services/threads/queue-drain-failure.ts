@@ -39,7 +39,10 @@ export function describeDispatchFailure(error: unknown): string {
     : `${message.slice(0, QUEUED_MESSAGE_FAILURE_REASON_MAX_LENGTH - 1)}…`;
 }
 
-const DISPATCH_REJECTED_CODE = "dispatch_rejected";
+const TERMINAL_DISPATCH_FAILURE_CODES = new Set([
+  "dispatch_rejected",
+  "provider_session_unavailable",
+]);
 
 function isTerminalDispatchFailure(
   deps: QueueDrainFailureDeps,
@@ -60,7 +63,7 @@ function isTerminalDispatchFailure(
   }
   return (
     args.error instanceof ApiError &&
-    args.error.body.code === DISPATCH_REJECTED_CODE
+    TERMINAL_DISPATCH_FAILURE_CODES.has(args.error.body.code)
   );
 }
 

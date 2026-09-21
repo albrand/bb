@@ -10,6 +10,7 @@ import {
   createConnection,
   createProject,
   createThread,
+  getCompletedEventOutputTruncationLimits,
   getLatestThreadSequence,
   insertEvents,
   migrate,
@@ -33,6 +34,8 @@ const LARGE_BUDGET = 1_000_000;
 const BYTE_WINDOW_ITEM_COUNT = 250;
 const SCALED_BYTE_BUDGET = THREAD_TIMELINE_EVENT_DATA_BYTE_LIMIT / 50;
 const SCALED_COMMAND_CHARS = 1_000;
+const COMMAND_OUTPUT_LIMITS =
+  getCompletedEventOutputTruncationLimits("commandExecution");
 
 const providerThreadId = "provider-root";
 const execution = {
@@ -1879,9 +1882,19 @@ describe("timeline inline output reads", () => {
     }
     expect(uncappedRow.output).toBe(output);
     expect(cappedRow.output).not.toBe(output);
-    expect(cappedRow.output.length).toBeLessThan(5_000);
-    expect(cappedRow.output.startsWith(output.slice(0, 2_048))).toBe(true);
-    expect(cappedRow.output.endsWith(output.slice(-2_048))).toBe(true);
+    expect(cappedRow.output.length).toBeLessThan(
+      COMMAND_OUTPUT_LIMITS.thresholdChars + 256,
+    );
+    expect(
+      cappedRow.output.startsWith(
+        output.slice(0, COMMAND_OUTPUT_LIMITS.retainedHeadChars),
+      ),
+    ).toBe(true);
+    expect(
+      cappedRow.output.endsWith(
+        output.slice(-COMMAND_OUTPUT_LIMITS.retainedTailChars),
+      ),
+    ).toBe(true);
     expect(cappedRow.output).toContain("output truncated by retention policy");
   });
 });
@@ -1948,7 +1961,9 @@ describe("timeline retained output reads", () => {
     ) {
       throw new Error("Expected retained command rows");
     }
-    expect(cappedRow.output.length).toBeLessThan(5_000);
+    expect(cappedRow.output.length).toBeLessThan(
+      COMMAND_OUTPUT_LIMITS.thresholdChars + 256,
+    );
     expect(cappedRow.output).toContain("output truncated by retention policy");
     expect(uncappedRow.output).toBe(output);
 

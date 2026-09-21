@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
 import {
   appendDaemonEventsInTransaction,
@@ -111,6 +112,42 @@ interface NotifyInsertedEventThreadsDeps {
 interface NotifyInsertedEventThreadsArgs {
   eventInputs: AppendDaemonEventInput[];
   insertedInputIndexes: number[];
+}
+
+function preserveTerminalProvisioningStatus(
+  deps: Pick<AppDeps, "db">,
+  entry: PostableEventBatchEntry,
+): PostableEventBatchEntry {
+  const event = entry.envelope.event;
+  if (event.type !== "system/thread-provisioning") {
+    return entry;
+  }
+  const latest = deps.db
+    .select({
+      status: sql<unknown>`json_extract(${storedEvents.data}, '$.status')`,
+    })
+    .from(storedEvents)
+    .where(
+      and(
+        eq(storedEvents.threadId, entry.envelope.threadId),
+        eq(storedEvents.type, "system/thread-provisioning"),
+        sql`json_extract(${storedEvents.data}, '$.provisioningId') = ${event.provisioningId}`,
+      ),
+    )
+    .orderBy(desc(storedEvents.sequence))
+    .limit(1)
+    .get();
+  const status = latest?.status;
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") {
+    return entry;
+  }
+  return {
+    ...entry,
+    envelope: {
+      ...entry.envelope,
+      event: { ...event, status },
+    },
+  };
 }
 
 function parseStoredBackgroundTaskItemStatus(data: string): string | undefined {
@@ -1085,7 +1122,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           ...entry,
           envelope: validated,
         };
-      });
+      }).map((entry) => preserveTerminalProvisioningStatus(deps, entry));
       const eventInputs = labelledEntries.map((entry) => {
         return toStoredEvent({
           envelope: entry.envelope,
@@ -1177,7 +1214,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       }
 
       deferEventFollowUpBatch(deps, followUps);
-      return context.json({
+      const responseBody = {
         acceptedEvents: appendResult.acceptedEvents.map(
           (acceptedEvent, acceptedIndex) => {
             const inputIndex = appendResult.insertedInputIndexes[acceptedIndex];
@@ -1198,7 +1235,13 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           },
         ),
         rejectedEvents,
-      });
+      };
+      const response = context.json(responseBody);
+      response.headers.set(
+        "content-length",
+        String(Buffer.byteLength(JSON.stringify(responseBody))),
+      );
+      return response;
     },
   );
 }

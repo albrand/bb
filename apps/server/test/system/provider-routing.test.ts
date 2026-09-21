@@ -23,7 +23,7 @@ import { listSystemProviderInfos } from "../../src/services/system/execution-opt
 
 function providerHostResponse(
   request: HostDaemonOnlineRpcRequestMessage,
-  installedProviderId: string,
+  installedProviderId: string | readonly string[],
   modelId: string,
   installedStatus:
     | "ready"
@@ -31,6 +31,10 @@ function providerHostResponse(
     | "unauthenticated"
     | "unknown" = "ready",
 ) {
+  const installedProviderIds =
+    typeof installedProviderId === "string"
+      ? [installedProviderId]
+      : installedProviderId;
   if (request.command.type === "provider.list_models") {
     return {
       ok: true as const,
@@ -47,7 +51,7 @@ function providerHostResponse(
         supported: true as const,
         health: {
           status:
-            request.command.providerId === installedProviderId
+            installedProviderIds.includes(request.command.providerId)
               ? installedStatus
               : ("not_installed" as const),
           statusMessage: null,
@@ -296,7 +300,7 @@ describe("persisted provider ordering", () => {
     await withTestHarness({}, async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
-      const installed = new Set(["acp-omp", "acp-opencode"]);
+      const installed = new Set(["acp-cursor", "acp-omp", "acp-opencode"]);
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -369,9 +373,18 @@ describe("persisted provider ordering", () => {
                 };
               if (status === "unsupported")
                 return { ok: true, result: { supported: false } };
-              return providerHostResponse(request, "acp-omp", "model", status);
+              return providerHostResponse(
+                request,
+                ["acp-cursor", "acp-opencode", "acp-omp"],
+                "model",
+                status,
+              );
             }
-            return providerHostResponse(request, "acp-opencode", "model");
+            return providerHostResponse(
+              request,
+              ["acp-cursor", "acp-opencode"],
+              "model",
+            );
           },
         });
         await saveProviderOrder(harness, interleavedProviderOrder);
@@ -396,7 +409,7 @@ describe("persisted provider ordering", () => {
         await providerIds(
           await harness.app.request("/api/v1/system/providers"),
         ),
-      ).toEqual(["claude-code", "codex", "pi", "acp-cursor"]);
+      ).toEqual(["claude-code", "codex", "pi"]);
     });
   });
 

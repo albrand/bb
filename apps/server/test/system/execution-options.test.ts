@@ -1805,7 +1805,7 @@ describe("providers a thread can actually start on", () => {
       );
 
       cursorStatus = "ready";
-      await getProviderStates(harness.deps, {});
+      await getProviderStates(harness.deps, { hostId: host.id });
 
       const after = await resolveSystemExecutionOptions(harness.deps, {
         hostId: host.id,
