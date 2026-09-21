@@ -1200,9 +1200,12 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         ),
         rejectedEvents,
       };
-      return context.json(responseBody, 200, {
-        "content-length": String(Buffer.byteLength(JSON.stringify(responseBody))),
-      });
+      const response = context.json(responseBody);
+      response.headers.set(
+        "content-length",
+        String(Buffer.byteLength(JSON.stringify(responseBody))),
+      );
+      return response;
     },
   );
 }
