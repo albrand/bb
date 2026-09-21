@@ -80,13 +80,13 @@ describe("resolveConfiguredAcpAgents", () => {
     expect(resolved.warnings[0]).toContain("must be a JSON array");
   });
 
-  it("reports a reserved id from either source and drops that entry", () => {
+  it("reports an explicitly reserved id from either source and drops that entry", () => {
     const resolved = resolveConfiguredAcpAgents({
       settingValue: JSON.stringify([
         { id: "cursor", displayName: "Mine", command: "mine" },
       ]),
       legacyEntries: [{ id: "cursor", displayName: "Old", command: "old" }],
-      reservedProviderIds: reserved,
+      reservedProviderIds: new Set(["acp-cursor"]),
       shippedAgents: KNOWN_ACP_AGENTS,
     });
 
