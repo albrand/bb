@@ -205,7 +205,7 @@ describe("thread event pruning", () => {
       });
 
       expect(result).toMatchObject({
-        totalRemoved: 306,
+        totalRemoved: 10,
       });
       drainLivePruning(harness.deps, { threadId: thread.id, mode: "idle" });
       expect(
@@ -213,7 +213,7 @@ describe("thread event pruning", () => {
           threadId: thread.id,
           type: "thread/tokenUsage/updated",
         }).at(0),
-      ).toBe(305);
+      ).toBe(9);
       expect(
         listEventSequencesForType(harness, {
           threadId: thread.id,
@@ -271,13 +271,13 @@ describe("thread event pruning", () => {
         },
       }).response;
 
-      expect(result.totalRemoved).toBe(303);
+      expect(result.totalRemoved).toBe(3);
       expect(
         listEventSequencesForType(harness, {
           threadId: thread.id,
           type: "thread/contextWindowUsage/updated",
         }),
-      ).toEqual([1, 305]);
+      ).toEqual([1, ...Array.from({ length: 301 }, (_, index) => index + 5)]);
       expect(timeline.contextWindowUsage).toEqual({
         usedTokens: 305,
         modelContextWindow: 200_000,
@@ -350,7 +350,7 @@ describe("thread event pruning", () => {
           threadId: thread.id,
           type: "thread/tokenUsage/updated",
         }).at(0),
-      ).toBe(305);
+      ).toBe(10);
       expect(
         listEventSequencesForType(harness, {
           threadId: thread.id,
@@ -454,7 +454,7 @@ describe("thread event pruning", () => {
           threadId: thread.id,
           type: "thread/tokenUsage/updated",
         }).at(0),
-      ).toBe(130);
+      ).toBe(13);
       expect(
         listEventSequencesForType(harness, {
           threadId: thread.id,
@@ -647,7 +647,7 @@ describe("thread event pruning", () => {
           threadId: thread.id,
           type: "thread/tokenUsage/updated",
         }).at(0),
-      ).toBe(1007);
+      ).toBe(7);
       expect(
         listEventSequencesForType(harness, {
           threadId: thread.id,

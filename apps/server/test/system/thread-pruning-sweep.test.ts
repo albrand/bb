@@ -117,7 +117,7 @@ describe("thread pruning sweep", () => {
           .from(events)
           .all()
           .map((row) => row.sequence),
-      ).toEqual([1200]);
+      ).toEqual(Array.from({ length: 300 }, (_, index) => index + 901));
     });
   });
 
