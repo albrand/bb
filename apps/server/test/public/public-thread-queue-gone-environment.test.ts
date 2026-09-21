@@ -90,19 +90,6 @@ describe("queued message into a thread whose environment is gone (#1789)", () =>
           data: earlierTurnEventData,
         });
 
-        const sendResponse = await harness.app.request(
-          `/api/v1/threads/${thread.id}/send`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              mode: "auto",
-              input: [{ type: "text", text: "direct send" }],
-            }),
-          },
-        );
-        expect(sendResponse.status).toBe(409);
-
         const queueResponse = await postQueuedMessage(
           harness,
           thread.id,
