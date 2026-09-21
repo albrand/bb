@@ -1,6 +1,8 @@
 import { SidebarContentElementContext } from "@/components/ui/sidebar";
 import {
   createContext,
+  lazy,
+  Suspense,
   useContext,
   useEffect,
   useMemo,
@@ -26,11 +28,15 @@ import { CollapsedThreadStatusGlyph } from "./ThreadRow";
 import {
   SidebarMore,
   SidebarOverflowItem,
-  SidebarVisibilityCustomize,
   SidebarVisibilityActionContent,
   SidebarCustomizeActionContent,
   type SidebarVisibilityItem,
 } from "./SidebarVisibilityControls";
+
+const LazySidebarVisibilityCustomize = lazy(async () => {
+  const module = await import("./SidebarVisibilityCustomize");
+  return { default: module.SidebarVisibilityCustomize };
+});
 
 export interface ThreadListVisibilityGroup extends SidebarVisibilityItem {
   id: SidebarSectionId;
@@ -123,31 +129,33 @@ export function ThreadListVisibility({
     <VisibilityContext.Provider value={value}>
       <div ref={container} tabIndex={-1} className="min-w-0 outline-none">
         {customizing ? (
-          <SidebarVisibilityCustomize
-            items={orderedGroups}
-            visibleIds={orderedGroups
-              .filter((group) => !hiddenIds.has(group.id))
-              .map((group) => group.id)}
-            onVisibleChange={setVisible}
-            onReorder={(activeId, overId) => {
-              const groupIds = orderedGroups.map((group) => group.id);
-              const next = reorderStoredOrder({
-                activeId,
-                overId,
-                order: groupIds,
-                visibleIds: groupIds,
-              });
-              if (next) onOrderChange(next);
-            }}
-            onDone={() => {
-              focusTarget.current = "more";
-              setCustomizing(false);
-            }}
-            title="Customize list"
-            listLabel={label}
-            variant={compact ? "compact" : "card"}
-            testIdPrefix="sidebar-thread-list"
-          />
+          <Suspense fallback={null}>
+            <LazySidebarVisibilityCustomize
+              items={orderedGroups}
+              visibleIds={orderedGroups
+                .filter((group) => !hiddenIds.has(group.id))
+                .map((group) => group.id)}
+              onVisibleChange={setVisible}
+              onReorder={(activeId, overId) => {
+                const groupIds = orderedGroups.map((group) => group.id);
+                const next = reorderStoredOrder({
+                  activeId,
+                  overId,
+                  order: groupIds,
+                  visibleIds: groupIds,
+                });
+                if (next) onOrderChange(next);
+              }}
+              onDone={() => {
+                focusTarget.current = "more";
+                setCustomizing(false);
+              }}
+              title="Customize list"
+              listLabel={label}
+              variant={compact ? "compact" : "card"}
+              testIdPrefix="sidebar-thread-list"
+            />
+          </Suspense>
         ) : (
           children
         )}

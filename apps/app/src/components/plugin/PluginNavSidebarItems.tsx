@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -39,12 +41,16 @@ import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import {
   SidebarMore,
   SidebarOverflowItem,
-  SidebarVisibilityCustomize,
   SidebarVisibilityActionContent,
   SidebarCustomizeActionContent,
   type SidebarVisibilityItem,
   type SidebarActivationModifiers as SidebarNavActivationModifiers,
 } from "@/components/sidebar/SidebarVisibilityControls";
+const LazySidebarVisibilityCustomize = lazy(async () => {
+  const module =
+    await import("@/components/sidebar/SidebarVisibilityCustomize");
+  return { default: module.SidebarVisibilityCustomize };
+});
 import {
   AUTOMATIONS_PLUGIN_ID,
   getPluginDetailRoutePath,
@@ -433,26 +439,28 @@ function PluginNavSidebarItemList({
         data-testid="plugin-nav-sidebar-items"
         data-sidebar-navigation-customize-mode="true"
       >
-        <SidebarVisibilityCustomize
-          title="Customize sidebar"
-          listLabel="Sidebar navigation"
-          variant={isCompactViewport ? "compact" : "card"}
-          items={ordered.map(sidebarVisibilityItem)}
-          visibleIds={visibleKeys}
-          onActivate={(item, event) => {
-            const row = ordered.find(
-              (candidate) => getPluginNavPanelKey(candidate) === item.id,
-            );
-            if (row) handleActivate(row, event);
-          }}
-          onDone={() => {
-            restoreCustomizeTriggerFocusRef.current = true;
-            setIsCustomizeOpen(false);
-          }}
-          onExit={() => setIsCustomizeOpen(false)}
-          onReorder={handleCustomizeDragEnd}
-          onVisibleChange={setPanelVisible}
-        />
+        <Suspense fallback={null}>
+          <LazySidebarVisibilityCustomize
+            title="Customize sidebar"
+            listLabel="Sidebar navigation"
+            variant={isCompactViewport ? "compact" : "card"}
+            items={ordered.map(sidebarVisibilityItem)}
+            visibleIds={visibleKeys}
+            onActivate={(item, event) => {
+              const row = ordered.find(
+                (candidate) => getPluginNavPanelKey(candidate) === item.id,
+              );
+              if (row) handleActivate(row, event);
+            }}
+            onDone={() => {
+              restoreCustomizeTriggerFocusRef.current = true;
+              setIsCustomizeOpen(false);
+            }}
+            onExit={() => setIsCustomizeOpen(false)}
+            onReorder={handleCustomizeDragEnd}
+            onVisibleChange={setPanelVisible}
+          />
+        </Suspense>
       </div>
     );
   }
