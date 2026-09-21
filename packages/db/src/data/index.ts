@@ -309,6 +309,7 @@ export {
   bindEnvironmentPath,
   createEnvironment,
   getEnvironment,
+  reviveDestroyedEnvironment,
   findProjectEnvironmentByHostPath,
   listEnvironments,
   findForeignManagedEnvironmentAtHostPath,

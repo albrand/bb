@@ -81,6 +81,56 @@ export function getEnvironment(db: EnvironmentReadConnection, id: string) {
   );
 }
 
+export function reviveDestroyedEnvironment(
+  db: EnvironmentWriteConnection,
+  notifier: DbNotifier,
+  args: {
+    environmentId: string;
+    path: string;
+    projectCheckoutProviderId: string;
+  },
+) {
+  const updated = db.transaction(
+    (tx) =>
+      tx
+        .update(environments)
+        .set({
+          path: args.path,
+          status: "ready",
+          teardownStatus: null,
+          teardownMessage: null,
+          retireAt: null,
+          updatedAt: Date.now(),
+        })
+        .where(
+          and(
+            eq(environments.id, args.environmentId),
+            eq(environments.status, "destroyed"),
+            or(
+              isNull(environments.environmentProviderId),
+              and(
+                eq(
+                  environments.environmentProviderId,
+                  args.projectCheckoutProviderId,
+                ),
+                eq(environments.providerOwnsPath, false),
+              ),
+            ),
+          ),
+        )
+        .returning()
+        .get() ?? null,
+    { behavior: "immediate" },
+  );
+  if (updated !== null) {
+    notifier.notifyEnvironment(updated.id, [
+      "metadata-changed",
+      "status-changed",
+    ]);
+  }
+  return updated;
+}
+
 export function findProjectEnvironmentByHostPath(
   db: DbConnection,
   projectId: string,
