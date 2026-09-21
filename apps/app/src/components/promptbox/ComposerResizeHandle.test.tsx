@@ -49,11 +49,23 @@ function renderHandle(containerHeightPx = FLOOR_PX) {
   const heightHandle = view.container.querySelector<HTMLDivElement>(
     "[data-promptbox-height-resize-handle]",
   );
-  const widthHandle = view.container.querySelector<HTMLDivElement>(
-    "[data-promptbox-width-resize-handle]",
+  const leftWidthHandle = view.container.querySelector<HTMLDivElement>(
+    '[data-promptbox-width-resize-side="left"]',
   );
-  if (!heightHandle || !widthHandle) throw new Error("resize handles missing");
-  return { ...view, handle: heightHandle, heightHandle, widthHandle, store };
+  const rightWidthHandle = view.container.querySelector<HTMLDivElement>(
+    '[data-promptbox-width-resize-side="right"]',
+  );
+  if (!heightHandle || !leftWidthHandle || !rightWidthHandle) {
+    throw new Error("resize handles missing");
+  }
+  return {
+    ...view,
+    handle: heightHandle,
+    heightHandle,
+    leftWidthHandle,
+    rightWidthHandle,
+    store,
+  };
 }
 
 describe("ComposerResizeHandle", () => {
@@ -80,9 +92,9 @@ describe("ComposerResizeHandle", () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 380 });
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 380 });
     expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
-    expect(window.localStorage.getItem(COMPOSER_EDITOR_HEIGHT_STORAGE_KEY)).toBe(
-      String(FLOOR_PX + 120),
-    );
+    expect(
+      window.localStorage.getItem(COMPOSER_EDITOR_HEIGHT_STORAGE_KEY),
+    ).toBe(String(FLOOR_PX + 120));
 
     fireEvent.pointerDown(handle, { pointerId: 2, button: 0, clientY: 500 });
     fireEvent.pointerUp(handle, { pointerId: 2, clientY: -2000 });
@@ -96,9 +108,13 @@ describe("ComposerResizeHandle", () => {
     const scroll = getByTestId("scroll");
     fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientY: 500 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 450 });
-    expect(scroll.style.getPropertyValue("--bb-composer-preview-height")).toBe("250px");
+    expect(scroll.style.getPropertyValue("--bb-composer-preview-height")).toBe(
+      "250px",
+    );
     fireEvent.pointerCancel(handle, { pointerId: 1, clientY: 450 });
-    expect(scroll.style.getPropertyValue("--bb-composer-preview-height")).toBe("");
+    expect(scroll.style.getPropertyValue("--bb-composer-preview-height")).toBe(
+      "",
+    );
     expect(store.get(composerEditorHeightAtom)).toBeNull();
   });
 
@@ -113,7 +129,10 @@ describe("ComposerResizeHandle", () => {
     fireEvent.doubleClick(handle);
     expect(store.get(composerEditorHeightAtom)).toBeNull();
     expect(
-      JSON.parse(window.localStorage.getItem(COMPOSER_EDITOR_HEIGHT_STORAGE_KEY) ?? "null"),
+      JSON.parse(
+        window.localStorage.getItem(COMPOSER_EDITOR_HEIGHT_STORAGE_KEY) ??
+          "null",
+      ),
     ).toBeNull();
   });
 
@@ -132,41 +151,83 @@ describe("ComposerResizeHandle", () => {
       clientX: 500,
       clientY: 500,
     });
-    fireEvent.pointerMove(heightHandle, { pointerId: 1, clientX: 620, clientY: 380 });
-    fireEvent.pointerUp(heightHandle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerMove(heightHandle, {
+      pointerId: 1,
+      clientX: 620,
+      clientY: 380,
+    });
+    fireEvent.pointerUp(heightHandle, {
+      pointerId: 1,
+      clientX: 620,
+      clientY: 380,
+    });
 
     expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
     expect(store.get(composerContentWidthAtom)).toBeNull();
     expect(
-      JSON.parse(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY) ?? "null"),
+      JSON.parse(
+        window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY) ??
+          "null",
+      ),
     ).toBeNull();
   });
 
-  it("grows only the chat from its right resize handle", () => {
-    const { widthHandle, store } = renderHandle();
-    fireEvent.pointerDown(widthHandle, {
+  it("grows only the chat from either top corner resize handle", () => {
+    const { leftWidthHandle, rightWidthHandle, store } = renderHandle();
+    fireEvent.pointerDown(rightWidthHandle, {
       pointerId: 1,
       button: 0,
       clientX: 500,
       clientY: 500,
     });
-    fireEvent.pointerMove(widthHandle, { pointerId: 1, clientX: 620, clientY: 380 });
-    fireEvent.pointerUp(widthHandle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerMove(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 620,
+      clientY: 380,
+    });
+    expect(
+      rightWidthHandle.getAttribute("data-promptbox-resize-dragging"),
+    ).toBe("");
+    expect(
+      leftWidthHandle.getAttribute("data-promptbox-resize-dragging"),
+    ).toBeNull();
+    fireEvent.pointerUp(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 620,
+      clientY: 380,
+    });
 
     expect(store.get(composerEditorHeightAtom)).toBeNull();
     expect(store.get(composerContentWidthAtom)).toBe(880);
-    expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe("880");
     expect(
-      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+      window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY),
+    ).toBe("880");
+    expect(
+      document.documentElement.style.getPropertyValue(
+        CONTENT_MEASURE_CSS_VARIABLE,
+      ),
     ).toBe("880px");
-    expect(widthHandle.getAttribute("aria-valuetext")).toContain(
+    expect(rightWidthHandle.getAttribute("aria-valuetext")).toContain(
       "Chat width 880 pixels",
     );
+
+    fireEvent.pointerDown(leftWidthHandle, {
+      pointerId: 2,
+      button: 0,
+      clientX: 500,
+      clientY: 500,
+    });
+    fireEvent.pointerUp(leftWidthHandle, {
+      pointerId: 2,
+      clientX: 380,
+      clientY: 380,
+    });
+    expect(store.get(composerContentWidthAtom)).toBe(1_000);
   });
 
   it("supports horizontal keyboard resizing and restores the original width on viewport resize", () => {
-    const { widthHandle, store } = renderHandle();
-    fireEvent.keyDown(widthHandle, { key: "ArrowRight" });
+    const { rightWidthHandle, store } = renderHandle();
+    fireEvent.keyDown(rightWidthHandle, { key: "ArrowRight" });
     expect(store.get(composerContentWidthAtom)).toBe(784);
 
     Object.defineProperty(window, "innerWidth", {
@@ -176,18 +237,23 @@ describe("ComposerResizeHandle", () => {
     fireEvent(window, new Event("resize"));
     expect(store.get(composerContentWidthAtom)).toBeNull();
     expect(
-      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+      document.documentElement.style.getPropertyValue(
+        CONTENT_MEASURE_CSS_VARIABLE,
+      ),
     ).toBe("760px");
   });
 
   it("resets each axis from its own resize handle", () => {
-    const { heightHandle, widthHandle, store } = renderHandle();
+    const { heightHandle, leftWidthHandle, rightWidthHandle, store } =
+      renderHandle();
     fireEvent.keyDown(heightHandle, { key: "ArrowUp" });
-    fireEvent.keyDown(widthHandle, { key: "ArrowRight" });
+    fireEvent.keyDown(rightWidthHandle, { key: "ArrowRight" });
     fireEvent.doubleClick(heightHandle);
     expect(store.get(composerEditorHeightAtom)).toBeNull();
     expect(store.get(composerContentWidthAtom)).toBe(784);
-    fireEvent.doubleClick(widthHandle);
+    fireEvent.keyDown(leftWidthHandle, { key: "ArrowLeft" });
+    expect(store.get(composerContentWidthAtom)).toBe(808);
+    fireEvent.doubleClick(leftWidthHandle);
     expect(store.get(composerContentWidthAtom)).toBeNull();
   });
 });
