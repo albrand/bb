@@ -38,6 +38,7 @@ function setup(
   label = "Pinned",
   section = false,
   organization: SidebarOrganizationMode = "project",
+  showNewProject = false,
 ) {
   const store = createStore();
   store.set(sidebarOrganizationModeAtom, organization);
@@ -53,7 +54,11 @@ function setup(
         <SidebarHeaderActionsProvider
           value={{ onNewProject: newProject, onNewSection: newSection }}
         >
-          <SidebarHeaderControls label={label} onNewThread={newThread}>
+          <SidebarHeaderControls
+            label={label}
+            onNewThread={newThread}
+            showNewProject={showNewProject}
+          >
             {section && (
               <SidebarSectionMenuItems onRename={vi.fn()} onRemove={vi.fn()} />
             )}
@@ -79,6 +84,30 @@ async function openSubmenu(label: string) {
 }
 
 describe("sidebar header controls", () => {
+  it("creates a project from the header button when the header offers it", () => {
+    const { newProject } = setup("Threads", false, "project", true);
+
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+
+    expect(newProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the header project button out of headers that do not offer it", () => {
+    setup();
+
+    expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
+  });
+
+  it("keeps New project in the menu alongside the header button", async () => {
+    setup("Threads", false, "project", true);
+
+    await openMenu("Threads");
+
+    expect(
+      screen.getByRole("menuitem", { name: "New project" }),
+    ).toBeTruthy();
+  });
+
   it("dismisses on the first outside click after toggling environment grouping", async () => {
     setup();
     await openMenu();

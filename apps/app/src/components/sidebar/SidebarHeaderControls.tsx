@@ -152,6 +152,7 @@ export function SidebarHeaderControls({
   label,
   onNewThread,
   showNewThread = true,
+  showNewProject = false,
   children,
   open,
   onOpenChange,
@@ -159,6 +160,7 @@ export function SidebarHeaderControls({
   label: string;
   onNewThread?: () => void;
   showNewThread?: boolean;
+  showNewProject?: boolean;
   children?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -173,14 +175,24 @@ export function SidebarHeaderControls({
   return (
     <SidebarRowControls
       primaryAction={
-        showNewThread ? (
-          <SidebarControlButton
-            label={`New thread in ${label}`}
-            icon="MessageSquarePlus"
-            onClick={() => onNewThread?.()}
-            disabled={!onNewThread}
-          />
-        ) : null
+        <>
+          {showNewProject && creation.onNewProject ? (
+            <SidebarControlButton
+              label="New project"
+              icon="FolderPlus"
+              onClick={() => creation.onNewProject?.()}
+              disabled={creation.isCreatingProject === true}
+            />
+          ) : null}
+          {showNewThread ? (
+            <SidebarControlButton
+              label={`New thread in ${label}`}
+              icon="MessageSquarePlus"
+              onClick={() => onNewThread?.()}
+              disabled={!onNewThread}
+            />
+          ) : null}
+        </>
       }
     >
       <DropdownMenu open={open} onOpenChange={changeOpen}>
