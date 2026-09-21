@@ -181,6 +181,47 @@ function setup(
   };
 }
 
+async function installProjectCheckoutProvider(
+  hostRpc: NonNullable<
+    Parameters<typeof createFakePluginHost>[0]
+  >["experimental_callHostRpc"],
+) {
+  const fake = createFakePluginHost({
+    pluginId: "environment-project-checkout",
+    experimental_callHostRpc: hostRpc,
+  });
+  const module = z
+    .object({
+      default: z.custom<(bb: BbPluginApi) => Promise<void>>(
+        (value) => typeof value === "function",
+      ),
+    })
+    .parse(
+      await import(
+        new URL(
+          "../../../../../plugins/environment-project-checkout/server.ts",
+          import.meta.url,
+        ).href
+      ),
+    );
+  await module.default(fake.bb);
+  const provider =
+    fake.harness.registrations.environmentProviders.get("project-checkout");
+  if (provider === undefined) throw new Error("Missing checkout provider");
+  const record = { pluginId: "environment-project-checkout", provider };
+  setPluginEnvironmentProviderBridge({
+    listEnvironmentProviders: () => [record],
+    getEnvironmentProvider: (id) =>
+      id === record.provider.id ? record : undefined,
+    invokeProvider: async (_id, _label, run) => ({
+      ok: true,
+      value: await run(),
+    }),
+    decisionTimeoutMs: 10_000,
+  });
+  return { fake, record };
+}
+
 function saveProviderStartup(
   harness: TestAppHarness,
   fixture: ReturnType<typeof setup>,
@@ -1502,6 +1543,129 @@ describe("core environment orchestration", () => {
         status: "destroyed",
         teardownStatus: "removed",
         teardownAttempt: 1,
+      });
+    }));
+
+  it("retires an unmanaged project checkout after its grace period", async () =>
+    withTestHarness(async (harness) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const hostRpc = vi.fn(() => {
+        throw new Error("Unmanaged checkout retirement must not call the host");
+      });
+      const fixture = setup(harness);
+      const { fake, record } = await installProjectCheckoutProvider(hostRpc);
+      try {
+        vi.setSystemTime(1_000);
+        const environment = seedEnvironment(harness.deps, {
+          projectId: fixture.context.project.id,
+          hostId: fixture.host.id,
+          path: "/tmp/unmanaged-project-checkout",
+          providerOwnsPath: false,
+          environmentProviderId: record.provider.id,
+          environmentProviderPluginId: record.pluginId,
+          environmentProviderInstanceKey: "checkout",
+        });
+
+        await sweepProviderEnvironment(harness.deps, environment.id);
+        expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+          status: "ready",
+          retireAt: 301_000,
+          teardownStatus: null,
+        });
+
+        vi.setSystemTime(301_001);
+        await sweepProviderEnvironment(harness.deps, environment.id);
+        expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+          status: "destroyed",
+          path: null,
+          teardownStatus: "removed",
+        });
+      } finally {
+        await fake.harness.lifecycle.dispose();
+        vi.useRealTimers();
+      }
+    }));
+
+  it("does not auto-retire an owned project checkout", async () =>
+    withTestHarness(async (harness) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const hostRpc = vi.fn(() => {
+        throw new Error("Owned checkout was retired unexpectedly");
+      });
+      const fixture = setup(harness);
+      const { fake, record } = await installProjectCheckoutProvider(hostRpc);
+      try {
+        vi.setSystemTime(301_001);
+        const environment = seedEnvironment(harness.deps, {
+          projectId: fixture.context.project.id,
+          hostId: fixture.host.id,
+          path: "/tmp/owned-project-checkout",
+          providerOwnsPath: true,
+          environmentProviderId: record.provider.id,
+          environmentProviderPluginId: record.pluginId,
+          environmentProviderInstanceKey: "checkout",
+        });
+
+        await sweepProviderEnvironment(harness.deps, environment.id);
+        expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+          status: "ready",
+          retireAt: null,
+          teardownStatus: null,
+        });
+      } finally {
+        await fake.harness.lifecycle.dispose();
+        vi.useRealTimers();
+      }
+    }));
+
+  it("retires an unmanaged project checkout without a host removal call", async () =>
+    withTestHarness(async (harness) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const hostRpc = vi.fn(() => {
+        throw new Error("Unmanaged checkout retirement must not call the host");
+      });
+      const fixture = setup(harness);
+      const { fake, record } = await installProjectCheckoutProvider(hostRpc);
+      try {
+        vi.setSystemTime(1_000);
+        const environment = seedEnvironment(harness.deps, {
+          projectId: fixture.context.project.id,
+          hostId: fixture.host.id,
+          path: "/tmp/unmanaged-project-checkout-no-host-call",
+          providerOwnsPath: false,
+          environmentProviderId: record.provider.id,
+          environmentProviderPluginId: record.pluginId,
+          environmentProviderInstanceKey: "checkout",
+        });
+
+        await sweepProviderEnvironment(harness.deps, environment.id);
+        vi.setSystemTime(301_001);
+        await sweepProviderEnvironment(harness.deps, environment.id);
+        expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+          status: "destroyed",
+          path: null,
+          teardownStatus: "removed",
+        });
+        expect(hostRpc).not.toHaveBeenCalled();
+      } finally {
+        await fake.harness.lifecycle.dispose();
+        vi.useRealTimers();
+      }
+    }));
+
+  it("retires a legacy null-provider environment in the database", async () =>
+    withTestHarness(async (harness) => {
+      const fixture = setup(harness);
+      const environment = seedEnvironment(harness.deps, {
+        projectId: fixture.context.project.id,
+        hostId: fixture.host.id,
+        path: "/tmp/legacy-null-provider",
+      });
+
+      await sweepProviderLifecycles(harness.deps);
+      expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+        status: "destroyed",
+        path: null,
       });
     }));
 

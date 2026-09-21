@@ -145,7 +145,6 @@ export default async function checkoutPlugin(bb: BbPluginApi): Promise<void> {
     icon: "Laptop",
     requires: { projectCheckout: true },
     inputs: checkoutInputsSchema,
-    policy: { retireGraceMs: null },
     async validate(context) {
       const branch = context.inputs.branch;
       const path = context.inputs.path ?? context.projectCheckout.path;
