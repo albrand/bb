@@ -103,6 +103,51 @@ describe("bb thread show command output", () => {
     expect(lines.some((line) => line.includes("Pinned:"))).toBe(true);
   });
 
+  it("bb thread show prints the latest failed turn error", async () => {
+    const thread: domain.Thread = fixtures.makeThread({
+      id: "thread-show-error",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "error",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    const get = vi.fn(async () => thread);
+    const events = vi.fn(async () => [
+      {
+        id: "event-turn-completed",
+        threadId: thread.id,
+        type: "turn/completed",
+        data: {
+          status: "failed",
+          error: { message: "Agent stopped the turn: refusal" },
+        },
+        createdAt: 2,
+        sequence: 2,
+      },
+    ]);
+    const timelineGet = fixtures.makeEmptyTimelineGetMock();
+    stubServerApi({
+      "v1.threads.:id.$get": get,
+      "v1.threads.:id.events.$get": events,
+      "v1.threads.:id.timeline.$get": timelineGet,
+    });
+
+    await runCommand(["thread", "show", thread.id], register);
+
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "  Error: Agent stopped the turn: refusal",
+    );
+    expect(events).toHaveBeenCalledWith({
+      param: { id: thread.id },
+      query: {
+        limit: "100",
+        order: "desc",
+        types: "system/error,turn/completed",
+      },
+    });
+  });
+
   it("bb thread show --self resolves from BB_THREAD_ID", async () => {
     vi.stubEnv("BB_THREAD_ID", "thread-show-self");
     const thread: domain.Thread = fixtures.makeThread({

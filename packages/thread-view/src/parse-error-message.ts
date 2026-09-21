@@ -8,8 +8,29 @@ export function parseErrorMessage(
   decoded: ThreadEvent,
   meta: EventMeta,
 ): EventProjectionErrorMessage | null {
-  if (decoded.type !== "provider/error" && decoded.type !== "system/error")
+  if (
+    decoded.type !== "provider/error" &&
+    decoded.type !== "system/error" &&
+    decoded.type !== "turn/completed"
+  ) {
     return null;
+  }
+
+  if (decoded.type === "turn/completed") {
+    if (decoded.status !== "failed" || !decoded.error?.message) return null;
+    return {
+      kind: "error",
+      id: messageId(decoded.threadId, "error", `${meta.seq}`),
+      threadId: decoded.threadId,
+      sourceSeqStart: meta.seq,
+      sourceSeqEnd: meta.seq,
+      createdAt: meta.createdAt,
+      scope: decoded.scope,
+      rawType: decoded.type,
+      message: decoded.error.message,
+      detail: null,
+    };
+  }
 
   const { message, detail } = decoded;
   const reconnectState =

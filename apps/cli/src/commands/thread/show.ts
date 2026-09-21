@@ -66,6 +66,7 @@ interface ThreadOutputCommandOptions {
 }
 
 interface ThreadStatusPayload {
+  lastError?: string | null;
   thread: Thread;
 }
 
@@ -245,8 +246,13 @@ export function registerShowCommand(
         const threadId = requireThreadIdOrSelf(id, opts);
         const sdk = createCliBbSdk(getUrl());
         const thread = await sdk.threads.get({ threadId });
+        const lastError =
+          thread.status === "error"
+            ? await fetchLastThreadErrorMessage(sdk, threadId)
+            : null;
 
-        const statusPayload: ThreadStatusPayload = { thread };
+        const statusPayload: ThreadStatusPayload =
+          thread.status === "error" ? { lastError, thread } : { thread };
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {
           if (!thread.environmentId) {
@@ -576,6 +582,9 @@ function printThreadStatus(
   const { thread } = payload;
   console.log(`Thread: ${thread.id}`);
   console.log(`  Status: ${thread.status}`);
+  if (payload.lastError != null) {
+    console.log(`  Error: ${payload.lastError}`);
+  }
   if (thread.title) {
     console.log(`  Title: ${thread.title}`);
   }
@@ -598,6 +607,36 @@ function printThreadStatus(
   }
   console.log(`  Created: ${new Date(thread.createdAt).toLocaleString()}`);
   console.log(`  Updated: ${new Date(thread.updatedAt).toLocaleString()}`);
+}
+
+async function fetchLastThreadErrorMessage(
+  sdk: BbSdk,
+  threadId: string,
+): Promise<string | null> {
+  let beforeSeq: string | undefined;
+  for (;;) {
+    const rows = await sdk.threads.events.list({
+      threadId,
+      limit: String(THREAD_EVENT_LIST_PAGE_SIZE),
+      order: "desc",
+      types: ["system/error", "turn/completed"],
+      ...(beforeSeq === undefined ? {} : { beforeSeq }),
+    });
+    for (const row of rows) {
+      if (row.type === "system/error") {
+        return row.data.message;
+      }
+      if (row.type === "turn/completed" && row.data.status === "failed") {
+        const message = row.data.error?.message;
+        if (message) return message;
+      }
+    }
+    const last = rows.at(-1);
+    if (last === undefined || rows.length < THREAD_EVENT_LIST_PAGE_SIZE) {
+      return null;
+    }
+    beforeSeq = String(last.seq);
+  }
 }
 
 function printEnvironmentPullRequest(
