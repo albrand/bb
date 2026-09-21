@@ -2937,6 +2937,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
                 : undefined,
             }}
             secondaryPanel={{
+              canNavigateTabs: isFocused,
               activeTab: activeFixedSecondaryTab,
               canUseGitUi,
               gitDiffTabStatus,
