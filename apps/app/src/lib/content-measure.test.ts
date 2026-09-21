@@ -5,10 +5,15 @@ import { join, resolve } from "node:path";
 import { createStore, getDefaultStore } from "jotai";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  clampComposerContentWidth,
+  COMPOSER_CONTENT_WIDTH_STORAGE_KEY,
   CONTENT_MEASURE_CSS_VARIABLE,
   CONTENT_MEASURE_STORAGE_KEY,
+  composerContentWidthAtom,
   contentMeasureAtom,
   initializeContentMeasure,
+  resetComposerContentWidth,
+  setComposerContentWidth,
   setContentMeasure,
 } from "./content-measure";
 
@@ -43,6 +48,7 @@ describe("content measure", () => {
     window.localStorage.clear();
     document.documentElement.style.removeProperty(CONTENT_MEASURE_CSS_VARIABLE);
     getDefaultStore().set(contentMeasureAtom, "comfortable");
+    getDefaultStore().set(composerContentWidthAtom, null);
   });
 
   it("writes the chosen width to the document and remembers it", () => {
@@ -55,6 +61,38 @@ describe("content measure", () => {
     expect(
       document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
     ).toBe("760px");
+  });
+
+  it("temporarily expands the shared chat width and restores the original setting", () => {
+    setContentMeasure("wide");
+    setComposerContentWidth(1_080);
+    expect(
+      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+    ).toBe("1080px");
+    expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe("1080");
+
+    resetComposerContentWidth();
+    expect(getDefaultStore().get(composerContentWidthAtom)).toBeNull();
+    expect(
+      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+    ).toBe("960px");
+  });
+
+  it("keeps a dragged width inside the viewport while never shrinking below the selected baseline", () => {
+    expect(
+      clampComposerContentWidth({
+        widthPx: 1_400,
+        baseWidthPx: 760,
+        viewportWidthPx: 900,
+      }),
+    ).toBe(868);
+    expect(
+      clampComposerContentWidth({
+        widthPx: 400,
+        baseWidthPx: 760,
+        viewportWidthPx: 900,
+      }),
+    ).toBe(760);
   });
 
   it("applies a remembered choice at boot and ignores a value it does not know", () => {
@@ -96,5 +134,18 @@ describe("content measure", () => {
     expect(
       document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
     ).toBe("960px");
+
+    window.localStorage.setItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY, "1080");
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: COMPOSER_CONTENT_WIDTH_STORAGE_KEY,
+        newValue: "1080",
+        storageArea: window.localStorage,
+      }),
+    );
+    expect(getDefaultStore().get(composerContentWidthAtom)).toBe(1080);
+    expect(
+      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+    ).toBe("1080px");
   });
 });

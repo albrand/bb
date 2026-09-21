@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { createStore, Provider } from "jotai";
+import { getDefaultStore } from "jotai";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ComposerResizeHandle } from "./ComposerResizeHandle";
@@ -9,6 +9,13 @@ import {
   COMPOSER_EDITOR_HEIGHT_STORAGE_KEY,
   composerEditorHeightAtom,
 } from "./composerHeightAtoms";
+import {
+  COMPOSER_CONTENT_WIDTH_STORAGE_KEY,
+  CONTENT_MEASURE_CSS_VARIABLE,
+  composerContentWidthAtom,
+  resetComposerContentWidth,
+  setContentMeasure,
+} from "@/lib/content-measure";
 
 const FLOOR_PX = 68;
 const VIEWPORT_HEIGHT_PX = 713;
@@ -37,12 +44,8 @@ function Harness({ containerHeightPx }: { containerHeightPx: number }) {
 }
 
 function renderHandle(containerHeightPx = FLOOR_PX) {
-  const store = createStore();
-  const view = render(
-    <Provider store={store}>
-      <Harness containerHeightPx={containerHeightPx} />
-    </Provider>,
-  );
+  const store = getDefaultStore();
+  const view = render(<Harness containerHeightPx={containerHeightPx} />);
   const handle = view.container.querySelector<HTMLDivElement>(
     "[data-promptbox-resize-handle]",
   );
@@ -53,9 +56,16 @@ function renderHandle(containerHeightPx = FLOOR_PX) {
 describe("ComposerResizeHandle", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    setContentMeasure("comfortable");
+    resetComposerContentWidth();
+    getDefaultStore().set(composerEditorHeightAtom, null);
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
       value: VIEWPORT_HEIGHT_PX,
+    });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1_200,
     });
   });
   afterEach(cleanup);
@@ -63,6 +73,7 @@ describe("ComposerResizeHandle", () => {
   it("remembers a drag upward as the new editor height, clamped to the viewport ceiling", () => {
     const { handle, store } = renderHandle();
     fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientY: 500 });
+    expect(document.activeElement).toBe(handle);
     fireEvent.pointerMove(handle, { pointerId: 1, clientY: 380 });
     fireEvent.pointerUp(handle, { pointerId: 1, clientY: 380 });
     expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
@@ -108,5 +119,50 @@ describe("ComposerResizeHandle", () => {
     fireEvent.keyDown(handle, { key: "ArrowUp" });
     expect(store.get(composerEditorHeightAtom)).toBe(124);
     expect(handle.getAttribute("aria-valuenow")).toBe("124");
+  });
+
+  it("grows the whole chat width on a diagonal drag and shares it through storage", () => {
+    const { handle, store } = renderHandle();
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      button: 0,
+      clientX: 500,
+      clientY: 500,
+    });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+
+    expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
+    expect(store.get(composerContentWidthAtom)).toBe(880);
+    expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe("880");
+    expect(
+      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+    ).toBe("880px");
+    expect(handle.getAttribute("aria-valuetext")).toContain("Chat width 880 pixels");
+  });
+
+  it("supports horizontal keyboard resizing and restores the original width on viewport resize", () => {
+    const { handle, store } = renderHandle();
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(store.get(composerContentWidthAtom)).toBe(784);
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+    });
+    fireEvent(window, new Event("resize"));
+    expect(store.get(composerContentWidthAtom)).toBeNull();
+    expect(
+      document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
+    ).toBe("760px");
+  });
+
+  it("resets both axes on double-click", () => {
+    const { handle, store } = renderHandle();
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    fireEvent.doubleClick(handle);
+    expect(store.get(composerEditorHeightAtom)).toBeNull();
+    expect(store.get(composerContentWidthAtom)).toBeNull();
   });
 });
