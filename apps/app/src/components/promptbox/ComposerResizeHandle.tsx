@@ -32,8 +32,6 @@ import {
 
 type ResizeAxis = "height" | "width";
 
-const DRAG_AXIS_LOCK_THRESHOLD_PX = 4;
-
 export function ComposerResizeHandle({
   scrollContainerRef,
   layout,
@@ -48,14 +46,15 @@ export function ComposerResizeHandle({
   const customContentWidth = useAtomValue(composerContentWidthAtom);
   const [dragging, setDragging] = useState(false);
   const [dragAxis, setDragAxis] = useState<ResizeAxis | null>(null);
-  const instructionsId = useId();
+  const heightInstructionsId = useId();
+  const widthInstructionsId = useId();
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
     startHeight: number;
     startWidth: number;
-    axis: ResizeAxis | null;
+    axis: ResizeAxis;
   } | null>(null);
 
   const baseContentWidth = CONTENT_MEASURE_WIDTH_PX[contentMeasure];
@@ -117,26 +116,6 @@ export function ComposerResizeHandle({
     );
   };
 
-  const resolveDragAxis = (
-    drag: NonNullable<typeof dragRef.current>,
-    clientX: number,
-    clientY: number,
-  ): ResizeAxis | null => {
-    if (drag.axis !== null) return drag.axis;
-    const deltaX = clientX - drag.startX;
-    const deltaY = drag.startY - clientY;
-    if (
-      Math.max(Math.abs(deltaX), Math.abs(deltaY)) <
-      DRAG_AXIS_LOCK_THRESHOLD_PX
-    ) {
-      return null;
-    }
-    const axis = Math.abs(deltaX) > Math.abs(deltaY) ? "width" : "height";
-    drag.axis = axis;
-    setDragAxis(axis);
-    return axis;
-  };
-
   useEffect(() => {
     const handleViewportResize = () => {
       dragRef.current = null;
@@ -149,7 +128,10 @@ export function ComposerResizeHandle({
     return () => window.removeEventListener("resize", handleViewportResize);
   }, [clearPreview]);
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    axis: ResizeAxis,
+  ) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
@@ -159,22 +141,22 @@ export function ComposerResizeHandle({
       startY: event.clientY,
       startHeight: currentHeight(),
       startWidth: currentContentWidth,
-      axis: null,
+      axis,
     };
     if (typeof event.currentTarget.setPointerCapture === "function") {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
+    setDragAxis(axis);
     setDragging(true);
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (drag === null || drag.pointerId !== event.pointerId) return;
-    const axis = resolveDragAxis(drag, event.clientX, event.clientY);
-    if (axis === "height") {
+    if (drag.axis === "height") {
       previewHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
     }
-    if (axis === "width") {
+    if (drag.axis === "width") {
       previewWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
     }
   };
@@ -182,17 +164,14 @@ export function ComposerResizeHandle({
   const finishDrag = (event: ReactPointerEvent<HTMLDivElement>, commit: boolean) => {
     const drag = dragRef.current;
     if (drag === null || drag.pointerId !== event.pointerId) return;
-    const axis = commit
-      ? resolveDragAxis(drag, event.clientX, event.clientY)
-      : null;
     dragRef.current = null;
     setDragging(false);
     setDragAxis(null);
     if (commit) {
-      if (axis === "height") {
+      if (drag.axis === "height") {
         commitHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
       }
-      if (axis === "width") {
+      if (drag.axis === "width") {
         commitWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
       }
     } else {
@@ -201,21 +180,32 @@ export function ComposerResizeHandle({
     }
   };
 
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const heightDirection =
-      event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
-    const widthDirection =
-      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (heightDirection === 0 && widthDirection === 0) return;
+  const handleKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+    axis: ResizeAxis,
+  ) => {
+    const direction =
+      axis === "height"
+        ? event.key === "ArrowUp"
+          ? 1
+          : event.key === "ArrowDown"
+            ? -1
+            : 0
+        : event.key === "ArrowRight"
+          ? 1
+          : event.key === "ArrowLeft"
+            ? -1
+            : 0;
+    if (direction === 0) return;
     event.preventDefault();
-    if (heightDirection !== 0) {
+    if (axis === "height") {
       commitHeight(
-        clamp(currentHeight() + heightDirection * COMPOSER_RESIZE_KEYBOARD_STEP_PX),
+        clamp(currentHeight() + direction * COMPOSER_RESIZE_KEYBOARD_STEP_PX),
       );
     }
-    if (widthDirection !== 0) {
+    if (axis === "width") {
       commitWidth(
-        currentContentWidth + widthDirection * COMPOSER_RESIZE_KEYBOARD_STEP_PX,
+        currentContentWidth + direction * COMPOSER_RESIZE_KEYBOARD_STEP_PX,
       );
     }
   };
@@ -223,42 +213,76 @@ export function ComposerResizeHandle({
   const maxPx = getComposerEditorMaxHeightPx(layout, typeof window === "undefined" ? 0 : window.innerHeight);
 
   return (
-    <div
-      role="separator"
-      tabIndex={0}
-      aria-orientation="horizontal"
-      aria-label="Resize composer and chat width"
-      aria-describedby={instructionsId}
-      aria-valuemin={floorPx}
-      aria-valuemax={Math.max(floorPx, maxPx)}
-      aria-valuenow={Math.round(userHeight ?? floorPx)}
-      aria-valuetext={`Composer height ${Math.round(userHeight ?? floorPx)} pixels. Chat width ${Math.round(currentContentWidth)} pixels.`}
-      data-promptbox-resize-handle=""
-      data-promptbox-resize-dragging={dragging ? "" : undefined}
-      data-promptbox-resize-axis={dragAxis ?? undefined}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={(event) => finishDrag(event, true)}
-      onPointerCancel={(event) => finishDrag(event, false)}
-      onDoubleClick={() => {
-        commitHeight(floorPx);
-        resetComposerContentWidth();
-      }}
-      onKeyDown={handleKeyDown}
-      className={cn(
-        "absolute inset-x-12 top-0 z-20 flex h-2 touch-none items-start justify-center outline-none",
-        dragAxis === "height" ? "cursor-row-resize" : dragAxis === "width" ? "cursor-col-resize" : "cursor-nesw-resize",
-        "before:mt-[3px] before:h-0.5 before:w-10 before:rounded-full before:bg-border before:opacity-0 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
-        "group-hover/promptbox:before:opacity-100 group-focus-within/promptbox:before:opacity-100 hover:before:bg-ring/60 focus-visible:before:bg-ring focus-visible:before:opacity-100",
-        dragging && "before:bg-ring before:opacity-100",
-      )}
-    >
-      <span id={instructionsId} className="sr-only">
-        Drag up to make the composer taller, or drag right to make the chat
-        wider. Each drag changes one direction only.
-        Use Arrow Up and Arrow Down for composer height, Arrow Right and Arrow
-        Left for chat width, or double-click to reset both.
-      </span>
-    </div>
+    <>
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-orientation="horizontal"
+        aria-label="Resize composer height"
+        aria-describedby={heightInstructionsId}
+        aria-valuemin={floorPx}
+        aria-valuemax={Math.max(floorPx, maxPx)}
+        aria-valuenow={Math.round(userHeight ?? floorPx)}
+        aria-valuetext={`Composer height ${Math.round(userHeight ?? floorPx)} pixels.`}
+        data-promptbox-resize-handle=""
+        data-promptbox-height-resize-handle=""
+        data-promptbox-resize-dragging={
+          dragging && dragAxis === "height" ? "" : undefined
+        }
+        onPointerDown={(event) => handlePointerDown(event, "height")}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishDrag(event, true)}
+        onPointerCancel={(event) => finishDrag(event, false)}
+        onDoubleClick={() => commitHeight(floorPx)}
+        onKeyDown={(event) => handleKeyDown(event, "height")}
+        className={cn(
+          "absolute inset-x-12 top-0 z-20 flex h-2 cursor-row-resize touch-none items-start justify-center outline-none",
+          "before:mt-[3px] before:h-0.5 before:w-10 before:rounded-full before:bg-border before:opacity-0 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
+          "group-hover/promptbox:before:opacity-100 group-focus-within/promptbox:before:opacity-100 hover:before:bg-ring/60 focus-visible:before:bg-ring focus-visible:before:opacity-100",
+          dragging && dragAxis === "height" && "before:bg-ring before:opacity-100",
+        )}
+      >
+        <span id={heightInstructionsId} className="sr-only">
+          Drag up to make the composer taller. Use Arrow Up and Arrow Down, or
+          double-click to reset its height.
+        </span>
+      </div>
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-orientation="vertical"
+        aria-label="Resize chat width"
+        aria-describedby={widthInstructionsId}
+        aria-valuemin={baseContentWidth}
+        aria-valuemax={Math.max(
+          baseContentWidth,
+          Math.floor(window.innerWidth - 32),
+        )}
+        aria-valuenow={Math.round(currentContentWidth)}
+        aria-valuetext={`Chat width ${Math.round(currentContentWidth)} pixels.`}
+        data-promptbox-resize-handle=""
+        data-promptbox-width-resize-handle=""
+        data-promptbox-resize-dragging={
+          dragging && dragAxis === "width" ? "" : undefined
+        }
+        onPointerDown={(event) => handlePointerDown(event, "width")}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishDrag(event, true)}
+        onPointerCancel={(event) => finishDrag(event, false)}
+        onDoubleClick={resetComposerContentWidth}
+        onKeyDown={(event) => handleKeyDown(event, "width")}
+        className={cn(
+          "absolute -right-1 inset-y-3 z-20 flex w-2 cursor-col-resize touch-none items-center justify-end outline-none",
+          "before:h-10 before:w-0.5 before:rounded-full before:bg-border before:opacity-0 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
+          "group-hover/promptbox:before:opacity-100 group-focus-within/promptbox:before:opacity-100 hover:before:bg-ring/60 focus-visible:before:bg-ring focus-visible:before:opacity-100",
+          dragging && dragAxis === "width" && "before:bg-ring before:opacity-100",
+        )}
+      >
+        <span id={widthInstructionsId} className="sr-only">
+          Drag right to make the chat wider. Use Arrow Right and Arrow Left, or
+          double-click to reset its width.
+        </span>
+      </div>
+    </>
   );
 }

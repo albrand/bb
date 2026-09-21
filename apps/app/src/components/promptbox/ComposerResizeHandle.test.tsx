@@ -46,11 +46,14 @@ function Harness({ containerHeightPx }: { containerHeightPx: number }) {
 function renderHandle(containerHeightPx = FLOOR_PX) {
   const store = getDefaultStore();
   const view = render(<Harness containerHeightPx={containerHeightPx} />);
-  const handle = view.container.querySelector<HTMLDivElement>(
-    "[data-promptbox-resize-handle]",
+  const heightHandle = view.container.querySelector<HTMLDivElement>(
+    "[data-promptbox-height-resize-handle]",
   );
-  if (!handle) throw new Error("handle missing");
-  return { ...view, handle, store };
+  const widthHandle = view.container.querySelector<HTMLDivElement>(
+    "[data-promptbox-width-resize-handle]",
+  );
+  if (!heightHandle || !widthHandle) throw new Error("resize handles missing");
+  return { ...view, handle: heightHandle, heightHandle, widthHandle, store };
 }
 
 describe("ComposerResizeHandle", () => {
@@ -121,51 +124,49 @@ describe("ComposerResizeHandle", () => {
     expect(handle.getAttribute("aria-valuenow")).toBe("124");
   });
 
-  it("locks an upward drag to height without changing chat width", () => {
-    const { handle, store } = renderHandle();
-    fireEvent.pointerDown(handle, {
+  it("grows only the composer from its top resize handle", () => {
+    const { heightHandle, store } = renderHandle();
+    fireEvent.pointerDown(heightHandle, {
       pointerId: 1,
       button: 0,
       clientX: 500,
       clientY: 500,
     });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 520, clientY: 380 });
-    expect(handle.getAttribute("data-promptbox-resize-axis")).toBe("height");
-    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerMove(heightHandle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerUp(heightHandle, { pointerId: 1, clientX: 620, clientY: 380 });
 
     expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
     expect(store.get(composerContentWidthAtom)).toBeNull();
-    expect(handle.getAttribute("data-promptbox-resize-axis")).toBeNull();
     expect(
       JSON.parse(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY) ?? "null"),
     ).toBeNull();
   });
 
-  it("locks a horizontal drag to width without changing composer height", () => {
-    const { handle, store } = renderHandle();
-    fireEvent.pointerDown(handle, {
+  it("grows only the chat from its right resize handle", () => {
+    const { widthHandle, store } = renderHandle();
+    fireEvent.pointerDown(widthHandle, {
       pointerId: 1,
       button: 0,
       clientX: 500,
       clientY: 500,
     });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 620, clientY: 490 });
-    expect(handle.getAttribute("data-promptbox-resize-axis")).toBe("width");
-    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerMove(widthHandle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerUp(widthHandle, { pointerId: 1, clientX: 620, clientY: 380 });
 
     expect(store.get(composerEditorHeightAtom)).toBeNull();
     expect(store.get(composerContentWidthAtom)).toBe(880);
-    expect(handle.getAttribute("data-promptbox-resize-axis")).toBeNull();
     expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe("880");
     expect(
       document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),
     ).toBe("880px");
-    expect(handle.getAttribute("aria-valuetext")).toContain("Chat width 880 pixels");
+    expect(widthHandle.getAttribute("aria-valuetext")).toContain(
+      "Chat width 880 pixels",
+    );
   });
 
   it("supports horizontal keyboard resizing and restores the original width on viewport resize", () => {
-    const { handle, store } = renderHandle();
-    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    const { widthHandle, store } = renderHandle();
+    fireEvent.keyDown(widthHandle, { key: "ArrowRight" });
     expect(store.get(composerContentWidthAtom)).toBe(784);
 
     Object.defineProperty(window, "innerWidth", {
@@ -179,12 +180,14 @@ describe("ComposerResizeHandle", () => {
     ).toBe("760px");
   });
 
-  it("resets both axes on double-click", () => {
-    const { handle, store } = renderHandle();
-    fireEvent.keyDown(handle, { key: "ArrowUp" });
-    fireEvent.keyDown(handle, { key: "ArrowRight" });
-    fireEvent.doubleClick(handle);
+  it("resets each axis from its own resize handle", () => {
+    const { heightHandle, widthHandle, store } = renderHandle();
+    fireEvent.keyDown(heightHandle, { key: "ArrowUp" });
+    fireEvent.keyDown(widthHandle, { key: "ArrowRight" });
+    fireEvent.doubleClick(heightHandle);
     expect(store.get(composerEditorHeightAtom)).toBeNull();
+    expect(store.get(composerContentWidthAtom)).toBe(784);
+    fireEvent.doubleClick(widthHandle);
     expect(store.get(composerContentWidthAtom)).toBeNull();
   });
 });
