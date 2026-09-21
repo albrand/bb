@@ -121,7 +121,7 @@ describe("ComposerResizeHandle", () => {
     expect(handle.getAttribute("aria-valuenow")).toBe("124");
   });
 
-  it("grows the whole chat width on a diagonal drag and shares it through storage", () => {
+  it("locks an upward drag to height without changing chat width", () => {
     const { handle, store } = renderHandle();
     fireEvent.pointerDown(handle, {
       pointerId: 1,
@@ -129,11 +129,33 @@ describe("ComposerResizeHandle", () => {
       clientX: 500,
       clientY: 500,
     });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 520, clientY: 380 });
+    expect(handle.getAttribute("data-promptbox-resize-axis")).toBe("height");
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 620, clientY: 380 });
 
     expect(store.get(composerEditorHeightAtom)).toBe(FLOOR_PX + 120);
+    expect(store.get(composerContentWidthAtom)).toBeNull();
+    expect(handle.getAttribute("data-promptbox-resize-axis")).toBeNull();
+    expect(
+      JSON.parse(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY) ?? "null"),
+    ).toBeNull();
+  });
+
+  it("locks a horizontal drag to width without changing composer height", () => {
+    const { handle, store } = renderHandle();
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      button: 0,
+      clientX: 500,
+      clientY: 500,
+    });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 620, clientY: 490 });
+    expect(handle.getAttribute("data-promptbox-resize-axis")).toBe("width");
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 620, clientY: 380 });
+
+    expect(store.get(composerEditorHeightAtom)).toBeNull();
     expect(store.get(composerContentWidthAtom)).toBe(880);
+    expect(handle.getAttribute("data-promptbox-resize-axis")).toBeNull();
     expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe("880");
     expect(
       document.documentElement.style.getPropertyValue(CONTENT_MEASURE_CSS_VARIABLE),

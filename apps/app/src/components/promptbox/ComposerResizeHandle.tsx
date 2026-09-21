@@ -30,6 +30,10 @@ import {
   type ComposerEditorLayout,
 } from "./composerHeightAtoms";
 
+type ResizeAxis = "height" | "width";
+
+const DRAG_AXIS_LOCK_THRESHOLD_PX = 4;
+
 export function ComposerResizeHandle({
   scrollContainerRef,
   layout,
@@ -43,6 +47,7 @@ export function ComposerResizeHandle({
   const contentMeasure = useContentMeasure();
   const customContentWidth = useAtomValue(composerContentWidthAtom);
   const [dragging, setDragging] = useState(false);
+  const [dragAxis, setDragAxis] = useState<ResizeAxis | null>(null);
   const instructionsId = useId();
   const dragRef = useRef<{
     pointerId: number;
@@ -50,6 +55,7 @@ export function ComposerResizeHandle({
     startY: number;
     startHeight: number;
     startWidth: number;
+    axis: ResizeAxis | null;
   } | null>(null);
 
   const baseContentWidth = CONTENT_MEASURE_WIDTH_PX[contentMeasure];
@@ -111,10 +117,31 @@ export function ComposerResizeHandle({
     );
   };
 
+  const resolveDragAxis = (
+    drag: NonNullable<typeof dragRef.current>,
+    clientX: number,
+    clientY: number,
+  ): ResizeAxis | null => {
+    if (drag.axis !== null) return drag.axis;
+    const deltaX = clientX - drag.startX;
+    const deltaY = drag.startY - clientY;
+    if (
+      Math.max(Math.abs(deltaX), Math.abs(deltaY)) <
+      DRAG_AXIS_LOCK_THRESHOLD_PX
+    ) {
+      return null;
+    }
+    const axis = Math.abs(deltaX) > Math.abs(deltaY) ? "width" : "height";
+    drag.axis = axis;
+    setDragAxis(axis);
+    return axis;
+  };
+
   useEffect(() => {
     const handleViewportResize = () => {
       dragRef.current = null;
       setDragging(false);
+      setDragAxis(null);
       clearPreview();
       resetComposerContentWidth();
     };
@@ -132,6 +159,7 @@ export function ComposerResizeHandle({
       startY: event.clientY,
       startHeight: currentHeight(),
       startWidth: currentContentWidth,
+      axis: null,
     };
     if (typeof event.currentTarget.setPointerCapture === "function") {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -142,18 +170,31 @@ export function ComposerResizeHandle({
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (drag === null || drag.pointerId !== event.pointerId) return;
-    previewHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
-    previewWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
+    const axis = resolveDragAxis(drag, event.clientX, event.clientY);
+    if (axis === "height") {
+      previewHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
+    }
+    if (axis === "width") {
+      previewWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
+    }
   };
 
   const finishDrag = (event: ReactPointerEvent<HTMLDivElement>, commit: boolean) => {
     const drag = dragRef.current;
     if (drag === null || drag.pointerId !== event.pointerId) return;
+    const axis = commit
+      ? resolveDragAxis(drag, event.clientX, event.clientY)
+      : null;
     dragRef.current = null;
     setDragging(false);
+    setDragAxis(null);
     if (commit) {
-      commitHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
-      commitWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
+      if (axis === "height") {
+        commitHeight(clamp(drag.startHeight + (drag.startY - event.clientY)));
+      }
+      if (axis === "width") {
+        commitWidth(clampWidth(drag.startWidth + (event.clientX - drag.startX)));
+      }
     } else {
       clearPreview();
       applyContentMeasure();
@@ -194,6 +235,7 @@ export function ComposerResizeHandle({
       aria-valuetext={`Composer height ${Math.round(userHeight ?? floorPx)} pixels. Chat width ${Math.round(currentContentWidth)} pixels.`}
       data-promptbox-resize-handle=""
       data-promptbox-resize-dragging={dragging ? "" : undefined}
+      data-promptbox-resize-axis={dragAxis ?? undefined}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={(event) => finishDrag(event, true)}
@@ -204,14 +246,16 @@ export function ComposerResizeHandle({
       }}
       onKeyDown={handleKeyDown}
       className={cn(
-        "absolute inset-x-12 top-0 z-20 flex h-2 cursor-nesw-resize touch-none items-start justify-center outline-none",
+        "absolute inset-x-12 top-0 z-20 flex h-2 touch-none items-start justify-center outline-none",
+        dragAxis === "height" ? "cursor-row-resize" : dragAxis === "width" ? "cursor-col-resize" : "cursor-nesw-resize",
         "before:mt-[3px] before:h-0.5 before:w-10 before:rounded-full before:bg-border before:opacity-0 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
         "group-hover/promptbox:before:opacity-100 group-focus-within/promptbox:before:opacity-100 hover:before:bg-ring/60 focus-visible:before:bg-ring focus-visible:before:opacity-100",
         dragging && "before:bg-ring before:opacity-100",
       )}
     >
       <span id={instructionsId} className="sr-only">
-        Drag up to make the composer taller and right to make the chat wider.
+        Drag up to make the composer taller, or drag right to make the chat
+        wider. Each drag changes one direction only.
         Use Arrow Up and Arrow Down for composer height, Arrow Right and Arrow
         Left for chat width, or double-click to reset both.
       </span>
