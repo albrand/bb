@@ -442,6 +442,7 @@ describe("createServerMovedWatcher", () => {
 
   function createManualSchedule() {
     const pending = new Set<() => void | Promise<void>>();
+    const callbacksInFlight = new Set<Promise<void>>();
     return {
       async flush({
         waitForCallbacks = false,
@@ -449,10 +450,16 @@ describe("createServerMovedWatcher", () => {
         const callbacks = [...pending];
         pending.clear();
         const results = callbacks.map((callback) => callback());
-        if (waitForCallbacks) await Promise.all(results);
-        await settle();
+        const currentCallbacks = Promise.all(results).then(() => undefined);
+        callbacksInFlight.add(currentCallbacks);
+        currentCallbacks.then(
+          () => callbacksInFlight.delete(currentCallbacks),
+          () => callbacksInFlight.delete(currentCallbacks),
+        );
+        if (waitForCallbacks) await currentCallbacks;
       },
       pendingCount: () => pending.size,
+      waitForCallbacks: () => Promise.all(callbacksInFlight),
       schedule(callback: () => void | Promise<void>) {
         const entry = () => callback();
         pending.add(entry);
@@ -461,12 +468,6 @@ describe("createServerMovedWatcher", () => {
         };
       },
     };
-  }
-
-  async function settle(): Promise<void> {
-    await new Promise<void>((resolvePromise) => {
-      setTimeout(resolvePromise, 20);
-    });
   }
 
   function createDeferred<T>() {
@@ -522,7 +523,7 @@ describe("createServerMovedWatcher", () => {
     await writeServerMovedFile(harness.dataDir, movedFile());
 
     harness.watcher.start();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     expect(harness.confirmMove).toHaveBeenCalledOnce();
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
@@ -550,7 +551,7 @@ describe("createServerMovedWatcher", () => {
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
 
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.confirmMove).toHaveBeenCalledOnce();
     expect(harness.onMove).toHaveBeenCalledOnce();
     harness.watcher.stop();
@@ -560,24 +561,31 @@ describe("createServerMovedWatcher", () => {
     const harness = await createHarness({ confirmMove: async () => false });
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     expect(harness.confirmMove).toHaveBeenCalledOnce();
     expect(harness.onMove).not.toHaveBeenCalled();
 
     harness.confirmMove.mockImplementation(async () => true);
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
     harness.watcher.stop();
   });
 
   it("checks again when the lock changes during a confirmation", async () => {
     const first = createDeferred<boolean>();
-    const harness = await createHarness({ confirmMove: () => first.promise });
+    const firstConfirmationStarted = createDeferred<void>();
+    const harness = await createHarness({
+      confirmMove: () => {
+        firstConfirmationStarted.resolve();
+        return first.promise;
+      },
+    });
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
     await harness.timers.flush();
+    await firstConfirmationStarted.promise;
     expect(harness.confirmMove).toHaveBeenCalledOnce();
 
     await writeServerMovedFile(
@@ -585,15 +593,15 @@ describe("createServerMovedWatcher", () => {
       movedFile({ moveId: "move-3" }),
     );
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.confirmMove).toHaveBeenCalledOnce();
 
     harness.confirmMove.mockImplementation(async () => true);
     first.resolve(false);
-    await settle();
+    await harness.timers.waitForCallbacks();
     expect(harness.onMove).not.toHaveBeenCalled();
     expect(harness.timers.pendingCount()).toBe(1);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     expect(harness.confirmMove).toHaveBeenCalledTimes(2);
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith({
@@ -606,18 +614,18 @@ describe("createServerMovedWatcher", () => {
   it("logs and skips an invalid lock, then delivers the corrected one", async () => {
     const harness = await createHarness();
     harness.watcher.start();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     await writeFile(join(harness.dataDir, SERVER_MOVED_FILE_NAME), "{partial");
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.confirmMove).not.toHaveBeenCalled();
     expect(harness.onMove).not.toHaveBeenCalled();
     expect(harness.logWarning).toHaveBeenCalledOnce();
 
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
     harness.watcher.stop();
   });
@@ -638,9 +646,11 @@ describe("createServerMovedWatcher", () => {
 
   it("cancels a confirmation that is still running when stopped", async () => {
     const confirmation = createDeferred<boolean>();
+    const confirmationStarted = createDeferred<void>();
     const cancellationChecks: Array<() => boolean> = [];
     const harness = await createHarness({
       confirmMove: (_move, isCancelled) => {
+        confirmationStarted.resolve();
         cancellationChecks.push(isCancelled);
         return confirmation.promise;
       },
@@ -648,6 +658,7 @@ describe("createServerMovedWatcher", () => {
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
     await harness.timers.flush();
+    await confirmationStarted.promise;
     expect(cancellationChecks.map((isCancelled) => isCancelled())).toEqual([
       false,
     ]);
@@ -655,7 +666,7 @@ describe("createServerMovedWatcher", () => {
     harness.watcher.stop();
     expect(cancellationChecks[0]?.()).toBe(true);
     confirmation.resolve(true);
-    await settle();
+    await harness.timers.waitForCallbacks();
 
     expect(harness.onMove).not.toHaveBeenCalled();
   });
@@ -671,12 +682,12 @@ describe("createServerMovedWatcher", () => {
 
     expect(() => harness.watcher.start()).not.toThrow();
     expect(harness.logWarning.mock.calls[0]?.[0]).toContain("ENOSPC");
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.onMove).not.toHaveBeenCalled();
 
     await writeServerMovedFile(harness.dataDir, movedFile());
-    await harness.timers.flush();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
 
     harness.watcher.stop();
@@ -686,14 +697,14 @@ describe("createServerMovedWatcher", () => {
   it("closes the watcher and polls after a watch error", async () => {
     const harness = await createHarness();
     harness.watcher.start();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     harness.fakeWatch.emitError(new Error("EMFILE"));
 
     expect(harness.fakeWatch.close).toHaveBeenCalledOnce();
     expect(harness.logWarning.mock.calls[0]?.[0]).toContain("EMFILE");
     await writeServerMovedFile(harness.dataDir, movedFile());
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
     expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
     harness.watcher.stop();
   });
