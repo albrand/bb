@@ -998,6 +998,27 @@ describe("delta assembler (keyed provider turns)", () => {
     });
   });
 
+  it("orders vouched input acceptance after a matching turn start", () => {
+    const assembler = createAssembler();
+    const events = assemble(
+      assembler,
+      {
+        kind: "input.accepted",
+        clientRequestId: CREQ,
+        providerTurnId: "turn-1",
+      },
+      { kind: "turn.open", providerTurnId: "turn-1" },
+    );
+    expect(events.map((event) => event.type)).toEqual([
+      "turn/started",
+      "turn/input/accepted",
+    ]);
+    expect(events[1]).toMatchObject({
+      clientRequestId: CREQ,
+      scope: events[0]?.scope,
+    });
+  });
+
   it("synthesizes item/started for a delta-first textDelta and reuses the id on close", () => {
     const assembler = createAssembler();
     const events = assemble(

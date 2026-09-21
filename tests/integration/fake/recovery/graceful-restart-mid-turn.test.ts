@@ -31,6 +31,9 @@ describe.sequential("fake provider graceful restart mid-turn", () => {
           harness,
           "Mid-turn Restart",
         );
+        const readyTurns = (await getThreadEvents(harness.api, thread.id))
+          .filter((event) => event.type === "turn/started")
+          .map((event) => event.scope);
         await sendTextMessage(harness.api, thread.id, { text: MID_TURN_TEXT });
         await waitForThreadStatus(
           harness.api,
@@ -38,9 +41,6 @@ describe.sequential("fake provider graceful restart mid-turn", () => {
           "active",
           ACTIVE_TIMEOUT_MS,
         );
-        const readyTurns = (await getThreadEvents(harness.api, thread.id))
-          .filter((event) => event.type === "turn/started")
-          .map((event) => event.scope);
         const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
         let startedBefore: unknown[] = [];
         while (startedBefore.length === 0 && Date.now() < deadline) {
