@@ -246,17 +246,8 @@ export function createProviderRegistryService(
     },
 
     lookupInstalled(key) {
-      const entry = installedStatusByHostId
-        .get(key.hostId)
-        ?.get(key.providerId);
-      if (
-        entry === undefined ||
-        entry.registrationRevision !== registrationRevision ||
-        entry.expiresAt <= Date.now()
-      ) {
-        return undefined;
-      }
-      return entry.value;
+      return installedStatusByHostId.get(key.hostId)?.get(key.providerId)
+        ?.value;
     },
 
     rememberInstalled(key, value) {
