@@ -480,7 +480,10 @@ export function registerTestHostRpcCapture(
         });
         return;
       }
-      if (command.type === "host.paths_exist") {
+      if (
+        command.type === "host.paths_exist" &&
+        args.pathsExistResult !== undefined
+      ) {
         deps.hub.recordHostOnlineRpcResponse({
           message: hostDaemonOnlineRpcResponseMessageSchema.parse({
             type: "host-rpc.response",

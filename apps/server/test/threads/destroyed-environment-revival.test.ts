@@ -9,6 +9,7 @@ import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../../src/services/environments
 import { acceptThreadSendRequest } from "../../src/services/threads/thread-send-request.js";
 import {
   listQueuedThreadCommands,
+  registerTestHostRpcCapture,
   waitForQueuedCommand,
 } from "../helpers/commands.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -35,8 +36,15 @@ function seedDestroyedEnvironmentFixture(
     providerOwnsPath?: boolean;
   } = {},
 ): DestroyedEnvironmentFixture {
-  const { host } = seedHostSession(harness.deps, { id: "host-revival" });
+  const { host, session } = seedHostSession(harness.deps, {
+    id: "host-revival",
+  });
   const projectSourcePath = `/tmp/revival-source-${host.id}`;
+  registerTestHostRpcCapture(harness, {
+    hostId: host.id,
+    sessionId: session.id,
+    pathsExistResult: { existence: { [projectSourcePath]: true } },
+  });
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: projectSourcePath,
