@@ -441,21 +441,20 @@ describe("createServerMovedWatcher", () => {
   }
 
   function createManualSchedule() {
-    const pending = new Set<() => void>();
+    const pending = new Set<() => void | Promise<void>>();
     return {
-      async flush() {
+      async flush({
+        waitForCallbacks = false,
+      }: { waitForCallbacks?: boolean } = {}) {
         const callbacks = [...pending];
         pending.clear();
-        for (const callback of callbacks) {
-          callback();
-        }
+        const results = callbacks.map((callback) => callback());
+        if (waitForCallbacks) await Promise.all(results);
         await settle();
       },
       pendingCount: () => pending.size,
-      schedule(callback: () => void) {
-        const entry = () => {
-          callback();
-        };
+      schedule(callback: () => void | Promise<void>) {
+        const entry = () => callback();
         pending.add(entry);
         return () => {
           pending.delete(entry);
@@ -533,7 +532,7 @@ describe("createServerMovedWatcher", () => {
   it("debounces lock events into one committed move", async () => {
     const harness = await createHarness();
     harness.watcher.start();
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     harness.fakeWatch.emit("bb.db-wal");
     expect(harness.timers.pendingCount()).toBe(0);
@@ -542,7 +541,7 @@ describe("createServerMovedWatcher", () => {
     harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
     harness.fakeWatch.emit(null);
     expect(harness.timers.pendingCount()).toBe(1);
-    await harness.timers.flush();
+    await harness.timers.flush({ waitForCallbacks: true });
 
     expect(harness.confirmMove).toHaveBeenCalledExactlyOnceWith(
       CONNECT_MOVE,

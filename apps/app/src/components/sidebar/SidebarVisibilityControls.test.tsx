@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { SidebarVisibilityCustomize } from "./SidebarVisibilityControls";
+import { SidebarVisibilityCustomize } from "./SidebarVisibilityCustomize";
 
 afterEach(cleanup);
 

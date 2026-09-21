@@ -105,7 +105,7 @@ type WatchServerMovedDirectory = (
 ) => ServerMovedWatcherHandle;
 
 type ScheduleServerMovedCheck = (
-  callback: () => void,
+  callback: () => void | Promise<void>,
   delayMs: number,
 ) => () => void;
 
@@ -447,7 +447,7 @@ export function createServerMovedWatcher(
     cancelDebouncedCheck?.();
     cancelDebouncedCheck = schedule(() => {
       cancelDebouncedCheck = null;
-      void checkLock();
+      return checkLock();
     }, args.debounceMs);
   }
 
