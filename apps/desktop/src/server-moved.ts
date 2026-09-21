@@ -455,7 +455,7 @@ export function createServerMovedWatcher(
     const pollGeneration = generation;
     cancelPoll = schedule(() => {
       cancelPoll = null;
-      void checkLock().then(() => {
+      return checkLock().then(() => {
         if (pollGeneration === generation) {
           schedulePoll();
         }
