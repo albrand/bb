@@ -32,7 +32,7 @@ export const CLAUDE_XHIGH_CAPABLE_REASONING_EFFORT_DATA: readonly ClaudeCodeReas
     { reasoningEffort: "max", description: "Maximum reasoning effort" },
   ];
 
-export const DEFAULT_CLAUDE_CODE_MODEL = "claude-opus-5[1m]";
+export const DEFAULT_CLAUDE_CODE_MODEL = "claude-opus-5-5[1m]";
 
 export const CLAUDE_CODE_ACTIVE_CATALOG_DATA: readonly ClaudeCodeCatalogEntryData[] =
   [
@@ -45,6 +45,13 @@ export const CLAUDE_CODE_ACTIVE_CATALOG_DATA: readonly ClaudeCodeCatalogEntryDat
     },
     {
       model: DEFAULT_CLAUDE_CODE_MODEL,
+      displayName: "Opus 5.5 (1M)",
+      description:
+        "Opus 5.5 with 1M context for complex long coding sessions; requires Claude Code v2.1.280+",
+      defaultReasoningEffort: "high",
+    },
+    {
+      model: "claude-opus-5[1m]",
       displayName: "Opus 5 (1M)",
       description: "Opus 5 with 1M context for complex long coding sessions",
       defaultReasoningEffort: "high",

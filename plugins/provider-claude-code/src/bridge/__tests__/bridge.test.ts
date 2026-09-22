@@ -2415,6 +2415,7 @@ describe("bridge", () => {
     });
     expect(models.map((model) => model.model)).toEqual([
       "claude-fable-5-1",
+      "claude-opus-5-5[1m]",
       "claude-opus-5[1m]",
       "claude-opus-4-8[1m]",
       "claude-opus-4-7[1m]",
