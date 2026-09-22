@@ -9,6 +9,7 @@ import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import type {
   PluginSdkApp,
   PluginSidebarProject,
+  PluginSidebarProjectActions,
   PluginSidebarSection,
   PluginSidebarThread,
   PluginSidebarThreadActions,
@@ -38,6 +39,7 @@ import {
   useEnvironmentPullRequest,
 } from "@/hooks/queries/environment-queries";
 import { useHosts } from "@/hooks/queries/host-queries";
+import { useQuickCreateProject } from "@/hooks/useQuickCreateProject";
 import { useArchivedThreads } from "@/hooks/queries/thread-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useUpdateThread } from "@/hooks/mutations/thread-state-mutations";
@@ -423,5 +425,21 @@ export function useSidebarThreadPullRequest(
             },
     }),
     [environmentId, pullRequest, query.isPending],
+  );
+}
+
+export function useSidebarProjectActions(): PluginSidebarProjectActions {
+  const quickCreateProject = useQuickCreateProject();
+
+  return useMemo<PluginSidebarProjectActions>(
+    () => ({
+      isAvailable: quickCreateProject.isAvailable,
+      isCreating: quickCreateProject.isCreating,
+      openCreateProject() {
+        if (!quickCreateProject.isAvailable) return;
+        quickCreateProject.openCreateDialog();
+      },
+    }),
+    [quickCreateProject],
   );
 }

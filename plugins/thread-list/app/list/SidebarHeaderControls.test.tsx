@@ -330,6 +330,52 @@ describe("sidebar header controls", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Back" })).toBeNull();
   });
+
+  it("creates a project from the header button only where the host offers one", () => {
+    const newProject = vi.fn();
+    const store = createStore();
+    store.set(sidebarThreadLifecyclesAtom, ["active"]);
+    const renderHeader = (value: {
+      onNewProject?: () => void;
+      isCreatingProject?: boolean;
+    }) =>
+      render(
+        <Provider store={store}>
+          <CompactViewportOverrideProvider isCompactViewport={false}>
+            <TooltipProvider>
+              <SidebarHeaderActionsProvider value={value}>
+                <SidebarHeaderControls
+                  label="Threads"
+                  onNewThread={vi.fn()}
+                  showNewProject
+                />
+              </SidebarHeaderActionsProvider>
+            </TooltipProvider>
+          </CompactViewportOverrideProvider>
+        </Provider>,
+      );
+
+    renderHeader({});
+    expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
+    cleanup();
+
+    renderHeader({ onNewProject: newProject });
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    expect(newProject).toHaveBeenCalledOnce();
+    cleanup();
+
+    renderHeader({ onNewProject: newProject, isCreatingProject: true });
+    expect(
+      screen.getByRole("button", { name: "New project" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+  });
+
+  it("omits the project button from section headers", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
+  });
 });
 
 it.each([false, true])(

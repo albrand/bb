@@ -1250,6 +1250,20 @@ export interface PluginSidebarThreadShortcut {
  * behave exactly as they do in the built-in sidebar. Unknown thread ids are
  * ignored by `open` and rejected by the rest.
  */
+/**
+ * Project creation bound to the host's quick-create flow, for sidebars that
+ * offer a "New project" control of their own. `openCreateProject` runs the
+ * same dialog bb's own welcome screen opens, so folder pickers, host
+ * selection, and the resulting navigation behave identically.
+ */
+export interface PluginSidebarProjectActions {
+  /** False where no host can create a project, e.g. a hosted body. */
+  isAvailable: boolean;
+  /** True while a create started from this flow is still in flight. */
+  isCreating: boolean;
+  openCreateProject(): void;
+}
+
 export interface PluginSidebarThreadActions {
   /**
    * Navigate to a thread. `split: true` applies bb's split placement rules —
@@ -2946,6 +2960,12 @@ export interface PluginSdkApp {
    * docs/api_to_audit.md.
    */
   experimental_useSidebarThreadActions(): PluginSidebarThreadActions;
+  /**
+   * Project creation actions bound to the host's quick-create flow (see
+   * {@link PluginSidebarProjectActions}). Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_useSidebarProjectActions(): PluginSidebarProjectActions;
   /**
    * The pull request for one thread's branch (see
    * {@link PluginSidebarThreadPullRequestState}).

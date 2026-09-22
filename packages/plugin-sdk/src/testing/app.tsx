@@ -47,6 +47,7 @@ import {
   type PluginSidebarFooterActionRegistration,
   type ExperimentalSidebarNavigationRegistration,
   type PluginSidebarPullRequest,
+  type PluginSidebarProjectActions,
   type PluginSidebarThreadActions,
   type PluginBrowserBbSdk,
   type PluginEnvironmentProvidersState,
@@ -238,6 +239,7 @@ interface SlotEnv {
   composerLog: ComposerLog;
   sidebarThreads: PluginSidebarThreadsState;
   sidebarActions: PluginSidebarThreadActions;
+  sidebarProjectActions: PluginSidebarProjectActions;
   sidebarActionCalls: SidebarActionCall[];
   sidebarPullRequests: ReadonlyMap<string, PluginSidebarPullRequest>;
   sidebarDraftThreadIds: ReadonlySet<string>;
@@ -266,7 +268,7 @@ interface TestFixedTabTargetStore {
 
 /** One recorded `experimental_useSidebarThreadActions()` call. */
 export interface SidebarActionCall {
-  method: keyof PluginSidebarThreadActions;
+  method: keyof PluginSidebarThreadActions | "openCreateProject";
   threadId?: string;
   options?: Record<string, unknown>;
   title?: string;
@@ -990,6 +992,10 @@ const testPluginSdkApp = {
   experimental_useSidebarThreadActions(): PluginSidebarThreadActions {
     return useSlotEnv("experimental_useSidebarThreadActions").sidebarActions;
   },
+  experimental_useSidebarProjectActions(): PluginSidebarProjectActions {
+    return useSlotEnv("experimental_useSidebarProjectActions")
+      .sidebarProjectActions;
+  },
   experimental_useSidebarThreadSplit(threadId): PluginSidebarThreadSplit {
     const env = useSlotEnv("experimental_useSidebarThreadSplit");
     return useMemo(
@@ -1365,6 +1371,9 @@ export interface RenderSlotOptions<
   sidebarShortcuts?: Record<string, PluginSidebarThreadShortcut>;
   /** The split layout `useSidebarSplitLayout()` reports. Omitted → null. */
   sidebarSplitLayout?: PluginSidebarSplitLayout;
+  sidebarProjectActions?: Partial<
+    Pick<PluginSidebarProjectActions, "isAvailable" | "isCreating">
+  >;
   /**
    * The environment provider catalog `useEnvironmentProviders()` reports.
    * Omitted → a ready, empty list. Pass `{ status: "loading" }` to test that
@@ -1677,6 +1686,13 @@ export function renderSlot<
       sidebarActionCalls.push({ method: "requestDelete", threadId });
     },
   };
+  const sidebarProjectActions: PluginSidebarProjectActions = {
+    isAvailable: options.sidebarProjectActions?.isAvailable ?? true,
+    isCreating: options.sidebarProjectActions?.isCreating ?? false,
+    openCreateProject() {
+      sidebarActionCalls.push({ method: "openCreateProject" });
+    },
+  };
   const navigate: BbNavigate = {
     toThread(threadId) {
       navigateCalls.push({ method: "toThread", threadId });
@@ -1896,6 +1912,7 @@ export function renderSlot<
     composerLog,
     sidebarThreads,
     sidebarActions,
+    sidebarProjectActions,
     sidebarActionCalls,
     sidebarPullRequests,
     sidebarDraftThreadIds,

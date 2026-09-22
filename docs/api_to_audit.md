@@ -3226,3 +3226,17 @@ remain forbidden. New-machine selections continue through creation.
 
 Stabilization requires lifecycle coverage for reuse, missing paths, cleanup in
 progress, cross-project ownership, and concurrent creation before binding.
+
+## `experimental_useSidebarProjectActions` (`@get-bb/plugin-sdk/app`)
+
+`PluginSidebarProjectActions` binds a thread-list plugin's own "New project"
+control to the host's quick-create flow: `isAvailable` is false where no host
+can create a project, `isCreating` reports a create still in flight, and
+`openCreateProject()` opens the same dialog bb's welcome screen opens. bb's
+sidebar header lost its built-in button when the built-in thread list was
+deleted, so a plugin that owns the region needs this to offer one.
+
+Stabilization requires deciding whether project creation belongs on a thread
+list surface at all or in a project-scoped API alongside rename, delete, and
+reorder, and coverage for an unavailable host, a create that fails, and a
+second create started while one is pending.

@@ -83,6 +83,8 @@ export const experimental_useSidebarThreads =
   runtime.experimental_useSidebarThreads;
 export const experimental_useSidebarThreadActions =
   runtime.experimental_useSidebarThreadActions;
+export const experimental_useSidebarProjectActions =
+  runtime.experimental_useSidebarProjectActions;
 export const experimental_useSidebarThreadPullRequest =
   runtime.experimental_useSidebarThreadPullRequest;
 export const experimental_useSidebarThreadSplit =

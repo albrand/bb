@@ -18,6 +18,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { toast } from "sonner";
 import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@bb/domain";
 import {
+  experimental_useSidebarProjectActions,
   experimental_useSidebarThreadActions,
   useSdk,
   useSidebarThreadDraftIds,
@@ -1347,6 +1348,7 @@ function ProjectListComponent({
     },
     [openRootComposeForProject],
   );
+  const projectActions = experimental_useSidebarProjectActions();
   const handleCreateProjectlessThread = useCallback(() => {
     openRootComposeForProject(PERSONAL_PROJECT_ID);
   }, [openRootComposeForProject]);
@@ -1449,6 +1451,7 @@ function ProjectListComponent({
       <SidebarHeaderControls
         label={label}
         onNewThread={handleCreateProjectlessThread}
+        showNewProject={sectionId === "threads"}
         open={openSidebarMenu === menuId}
         onOpenChange={(open) => setSidebarMenuOpen(menuId, open)}
         onCloseAutoFocus={renameActions?.onCloseAutoFocus}
@@ -1622,7 +1625,11 @@ function ProjectListComponent({
   return (
     <SidebarHeaderActionsProvider
       value={{
+        onNewProject: projectActions.isAvailable
+          ? projectActions.openCreateProject
+          : undefined,
         onNewSection: handleOpenCreateSectionDialog,
+        isCreatingProject: projectActions.isCreating,
         isCreatingSection: isCreateThreadSectionPending,
       }}
     >

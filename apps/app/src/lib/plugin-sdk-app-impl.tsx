@@ -41,6 +41,7 @@ import {
 } from "./plugin-sdk-hooks";
 import {
   useSidebarThreadActions,
+  useSidebarProjectActions,
   useSidebarThreadDraft,
   useSidebarThreadDraftIds,
   useSidebarThreadPullRequest,
@@ -85,6 +86,7 @@ export const pluginSdkAppImplementation = installDeprecatedAliases(
     experimental_Diff: PluginDiff,
     experimental_useSidebarThreads: useSidebarThreads,
     experimental_useSidebarThreadActions: useSidebarThreadActions,
+    experimental_useSidebarProjectActions: useSidebarProjectActions,
     experimental_useSidebarThreadPullRequest: useSidebarThreadPullRequest,
     experimental_useSidebarThreadSplit: useSidebarThreadSplit,
     useSidebarThreadDraft,

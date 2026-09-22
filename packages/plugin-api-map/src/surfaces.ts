@@ -136,6 +136,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginSidebarSection",
           "experimental_useSidebarThreadActions",
           "PluginSidebarThreadActions",
+          "experimental_useSidebarProjectActions",
+          "PluginSidebarProjectActions",
           "experimental_useSidebarThreadPullRequest",
           "PluginSidebarThreadPullRequestState",
           "experimental_useSidebarThreadSplit",
