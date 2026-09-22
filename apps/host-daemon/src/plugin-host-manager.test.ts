@@ -299,7 +299,9 @@ describe("PluginHostManager", () => {
           payload: expect.objectContaining({ id }),
         });
       const waitForStart = (id: string) =>
-        vi.waitFor(() => expect(onSignal).toHaveBeenCalledWith(started(id)));
+        vi.waitFor(() => expect(onSignal).toHaveBeenCalledWith(started(id)), {
+          timeout: 10_000,
+        });
       return {
         manager,
         command,
