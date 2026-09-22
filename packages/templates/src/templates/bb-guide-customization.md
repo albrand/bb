@@ -87,6 +87,16 @@ uses an automatic per-host limit of one thread per available processor. Use
 `bb concurrency-limit global [unlimited|<limit>]` and `bb
 concurrency-limit host <host-id> [auto|<limit>]`; 0 pauses new work.
 
+The sidebar thread list is owned by the Thread list builtin plugin. Its
+layout preferences (active/archived filter, organization mode, sort, section order, hidden and
+collapsed groups) live in the plugin and sync to every window:
+`bb thread-list prefs list [--json]`, `prefs get <key>`,
+`prefs set <key> <value>`, and `prefs reset <key>`. `set` takes JSON; a bare
+word is a string. On first load the plugin copies non-default `sidebar.*`
+values from `bb settings ui` once. The `threadLifecycles` preference defaults
+to `["active"]`; `bb thread-list prefs set threadLifecycles '["archived"]'`
+shows archived threads, and `'["active","archived"]'` shows both.
+
 Settings → Keyboard also includes `showKeyboardHints`, which defaults to true.
 Turn it off to hide the delayed shortcut badges shown while holding Command or
 Control on macOS, or Control on Windows/Linux. Shortcut commands continue to
@@ -311,6 +321,12 @@ Active includes threads with saved messages; there is no separate
 Drafts section or filter. Archived threads use their preserved placement and a
 restore action. Archived pages load only while selected.
 Plugin sidebar replacements own their filters.
+
+The palette's Filter uses Active and Archived independently of the
+sidebar, defaulting to Active. Its selection is browser-local, not configurable
+through SDK/CLI. Active includes threads with saved messages; Search threads retains
+the existing title and conversation search behavior. Archived fetches bounded recent rows only when
+selected.
 
 Every thread-list header's actions menu offers New project, New section,
 Organize, Sort by, and Filter. Organize selects By project,

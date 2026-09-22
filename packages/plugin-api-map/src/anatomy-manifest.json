@@ -60,7 +60,7 @@
           "anchors": [
             "top-[12%] max-w-[640px] translate-y-0 gap-0 p-0",
             "aria-selected={isActive}",
-            "flex min-h-9 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-left text-sm outline-none",
+            "flex min-h-8 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none",
             "bg-state-hover text-foreground"
           ]
         },
@@ -246,9 +246,7 @@
         },
         {
           "path": "apps/app/src/components/plugin/management/plugin-status.ts",
-          "anchors": [
-            "Complete the Configuration section; bb reloads the plugin after you save."
-          ]
+          "anchors": ["Complete the required settings."]
         },
         {
           "path": "apps/app/src/components/tools/PluginDetail.tsx",

@@ -333,6 +333,27 @@ async function runDispatchAttempt(
       return;
     }
 
+    const currentThread = getThread(deps.db, thread.id);
+    if (currentThread === null) {
+      throw new ApiError(404, "thread_not_found", "Thread not found");
+    }
+    if (
+      currentThread.status !== thread.status ||
+      currentThread.archivedAt !== thread.archivedAt ||
+      currentThread.deletedAt !== thread.deletedAt
+    ) {
+      continued.reattemptThread = currentThread;
+      return;
+    }
+
+    if (thread.status === "active" && payload.mode === "start") {
+      throwThreadNotWritable(
+        thread,
+        "already_active",
+        "Thread is already active",
+      );
+    }
+
     const { environment: dispatchEnvironment, host: dispatchHost } =
       dispatchEnvironmentAndHost(deps, thread.environmentId);
     if (
@@ -349,13 +370,6 @@ async function runDispatchAttempt(
     }
 
     if (thread.status === "active" && attempt === "start-turn") {
-      if (payload.mode === "start") {
-        throwThreadNotWritable(
-          thread,
-          "already_active",
-          "Thread is already active",
-        );
-      }
       continued.outcome = waitOn({ kind: "thread-busy" }, null);
       return;
     }
@@ -374,18 +388,6 @@ async function runDispatchAttempt(
 
     if (payload.mode !== "start" && isManualCompactionActive(deps, thread)) {
       continued.outcome = waitOn({ kind: "thread-busy" }, null);
-      return;
-    }
-    const currentThread = getThread(deps.db, thread.id);
-    if (currentThread === null) {
-      throw new ApiError(404, "thread_not_found", "Thread not found");
-    }
-    if (
-      currentThread.status !== thread.status ||
-      currentThread.archivedAt !== thread.archivedAt ||
-      currentThread.deletedAt !== thread.deletedAt
-    ) {
-      continued.reattemptThread = currentThread;
       return;
     }
     if (
