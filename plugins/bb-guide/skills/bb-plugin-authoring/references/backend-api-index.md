@@ -255,6 +255,7 @@ Read the installed declarations for exact current signatures.
 - `PluginSidebarPullRequest`
 - `PluginSidebarSplitPane`
 - `PluginSidebarThread`
+- `PluginSidebarProjectActions`
 - `PluginSidebarThreadActions`
 - `PluginSidebarThreadActivity`
 - `PluginSidebarThreadIndicator`

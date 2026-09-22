@@ -37,6 +37,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `useComposerView`
 - `experimental_useSidebarThreads`
 - `experimental_useSidebarThreadActions`
+- `experimental_useSidebarProjectActions`
 - `experimental_useSidebarThreadPullRequest`
 - `experimental_useSidebarThreadSplit`
 - `useSidebarThreadDraft` — whether the composer holds an unsent draft for
@@ -152,6 +153,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginCodeThemeTokenRule`
 - `PluginCodeThemeData`
 - `PluginCodeThemeState`
+- `PluginSidebarProjectActions`
 - `PluginSidebarThreadActions`
 - `PluginSidebarThreadDraftState`
 - `PluginSidebarThreadRowStatus`
