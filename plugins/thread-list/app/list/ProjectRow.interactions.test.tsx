@@ -894,7 +894,7 @@ describe("ProjectRow interactions", () => {
         (element) => element.dataset.sidebarVisibilityGroup,
       ),
     ).toEqual(["section:sec_review", "section:sec_building", "threads"]);
-  }, 20_000);
+  });
 
   it("surfaces named activity when the project is collapsed", () => {
     renderProjectRow(
