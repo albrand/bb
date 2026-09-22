@@ -73,14 +73,6 @@ function runScript(
 }
 
 const BOOTSTRAP_ARGS = ["--bootstrap-env", "BB_ENROLLMENT"];
-const JOIN_ARGS = [
-  "--join-code",
-  "unused-fresh-code",
-  "--host-id",
-  "host-test",
-  "--server",
-  "https://machine.getbb.app",
-];
 
 function bootstrapBundle(serverUrl = "https://machine.getbb.app"): string {
   return JSON.stringify({
@@ -1476,7 +1468,7 @@ fi
 `,
     );
 
-    const result = runScript(JOIN_ARGS, fixture);
+    const result = runScript(BOOTSTRAP_ARGS, fixture);
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(dropInDir, "override.conf"), "utf8")).toBe(
