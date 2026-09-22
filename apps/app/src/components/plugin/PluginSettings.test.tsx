@@ -701,7 +701,7 @@ describe("PluginSettingsPage", () => {
     ).toBeNull();
     expect(
       container.querySelectorAll("[data-resource-detail-section]"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
 
     fireEvent.click(enable);
 
@@ -855,7 +855,7 @@ describe("PluginSettingsPage", () => {
     expect(screen.queryByRole("heading", { name: "Configuration" })).toBeNull();
     expect(
       container.querySelectorAll("[data-resource-detail-section]"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it("keeps a section-only plugin in Configuration with a flat surface", async () => {
