@@ -196,12 +196,9 @@ describe("thread-list plugin", () => {
     renderList({ organizationMode: "project" });
 
     await screen.findByText("Pinned thread");
-    expect(sectionHeaders()).toEqual([
-      "Pinned",
-      "Personal",
-      "App",
-      "Web",
-      "Threads",
+    expect(sectionHeaders()).toEqual(["Pinned", "App", "Web", "Threads"]);
+    expect(threadIds().filter((id) => id === "thr_personal")).toEqual([
+      "thr_personal",
     ]);
     const appGroup = screen
       .getByTitle("App")
