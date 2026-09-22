@@ -57,6 +57,7 @@ jobs:
       # fields changed is a hard failure; an unreachable registry or a failed
       # local pack (exit 2) is infrastructure, not a finding.
       - name: Check plugin SDK npm version guard
+        if: github.repository == 'get-bb/bb'
         run: |
           # +e so the exit code can be inspected: GitHub's default shell runs
           # with -e, which would abort the step before the exit-2 check.
