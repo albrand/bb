@@ -1486,6 +1486,7 @@ fi
         .trim()
         .split("\n"),
     ).toEqual([
+      "--user show-environment [Service]|KillMode=mixed|",
       "--user daemon-reload [Service]|KillMode=process|",
       "--user enable bb-host-daemon-machine-getbb-app-host-test.service [Service]|KillMode=process|",
       "--user restart bb-host-daemon-machine-getbb-app-host-test.service [Service]|KillMode=process|",
