@@ -196,13 +196,10 @@ describe("thread-list plugin", () => {
     renderList({ organizationMode: "project" });
 
     await screen.findByText("Pinned thread");
-    expect(sectionHeaders()).toEqual([
-      "Pinned",
-      "Personal",
-      "App",
-      "Web",
-      "Threads",
+    expect(threadIds().filter((id) => id === "thr_personal")).toEqual([
+      "thr_personal",
     ]);
+    expect(sectionHeaders()).toEqual(["Pinned", "App", "Web", "Threads"]);
     const appGroup = screen
       .getByTitle("App")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
