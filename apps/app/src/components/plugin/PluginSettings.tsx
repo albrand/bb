@@ -411,7 +411,13 @@ function AutosavingPluginSetting({
           ? "secret"
           : undefined
       }
-      controlPlacement={isMultilineSetting(descriptor) ? "below" : "inline"}
+      controlPlacement={
+        descriptor.type === "boolean"
+          ? "trailing"
+          : isMultilineSetting(descriptor)
+            ? "below"
+            : "inline"
+      }
       {...(descriptor.description !== undefined
         ? { description: descriptor.description }
         : {})}
@@ -584,6 +590,7 @@ function PluginSettingsContent({ plugin }: { plugin: PluginListItem }) {
           </div>
         </div>
         <Switch
+          className="mr-[13px]"
           checked={enabled}
           disabled={toggle.isPending}
           onCheckedChange={(next) => toggle.mutate(next)}
