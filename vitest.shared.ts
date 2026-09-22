@@ -343,6 +343,7 @@ export function defineWorkspaceTestConfig(
       test: {
         testTimeout: 20_000,
         hookTimeout: 20_000,
+        expect: { poll: { timeout: 10_000 } },
         globalSetup: [
           fileURLToPath(new URL("./vitest.global-tmpdir.ts", import.meta.url)),
         ],
