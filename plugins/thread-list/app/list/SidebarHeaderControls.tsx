@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
+import type { SidebarSectionId } from "@bb/client-core";
 import { Button } from "@bb/shared-ui/button";
 import { Icon } from "@bb/shared-ui/icon";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
@@ -20,8 +21,8 @@ import { SidebarHeaderMenuContents } from "./SidebarViewItems.js";
 
 export interface HeaderCreationActions {
   onNewProject?: () => void;
-  onNewSection?: () => void;
   isCreatingProject?: boolean;
+  onNewSection?: (anchorSectionId?: SidebarSectionId) => void;
   isCreatingSection?: boolean;
 }
 
@@ -30,6 +31,7 @@ export const SidebarHeaderActionsProvider = HeaderCreationContext.Provider;
 
 export function SidebarHeaderControls({
   label,
+  sectionId,
   onNewThread,
   showNewThread = true,
   showNewProject = false,
@@ -39,6 +41,7 @@ export function SidebarHeaderControls({
   onCloseAutoFocus,
 }: {
   label: string;
+  sectionId?: SidebarSectionId;
   onNewThread?: () => void;
   showNewThread?: boolean;
   showNewProject?: boolean;
@@ -108,6 +111,7 @@ export function SidebarHeaderControls({
         >
           <SidebarHeaderMenuContents
             creation={creation}
+            anchorSectionId={sectionId}
             compact={compact}
             page={page}
             onPageChange={setPage}

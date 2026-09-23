@@ -128,7 +128,7 @@ describe("GET /api/v1/system/usage-limits", () => {
             ? [request.command.providerId]
             : [],
         ),
-      ).toEqual(["acp-cursor"]);
+      ).toEqual(["acp-cursor", "acp-opencode"]);
     });
   });
 
@@ -156,12 +156,10 @@ describe("GET /api/v1/system/usage-limits", () => {
         ),
       ).toEqual(["codex"]);
       expect(
-        responder.requests.flatMap((request) =>
-          request.command.type === "provider.health"
-            ? [request.command.providerId]
-            : [],
+        responder.requests.some(
+          (request) => request.command.type === "provider.health",
         ),
-      ).toEqual(["acp-cursor"]);
+      ).toBe(false);
     });
   });
 
@@ -209,7 +207,11 @@ describe("GET /api/v1/system/usage-limits", () => {
             ? [request.command.providerId]
             : [],
         ),
-      ).toEqual([...ALWAYS_VISIBLE_PROVIDER_IDS, "acp-cursor"]);
+      ).toEqual([
+        ...ALWAYS_VISIBLE_PROVIDER_IDS,
+        "acp-cursor",
+        "acp-opencode",
+      ]);
     });
   });
 

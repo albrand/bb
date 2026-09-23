@@ -161,6 +161,7 @@ export {
   lifecycleThreadTreeIdsForProject,
   listLifecycleThreadTree,
   listLifecycleThreadDependents,
+  listArchivedThreadsPendingTeardown,
   listRunningThreads,
   listThreadsWithPendingInteractionState,
   listThreadsWithPendingInteractionStateForProjects,

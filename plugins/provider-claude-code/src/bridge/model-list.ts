@@ -18,9 +18,7 @@ function buildModelProbeOptions(env: NodeJS.ProcessEnv): Options {
     cwd: process.cwd(),
     maxTurns: 0,
     persistSession: false,
-    allowDangerouslySkipPermissions: true,
-    permissionMode: "bypassPermissions",
-    settingSources: [],
+    settingSources: ["user", "project", "local"],
     ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
   };
 }
@@ -40,6 +38,9 @@ export async function probeClaudeCodeDiscoveredModels(
 
   try {
     const initialization = await session.initializationResult();
+    if (initialization.models.length === 0) {
+      throw new Error("Claude Code reported no models.");
+    }
     return initialization.models;
   } catch (error) {
     throw translateMissingClaudeCliError(error);

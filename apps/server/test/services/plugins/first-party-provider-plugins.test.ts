@@ -67,7 +67,7 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     supportsThreadRename: false,
     fork: "tip",
     supportsManualCompaction: true,
-    supportsUsage: false,
+    supportsUsage: true,
     visibility: "installed",
     hasLogo: true,
   },
@@ -344,10 +344,18 @@ describe("first-party provider plugins", () => {
           "ultracode",
           "max",
         ]);
-        expect(claude?.fallbackModels.map((model) => model.id)).toContain(
+        expect(claude?.fallbackModels.map((model) => model.model)).toEqual([
+          "claude-fable-5-1",
+          "claude-opus-5-5[1m]",
           "claude-opus-5[1m]",
-        );
-        expect(claude?.envPassthrough).toEqual(["BB_CLAUDE_CODE_EXECUTABLE"]);
+          "claude-opus-4-8[1m]",
+          "claude-opus-4-7[1m]",
+          "claude-sonnet-5",
+        ]);
+        expect(claude?.envPassthrough).toEqual([
+          "BB_CLAUDE_CODE_EXECUTABLE",
+          "CLAUDE_CODE_OAUTH_TOKEN",
+        ]);
         expect(
           harness.deps.providerRegistry
             .get("codex")

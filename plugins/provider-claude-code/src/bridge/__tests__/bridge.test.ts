@@ -2439,6 +2439,22 @@ describe("bridge", () => {
         persistSession: false,
       }),
     });
+    const probeOptions = queryMock.mock.calls.at(-1)?.[0]?.options;
+    expect(probeOptions).not.toHaveProperty("allowDangerouslySkipPermissions");
+    expect(probeOptions).not.toHaveProperty("permissionMode");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("treats an empty Claude model report as a discovery failure", async () => {
+    const close = vi.fn();
+    queryMock.mockReturnValueOnce({
+      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      close,
+    });
+
+    await expect(listClaudeCodeBridgeModels()).rejects.toThrow(
+      "Claude Code reported no models.",
+    );
     expect(close).toHaveBeenCalledOnce();
   });
 
@@ -2448,7 +2464,16 @@ describe("bridge", () => {
     mkdirSync(lockPath);
     const close = vi.fn();
     queryMock.mockReturnValueOnce({
-      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      initializationResult: vi.fn().mockResolvedValue({
+        models: [
+          {
+            value: "default",
+            resolvedModel: "claude-opus-5[1m]",
+            displayName: "Default (recommended)",
+            description: "Opus 5 with 1M context",
+          },
+        ],
+      }),
       close,
     });
     try {

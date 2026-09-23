@@ -14,7 +14,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { toast } from "sonner";
 import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@bb/domain";
 import {
@@ -28,6 +28,7 @@ import {
   useSidebarRename,
   useSidebarRenameState,
 } from "../rows/SidebarInlineRename.js";
+import { AppThreadSectionMoveProvider } from "../rows/ThreadSectionMoveProvider.js";
 import { useDialogState } from "../ui/useDialogState.js";
 import {
   buildProjectThreadGroups,
@@ -68,6 +69,7 @@ import {
   createSidebarProjectIdResolver,
   isSidebarProjectThread,
   buildSidebarEntitySectionId,
+  insertSidebarSectionAfter,
   type CollapsibleSidebarSectionId,
   type ProjectThreadItem,
   type SidebarSectionDefinition,
@@ -91,6 +93,7 @@ import {
   sidebarGroupThreadsByEnvironmentAtom,
   sidebarSortDirectionAtom,
   sidebarCollapsedMachinesAtom,
+  sidebarManualSectionOrderAtom,
   sidebarOrganizationModeAtom,
 } from "../preferences/atoms.js";
 import type {
@@ -371,6 +374,19 @@ export function ProjectListShell({ children }: ProjectListShellProps) {
         <SidebarGroupContent>{children}</SidebarGroupContent>
       </SidebarStickyStack>
     </SidebarContentElementProvider>
+  );
+}
+
+function ProjectListSectionMoveScope({
+  children,
+  sections,
+}: ProjectListShellProps & {
+  sections: readonly SidebarSectionDefinition[];
+}) {
+  return (
+    <AppThreadSectionMoveProvider sections={sections}>
+      <ProjectListShell>{children}</ProjectListShell>
+    </AppThreadSectionMoveProvider>
   );
 }
 
@@ -704,6 +720,7 @@ function ProjectModeSections({
       id: "threads",
       title: "Threads",
       threads: personalThreads,
+      onNewThread: () => onCreateProjectThread(PERSONAL_PROJECT_ID),
       renderContent: (close: () => void) => (
         <ProjectThreadTree
           projectId={PERSONAL_PROJECT_ID}
@@ -733,6 +750,7 @@ function ProjectModeSections({
         id,
         title: row.project.name,
         threads: getProjectThreadItemDescendants(items),
+        onNewThread: () => onCreateProjectThread(row.project.id),
         renderContent: (close: () => void) => (
           <ProjectThreadTree
             projectId={row.project.id}
@@ -761,6 +779,7 @@ function ProjectModeSections({
       order={persistedOrder}
       onOrderChange={onOrderChange}
       label="Projects"
+      selectedThreadId={selectedThreadId}
     >
       <ReorderableSidebarSectionOrderList order={order} threadDnd={threadDnd}>
         {(sectionId, consumeClickSuppression) => {
@@ -819,6 +838,7 @@ interface SectionModeSectionsProps extends BuiltInSectionRenderState {
   collapsedThreadIds: Set<string>;
   compareThreads: ThreadComparator;
   sections: readonly SidebarSectionDefinition[];
+  onCreateThread: () => void;
   onCreateThreadInSection: (sectionId: string) => void;
   onProjectSelect?: () => void;
   onRemoveSection: (section: SidebarSectionDefinition) => void;
@@ -845,6 +865,7 @@ function SectionModeSections({
   compareThreads,
   effectivePinnedThreadIds,
   sections,
+  onCreateThread,
   onCreateThreadInSection,
   onProjectSelect,
   onRemoveSection,
@@ -892,6 +913,7 @@ function SectionModeSections({
       collapsedThreadIds={collapsedThreadIds}
       collapsedEnvironmentIds={collapsedEnvironmentIds}
       onProjectSelect={onProjectSelect}
+      onCreateThread={onCreateThread}
       onCreateThreadInSection={onCreateThreadInSection}
       onRemoveSection={onRemoveSection}
       onToggleThreadCollapsed={onToggleThreadCollapsed}
@@ -920,6 +942,7 @@ interface MachineModeSectionsProps
   compareThreads: ThreadComparator;
   draftThreadIds: ReadonlySet<string>;
   effectivePinnedThreadIds: ReadonlySet<string>;
+  onCreateThread?: () => void;
   onProjectSelect?: () => void;
   onToggleEnvironmentCollapsed: ToggleCollapsedId;
   onToggleThreadCollapsed: ToggleCollapsedId;
@@ -982,6 +1005,7 @@ export function MachineModeSections({
   draftThreadIds,
   effectivePinnedThreadIds,
   isSectionDisplayOptionsOpen,
+  onCreateThread,
   onProjectSelect,
   onToggleCollapsed,
   onToggleEnvironmentCollapsed,
@@ -1162,6 +1186,7 @@ export function MachineModeSections({
       id: "threads",
       title: "Threads",
       threads: nonPinnedThreads,
+      onNewThread: onCreateThread,
       renderContent: (close: () => void) => (
         <ProjectThreadTree
           dndParentKey={CHRONOLOGICAL_CONTAINER_ID}
@@ -1215,6 +1240,7 @@ export function MachineModeSections({
       order={persistedOrder}
       onOrderChange={onOrderChange}
       label="Machines"
+      selectedThreadId={selectedThreadId}
     >
       <ReorderableSidebarSectionOrderList order={order} threadDnd={threadDnd}>
         {(sectionId, consumeClickSuppression) => {
@@ -1366,24 +1392,59 @@ function ProjectListComponent({
   const [sectionCreateErrorMessage, setSectionCreateErrorMessage] = useState<
     string | null
   >(null);
+  const [sectionCreateAnchorId, setSectionCreateAnchorId] =
+    useState<SidebarSectionId | null>(null);
   const sectionDeleteDialog = useDialogState<SidebarSectionDefinition>();
-  const handleOpenCreateSectionDialog = useCallback(() => {
-    setSectionCreateErrorMessage(null);
-    setIsSectionCreateDialogOpen(true);
-  }, []);
+  const setManualSectionOrder = useSetAtom(sidebarManualSectionOrderAtom);
+  const handleOpenCreateSectionDialog = useCallback(
+    (anchorSectionId?: SidebarSectionId) => {
+      setSectionCreateErrorMessage(null);
+      setSectionCreateAnchorId(anchorSectionId ?? null);
+      setIsSectionCreateDialogOpen(true);
+    },
+    [],
+  );
   const handleCreateSectionDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
       setSectionCreateErrorMessage(null);
       setIsSectionCreateDialogOpen(false);
     }
   }, []);
+  const placeCreatedSectionNextToAnchor = useCallback(
+    (createdSectionId: string) => {
+      const anchorSectionId = sectionCreateAnchorId;
+      if (!anchorSectionId) {
+        return;
+      }
+      const sectionId = buildSidebarEntitySectionId(
+        "section",
+        createdSectionId,
+      );
+      setManualSectionOrder(
+        (current) =>
+          insertSidebarSectionAfter({
+            storedOrder: current,
+            entitySectionIds: sections.map((section) =>
+              buildSidebarEntitySectionId("section", section.id),
+            ),
+            legacyEntityAnchor: "sections",
+            anchorSectionId,
+            sectionId,
+          }) ?? current,
+      );
+    },
+    [sectionCreateAnchorId, sections, setManualSectionOrder],
+  );
   const handleCreateThreadSection = useCallback(
     (name: string) => {
       setSectionCreateErrorMessage(null);
       setIsCreateThreadSectionPending(true);
       void sdk.threadSections
         .create({ name })
-        .then(() => setIsSectionCreateDialogOpen(false))
+        .then((section) => {
+          placeCreatedSectionNextToAnchor(section.id);
+          setIsSectionCreateDialogOpen(false);
+        })
         .catch((error: unknown) =>
           setSectionCreateErrorMessage(
             getSectionMutationErrorMessage(error, "Failed to create section."),
@@ -1391,7 +1452,7 @@ function ProjectListComponent({
         )
         .finally(() => setIsCreateThreadSectionPending(false));
     },
-    [sdk],
+    [placeCreatedSectionNextToAnchor, sdk],
   );
   const handleRemoveThreadSection = useCallback(
     (section: SidebarSectionDefinition) => {
@@ -1453,6 +1514,7 @@ function ProjectListComponent({
     return (
       <SidebarHeaderControls
         label={label}
+        sectionId={sectionId}
         onNewThread={handleCreateProjectlessThread}
         showNewProject={sectionId === "threads"}
         open={openSidebarMenu === menuId}
@@ -1462,7 +1524,7 @@ function ProjectListComponent({
         {renameActions ? (
           <SidebarSectionMenuItems onRename={renameActions.onRename} />
         ) : (
-          <ThreadListVisibilityMenuItems />
+          <ThreadListVisibilityMenuItems leadingSeparator={false} />
         )}
       </SidebarHeaderControls>
     );
@@ -1636,7 +1698,7 @@ function ProjectListComponent({
         isCreatingSection: isCreateThreadSectionPending,
       }}
     >
-      <ProjectListShell>
+      <ProjectListSectionMoveScope sections={sections}>
         <ActiveSidebarModeSections
           mode={organizationMode}
           renderMachine={() => (
@@ -1661,6 +1723,7 @@ function ProjectListComponent({
               compareThreads={sidebarThreadComparator}
               renderSectionDisplayOptions={renderSectionDisplayOptions}
               isSectionDisplayOptionsOpen={isSectionDisplayOptionsOpen}
+              onCreateThread={handleCreateProjectlessThread}
               onProjectSelect={onProjectSelect}
               onToggleCollapsed={toggleSidebarSectionCollapsed}
               onToggleThreadCollapsed={toggleThreadCollapsed}
@@ -1688,6 +1751,7 @@ function ProjectListComponent({
               collapsedEnvironmentIds={collapsedEnvironmentIds}
               compareThreads={sidebarThreadComparator}
               onProjectSelect={onProjectSelect}
+              onCreateThread={handleCreateProjectlessThread}
               onCreateThreadInSection={handleCreateThreadInSection}
               onRemoveSection={handleRemoveThreadSection}
               onToggleCollapsed={toggleSidebarSectionCollapsed}
@@ -1750,7 +1814,7 @@ function ProjectListComponent({
             )}
           </>
         )}
-      </ProjectListShell>
+      </ProjectListSectionMoveScope>
       {sectionCreateDialog}
       {sectionDeleteDialogContent}
     </SidebarHeaderActionsProvider>

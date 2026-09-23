@@ -244,6 +244,7 @@ interface ChronologicalBuiltInSidebarSections {
 
 interface ChronologicalSectionThreadSectionsProps extends SectionThreadTreeProps {
   builtInSections: ChronologicalBuiltInSidebarSections;
+  onCreateThread?: () => void;
   topLevelSectionOrder: readonly SidebarSectionId[];
   fullSectionOrder: readonly SidebarSectionId[];
   onTopLevelSectionOrderChange: (order: SidebarSectionId[]) => void;
@@ -1420,6 +1421,7 @@ const SectionTreeItemRow = memo(function SectionTreeItemRow({
     const topLevelActions = (
       <SidebarHeaderControls
         label={`${section.name} section`}
+        sectionId={buildSidebarEntitySectionId("section", section.id)}
         onNewThread={
           onCreateThreadInSection
             ? () => onCreateThreadInSection(section.id)
@@ -1476,6 +1478,7 @@ const SectionTreeItemRow = memo(function SectionTreeItemRow({
       <SidebarSectionRow
         name={section.name}
         label={section.name}
+        sectionId={buildSidebarEntitySectionId("section", section.id)}
         labelEditor={rename.editor}
         onRename={rename.startEditing}
         onRenameFromMenu={rename.startEditingFromMenu}
@@ -1971,6 +1974,7 @@ export const ChronologicalSectionThreadSections = memo(
     collapsedThreadIds,
     collapsedEnvironmentIds,
     onProjectSelect,
+    onCreateThread,
     onCreateThreadInSection,
     onRemoveSection,
     onToggleThreadCollapsed,
@@ -2117,6 +2121,7 @@ export const ChronologicalSectionThreadSections = memo(
         id: "threads",
         title: "Threads",
         threads: looseThreads,
+        onNewThread: onCreateThread,
         renderContent: (close: () => void) => (
           <ProjectThreadTree
             rootItems={looseItems}
@@ -2143,6 +2148,9 @@ export const ChronologicalSectionThreadSections = memo(
         id: buildSidebarEntitySectionId("section", item.group.id),
         title: item.group.name,
         threads: getProjectThreadItemDescendants(item.group.items),
+        onNewThread: onCreateThreadInSection
+          ? () => onCreateThreadInSection(item.group.id)
+          : undefined,
         renderContent: (close: () => void) => (
           <ProjectThreadTree
             rootItems={item.group.items}
@@ -2202,6 +2210,7 @@ export const ChronologicalSectionThreadSections = memo(
         order={fullSectionOrder}
         onOrderChange={onTopLevelSectionOrderChange}
         label="Sections"
+        selectedThreadId={selectedThreadId}
       >
         {sectionDnd ? (
           <DndContext {...sectionDnd.dndContextProps}>
@@ -2293,6 +2302,7 @@ function ProjectRowComponent({
   const projectActions = (
     <SidebarHeaderControls
       label={project.name}
+      sectionId={buildSidebarEntitySectionId("project", project.id)}
       onNewThread={onCreateProjectThread ? handleCreateThread : undefined}
       onOpenChange={setIsDropdownActionsOpen}
       onCloseAutoFocus={rename.onCloseAutoFocus}

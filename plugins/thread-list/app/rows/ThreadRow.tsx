@@ -138,6 +138,7 @@ interface ThreadRowContainerArgs {
   dragBindings?: SidebarSortableDragBindings;
   nestTargetState: SidebarNestTargetState | null;
   reorderPlacement: SidebarReorderPlacement | null;
+  onClick?: MouseEventHandler<HTMLDivElement>;
   onClickCapture?: ThreadRowClickCaptureHandler;
   onSplitDragPointerDown?: PointerEventHandler<HTMLElement>;
   stickyLevel?: number;
@@ -171,6 +172,7 @@ function renderThreadRowContainer({
   containerRef,
   dragBindings,
   nestTargetState,
+  onClick,
   onClickCapture,
   onSplitDragPointerDown,
   reorderPlacement,
@@ -185,6 +187,7 @@ function renderThreadRowContainer({
     "data-sidebar-reorder-placement": reorderPlacement ?? undefined,
     ...dragBindings?.attributes,
     ...(dragBindings?.listeners ?? {}),
+    onClick,
     onClickCapture,
     onPointerDown: onSplitDragPointerDown,
   };
@@ -448,6 +451,17 @@ function ThreadRowComponent({
   );
 
   const rowLinkRef = useRef<HTMLAnchorElement>(null);
+  const handleRowClick = useCallback<MouseEventHandler<HTMLDivElement>>(
+    (event) => {
+      if (event.target !== event.currentTarget) {
+        if (!(event.target instanceof Element)) return;
+        if (!event.target.closest("[data-sidebar-thread-trailing]")) return;
+        if (event.target.closest("a, button")) return;
+      }
+      rowLinkRef.current?.click();
+    },
+    [],
+  );
   const rowContent = (
     <>
       {parentOptions?.stickyLevel !== undefined && parentGuideLeft !== null ? (
@@ -495,7 +509,7 @@ function ThreadRowComponent({
       ) : null}
       <span
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-1.5 self-stretch",
+          "relative flex min-w-0 flex-1 items-center gap-1.5 self-stretch",
           !shortcut &&
             !isEditing &&
             (parentOptions && hasChildren
@@ -503,44 +517,44 @@ function ThreadRowComponent({
               : SIDEBAR_HOVER_ACTIONS_INSET_CLASS),
         )}
       >
+        <a
+          ref={rowLinkRef}
+          href={thread.href}
+          data-sidebar-thread-shortcut-target=""
+          data-sidebar-thread-id={thread.id}
+          data-sidebar-rename-anchor=""
+          onClick={(event) => {
+            if (isEditing) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            if (splitAvailable && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              openInSplit();
+              return;
+            }
+            if (consumeSidebarTitleDoubleClick(thread.id)) {
+              event.preventDefault();
+              event.stopPropagation();
+              startEditing();
+              return;
+            }
+            onProjectSelect?.();
+          }}
+          onDoubleClick={isEditing ? undefined : startTitleEditing}
+          aria-label={linkLabel}
+          aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
+          className="absolute inset-0 rounded-md outline-none"
+        />
         <span
           className={cn(
-            "relative flex min-w-0 items-center self-stretch",
+            "pointer-events-none relative flex min-w-0 items-center self-stretch",
             (!parentOptions || !hasChildren || isEditing) && "flex-1",
           )}
         >
-          <a
-            ref={rowLinkRef}
-            href={thread.href}
-            data-sidebar-thread-shortcut-target=""
-            data-sidebar-thread-id={thread.id}
-            data-sidebar-rename-anchor=""
-            onClick={(event) => {
-              if (isEditing) {
-                event.preventDefault();
-                event.stopPropagation();
-                return;
-              }
-              if (splitAvailable && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                openInSplit();
-                return;
-              }
-              if (consumeSidebarTitleDoubleClick(thread.id)) {
-                event.preventDefault();
-                event.stopPropagation();
-                startEditing();
-                return;
-              }
-              onProjectSelect?.();
-            }}
-            onDoubleClick={isEditing ? undefined : startTitleEditing}
-            aria-label={linkLabel}
-            aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
-            className="absolute inset-0 rounded-md outline-none"
-          />
           {isEditing ? (
-            <span className="relative z-10 min-w-0 flex-1 overflow-visible">
+            <span className="pointer-events-auto relative z-10 min-w-0 flex-1 overflow-visible">
               {editor}
             </span>
           ) : (
@@ -566,6 +580,7 @@ function ThreadRowComponent({
         ) : null}
       </span>
       <span
+        data-sidebar-thread-trailing=""
         className={cn(
           "flex shrink-0 items-center gap-0.5",
           isEditing && "hidden",
@@ -683,6 +698,7 @@ function ThreadRowComponent({
     dragBindings: rowDragBindings,
     nestTargetState,
     reorderPlacement,
+    onClick: isEditing ? undefined : handleRowClick,
     onClickCapture:
       !isEditing && options.consumeClickSuppression
         ? handleRowClickCapture

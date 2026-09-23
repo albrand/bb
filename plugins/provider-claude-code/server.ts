@@ -1,11 +1,11 @@
 import { registerUsageSource } from "./src/usage-source.js";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { CLAUDE_NATIVE_ROOTS_DECLARATION } from "./src/native-roots.js";
 import {
   CLAUDE_CODE_ACTIVE_CATALOG_DATA,
   CLAUDE_XHIGH_CAPABLE_REASONING_EFFORT_DATA,
   DEFAULT_CLAUDE_CODE_MODEL,
 } from "./src/model-catalog-data.js";
-import { CLAUDE_NATIVE_ROOTS_DECLARATION } from "./src/native-roots.js";
 
 export default function plugin(bb: BbPluginApi) {
   registerUsageSource(bb);
@@ -79,7 +79,9 @@ export default function plugin(bb: BbPluginApi) {
     ],
     composerActions: ["plan"],
     completedTurnDisplay: "flat",
-    env: { passthrough: ["BB_CLAUDE_CODE_EXECUTABLE"] },
+    env: {
+      passthrough: ["BB_CLAUDE_CODE_EXECUTABLE", "CLAUDE_CODE_OAUTH_TOKEN"],
+    },
     models: {
       scope: "host",
       fallback: CLAUDE_CODE_ACTIVE_CATALOG_DATA.map((entry) => ({

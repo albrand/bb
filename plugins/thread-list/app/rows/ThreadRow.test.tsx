@@ -980,6 +980,11 @@ describe("ThreadRow", () => {
         name: /(?:Expand|Collapse) Nested discussion/,
       });
       const titleContainer = toggle.parentElement;
+      const link = screen.getByRole("link", {
+        name: "Open Nested discussion with enough text to fill the sidebar width",
+      });
+      const navigationTarget = link.parentElement;
+      const titleWrapper = link.nextElementSibling;
       expect(
         titleContainer?.classList.contains("bb-sidebar-hover-actions-inset"),
       ).toBe(false);
@@ -987,10 +992,47 @@ describe("ThreadRow", () => {
       expect(
         titleContainer?.classList.contains("max-md:pointer-coarse:pr-0"),
       ).toBe(true);
+      expect(navigationTarget?.classList.contains("flex-1")).toBe(true);
+      expect(titleWrapper?.classList.contains("flex-1")).toBe(false);
       fireEvent.click(toggle);
       expect(onToggleCollapsed).toHaveBeenCalledWith("thr_test");
     },
   );
+
+  it("routes a tap on the bare row through its navigation link", () => {
+    renderThreadRow();
+    const link = screen.getByRole("link", { name: "Open Thread" });
+    const row = link.closest("[data-sidebar-rename-row]");
+    expect(row).not.toBeNull();
+    const clickLink = vi.spyOn(link, "click");
+
+    fireEvent.click(row!);
+    expect(clickLink).toHaveBeenCalledOnce();
+
+    fireEvent.click(row!.querySelector("[data-sidebar-thread-trailing]")!);
+    expect(clickLink).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(link);
+    expect(clickLink).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not route a suppressed drag click on the trailing area", () => {
+    renderThreadRow({
+      options: {
+        ...DEFAULT_OPTIONS,
+        consumeClickSuppression: vi.fn(() => true),
+      },
+    });
+    const link = screen.getByRole("link", { name: "Open Thread" });
+    const clickLink = vi.spyOn(link, "click");
+    const trailing = link
+      .closest("[data-sidebar-rename-row]")
+      ?.querySelector("[data-sidebar-thread-trailing]");
+    expect(trailing).not.toBeNull();
+
+    fireEvent.click(trailing!);
+    expect(clickLink).not.toHaveBeenCalled();
+  });
 
   it("keeps the parent-thread disclosure caret visible on mobile", () => {
     renderThreadRow({
