@@ -588,7 +588,6 @@ function ProjectModeSections({
   }, [effectivePinnedThreadIds, threads]);
   const projectRows = useMemo<ProjectListRowModel[]>(
     () =>
-      // Personal threads render in the built-in Threads section, never as a project.
       projects
         .filter((project) => !project.isPersonal)
         .map((project) => ({
