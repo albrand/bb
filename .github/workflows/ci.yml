@@ -166,7 +166,7 @@ jobs:
     name: Provider Model Listing
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ours' }}
 
     steps:
       - name: Checkout repository
