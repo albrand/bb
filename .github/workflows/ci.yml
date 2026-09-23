@@ -37,6 +37,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check source files for literal NUL bytes
+        run: node scripts/check-source-nul.mjs
+
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -155,6 +158,55 @@ jobs:
 
       - name: Test
         run: pnpm exec turbo run test ${{ matrix.filter }} --cache-dir=.turbo/cache --output-logs=new-only --concurrency=4 ${{ matrix.args }}
+
+  # Every other suite mocks the Agent SDK, so an upstream CLI release that
+  # breaks the model probe would otherwise pass CI silently. Keep this live
+  # check enabled wherever the fork has configured its Claude credential.
+  provider-model-listing:
+    name: Provider Model Listing
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check Claude Code credential availability
+        id: credentials
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping the live Claude model-listing probe because CLAUDE_CODE_OAUTH_TOKEN is not configured."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup workspace
+        if: steps.credentials.outputs.available == 'true'
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          cache-prefix: test-provider-model-listing
+
+      - name: Install Claude Code CLI
+        if: steps.credentials.outputs.available == 'true'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show Claude Code version
+        if: steps.credentials.outputs.available == 'true'
+        run: claude --version
+
+      - name: Probe Claude Code model listing
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: pnpm exec turbo run test:integration --filter=@bb/agent-runtime --cache-dir=.turbo/cache --output-logs=new-only --force -- -t "claude-code provider lists models"
 
   # The macOS legs run without the Turbo cache. The cache moves over GitHub's
   # own service at ~50 MB/s: restoring and saving the ~2 GB directory cost about
