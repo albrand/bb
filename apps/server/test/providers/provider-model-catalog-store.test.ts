@@ -43,6 +43,14 @@ const BASE_NOW = 1_800_000_000_000;
 const SECOND = 1_000;
 const MINUTE = 60 * SECOND;
 const SETTLED = "Provider model catalog refresh settled";
+const CLAUDE_CODE_FALLBACK_MODEL_IDS = [
+  "claude-fable-5-1",
+  "claude-opus-5-5[1m]",
+  "claude-opus-5[1m]",
+  "claude-opus-4-8[1m]",
+  "claude-opus-4-7[1m]",
+  "claude-sonnet-5",
+];
 
 type ListModelsCommand = Extract<
   HostDaemonOnlineRpcRequestMessage["command"],
@@ -217,7 +225,7 @@ describe("provider model catalog store", () => {
         providerId: "claude-code",
         code: "failed",
       });
-      expect(modelIds(response)).toEqual([]);
+      expect(modelIds(response)).toEqual(CLAUDE_CODE_FALLBACK_MODEL_IDS);
       expect(host.listRequests()).toHaveLength(2);
     });
   });
@@ -562,7 +570,7 @@ describe("provider model catalog store", () => {
       lateFailure.resolve();
       const failed = await pending;
       expect(failed.modelLoadError?.code).toBe("failed");
-      expect(modelIds(failed)).toEqual([]);
+      expect(modelIds(failed)).toEqual(CLAUDE_CODE_FALLBACK_MODEL_IDS);
 
       updateHost(harness.db, harness.hub, host.hostId, { phase: "creating" });
       expect((await host.read("claude-code")).modelLoadError?.code).toBe(

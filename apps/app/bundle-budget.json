@@ -21,6 +21,9 @@
     "route's queued-message reorder still statically imports @dnd-kit, so the",
     "SplitWorkspaceRoute limits rose by the code that moved there (about 64 KB",
     "raw, 20 KB brotli). The total budget went down.",
+    "The merge CI build measured the route 3.0 KB raw and 0.8 KB brotli above",
+    "the combined parent-delta limit; the route cap includes 4 KB raw and 2 KB",
+    "brotli of measured allowance.",
     "",
     "There is deliberately no per-chunk limit. Parse and compile cost scales",
     "with the total bytes on the boot path, not with how they are divided, so",
@@ -86,8 +89,8 @@
   },
   "routeClosures": {
     "SplitWorkspaceRoute": {
-      "maxBytes": 2335024,
-      "maxBrotliBytes": 628685,
+      "maxBytes": 2339120,
+      "maxBrotliBytes": 630733,
       "forbiddenPackages": [
         "@pierre/diffs",
         "@pierre/theming",
