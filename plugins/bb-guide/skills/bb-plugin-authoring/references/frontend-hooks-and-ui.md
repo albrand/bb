@@ -28,6 +28,11 @@ Hooks:
 - `useSettings()` → `{ values, isLoading }` — effective non-secret values
   (secret settings are excluded; read them server-side only).
 - `useBbContext()` → `{ projectId, threadId }` from the current route.
+- `experimental_usePluginId()` → this plugin's id, the same value as the
+  server's `bb.pluginId`. Key anything kept outside bb's plugin storage with
+  it (localStorage entries, log prefixes) so a copy published under another
+  package name does not share the original's state. `renderSlot` returns its
+  `pluginId` option, `test-plugin` by default.
 - `useBbNavigate()` → `{ toThread(id), toProject(id), toPluginPanel(path,
 { subPath?, replace? }?), toCompose({ initialPrompt?, focusPrompt? }?),
 openThreadPanel({ actionId, title?, params? }), openUrl(url),
@@ -126,9 +131,12 @@ component kit is removed. The app module still exports focused BB capability
 components such as `ThreadChat`, `Markdown`, file links, pickers, source and
 diff viewers, and the new-thread composer.
 
-- Builtin plugins in this repo import shared UI from `@bb/shared-ui` (the
-  single source of truth the app also consumes and the registry generates
-  from); external and example plugins still vendor source through the registry.
+- Most builtin plugins in this repo import shared UI from `@bb/shared-ui`
+  (the single source of truth the app also consumes and the registry
+  generates from). Forkable builtins (`scripts/forkable-plugins.json`) import
+  the same components through the `@/` alias, which their tsconfig maps onto
+  that source; a fork vendors them from the registry. External and example
+  plugins vendor source through the registry.
 - `bb plugin new` pre-vendors button, card, input, checkbox, dialog (plus
   their support files: `lib/utils`, `lib/portal-scope`, icon,
   responsive-overlay, drawer, hooks) into `components/ui/` etc., and writes a `components.json`
@@ -136,12 +144,15 @@ diff viewers, and the new-thread composer.
   BB. Import via the `@/*` alias: `import { Button } from
 "@/components/ui/button"` (tsconfig maps it; `bb plugin build` reads it).
 - Add more with stock shadcn tooling: `npx shadcn add @bb/select
-@bb/table` — the BB registry carries the full stock set (~44 items:
+@bb/table` — the BB registry carries the full stock set (~46 items:
   accordion, alert-dialog, calendar, chart, command, form, sheet, table,
   …), generated from the BB app's own component source, so vendored code is
   version-matched to your BB by construction. Edit the copies freely; they
   never change out from under you. Re-running `shadcn add` is the manual
   update path.
+- The registry's `icon` is a thin wrapper over `experimental_Icon`: vendored
+  components draw bb's glyphs, including icons other plugins register, from
+  the host at runtime instead of bundling an icon set.
 - `toast`: `import { toast } from "sonner"` — runtime-shimmed to the host's
   Toaster (`toast.success("Saved")` just works; never mount your own
   `<Toaster>`).
@@ -176,9 +187,9 @@ plugin types --check` reports drift). Never list one in `dependencies` —
   after adding components (`bb plugin new` runs the first one; `shadcn add`
   installs each item's declared deps). Users of your prebuilt artifact need no
   npm. Managed source installs do.
-- The old bb extras (`EmptyState`, `PageBody`, `Spinner`) are
-  gone — write your own (each is a few lines; see
-  `plugins/github/components/` for reference implementations).
+- `EmptyState` ships as `npx shadcn add @bb/empty-state`. The other old bb
+  extras (`PageBody`, `Spinner`) are gone — write your own (each is a few
+  lines; see `plugins/github/components/` for reference implementations).
 
 Compatibility aliases remain for one release and warn once. Use `UrlLink`
 instead of `experimental_UrlLink`. Use `BbNavigate.openUrl` instead of

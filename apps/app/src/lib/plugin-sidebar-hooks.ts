@@ -337,7 +337,7 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
         await updateThreadAsync({ id: threadId, title });
       },
       archive(threadId) {
-        hostActions.archiveThreadAndChildren(requireEntry(threadId));
+        hostActions.requestArchive(requireEntry(threadId));
       },
       requestDelete(threadId) {
         hostActions.requestDelete(requireEntry(threadId));

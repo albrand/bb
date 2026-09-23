@@ -1,3 +1,4 @@
+import * as React from "react";
 import {
   createContext,
   useContext,
@@ -111,11 +112,11 @@ import {
  *
  * - {@link installTestPluginRuntime} fills `globalThis.__bbPluginRuntime.
  *   pluginSdkApp` with a test implementation of the `@get-bb/plugin-sdk/app`
- *   surface (the same seam `bb plugin build` shims to the real app). It must
- *   run BEFORE the plugin's `app.tsx` module evaluates, because that module
- *   binds the runtime at import time — so import `app.tsx` through
- *   {@link loadPluginApp}'s thunk form, or call the installer from a vitest
- *   setup file when you prefer static imports.
+ *   surface (the same seam `bb plugin build` shims to the real app). The
+ *   `@get-bb/plugin-sdk/app` exports look the runtime up when they are called
+ *   or rendered, so import order does not matter: install the runtime any time
+ *   before the first hook runs ({@link loadPluginApp} and {@link renderSlot}
+ *   install it for you).
  * - {@link loadPluginApp} runs the definition's setup against a validating
  *   collector (ported from the BB app's interpreter, same error messages)
  *   and returns the typed slot registrations.
@@ -236,6 +237,7 @@ interface SlotEnv {
   realtimeConnection: TestRealtimeConnectionStore;
   settingsState: PluginSettingsState;
   bbContext: BbContext;
+  pluginId: string;
   navigate: BbNavigate;
   navigateCalls: NavigateCall[];
   appPanel: ExperimentalAppPanel;
@@ -922,6 +924,9 @@ const testPluginSdkApp = {
   useBbContext(): BbContext {
     return useSlotEnv("useBbContext").bbContext;
   },
+  experimental_usePluginId(): string {
+    return useSlotEnv("experimental_usePluginId").pluginId;
+  },
   useBbNavigate(): BbNavigate {
     return useSlotEnv("useBbNavigate").navigate;
   },
@@ -1142,18 +1147,21 @@ const testPluginSdkApp = {
 } satisfies PluginSdkApp;
 
 interface PluginRuntimeHost {
-  __bbPluginRuntime?: { pluginSdkApp?: unknown };
+  __bbPluginRuntime?: { pluginSdkApp?: unknown; react?: unknown };
 }
 
 /**
- * Install the test runtime at `globalThis.__bbPluginRuntime.pluginSdkApp`.
- * Idempotent per module instance; must run before the plugin's `app.tsx`
- * (and therefore `@get-bb/plugin-sdk/app`) is imported.
+ * Install the test runtime at `globalThis.__bbPluginRuntime.pluginSdkApp`,
+ * plus the React the `@get-bb/plugin-sdk/app` components render through.
+ * Idempotent per module instance. Call it before the first SDK hook runs or
+ * SDK component renders; when the plugin's modules are imported does not
+ * matter.
  */
 export function installTestPluginRuntime(): void {
   const host = globalThis as PluginRuntimeHost;
   host.__bbPluginRuntime = {
     ...host.__bbPluginRuntime,
+    react: host.__bbPluginRuntime?.react ?? React,
     pluginSdkApp: testPluginSdkApp,
   };
 }
@@ -1200,9 +1208,8 @@ export type PluginAppSource =
 
 /**
  * Install the test runtime, resolve the plugin app definition, and capture
- * its slot registrations. Pass a thunk (`() => import("../app.tsx")`) so the
- * plugin module evaluates after the runtime is installed — a static import
- * would bind `definePluginApp` before the installer runs.
+ * its slot registrations. Pass the imported module, its default export, or a
+ * thunk (`() => import("../app.tsx")`).
  */
 export async function loadPluginApp(
   source: PluginAppSource,
@@ -1383,6 +1390,8 @@ export interface RenderSlotOptions<
   settings?: Record<string, string | number | boolean>;
   /** `useBbContext()` selection; both default to null. */
   context?: { projectId?: string | null; threadId?: string | null };
+  /** `experimental_usePluginId()` value; defaults to `test-plugin`. */
+  pluginId?: string;
   /** Initial `useRealtimeConnectionState()` value; defaults to `connected`. */
   realtimeConnectionState?: PluginRealtimeConnectionState;
   /** Initial state for this render's isolated composer scope and view. */
@@ -1588,6 +1597,7 @@ export function renderSlot<
   props: Props,
   options: RenderSlotOptions<Contract> = {},
 ): RenderedSlot {
+  installTestPluginRuntime();
   const rpcCalls: RpcCall[] = [];
   const rpcHandlers = (options.rpc ?? {}) as Record<
     string,
@@ -2017,6 +2027,7 @@ export function renderSlot<
     realtimeConnection,
     settingsState: { values: options.settings, isLoading: false },
     bbContext: { projectId, threadId },
+    pluginId: options.pluginId ?? "test-plugin",
     navigate,
     navigateCalls,
     appPanel,

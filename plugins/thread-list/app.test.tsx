@@ -8,7 +8,6 @@ import {
   renderSlot,
   type RenderSlotOptions,
 } from "@get-bb/plugin-sdk/testing/app";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
 import { makePluginProject, makeSidebarThread } from "./app/model/fixtures.js";
 import {
   resetPreferencesSyncForTest,
@@ -22,6 +21,8 @@ import {
 const app = await loadPluginApp(() => import("./app"));
 const registration = app.threadLists[0];
 if (!registration) throw new Error("thread-list slot not registered");
+
+const PERSONAL_PROJECT_ID = "proj_personal";
 
 const PROJECTS = [
   makePluginProject({
@@ -213,6 +214,20 @@ describe("thread-list plugin", () => {
       .getByTitle("Threads")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
     expect(within(threadsGroup).getByText("Personal thread")).not.toBeNull();
+  });
+
+  it("keys its slot and preferences mirror by its own plugin id", async () => {
+    window.localStorage.clear();
+    expect(registration.id).toBe("thread-list");
+    renderList({ organizationMode: "machine" }, { pluginId: "thread-list" });
+
+    await screen.findByText("Pinned thread");
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("bb.thread-list.preferences.v1") ?? "{}",
+      ).organizationMode,
+    ).toBe("machine");
+    window.localStorage.clear();
   });
 
   it("calls onNavigate when a thread row is opened", async () => {

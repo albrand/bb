@@ -10,14 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import { useAtom } from "jotai";
-import type { ThreadListEntry } from "@bb/domain";
-import {
-  getCollapsedChildActivity,
-  type SidebarSectionId,
-} from "@bb/client-core";
-import { DropdownMenuItem } from "@bb/shared-ui/dropdown-menu";
-import { ContextMenuItem } from "@bb/shared-ui/context-menu";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import type { SidebarThread } from "../model/sidebar-thread.js";
+import type { SidebarSectionId } from "../model/sidebar-section-id.js";
+import { getCollapsedChildActivity } from "../model/thread-activity.js";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { useSidebarThreadDraftIds } from "@get-bb/plugin-sdk/app";
 import { ActionMenuSeparator } from "../ui/action-menu-items.js";
 import { SidebarContentElementContext } from "../ui/sidebar.js";
@@ -40,7 +38,7 @@ const LazySidebarVisibilityCustomize = lazy(async () => {
 
 export interface ThreadListVisibilityGroup extends SidebarVisibilityItem {
   id: SidebarSectionId;
-  threads: readonly ThreadListEntry[];
+  threads: readonly SidebarThread[];
   renderContent: (close: () => void) => ReactNode;
   onNewThread?: () => void;
 }
@@ -209,7 +207,7 @@ export function ThreadListVisibilityMenuItems({
   );
 }
 
-function GroupActivity({ threads }: { threads: readonly ThreadListEntry[] }) {
+function GroupActivity({ threads }: { threads: readonly SidebarThread[] }) {
   const drafts = useSidebarThreadDraftIds();
   const pluginStatus = usePluginThreadRowStatusForThreads(threads);
   return (

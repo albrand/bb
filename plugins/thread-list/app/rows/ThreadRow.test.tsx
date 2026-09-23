@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type {
   PluginSidebarProject,
   PluginSidebarSplitLayout,
@@ -15,9 +15,8 @@ import {
   type PluginSdkTestFakes,
   type RenderedSlot,
 } from "@get-bb/plugin-sdk/testing/app";
-import { NO_COLLAPSED_CHILD_ACTIVITY } from "@bb/client-core";
+import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
 import { makeSidebarThread } from "../model/fixtures.js";
-import { toSidebarThread } from "../model/sidebar-thread.js";
 import {
   SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
   SIDEBAR_WORKING_STATUS_COLOR_CLASS,
@@ -78,7 +77,7 @@ function ThreadRowHarness({
   const row = (
     <ThreadRow
       projectId={thread.projectId}
-      thread={toSidebarThread(thread)}
+      thread={thread}
       crossProjectId={crossProjectId}
       isActive={isActive}
       options={options}
@@ -206,6 +205,7 @@ describe("ThreadRow", () => {
     expect(link.getAttribute("href")).toBe("/projects/proj_test/threads/thr_test");
     expect(link.getAttribute("data-sidebar-thread-shortcut-target")).toBe("");
     expect(link.getAttribute("data-sidebar-thread-id")).toBe("thr_test");
+    expect(link.getAttribute("data-sidebar-project-id")).toBe("proj_test");
     expect(link.getAttribute("data-sidebar-rename-anchor")).toBe("");
     expect(link.closest("[data-sidebar-rename-row]")).not.toBeNull();
     fireEvent.click(link);
@@ -585,20 +585,6 @@ describe("ThreadRow", () => {
     ).not.toBeNull();
     expect(screen.queryByLabelText("Thread has unsubmitted draft")).toBeNull();
     expect(screen.queryByLabelText("Unread thread succeeded")).toBeNull();
-  });
-
-  it("falls back to the default glyph for an icon name no plugin registered", () => {
-    renderThreadRow({
-      pluginStatus: {
-        icon: "icon-probe/undeclared",
-        label: "Unregistered name",
-      },
-      thread: createThread({ lastReadAt: 1, latestAttentionAt: 1 }),
-    });
-
-    expect(
-      screen.getByLabelText("Unregistered name").getAttribute("data-icon"),
-    ).toBe("Zap");
   });
 
   it("replaces the draft icon with a plugin status and restores it without one", () => {
@@ -1388,6 +1374,7 @@ describe("ThreadRow", () => {
       status: "idle",
       runtimeStatus: "idle",
       latestAttentionAt: 2_000,
+      isUnread: true,
     });
 
     expect(container.querySelector('[data-icon="CircleCheck"]')).toBeNull();

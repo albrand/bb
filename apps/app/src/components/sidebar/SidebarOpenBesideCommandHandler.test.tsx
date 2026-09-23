@@ -4,8 +4,6 @@ import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
-import type { ThreadListEntry } from "@bb/domain";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -36,7 +34,6 @@ vi.mock("@/components/thread/ThreadActionsMenu", () => ({
   ThreadArchiveQuickAction: () => null,
 }));
 
-import { ThreadRow } from "./ThreadRow";
 import { SidebarOpenBesideCommandHandler } from "./SidebarOpenBesideCommandHandler";
 import {
   EMPTY_SIDEBAR_THREAD_SHORTCUT_KEYS,
@@ -47,35 +44,20 @@ import {
 const THREAD_ID = "thr_beside";
 const PROJECT_ID = "proj_beside";
 
-function thread(): ThreadListEntry {
-  return makeThreadListEntry({
-    id: THREAD_ID,
-    projectId: PROJECT_ID,
-    title: "Beside me",
-    titleFallback: "Beside me",
-    lastReadAt: 0,
-    latestAttentionAt: 1,
-    createdAt: 1,
-    updatedAt: 1,
-  });
-}
-
 function renderSidebar() {
-  const entry = thread();
   const result = render(
     <MemoryRouter>
       <TooltipProvider>
         <SidebarThreadShortcutKeysContext.Provider
           value={EMPTY_SIDEBAR_THREAD_SHORTCUT_KEYS}
         >
-          <ThreadRow
-            projectId={entry.projectId}
-            thread={entry}
-            crossProjectId={null}
-            isActive={false}
-            hasComposerDraft={false}
-            options={{ kind: "default", depth: 1, isCompact: false }}
-          />
+          <a
+            data-sidebar-project-id={PROJECT_ID}
+            data-sidebar-thread-id={THREAD_ID}
+            href="#thread"
+          >
+            Focusable thread row
+          </a>
           <textarea data-testid="composer" />
           <SidebarOpenBesideCommandHandler />
         </SidebarThreadShortcutKeysContext.Provider>
