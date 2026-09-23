@@ -1,13 +1,11 @@
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import {
+  experimental_assembleCapturedThreadEvents as assembleCapturedThreadEvents,
+  experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
+} from "@get-bb/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -25,7 +23,14 @@ beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-resume-hydration-"));
   requestLogPath = join(workspaceDir, "requests.jsonl");
   const scriptPath = join(workspaceDir, "script.json");
-  writeFileSync(scriptPath, JSON.stringify({ requestLogPath }), "utf8");
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({
+      requestLogPath,
+      resumeRecordedModel: "gpt-5.6-terra",
+    }),
+    "utf8",
+  );
   stubFakeCodexAppServer(scriptPath);
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
@@ -62,36 +67,61 @@ it("excludes turn history when it resumes a Codex thread", async () => {
     method: "thread/resume",
     params: expect.objectContaining({ excludeTurns: true }),
   });
+  expect(
+    requests.find((request) => request.method === "thread/resume")?.params,
+  ).not.toHaveProperty("model");
 });
 
-it("defers a selected model until the resumed thread's next turn", async () => {
+it("sends A, B, A selections on resume and subsequent turns", async () => {
+  const selectedModels = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-sol"];
   harness.sendRequest(1, "thread/resume", {
     threadId: THREAD_ID,
     providerThreadId: PROVIDER_THREAD_ID,
     cwd: workspaceDir,
     instructionMode: "append",
-    options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-5.6-terra" },
+    options: { ...FULL_ACCESS_SESSION_OPTIONS, model: selectedModels[0] },
   });
   expect((await harness.waitForResponse(1)).error).toBeUndefined();
+  expect(
+    assembleCapturedThreadEvents(harness.messages, "codex").filter(
+      (event) => event.type === "thread/execution/reported",
+    ),
+  ).toContainEqual(
+    expect.objectContaining({
+      execution: expect.objectContaining({ model: selectedModels[0] }),
+    }),
+  );
 
-  harness.sendRequest(2, "turn/start", {
-    threadId: THREAD_ID,
-    providerThreadId: PROVIDER_THREAD_ID,
-    clientRequestId: "creq_terramede2",
-    input: [{ type: "text", text: "continue", mentions: [] }],
-    options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-5.6-terra" },
-  });
-  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+  for (const [index, model] of selectedModels.slice(1).entries()) {
+    const requestId = index + 2;
+    harness.sendRequest(requestId, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId: PROVIDER_THREAD_ID,
+      clientRequestId: requestId === 2 ? "creq_terramede2" : "creq_terramede3",
+      input: [{ type: "text", text: "continue", mentions: [] }],
+      options: { ...FULL_ACCESS_SESSION_OPTIONS, model },
+    });
+    expect((await harness.waitForResponse(requestId)).error).toBeUndefined();
+  }
 
   const requests = readFileSync(requestLogPath, "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  const resume = requests.find(
-    (request) => request.method === "thread/resume",
-  );
-  const turn = requests.find((request) => request.method === "turn/start");
+  const resume = requests.find((request) => request.method === "thread/resume");
 
-  expect(resume?.params).not.toHaveProperty("model");
-  expect(turn?.params).toMatchObject({ model: "gpt-5.6-terra" });
+  expect(resume?.params).toMatchObject({ model: "gpt-5.6-sol" });
+  expect(
+    requests
+      .filter((request) => request.method === "turn/start")
+      .map((request) => request.params.model),
+  ).toEqual(selectedModels.slice(1));
+  expect(
+    harness.messages.filter((message) => message.method === "session/replaced"),
+  ).toEqual([]);
+  expect(
+    assembleCapturedThreadEvents(harness.messages, "codex").filter(
+      (event) => event.type === "provider/warning",
+    ),
+  ).toEqual([]);
 });

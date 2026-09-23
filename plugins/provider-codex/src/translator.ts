@@ -339,6 +339,33 @@ function extractRecoveredCommandOutput(
 
 interface CreateCodexEventTranslatorOptions {
   additionalWorkspaceWriteRoots: readonly string[];
+  resumeModel?: string;
+}
+
+const intentionalResumeModelWarningPattern =
+  /^This session was recorded with model `([^`]+)` but is resuming with `([^`]+)`\. Consider switching back to `([^`]+)` as it may affect Codex performance\.$/u;
+
+function isIntentionalResumeModelWarning(
+  event: ProviderRuntimeEvent,
+  resumeModel: string | undefined,
+): boolean {
+  if (event.method !== "warning" || resumeModel === undefined) {
+    return false;
+  }
+  const params = z
+    .object({ message: z.string() })
+    .passthrough()
+    .safeParse(event.params);
+  if (!params.success) {
+    return false;
+  }
+  const match = intentionalResumeModelWarningPattern.exec(params.data.message);
+  return (
+    match !== null &&
+    match[2] === resumeModel &&
+    match[1] === match[3] &&
+    match[1] !== match[2]
+  );
 }
 
 interface CodexSessionConstructionInput {
@@ -382,6 +409,7 @@ export function createCodexEventTranslator(
   options: CreateCodexEventTranslatorOptions,
 ) {
   const additionalWorkspaceWriteRoots = options.additionalWorkspaceWriteRoots;
+  const resumeModel = options.resumeModel;
   const eventTranslationState = createCodexEventTranslationState();
   const nativeTurnStartClientRequestIdsByProviderThreadId = new Map<
     string,
@@ -1649,6 +1677,9 @@ export function createCodexEventTranslator(
     const rawResponseDeltas = consumeCodexRawResponseItem(event);
     if (rawResponseDeltas !== null) {
       return rawResponseDeltas;
+    }
+    if (isIntentionalResumeModelWarning(event, resumeModel)) {
+      return [];
     }
 
     const providerThreadId = extractCodexProviderThreadId(event);

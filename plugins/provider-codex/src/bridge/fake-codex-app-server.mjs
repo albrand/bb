@@ -241,6 +241,7 @@ const scriptPath = scriptPathFromArgs(process.argv.slice(2));
 const script = scriptPath ? JSON.parse(readFileSync(scriptPath, "utf8")) : null;
 const scriptedTurns = script?.turns ?? null;
 const requestLogPath = script?.requestLogPath ?? null;
+const resumeRecordedModel = script?.resumeRecordedModel ?? null;
 const modelListFailOnceMarkerPath = script?.modelListFailOnceMarkerPath ?? null;
 /**
  * `archiveStatePath`: a JSON file of archived thread ids shared by every fake
@@ -526,7 +527,10 @@ async function handleRequest(message) {
       threadCounter += 1;
       const threadId = `codex-fx-${process.pid}-${threadCounter}`;
       notify("thread/started", { thread: { id: threadId } });
-      respond(id, { thread: { id: threadId }, ...resolvedSessionSettings(params) });
+      respond(id, {
+        thread: { id: threadId },
+        ...resolvedSessionSettings(params),
+      });
       return;
     }
     case "thread/resume": {
@@ -561,6 +565,16 @@ async function handleRequest(message) {
       if (String(params.threadId).startsWith("usage-replay-")) {
         replayLastTurnUsage(params.threadId);
       }
+      if (
+        resumeRecordedModel !== null &&
+        params.model !== undefined &&
+        params.model !== resumeRecordedModel
+      ) {
+        notify("warning", {
+          threadId: params.threadId,
+          message: `This session was recorded with model \`${resumeRecordedModel}\` but is resuming with \`${params.model}\`. Consider switching back to \`${resumeRecordedModel}\` as it may affect Codex performance.`,
+        });
+      }
       respond(id, {
         thread: { id: params.threadId },
         ...resolvedSessionSettings(params),
@@ -587,7 +601,10 @@ async function handleRequest(message) {
       const threadId = replaysUsage
         ? `usage-replay-fork-${process.pid}-${threadCounter}`
         : `codex-fx-${process.pid}-fork-${threadCounter}`;
-      respond(id, { thread: { id: threadId }, ...resolvedSessionSettings(params) });
+      respond(id, {
+        thread: { id: threadId },
+        ...resolvedSessionSettings(params),
+      });
       // thread/fork replays the source rollout's last-turn usage the same way,
       // after the response, under the NEW thread id but the SOURCE turn id
       // (#1727).
