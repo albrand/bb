@@ -214,9 +214,19 @@ export function printExecutionProfile(
     `    Last requested: ${execution.lastRequested ? describe(execution.lastRequested) : "(no turn yet)"}`,
   );
   const { executed } = execution;
-  console.log(
-    `    Executed:       ${executed ? `${executed.model} · ${executed.reasoningLevel ?? "unreported"} · ${executed.permissionMode ?? "unreported"} · ${executed.serviceTier ?? "unreported"}` : "not reported by the provider"}`,
-  );
+  if (executed === null) {
+    console.log(
+      "    Last provider report: current model unknown (not reported by the provider)",
+    );
+    return;
+  }
+  const report = `${executed.model} · ${executed.reasoningLevel ?? "unreported"} · ${executed.permissionMode ?? "unreported"} · ${executed.serviceTier ?? "unreported"}`;
+  const requestedModel = execution.lastRequested?.model;
+  const status =
+    requestedModel !== undefined && requestedModel !== executed.model
+      ? `stale; current requested model ${requestedModel} is unconfirmed`
+      : "last provider-reported session settings";
+  console.log(`    Last provider report: ${status}: ${report}`);
 }
 
 export function registerShowCommand(

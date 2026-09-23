@@ -6,7 +6,7 @@ describe("printExecutionProfile (get-bb/bb#1787)", () => {
     vi.restoreAllMocks();
   });
 
-  it("labels request, overrides and next turn, and never claims what ran", () => {
+  it("labels an unreported current model without claiming the request ran", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     printExecutionProfile({
       lastRequested: {
@@ -30,27 +30,66 @@ describe("printExecutionProfile (get-bb/bb#1787)", () => {
     expect(out).toContain("Next turn:      gpt-5 · max · full · default");
     expect(out).toContain("Overrides:      model default · reasoning max");
     expect(out).toContain("Last requested: gpt-5 · medium · full · default");
-    expect(out).toContain("Executed:       not reported by the provider");
+    expect(out).toContain(
+      "Last provider report: current model unknown (not reported by the provider)",
+    );
+    expect(out).not.toContain("accepted");
   });
 
-  it("prints what the provider reported it runs, marking what it did not report", () => {
+  it("labels a same-model report as provider-reported session settings", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     printExecutionProfile({
-      lastRequested: null,
+      lastRequested: {
+        model: "claude-opus-5",
+        reasoningLevel: "xhigh",
+        permissionMode: "full",
+        serviceTier: "default",
+        source: "client/turn/requested",
+      },
       overrides: { model: null, reasoningLevel: null },
       nextTurn: null,
       executed: {
         model: "claude-opus-5",
         reasoningLevel: "xhigh",
         permissionMode: "full",
-        serviceTier: null,
+        serviceTier: "default",
       },
     });
     const out = log.mock.calls.map((call) => String(call[0])).join("\n");
     expect(out).toContain(
-      "Executed:       claude-opus-5 · xhigh · full · unreported",
+      "Last provider report: last provider-reported session settings: claude-opus-5 · xhigh · full · default",
     );
-    expect(out).not.toContain("not reported by the provider");
+    expect(out).not.toContain("current model unknown");
+    expect(out).not.toContain("current requested model");
+  });
+
+  it("marks a different requested model as stale without replacing the report", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    printExecutionProfile({
+      lastRequested: {
+        model: "gpt-6-sol",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        serviceTier: "default",
+        source: "client/turn/requested",
+      },
+      overrides: { model: null, reasoningLevel: null },
+      nextTurn: null,
+      executed: {
+        model: "gpt-6-terra",
+        reasoningLevel: "high",
+        permissionMode: "full",
+        serviceTier: "default",
+      },
+    });
+    const out = log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(out).toContain(
+      "Last provider report: stale; current requested model gpt-6-sol is unconfirmed: gpt-6-terra · high · full · default",
+    );
+    expect(out).toContain(
+      "Last requested: gpt-6-sol · medium · full · default",
+    );
+    expect(out).not.toContain("Executed:");
   });
 
   it("prints nothing when the server has no execution profile", () => {
