@@ -110,6 +110,7 @@ import { apiJsonCompression } from "./api-response-compression.js";
 import { planUnclaimedAnswerDelivery } from "./services/interactions/deliver-unclaimed-answer.js";
 import { createQueuedMessageForThread } from "./services/threads/queued-messages.js";
 import { getThread } from "@bb/db";
+import { APP_SURFACE_WEB, type AppSurface } from "@bb/config/app-surface";
 import type { ServerBindHost } from "@bb/config/server";
 import { registerServerMoveRoutes } from "./routes/server-move.js";
 import {
@@ -170,6 +171,7 @@ function normalizeInternalAuthPath(path: string): string {
 }
 
 export interface ServerMoveAppOptions {
+  appSurface: AppSurface;
   bindHost: ServerBindHost | null;
   manualImportPending: boolean;
   pending: PendingServerMove | null;
@@ -462,6 +464,7 @@ export function createApp(
       serverEntryUrl: import.meta.url,
     });
   const serverMoveOptions: ServerMoveAppOptions = options?.serverMove ?? {
+    appSurface: APP_SURFACE_WEB,
     bindHost: null,
     manualImportPending: false,
     pending: null,
@@ -730,6 +733,7 @@ export function createApp(
   setPluginAgentContributions(pluginService);
   const serverMove = createServerMoveCoordinator(
     createDefaultServerMoveEnvironment({
+      appSurface: serverMoveOptions.appSurface,
       bindHost: serverMoveOptions.bindHost,
       deps,
       env: process.env,

@@ -221,6 +221,12 @@ Moving the server needs the default-off `serverMove` experiment:
 `bb server move`, `bb server export`, and old-copy deletion with
 `server_move_experiment_disabled`.
 
+Server moves are experimental. As an agent, never start a move, abandon one,
+or unlock an old copy unless the user explicitly confirmed that action in the
+conversation. Run `--check`, show the user the checklist, and wait for their
+confirmation before running the command; don't pass `--yes` to skip the
+confirmation on their behalf.
+
 Run `bb server move --to <machine> --check` first. It prints blockers,
 warnings, and notes and exits nonzero while the move is blocked. A
 direct-address server also needs `--address <url>`: the URL every machine and
@@ -263,7 +269,14 @@ time that server starts.
 
 The old computer's data directory keeps a `server-moved.json` lock, so bb runs
 there as a regular machine. `bb server delete-old-copy` deletes the server files
-the move left behind and keeps the lock. `bb server unlock` removes the lock so
+the move left behind and keeps the lock. The desktop app installs a persistent,
+self-updating machine service there after the move; until that succeeds, and
+after a move from `bb-app`, the machine stays connected only while the app runs.
+`bb server install-machine-service [--data-dir <dir>] [--yes] [--json]` stops
+bb there and runs `install-machine.sh --adopt --data-dir <dir>` to install the
+persistent, self-updating service with the same machine ID. It needs Node.js
+22.19 or newer on the PATH, and `bb server unlock` refuses while the service
+exists. `bb server unlock` removes the lock so
 the old copy can start again; everything since the move is lost there, and the
 new server must be stopped first. It probes `<serverUrl>/health` (connect
 mode: `/api/v1/system/version` with the machine grant in `config.json`) and

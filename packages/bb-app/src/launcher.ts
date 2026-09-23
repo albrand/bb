@@ -25,6 +25,10 @@ import {
 } from "@bb/config/app-runtime-file";
 import { stopVerifiedProcess } from "@bb/config/verified-process-stop";
 import {
+  findMachineServiceFile,
+  MACHINE_INSTALLER_ENV_NAME,
+} from "@bb/config/machine-service";
+import {
   hasProcessExited,
   waitForProcessExit,
   waitForProcessExitWithTimeout,
@@ -458,6 +462,7 @@ interface RunMovedModeArgs {
   bindHost: ServerBindHost;
   context: BbAppStartContext;
   delayMilliseconds: DelayMillisecondsFn;
+  findMachineService: () => Promise<string | null>;
   isShutdownRequested: () => boolean;
   movedFile: ServerMovedFile;
   processes: ManagedFullStackProcesses;
@@ -477,6 +482,7 @@ interface FullStackStarters {
 interface SuperviseBbAppStartArgs {
   context: BbAppStartContext;
   delayMilliseconds: DelayMillisecondsFn;
+  findMachineService: () => Promise<string | null>;
   isShutdownRequested: () => boolean;
   prepareFullStack: (entry: FullStackEntry) => Promise<FullStackStarters>;
   processes: ManagedFullStackProcesses;
@@ -2455,6 +2461,11 @@ function createCliEnv(args: CreateCliEnvArgs): NodeJS.ProcessEnv {
     ...args.env,
     BB_APP_VERSION: args.context.appVersion,
     BB_HOST_DAEMON_PORT: String(args.context.daemonPort),
+    [MACHINE_INSTALLER_ENV_NAME]: join(
+      dirname(args.context.serverEntry),
+      "assets",
+      "install-machine.sh",
+    ),
     NODE_ENV: "production",
   };
 
@@ -3230,6 +3241,12 @@ function printMovedModeReadyOutput(args: PrintMovedModeReadyOutputArgs): void {
   log(" ", formatReadyOutputRow("logs", `${args.context.logDir}/`));
   log(" ", formatReadyOutputRow("lock", args.context.daemonLockFile));
   process.stdout.write("\n");
+  log(
+    " ",
+    dim(
+      "This computer stays connected only while bb-app runs. Run `bb server install-machine-service` to keep it connected with a background service.",
+    ),
+  );
   log(" ", dim("Press Ctrl+C to stop"));
 }
 
@@ -3353,7 +3370,20 @@ export async function runMovedMode(
   await syncResponder();
   const watcher = watchMarkers();
   try {
-    if (!isMovedModeOver()) {
+    const machineService = isMovedModeOver()
+      ? null
+      : await args.findMachineService();
+    if (machineService !== null) {
+      log(
+        green("●"),
+        `A background service runs this computer as a machine (${machineService}); not starting another host daemon`,
+      );
+      while (!isMovedModeOver()) {
+        await args.delayMilliseconds({
+          ms: MOVED_MODE_MARKER_POLL_INTERVAL_MS,
+        });
+      }
+    } else if (!isMovedModeOver()) {
       beginStep("Starting host daemon");
       try {
         await args.startDaemon();
@@ -3475,6 +3505,7 @@ export async function superviseBbAppStart(
       bindHost: args.serverBindHost,
       context: args.context,
       delayMilliseconds: args.delayMilliseconds,
+      findMachineService: args.findMachineService,
       isShutdownRequested: args.isShutdownRequested,
       movedFile,
       processes: args.processes,
@@ -3761,6 +3792,12 @@ export async function runBbApp(
     const supervisionResult = await superviseBbAppStart({
       context,
       delayMilliseconds,
+      findMachineService: () =>
+        findMachineServiceFile({
+          dataDir: context.dataDir,
+          homeDir: homedir(),
+          platform: process.platform,
+        }),
       isShutdownRequested,
       prepareFullStack: async (entry) => {
         const fullStackRuntime = await resolveFullStackRuntime(entry);
