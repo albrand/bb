@@ -1029,9 +1029,13 @@ async function constructThreadSession(
   const serial = sessionSerialCounter;
   const translator = createCodexEventTranslator({
     additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
-    ...(args.request.kind === "resume" &&
-    decoded.sessionOptions.model !== undefined
-      ? { resumeModel: decoded.sessionOptions.model }
+    ...(args.request.kind === "resume"
+      ? {
+          resumeProviderThreadId: args.request.providerThreadId,
+          ...(decoded.sessionOptions.model !== undefined
+            ? { resumeModel: decoded.sessionOptions.model }
+            : {}),
+        }
       : {}),
   });
   translator.configureInjectedTools(

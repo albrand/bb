@@ -340,6 +340,7 @@ function extractRecoveredCommandOutput(
 interface CreateCodexEventTranslatorOptions {
   additionalWorkspaceWriteRoots: readonly string[];
   resumeModel?: string;
+  resumeProviderThreadId?: string;
 }
 
 const intentionalResumeModelWarningPattern =
@@ -348,12 +349,17 @@ const intentionalResumeModelWarningPattern =
 function isIntentionalResumeModelWarning(
   event: ProviderRuntimeEvent,
   resumeModel: string | undefined,
+  resumeProviderThreadId: string | undefined,
 ): boolean {
-  if (event.method !== "warning" || resumeModel === undefined) {
+  if (
+    event.method !== "warning" ||
+    resumeModel === undefined ||
+    resumeProviderThreadId === undefined
+  ) {
     return false;
   }
   const params = z
-    .object({ message: z.string() })
+    .object({ threadId: z.string(), message: z.string() })
     .passthrough()
     .safeParse(event.params);
   if (!params.success) {
@@ -361,6 +367,7 @@ function isIntentionalResumeModelWarning(
   }
   const match = intentionalResumeModelWarningPattern.exec(params.data.message);
   return (
+    params.data.threadId === resumeProviderThreadId &&
     match !== null &&
     match[2] === resumeModel &&
     match[1] === match[3] &&
@@ -410,6 +417,7 @@ export function createCodexEventTranslator(
 ) {
   const additionalWorkspaceWriteRoots = options.additionalWorkspaceWriteRoots;
   const resumeModel = options.resumeModel;
+  const resumeProviderThreadId = options.resumeProviderThreadId;
   const eventTranslationState = createCodexEventTranslationState();
   const nativeTurnStartClientRequestIdsByProviderThreadId = new Map<
     string,
@@ -1678,7 +1686,13 @@ export function createCodexEventTranslator(
     if (rawResponseDeltas !== null) {
       return rawResponseDeltas;
     }
-    if (isIntentionalResumeModelWarning(event, resumeModel)) {
+    if (
+      isIntentionalResumeModelWarning(
+        event,
+        resumeModel,
+        resumeProviderThreadId,
+      )
+    ) {
       return [];
     }
 

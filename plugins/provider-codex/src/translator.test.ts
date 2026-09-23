@@ -92,6 +92,7 @@ it("suppresses only the exact intentional resume model warning", () => {
   const translator = createCodexEventTranslator({
     additionalWorkspaceWriteRoots: [],
     resumeModel: "gpt-5.6-sol",
+    resumeProviderThreadId: "codex-thread",
   });
   const intentionalWarning = {
     jsonrpc: "2.0" as const,
@@ -104,6 +105,30 @@ it("suppresses only the exact intentional resume model warning", () => {
   };
 
   expect(translator.translateEvent(intentionalWarning)).toEqual([]);
+  expect(
+    translator.translateEvent({
+      ...intentionalWarning,
+      params: { message: intentionalWarning.params.message },
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      rawType: "warning",
+    }),
+  );
+  expect(
+    translator.translateEvent({
+      ...intentionalWarning,
+      params: {
+        ...intentionalWarning.params,
+        threadId: "another-codex-thread",
+      },
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      kind: "provider.warning",
+      summary: intentionalWarning.params.message,
+    }),
+  );
   expect(
     translator.translateEvent({
       ...intentionalWarning,
