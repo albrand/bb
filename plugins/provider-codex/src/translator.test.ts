@@ -88,6 +88,81 @@ function createTranslator() {
   return createCodexEventTranslator({ additionalWorkspaceWriteRoots: [] });
 }
 
+it("suppresses only the exact intentional resume model warning", () => {
+  const translator = createCodexEventTranslator({
+    additionalWorkspaceWriteRoots: [],
+    resumeModel: "gpt-5.6-sol",
+    resumeProviderThreadId: "codex-thread",
+  });
+  const intentionalWarning = {
+    jsonrpc: "2.0" as const,
+    method: "warning" as const,
+    params: {
+      threadId: "codex-thread",
+      message:
+        "This session was recorded with model `gpt-5.6-terra` but is resuming with `gpt-5.6-sol`. Consider switching back to `gpt-5.6-terra` as it may affect Codex performance.",
+    },
+  };
+
+  expect(translator.translateEvent(intentionalWarning)).toEqual([]);
+  expect(
+    translator.translateEvent({
+      ...intentionalWarning,
+      params: { message: intentionalWarning.params.message },
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      rawType: "warning",
+    }),
+  );
+  expect(
+    translator.translateEvent({
+      ...intentionalWarning,
+      params: {
+        ...intentionalWarning.params,
+        threadId: "another-codex-thread",
+      },
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      kind: "provider.warning",
+      summary: intentionalWarning.params.message,
+    }),
+  );
+  expect(
+    translator.translateEvent({
+      ...intentionalWarning,
+      params: {
+        ...intentionalWarning.params,
+        message: "A provider warning unrelated to model selection.",
+      },
+    }),
+  ).toEqual([
+    expect.objectContaining({
+      kind: "provider.warning",
+      summary: "A provider warning unrelated to model selection.",
+    }),
+  ]);
+  expect(
+    translator.translateEvent({
+      jsonrpc: "2.0",
+      method: "model/rerouted",
+      params: {
+        threadId: "codex-thread",
+        turnId: "turn-1",
+        fromModel: "gpt-5.6-sol",
+        toModel: "gpt-5.6-terra",
+        reason: "modelUnavailable",
+      },
+    }),
+  ).toContainEqual(
+    expect.objectContaining({
+      kind: "unhandled",
+      rawType: "model/rerouted",
+    }),
+  );
+});
+
 const WORKSPACE_ASK_OPTIONS = {
   permissionMode: "accept-edits",
   permissionScope: "workspace",

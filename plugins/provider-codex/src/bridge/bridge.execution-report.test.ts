@@ -111,3 +111,45 @@ it("reports again when a session is resumed", async () => {
     }),
   ]);
 });
+
+it("keeps the accepted resume model when turns do not report one", async () => {
+  providerThreadId = RESUMED_PROVIDER_THREAD_ID;
+  harness.sendRequest(1, "thread/resume", {
+    threadId: THREAD_ID,
+    providerThreadId: RESUMED_PROVIDER_THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: {
+      permissionMode: "full",
+      permissionScope: "full",
+      approvalReviewer: null,
+      permissionEscalation: null,
+      model: "gpt-5.6-terra",
+    },
+  });
+  expect((await harness.waitForResponse(1)).error).toBeUndefined();
+
+  for (const [index, model] of ["gpt-5.6-sol", "gpt-5.6-terra"].entries()) {
+    const requestId = index + 2;
+    harness.sendRequest(requestId, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId: RESUMED_PROVIDER_THREAD_ID,
+      clientRequestId: requestId === 2 ? "creq_terramede2" : "creq_terramede3",
+      input: [{ type: "text", text: "continue", mentions: [] }],
+      options: {
+        permissionMode: "full",
+        permissionScope: "full",
+        approvalReviewer: null,
+        permissionEscalation: null,
+        model,
+      },
+    });
+    expect((await harness.waitForResponse(requestId)).error).toBeUndefined();
+  }
+
+  expect(executionReports()).toEqual([
+    expect.objectContaining({
+      execution: expect.objectContaining({ model: "gpt-5.6-terra" }),
+    }),
+  ]);
+});
