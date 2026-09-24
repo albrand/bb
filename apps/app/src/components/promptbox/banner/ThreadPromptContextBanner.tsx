@@ -54,6 +54,10 @@ import {
   DropdownMenuTrigger,
 } from "@bb/shared-ui/dropdown-menu";
 import { useUrlAnchorClickHandler } from "@/lib/url-open-routing";
+import {
+  ThreadTitle,
+  useThreadTitleDisplayText,
+} from "@/components/thread/ThreadTitleMentions";
 
 export interface ContextBannerMergeBaseConfig {
   branch: string;
@@ -286,10 +290,49 @@ const PARENT_SECTION_ICON: Record<
   "side-chat": "SideChat",
 };
 
-function parentSectionAriaLabel(
+function useParentSectionAriaLabel(
   section: ThreadPromptParentThreadSection,
 ): string {
-  return `${PARENT_SECTION_COPY[section.relationship].ariaPrefix} ${section.parentThreadTitle}`;
+  const parentThreadTitle = useThreadTitleDisplayText(
+    section.parentThreadTitle,
+  );
+  return `${PARENT_SECTION_COPY[section.relationship].ariaPrefix} ${parentThreadTitle}`;
+}
+
+const PARENT_THREAD_TITLE_CLASS =
+  "text-foreground/90 underline underline-offset-2";
+
+function ParentThreadInlineSegment({
+  section,
+}: {
+  section: ThreadPromptParentThreadSection;
+}) {
+  const ariaLabel = useParentSectionAriaLabel(section);
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 text-xs",
+        PROMPT_STACK_INLAY_SEGMENT_CLASS,
+      )}
+      title={ariaLabel}
+    >
+      <Icon
+        name={PARENT_SECTION_ICON[section.relationship]}
+        className="size-3.5 shrink-0"
+        aria-hidden="true"
+      />
+      <span className="min-w-0 truncate">
+        {PARENT_SECTION_COPY[section.relationship].verb}{" "}
+        <NavLink to={section.href}>
+          <ThreadTitle
+            title={section.parentThreadTitle}
+            className={PARENT_THREAD_TITLE_CLASS}
+            inline
+          />
+        </NavLink>
+      </span>
+    </div>
+  );
 }
 
 function shouldShowPullRequestAttentionLabel(
@@ -313,11 +356,12 @@ function ParentThreadSectionToggle({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const ariaLabel = useParentSectionAriaLabel(section);
   return (
     <SectionToggleButton
       id={SECTION_IDS.parentThread.toggle}
       controlsId={SECTION_IDS.parentThread.body}
-      ariaLabel={parentSectionAriaLabel(section)}
+      ariaLabel={ariaLabel}
       icon={
         <Icon
           name={PARENT_SECTION_ICON[section.relationship]}
@@ -348,11 +392,12 @@ function ParentThreadSectionBody({
     >
       <div className="px-3 pb-2 pt-1.5 text-xs leading-relaxed text-muted-foreground">
         {PARENT_SECTION_COPY[section.relationship].bodyLead}
-        <NavLink
-          to={section.href}
-          className="text-foreground/90 underline underline-offset-2"
-        >
-          {section.parentThreadTitle}
+        <NavLink to={section.href}>
+          <ThreadTitle
+            title={section.parentThreadTitle}
+            className={PARENT_THREAD_TITLE_CLASS}
+            inline
+          />
         </NavLink>
         .
       </div>
@@ -371,7 +416,6 @@ function ChildThreadsBody({
         <li key={item.id} className="text-xs">
           <NavLink
             to={item.href}
-            title={item.title}
             className="flex min-w-0 items-center gap-2 py-0.5 text-foreground/90 underline-offset-2 hover:underline"
           >
             {item.hasPendingInteraction ? (
@@ -383,7 +427,7 @@ function ChildThreadsBody({
             ) : (
               <ChildThreadIcon className="text-subtle-foreground no-underline" />
             )}
-            <span className="min-w-0 flex-1 truncate">{item.title}</span>
+            <ThreadTitle title={item.title} tooltip className="flex-1" />
             {item.hasPendingInteraction ? (
               <span className="shrink-0 text-muted-foreground">
                 Needs input
@@ -601,6 +645,7 @@ function ActiveChildThreadsCard({
         : 1,
   );
   const primary = items[0];
+  const primaryTitle = useThreadTitleDisplayText(primary?.title ?? "");
   if (!primary) {
     return null;
   }
@@ -625,7 +670,7 @@ function ActiveChildThreadsCard({
           id={SECTION_IDS.childThreads.toggle}
           aria-expanded={isExpanded}
           aria-controls={SECTION_IDS.childThreads.body}
-          aria-label={`${groupLabel}: ${primary.title}`}
+          aria-label={`${groupLabel}: ${primaryTitle}`}
           onClick={onToggle}
           className={
             needsApproval
@@ -649,9 +694,11 @@ function ActiveChildThreadsCard({
             <span className="text-muted-foreground">
               {needsApproval ? "Needs your input: " : "Active child thread: "}
             </span>
-            <span className="font-medium text-foreground/80">
-              {primary.title}
-            </span>
+            <ThreadTitle
+              title={primary.title}
+              className="font-medium text-foreground/80"
+              inline
+            />
           </span>
           {otherCount > 0 ? (
             <span className="shrink-0 text-muted-foreground">
@@ -923,28 +970,7 @@ export function ThreadPromptContextBanner({
           )}
         >
           {showParentThread && parentThreadSection && isParentThreadOnly ? (
-            <div
-              className={cn(
-                "flex min-w-0 items-center gap-1.5 text-xs",
-                PROMPT_STACK_INLAY_SEGMENT_CLASS,
-              )}
-              title={parentSectionAriaLabel(parentThreadSection)}
-            >
-              <Icon
-                name={PARENT_SECTION_ICON[parentThreadSection.relationship]}
-                className="size-3.5 shrink-0"
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate">
-                {PARENT_SECTION_COPY[parentThreadSection.relationship].verb}{" "}
-                <NavLink
-                  to={parentThreadSection.href}
-                  className="text-foreground/90 underline underline-offset-2"
-                >
-                  {parentThreadSection.parentThreadTitle}
-                </NavLink>
-              </span>
-            </div>
+            <ParentThreadInlineSegment section={parentThreadSection} />
           ) : null}
           {showParentThread && parentThreadSection && !isParentThreadOnly ? (
             <ParentThreadSectionToggle
