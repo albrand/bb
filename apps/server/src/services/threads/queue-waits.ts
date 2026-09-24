@@ -26,6 +26,7 @@ import {
   emitPluginMessageQueued,
 } from "../plugins/plugin-thread-events.js";
 import { toThreadQueuedMessage } from "./thread-queued-messages.js";
+import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 
 type QueueWaitDeps = { db: DbQueryConnection; hub: DbNotifier };
 
@@ -86,8 +87,9 @@ export function recordQueuedMessageWait(
 
   if (leadClaim === undefined) {
     row = deps.db.transaction(
-      (tx) =>
-        createQueuedThreadMessageInTransaction(tx, {
+      (tx) => {
+        assertThreadHostAcceptsWork(tx, args.thread);
+        return createQueuedThreadMessageInTransaction(tx, {
           threadId: args.thread.id,
           content: args.message.input,
           senderThreadId: args.message.senderThreadId,
@@ -102,7 +104,8 @@ export function recordQueuedMessageWait(
           sendAt: args.sendAt,
           payload: args.message.payload,
           systemNotice: args.message.systemNotice,
-        }),
+        });
+      },
       { behavior: "immediate" },
     );
   } else {

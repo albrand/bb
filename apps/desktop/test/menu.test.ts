@@ -14,6 +14,7 @@ import {
   SET_SERVER_URL_MENU_LABEL,
   type InstallApplicationMenuArgs,
 } from "../src/menu.js";
+import { BUILTIN_SERVER_NAME } from "../src/server-target.js";
 
 function menuArgs(
   reloadWindow: InstallApplicationMenuArgs["reloadWindow"],
@@ -39,9 +40,10 @@ function menuArgs(
     openSettings: () => {},
     reopenClosedTab: () => {},
     reloadWindow,
+    zoomFocusedPage: () => {},
     selectServer: () => {},
     serverDaemonLogsMenuEnabled: false,
-    servers: [{ checked: true, id: "builtin", name: "This Mac" }],
+    servers: [{ checked: true, id: "builtin", name: BUILTIN_SERVER_NAME }],
     setServerUrl: () => {},
     addServer: () => {},
     ...overrides,
@@ -131,6 +133,26 @@ describe("application menu", () => {
     expect(Menu.sendActionToFirstResponder).not.toHaveBeenCalled();
   });
 
+  it("routes zoom shortcuts to the focused page's clamped zoom", () => {
+    const zoomFocusedPage = vi.fn();
+    const template = buildApplicationMenuTemplate(
+      menuArgs(vi.fn(), { zoomFocusedPage }),
+    );
+    const viewMenu = template.find((item) => item.label === "View");
+    const submenu = viewMenu?.submenu as MenuItemConstructorOptions[];
+
+    for (const [label, accelerator] of [
+      ["Actual Size", "CommandOrControl+0"],
+      ["Zoom In", "CommandOrControl+Plus"],
+      ["Zoom Out", "CommandOrControl+-"],
+    ]) {
+      const item = submenu.find((entry) => entry.label === label);
+      expect(item?.accelerator).toBe(accelerator);
+      item?.click?.({} as never, undefined, {} as never);
+    }
+    expect(zoomFocusedPage.mock.calls).toEqual([["reset"], ["in"], ["out"]]);
+  });
+
   it("shows reload shortcuts without globally stealing browser commands", () => {
     const reloadWindow = vi.fn();
     const template = buildApplicationMenuTemplate(menuArgs(reloadWindow));
@@ -158,7 +180,7 @@ describe("application menu", () => {
       menuArgs(() => {}, {
         selectServer,
         servers: [
-          { checked: false, id: "builtin", name: "This Mac" },
+          { checked: false, id: "builtin", name: BUILTIN_SERVER_NAME },
           {
             checked: true,
             id: "custom:https://first.example",
@@ -254,7 +276,7 @@ describe("application menu", () => {
       menuArgs(() => {}, {
         connectServersSkipReason: "no-credential",
         servers: [
-          { checked: false, id: "builtin", name: "This Mac" },
+          { checked: false, id: "builtin", name: BUILTIN_SERVER_NAME },
           {
             checked: true,
             id: "custom",
@@ -267,7 +289,7 @@ describe("application menu", () => {
 
     expect(serverSubmenu.map((item) => item.label ?? `<${item.type}>`)).toEqual(
       [
-        "This Mac",
+        BUILTIN_SERVER_NAME,
         "old-host.tailnet.ts.net:38886",
         CONNECT_SERVERS_SKIPPED_MENU_LABELS["no-credential"],
         "<separator>",

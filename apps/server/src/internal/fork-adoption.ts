@@ -133,6 +133,7 @@ function interruptAdoptedThreadWithoutTurn(
   );
   interruptActiveThreadsForHost(deps, {
     hostId: args.hostId,
+    includeStopping: false,
     onlyThreadIds: new Set([args.threadId]),
     reason: "host-daemon-restarted",
   });

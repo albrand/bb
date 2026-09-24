@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type {
   DiscoveredWorkspaceProperties,
   EnvironmentChangeKind,
@@ -517,16 +517,25 @@ export function applyEnvironmentLifecycleEventInTransaction(
   ];
   if (args.event.type === "destroy.recorded") {
     conditions.push(
-      sql`NOT EXISTS (
-        SELECT 1 FROM threads
-        WHERE threads.environment_id = ${environments.id}
-        AND threads.archived_at IS NULL
-        AND threads.deleted_at IS NULL
-      )`,
-      sql`NOT EXISTS (
-        SELECT 1 FROM threads
-        WHERE threads.environment_id = ${environments.id}
-        AND threads.status = 'stopping'
+      sql`(
+        EXISTS (
+          SELECT 1 FROM hosts
+          WHERE hosts.id = ${environments.hostId}
+          AND hosts.phase = 'removing'
+        )
+        OR (
+          NOT EXISTS (
+            SELECT 1 FROM threads
+            WHERE threads.environment_id = ${environments.id}
+            AND threads.archived_at IS NULL
+            AND threads.deleted_at IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM threads
+            WHERE threads.environment_id = ${environments.id}
+            AND threads.status = 'stopping'
+          )
+        )
       )`,
     );
   }
@@ -596,7 +605,7 @@ export function listProviderLifecycleEnvironments(
       ? undefined
       : or(isNull(environments.ownerThreadId), sql`${environments.teardownStatus} is not null`),
     sql`(${environments.retireAt} is not null or ${environments.teardownStatus} is not null or not exists (select 1 from ${threads} where ${threads.environmentId} = ${environments.id} and ${threads.archivedAt} is null and ${threads.deletedAt} is null))`,
-    or(ne(environments.status, "destroyed"), isNull(environments.teardownStatus), ne(environments.teardownStatus, "removed")),
+    sql`(${environments.status} <> 'destroyed' OR ${environments.teardownStatus} IS NOT 'removed')`,
   )).all();
 }
 
@@ -605,7 +614,7 @@ export function environmentHasLiveThreads(db: EnvironmentWriteConnection, enviro
 }
 
 export function releaseFinishedEnvironmentPreparationOwners(db: EnvironmentWriteConnection): void {
-  db.update(environments).set({ ownerThreadId: null }).where(and(eq(environments.teardownStatus, "removed"), sql`not exists (select 1 from ${threads} where ${threads.id} = ${environments.ownerThreadId} and ${threads.deletedAt} is null)`)).run();
+  db.update(environments).set({ ownerThreadId: null }).where(and(isNotNull(environments.ownerThreadId), eq(environments.teardownStatus, "removed"), sql`not exists (select 1 from ${threads} where ${threads.id} = ${environments.ownerThreadId} and ${threads.deletedAt} is null)`)).run();
 }
 
 export function claimEnvironmentPath(db: DbConnection, provisioning: EnvironmentRow, path: string, allowCancelled = false): boolean {

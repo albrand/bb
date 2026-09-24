@@ -86,6 +86,7 @@ export const DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS = 250;
 export interface ThreadListArgs {
   archived?: boolean;
   environmentId?: string;
+  hostId?: string;
   sectionId?: string;
   hasParent?: boolean;
   includeHidden?: boolean;
@@ -566,6 +567,7 @@ function listQuery(args: ThreadListArgs | undefined): ThreadListQuery {
   return {
     ...(args?.projectId ? { projectId: args.projectId } : {}),
     ...(args?.environmentId ? { environmentId: args.environmentId } : {}),
+    ...(args?.hostId ? { hostId: args.hostId } : {}),
     ...(args?.parentThreadId ? { parentThreadId: args.parentThreadId } : {}),
     ...(args?.sourceThreadId ? { sourceThreadId: args.sourceThreadId } : {}),
     ...(args?.sectionId ? { sectionId: args.sectionId } : {}),

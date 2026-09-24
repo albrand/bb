@@ -22,6 +22,7 @@ import {
   environmentHasLiveThreads,
   environments,
   getEnvironment,
+  getHost,
   getThread,
   findProjectEnvironmentByHostPath,
   getPreparingEnvironment,
@@ -379,7 +380,7 @@ async function runCreate(
               previous === null
                 ? null
                 : {
-                    environment: toEnvironmentResponse(previous),
+                    environment: toEnvironmentResponse(deps.db, previous),
                     resource:
                       previous.teardownStatus === "removed"
                         ? null
@@ -591,11 +592,14 @@ export function requestEnvironmentRemoval(
   environmentId: string,
 ): boolean {
   const row = getEnvironment(deps.db, environmentId);
-  if (row === null || environmentHasLiveThreads(deps.db, environmentId))
+  if (row === null) return false;
+  const removingMachine = getHost(deps.db, row.hostId)?.phase === "removing";
+  if (!removingMachine && environmentHasLiveThreads(deps.db, environmentId))
     return false;
   if (row.ownerThreadId !== null && row.teardownStatus === null) {
     const owner = getThread(deps.db, row.ownerThreadId);
     if (
+      !removingMachine &&
       owner !== null &&
       owner.status === "starting" &&
       owner.archivedAt === null &&
@@ -678,7 +682,9 @@ async function runRemove(
         () =>
           record.provider.remove({
             environment:
-              row.ownerThreadId !== null ? null : toEnvironmentResponse(row),
+              row.ownerThreadId !== null
+                ? null
+                : toEnvironmentResponse(deps.db, row),
             hostId: row.hostId,
             path: row.path,
             pathKey: row.environmentProviderInstanceKey ?? row.id,
@@ -763,8 +769,11 @@ async function sweepProviderEnvironmentInSlot(
   )
     return;
   const environmentProviderId = row.environmentProviderId;
-  const shared = environmentHasLiveThreads(deps.db, environmentId);
+  const machineRemoving = getHost(deps.db, row.hostId)?.phase === "removing";
+  const shared =
+    !machineRemoving && environmentHasLiveThreads(deps.db, environmentId);
   if (
+    !machineRemoving &&
     row.ownerThreadId !== null &&
     row.teardownStatus !== null &&
     (shared || (row.status === "ready" && row.path !== null))

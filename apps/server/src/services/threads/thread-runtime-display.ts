@@ -379,7 +379,9 @@ function resolveWorkspaceSharing(
           ? null
           : getEnvironment(deps.db, thread.environmentId);
       const environment =
-        environmentRow === null ? null : toEnvironmentResponse(environmentRow);
+        environmentRow === null
+          ? null
+          : toEnvironmentResponse(deps.db, environmentRow);
       if (
         environment === null ||
         environment.managed ||

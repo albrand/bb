@@ -61,7 +61,9 @@ function pendingWorkspaceWriteTarget(
       environmentIntent.environmentId,
     );
     return workspaceWriteTarget(
-      environment === null ? null : toEnvironmentResponse(environment),
+      environment === null
+        ? null
+        : toEnvironmentResponse(deps.db, environment),
     );
   }
   if (environmentIntent.machine.type !== "existing") return null;

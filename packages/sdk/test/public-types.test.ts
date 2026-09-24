@@ -299,6 +299,8 @@ type ExpectedHostsKey =
 
 type ExpectedPluginsKey =
   | "experimental_discoverRpc"
+  | "experimental_getSafeMode"
+  | "experimental_setSafeMode"
   | "applyUpdate"
   | "callRpc"
   | "catalog"

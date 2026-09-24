@@ -84,10 +84,7 @@ export interface ClaudeDeltaTranslationContext {
 }
 
 const ASSISTANT_STREAM_KEY = "assistant";
-
-function thinkingStreamChannel(contentIndex: number): string {
-  return `thinking-${contentIndex}`;
-}
+const THINKING_STREAM_KEY = "thinking";
 
 const PLAN_STEPS_CHANNEL = "planSteps";
 
@@ -850,15 +847,12 @@ export function createClaudeDeltaTranslator(
       }
     }
 
-    for (const thinkingBlock of extractThinkingBlocks(message)) {
+    for (const thinking of extractThinkingBlocks(message)) {
       deltas.push({
         kind: "item.textClose",
-        key: {
-          channel: thinkingStreamChannel(thinkingBlock.contentIndex),
-          ...parentRefField,
-        },
+        key: { channel: THINKING_STREAM_KEY, ...parentRefField },
         channel: "reasoningText",
-        text: thinkingBlock.text,
+        text: thinking,
       });
     }
 
@@ -920,12 +914,9 @@ export function createClaudeDeltaTranslator(
       deltas.push({ kind: "turn.open" });
       deltas.push({
         kind: "item.textDelta",
-        key: {
-          channel: thinkingStreamChannel(reasoningDelta.contentIndex),
-          ...parentRefField,
-        },
+        key: { channel: THINKING_STREAM_KEY, ...parentRefField },
         channel: "reasoningText",
-        text: reasoningDelta.delta,
+        text: reasoningDelta,
       });
     }
 
@@ -936,7 +927,7 @@ export function createClaudeDeltaTranslator(
         kind: "item.textDelta",
         key: { channel: ASSISTANT_STREAM_KEY, ...parentRefField },
         channel: "agentMessage",
-        text: textDelta.delta,
+        text: textDelta,
       });
     }
 

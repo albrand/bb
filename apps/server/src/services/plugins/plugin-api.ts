@@ -557,6 +557,7 @@ export function createPluginApi(options: {
   const threadEventHandlers: PluginThreadEventHandlers = {
     "experimental_thread.events": [],
     "experimental_terminal.input": [],
+    "experimental_host.deleted": [],
     "thread.created": [],
     "thread.active": [],
     "thread.idle": [],

@@ -127,6 +127,7 @@ export async function handleHostSessionOpened(
       });
       interruptActiveThreadsForHost(deps, {
         exceptThreadIds: adopted.excepted,
+        includeStopping: false,
         hostId: args.hostId,
         reason: "host-daemon-restarted",
       });
@@ -224,13 +225,25 @@ export function handleHostRemoved(
   deps.terminalSessions.handleDaemonSessionClosed({
     sessionId: args.sessionId,
   });
+  settleRemovedHostWork(deps, { hostId: args.hostId });
+}
+
+export function settleRemovedHostWork(
+  deps: Omit<DaemonSocketClosedDeps, "sharedPorts">,
+  args: { hostId: string },
+): void {
   interruptPendingInteractionsForHostThreads(deps, {
     hostId: args.hostId,
-    reason: DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON,
+    reason: "The machine was removed",
+  });
+  interruptEnvironmentProvisioningForHost(deps, {
+    hostId: args.hostId,
+    reason: DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON,
   });
   interruptActiveThreadsForHost(deps, {
+    includeStopping: true,
     hostId: args.hostId,
-    reason: "host-daemon-restarted",
+    reason: "host-removed",
   });
   settleDanglingBackgroundTasks(deps, { hostId: args.hostId });
   notifyHostThreadRuntimeStatusChanged(deps, args.hostId);
@@ -307,6 +320,7 @@ function completeDaemonActiveWorkDisconnectGrace(
   const detachedThreadIds = new Set(detached.map((thread) => thread.threadId));
   interruptActiveThreadsForHost(deps, {
     exceptThreadIds: detachedThreadIds,
+    includeStopping: false,
     hostId: args.hostId,
     reason: "host-daemon-restarted",
     cause: "host-connection-lost",

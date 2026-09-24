@@ -34,7 +34,6 @@ import {
   getPreparingEnvironment,
   getThread,
   getProject,
-  pruneDestroyedEnvironments,
   reserveEnvironment,
   updatePreparingEnvironment,
   threads,
@@ -1314,7 +1313,10 @@ describe("core environment orchestration", () => {
       const environmentId = fixture.attach();
       expect(
         JSON.stringify(
-          toEnvironmentResponse(getEnvironment(harness.db, environmentId)!),
+          toEnvironmentResponse(
+            harness.db,
+            getEnvironment(harness.db, environmentId)!,
+          ),
         ),
       ).not.toContain("private");
       await sweepProviderEnvironment(harness.deps, environmentId);
@@ -1667,32 +1669,6 @@ describe("core environment orchestration", () => {
         status: "destroyed",
         path: null,
       });
-    }));
-
-  it("keeps destroyed rows until provider remove finishes", async () =>
-    withTestHarness(async (harness) => {
-      const fixture = setup(harness);
-      fixture.ask();
-      await fixture.settled();
-      const environmentId = fixture.attach();
-      harness.db
-        .update(environments)
-        .set({ status: "destroyed", updatedAt: 1, teardownStatus: "failed" })
-        .where(eq(environments.id, environmentId))
-        .run();
-      const prune = () =>
-        pruneDestroyedEnvironments(harness.db, harness.hub, {
-          updatedBefore: Date.now(),
-          eventBatchSize: 10,
-          limit: 10,
-        });
-      expect(prune().deleted).toBe(0);
-      harness.db
-        .update(environments)
-        .set({ teardownStatus: "removed" })
-        .where(eq(environments.id, environmentId))
-        .run();
-      expect(prune().deleted).toBe(1);
     }));
 
   it.each([
