@@ -11,6 +11,9 @@ This index lists every command path that the core CLI registers, including alias
 - `bb settings`
 - `bb settings show`
 - `bb settings ai-services`
+- `bb settings ai-services show`
+- `bb settings ai-services set`
+- `bb settings ai-services test`
 - `bb settings general`
 - `bb settings completed-turns`
 - `bb settings experiment`
@@ -79,6 +82,7 @@ This index lists every command path that the core CLI registers, including alias
 - `bb machine create`
 - `bb machine list`
 - `bb machine show`
+- `bb machine reconnect`
 - `bb machine rename`
 - `bb machine remove`
 - `bb machine suspend`
@@ -122,6 +126,10 @@ move and downloads the new server's bb-app package for its service.
 - `bb updates`
 - `bb updates status`
 - `bb updates apply`
+- `bb updates app`
+- `bb updates app status`
+- `bb updates app apply`
+- `bb updates app dismiss`
 
 ## terminal
 

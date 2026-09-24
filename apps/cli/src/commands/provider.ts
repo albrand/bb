@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import type { AvailableModel } from "@bb/domain";
 import type {
+  SystemExecutionOptionsModelLoadError,
   SystemProviderInfo,
   SystemProviderState,
 } from "@bb/server-contract";
@@ -130,6 +131,7 @@ export function registerProviderCommands(
             ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
             ...(providerId ? { providerId } : {}),
           });
+          printModelLoadError(executionOptions.modelLoadError);
           const models = includeSelectedOnlyModel({
             models: executionOptions.models,
             selectedOnlyModels: executionOptions.selectedOnlyModels,
@@ -177,6 +179,20 @@ function printProviderTable(providerRows: ProviderListRow[]): void {
     },
     rows,
   );
+}
+
+function printModelLoadError(
+  modelLoadError: SystemExecutionOptionsModelLoadError | null,
+): void {
+  if (modelLoadError === null) {
+    return;
+  }
+  console.error(
+    `Could not load models for ${modelLoadError.providerId} (${modelLoadError.code})`,
+  );
+  if (modelLoadError.detail !== null) {
+    console.error(`  ${modelLoadError.detail}`);
+  }
 }
 
 function printModelTable(models: AvailableModel[], providerId?: string): void {

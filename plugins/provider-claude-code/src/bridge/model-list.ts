@@ -9,7 +9,7 @@ import {
 import { z } from "zod";
 import { buildClaudeCodeModels } from "../model-list.js";
 import { afterClaudeRenewalSettles } from "./claude-refresh-lock.js";
-import { translateMissingClaudeCliError } from "./missing-cli-error.js";
+import { translateMissingClaudeCliCatalogError } from "./missing-cli-error.js";
 import { resolveClaudeCodeExecutable } from "./session-options.js";
 
 function buildModelProbeOptions(env: NodeJS.ProcessEnv): Options {
@@ -33,7 +33,7 @@ export async function probeClaudeCodeDiscoveredModels(
       options: buildModelProbeOptions(env),
     });
   } catch (error) {
-    throw translateMissingClaudeCliError(error);
+    throw translateMissingClaudeCliCatalogError(error);
   }
 
   try {
@@ -43,7 +43,7 @@ export async function probeClaudeCodeDiscoveredModels(
     }
     return initialization.models;
   } catch (error) {
-    throw translateMissingClaudeCliError(error);
+    throw translateMissingClaudeCliCatalogError(error);
   } finally {
     await afterClaudeRenewalSettles(env);
     session.close();

@@ -4,10 +4,10 @@ import {
   useRpc,
   type StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk/app";
-import { Checkbox } from "@bb/shared-ui/checkbox";
-import { RadioGroup, RadioGroupItem } from "@bb/shared-ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ResourceDetailPanel } from "@bb/shared-ui/resource-list";
-import { Switch } from "@bb/shared-ui/switch";
+import { Switch } from "@/components/ui/switch";
 import type { keepAwakeRpcContract } from "./server.js";
 
 type ConfigurationView = StandardSchemaV1InferOutput<

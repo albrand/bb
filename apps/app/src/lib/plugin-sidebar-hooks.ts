@@ -42,7 +42,11 @@ import { useHosts } from "@/hooks/queries/host-queries";
 import { useQuickCreateProject } from "@/hooks/useQuickCreateProject";
 import { useArchivedThreads } from "@/hooks/queries/thread-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
-import { useUpdateThread } from "@/hooks/mutations/thread-state-mutations";
+import {
+  usePinThread,
+  useUnpinThread,
+  useUpdateThread,
+} from "@/hooks/mutations/thread-state-mutations";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
 import { toPluginSidebarThread } from "./plugin-sidebar-threads";
 import { useSetRootComposeProjectId } from "./root-compose-selection";
@@ -268,6 +272,8 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
   const setRootComposeProjectId = useSetRootComposeProjectId();
   const hostActions = useThreadActions();
   const entriesById = useThreadEntryMap();
+  const { mutateAsync: pinThreadAsync } = usePinThread();
+  const { mutateAsync: unpinThreadAsync } = useUnpinThread();
   const { mutateAsync: updateThreadAsync } = useUpdateThread();
 
   const requireEntry = useCallback(
@@ -325,7 +331,11 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
       async setPinned(threadId, pinned) {
         const entry = requireEntry(threadId);
         if ((entry.pinnedAt !== null) === pinned) return;
-        hostActions.togglePin(entry);
+        if (pinned) {
+          await pinThreadAsync({ id: threadId });
+        } else {
+          await unpinThreadAsync({ id: threadId });
+        }
       },
       async setRead(threadId, read) {
         const entry = requireEntry(threadId);
@@ -348,9 +358,11 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
       hostActions,
       isCompact,
       navigate,
+      pinThreadAsync,
       requireEntry,
       setRootComposeProjectId,
       store,
+      unpinThreadAsync,
       updateThreadAsync,
     ],
   );

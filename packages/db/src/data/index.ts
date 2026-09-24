@@ -193,8 +193,10 @@ export type {
 } from "./threads.js";
 
 export {
+  getAiServiceSelections,
   getAppKeybindingOverrides,
   getAppSettings,
+  setAiServiceSelection,
   setAppKeybindingOverrides,
   setAppSettings,
 } from "./app-settings.js";

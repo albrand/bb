@@ -224,6 +224,7 @@ describe("provider model catalog store", () => {
       expect(response.modelLoadError).toEqual({
         providerId: "claude-code",
         code: "failed",
+        detail: "model list command_failed",
       });
       expect(modelIds(response)).toEqual(CLAUDE_CODE_FALLBACK_MODEL_IDS);
       expect(host.listRequests()).toHaveLength(2);
@@ -407,6 +408,7 @@ describe("provider model catalog store", () => {
       expect(surfaced.modelLoadError).toEqual({
         providerId: "codex",
         code: "auth_required",
+        detail: "model list auth_required",
       });
       expect(surfaced.models).toEqual([]);
     });
@@ -570,12 +572,14 @@ describe("provider model catalog store", () => {
       lateFailure.resolve();
       const failed = await pending;
       expect(failed.modelLoadError?.code).toBe("failed");
+      expect(failed.modelLoadError?.detail).toBe("Runtime shutting down");
       expect(modelIds(failed)).toEqual(CLAUDE_CODE_FALLBACK_MODEL_IDS);
 
       updateHost(harness.db, harness.hub, host.hostId, { phase: "creating" });
-      expect((await host.read("claude-code")).modelLoadError?.code).toBe(
-        "failed",
-      );
+      expect((await host.read("claude-code")).modelLoadError).toMatchObject({
+        code: "failed",
+        detail: "Host is not connected",
+      });
       updateHost(harness.db, harness.hub, host.hostId, { phase: "active" });
       expect(modelIds(await host.read("claude-code"))).toEqual([
         "claude-code-model",
@@ -590,6 +594,23 @@ describe("provider model catalog store", () => {
         ["host_unavailable", "host_unavailable"],
         ["success", undefined],
       ]);
+    });
+  });
+
+  it("collapses and truncates a long failure message before serving it to the picker", async () => {
+    await withTestHarness(async (harness) => {
+      const host = setupCatalogHost(harness, { id: "host-catalog-detail" });
+      host.setAnswer(() => ({
+        ok: false,
+        errorCode: "command_failed",
+        errorMessage: `codex stderr:\n${"x".repeat(400)}`,
+      }));
+
+      const response = await host.read("claude-code");
+      expect(response.modelLoadError?.detail).toBe(
+        `codex stderr: ${"x".repeat(285)}\u2026`,
+      );
+      expect(response.modelLoadError?.detail).toHaveLength(300);
     });
   });
 

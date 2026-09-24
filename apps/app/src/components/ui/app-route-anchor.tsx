@@ -43,6 +43,7 @@ type RouteNavigate = (path: string, options?: RouteNavigateOptions) => void;
 
 interface RouteNavigation {
   navigate: RouteNavigate;
+  navigateImmediately: RouteNavigate;
   openInSplit: (path: string) => boolean;
 }
 
@@ -63,9 +64,16 @@ export function useRouteNavigate(): RouteNavigate {
   );
 }
 
+export function useImmediateRouteNavigate(): RouteNavigate {
+  return (
+    useContext(RouteNavigationContext)?.navigateImmediately ??
+    navigateWithoutProvider
+  );
+}
+
 function navigateWithoutProvider(path: string): void {
   throw new Error(
-    `useRouteNavigate: no <RouteNavigationProvider> above the caller (navigating to "${path}")`,
+    `route navigation: no <RouteNavigationProvider> above the caller (navigating to "${path}")`,
   );
 }
 
@@ -102,17 +110,20 @@ export function RouteNavigationProvider({
     navigateRef.current = navigate;
   }, [navigate]);
   const [isNavigationPending, startNavigationTransition] = useTransition();
+  const navigateImmediately = useCallback<RouteNavigate>((path, options) => {
+    if (options === undefined) {
+      navigateRef.current(path);
+      return;
+    }
+    navigateRef.current(path, options);
+  }, []);
   const navigateRoute = useCallback<RouteNavigate>(
     (path, options) => {
       startNavigationTransition(() => {
-        if (options === undefined) {
-          navigateRef.current(path);
-          return;
-        }
-        navigateRef.current(path, options);
+        navigateImmediately(path, options);
       });
     },
-    [startNavigationTransition],
+    [navigateImmediately, startNavigationTransition],
   );
   const openInSplit = useCallback<RouteNavigation["openInSplit"]>(
     (path) => {
@@ -145,8 +156,8 @@ export function RouteNavigationProvider({
   }, [navigateRoute]);
 
   const value = useMemo<RouteNavigation>(
-    () => ({ navigate: navigateRoute, openInSplit }),
-    [navigateRoute, openInSplit],
+    () => ({ navigate: navigateRoute, navigateImmediately, openInSplit }),
+    [navigateImmediately, navigateRoute, openInSplit],
   );
   return (
     <RouteNavigationContext.Provider value={value}>

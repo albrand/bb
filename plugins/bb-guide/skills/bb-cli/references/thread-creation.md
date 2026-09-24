@@ -103,8 +103,11 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
 - `bb updates` runs the default `bb updates status` action. It aggregates BB and provider
   CLI update state across every machine — the CLI counterpart of Settings →
   Updates. `bb updates apply [--machine <id-or-name>]` runs every available
-  provider CLI install/update sequentially; update bb-app itself with the
-  printed upgrade command or the desktop relaunch.
+  provider CLI install/update sequentially. `bb updates app` shows whether bb
+  can update itself, which needs bb started with `--in-app-updates`;
+  `bb updates app apply [--yes] [--no-wait]` downloads the
+  update and restarts bb into it, without rolling back if it fails to start.
+  Running it from a thread restarts bb and interrupts that thread.
 - Use `bb project create --name <name> --root <path> --machine <id-or-name>`
   to bind a new project's local path to a connected enrolled machine. Use
   `--host` as an alias. Without a selector, the CLI asks its local host daemon.
@@ -175,7 +178,8 @@ environment pull-request show <id>`. Diff commands require an explicit target
   intentionally inspect the server machine. Model lists answer from the
   machine's last stored list while a background refresh runs, so a list can be
   hours old. A provider whose refresh keeps failing or timing out keeps
-  answering from its last stored list.
+  answering from its last stored list. When nothing can be listed, the command
+  prints the provider, failure code, and underlying host message on stderr.
 - Top-level `customModels` in the same `config.json` registers extra picker
   models. Use a provider ID returned by the target host's catalog. Acceptance
   of unlisted models is provider-specific; consult that provider's skill.

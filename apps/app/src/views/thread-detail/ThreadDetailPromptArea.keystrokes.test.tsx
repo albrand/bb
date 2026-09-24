@@ -34,11 +34,6 @@ const mocks = vi.hoisted(() => ({
   updateThread: { isPending: false, mutate: vi.fn(), variables: null },
 }));
 
-vi.mock("react-router-dom", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react-router-dom")>();
-  return { ...actual, useNavigate: () => vi.fn() };
-});
-
 vi.mock("@/components/promptbox/FollowUpPromptBox", () => ({
   FollowUpPromptBox: ({
     composer,

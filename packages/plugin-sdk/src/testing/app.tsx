@@ -20,6 +20,7 @@ import {
   type ComposerCustomization,
   type ComposerView,
   type ExperimentalAppOverlayRegistration,
+  type ExperimentalQuestionFormHost,
   type PluginAppDefinition,
   type PluginAppSetup,
   type PluginCodeThemeState,
@@ -238,6 +239,7 @@ interface SlotEnv {
   settingsState: PluginSettingsState;
   bbContext: BbContext;
   pluginId: string;
+  questionFormHost: ExperimentalQuestionFormHost;
   navigate: BbNavigate;
   navigateCalls: NavigateCall[];
   appPanel: ExperimentalAppPanel;
@@ -926,6 +928,9 @@ const testPluginSdkApp = {
   },
   experimental_usePluginId(): string {
     return useSlotEnv("experimental_usePluginId").pluginId;
+  },
+  experimental_useQuestionFormHost(): ExperimentalQuestionFormHost {
+    return useSlotEnv("experimental_useQuestionFormHost").questionFormHost;
   },
   useBbNavigate(): BbNavigate {
     return useSlotEnv("useBbNavigate").navigate;
@@ -2028,6 +2033,10 @@ export function renderSlot<
     settingsState: { values: options.settings, isLoading: false },
     bbContext: { projectId, threadId },
     pluginId: options.pluginId ?? "test-plugin",
+    questionFormHost: {
+      shortcuts: new Map(),
+      registerChoiceHandler: () => () => {},
+    },
     navigate,
     navigateCalls,
     appPanel,

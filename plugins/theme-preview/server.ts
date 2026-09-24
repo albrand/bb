@@ -36,7 +36,10 @@ const catalogSchema = z
 
 export const rpcContract = defineRpcContract({
   themeCatalog: { input: z.object({}).strict(), output: catalogSchema },
-  setTheme: { input: z.object({ themeId: z.string().min(1) }).strict(), output: catalogSchema },
+  setTheme: {
+    input: z.object({ themeId: z.string().min(1) }).strict(),
+    output: catalogSchema,
+  },
 });
 
 export type ThemeSwatch = z.infer<typeof swatchSchema>;
@@ -52,7 +55,9 @@ const SWATCH_TOKENS: ReadonlyArray<[keyof ThemeSwatch, readonly string[]]> = [
   ["fontMono", ["font-mono"]],
 ];
 
-export function classifySelector(selector: string): "shared" | "light" | "dark" | null {
+export function classifySelector(
+  selector: string,
+): "shared" | "light" | "dark" | null {
   const parts = selector
     .split(",")
     .map((part) => part.trim())
@@ -64,8 +69,15 @@ export function classifySelector(selector: string): "shared" | "light" | "dark" 
   for (const part of parts) {
     if (/\s/.test(part.replace(/:not\([^)]*\)/g, ""))) return null;
     if (part === ":root") sawShared = true;
-    else if (part === ".light" || part === ".light:not(.dark)" || part === ":root:not(.dark)" || part === "html:not(.dark)") sawLight = true;
-    else if (part === ".dark" || part === ":root.dark" || part === "html.dark") sawDark = true;
+    else if (
+      part === ".light" ||
+      part === ".light:not(.dark)" ||
+      part === ":root:not(.dark)" ||
+      part === "html:not(.dark)"
+    )
+      sawLight = true;
+    else if (part === ".dark" || part === ":root.dark" || part === "html.dark")
+      sawDark = true;
     else return null;
   }
   if (sawShared) return "shared";
@@ -74,8 +86,14 @@ export function classifySelector(selector: string): "shared" | "light" | "dark" 
   return null;
 }
 
-export function parseThemeSwatches(css: string): { light: ThemeSwatch | null; dark: ThemeSwatch | null } {
-  const declarations: { light: Map<string, string>; dark: Map<string, string> } = {
+export function parseThemeSwatches(css: string): {
+  light: ThemeSwatch | null;
+  dark: ThemeSwatch | null;
+} {
+  const declarations: {
+    light: Map<string, string>;
+    dark: Map<string, string>;
+  } = {
     light: new Map(),
     dark: new Map(),
   };
@@ -84,7 +102,9 @@ export function parseThemeSwatches(css: string): { light: ThemeSwatch | null; da
   for (const block of blocks) {
     const mode = classifySelector(block[1]);
     if (!mode) continue;
-    for (const declaration of block[2].matchAll(/--([a-zA-Z0-9-]+)\s*:\s*([^;]+);/g)) {
+    for (const declaration of block[2].matchAll(
+      /--([a-zA-Z0-9-]+)\s*:\s*([^;]+);/g,
+    )) {
       if (mode === "shared") {
         declarations.light.set(declaration[1], declaration[2].trim());
         declarations.dark.set(declaration[1], declaration[2].trim());
@@ -94,7 +114,11 @@ export function parseThemeSwatches(css: string): { light: ThemeSwatch | null; da
     }
   }
 
-  const resolveToken = (name: string, tokens: Map<string, string>, seen = new Set<string>()): string | null => {
+  const resolveToken = (
+    name: string,
+    tokens: Map<string, string>,
+    seen = new Set<string>(),
+  ): string | null => {
     if (seen.has(name)) return null;
     const value = tokens.get(name);
     if (value === undefined) return null;
@@ -105,35 +129,49 @@ export function parseThemeSwatches(css: string): { light: ThemeSwatch | null; da
       resolved = resolved.replace(
         /var\(\s*--([a-zA-Z0-9-]+)(?:\s*,\s*([^()]*))?\s*\)/g,
         (whole, referenced: string, fallback: string | undefined) =>
-          resolveToken(referenced, tokens, nextSeen) ?? fallback?.trim() ?? whole,
+          resolveToken(referenced, tokens, nextSeen) ??
+          fallback?.trim() ??
+          whole,
       );
       if (resolved === before) break;
     }
     return resolved.includes("var(") ? null : resolved;
   };
 
-  const build = (source: Map<string, string>, mode: "light" | "dark"): ThemeSwatch => {
+  const build = (
+    source: Map<string, string>,
+    mode: "light" | "dark",
+  ): ThemeSwatch => {
     const base = BUILTIN_SWATCHES.default[mode];
     const tokens = new Map<string, string>();
     for (const [key, candidates] of SWATCH_TOKENS) {
-      for (const candidate of candidates) tokens.set(candidate, base[key] ?? "");
+      for (const candidate of candidates)
+        tokens.set(candidate, base[key] ?? "");
     }
     for (const [name, value] of source) tokens.set(name, value);
     const swatch = {} as ThemeSwatch;
     for (const [key, candidates] of SWATCH_TOKENS) {
-      const token = candidates.find((candidate) => source.has(candidate)) ?? candidates[0];
+      const token =
+        candidates.find((candidate) => source.has(candidate)) ?? candidates[0];
       swatch[key] = resolveToken(token, tokens) ?? base[key];
     }
     return swatch;
   };
-  return { light: build(declarations.light, "light"), dark: build(declarations.dark, "dark") };
+  return {
+    light: build(declarations.light, "light"),
+    dark: build(declarations.dark, "dark"),
+  };
 }
 
 function customThemeCssCandidates(dir: string, id: string): string[] {
   return [resolve(dir, id, "theme.css"), resolve(dir, `${id}.css`)];
 }
 
-async function readCustomThemeCss(directory: string, id: string, signal?: AbortSignal): Promise<string | null> {
+async function readCustomThemeCss(
+  directory: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
   for (const candidate of customThemeCssCandidates(directory, id)) {
     try {
       return await readFile(candidate, { encoding: "utf8", signal });
@@ -155,183 +193,202 @@ export const BUILTIN_THEMES: ReadonlyArray<{ id: string; name: string }> = [
   { id: "conductor-black", name: "Conductor Pitch Black" },
 ];
 
-export const BUILTIN_SWATCHES: Record<string, { light: ThemeSwatch; dark: ThemeSwatch }> = {
-  "conductor": {
-    "light": {
-      "canvas": "#ffffff",
-      "sidebar": "#f8f7f6",
-      "card": "#ffffff",
-      "primary": "#1aa14a",
-      "accent": "#f5f3f0",
-      "foreground": "#2c2826",
-      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
-      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+export const BUILTIN_SWATCHES: Record<
+  string,
+  { light: ThemeSwatch; dark: ThemeSwatch }
+> = {
+  conductor: {
+    light: {
+      canvas: "#ffffff",
+      sidebar: "#f8f7f6",
+      card: "#ffffff",
+      primary: "#1aa14a",
+      accent: "#f5f3f0",
+      foreground: "#2c2826",
+      fontSans: '"Geist Variable", "Inter Variable", Inter, sans-serif',
+      fontMono:
+        '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#151110",
-      "sidebar": "#1b1716",
-      "card": "#2a1e1d",
-      "primary": "#3eb15f",
-      "accent": "#2c2726",
-      "foreground": "#ece9e7",
-      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
-      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#151110",
+      sidebar: "#1b1716",
+      card: "#2a1e1d",
+      primary: "#3eb15f",
+      accent: "#2c2726",
+      foreground: "#ece9e7",
+      fontSans: '"Geist Variable", "Inter Variable", Inter, sans-serif',
+      fontMono:
+        '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
   "conductor-black": {
-    "light": {
-      "canvas": "#ffffff",
-      "sidebar": "#f8f7f6",
-      "card": "#ffffff",
-      "primary": "#1aa14a",
-      "accent": "#f5f3f0",
-      "foreground": "#2c2826",
-      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
-      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    light: {
+      canvas: "#ffffff",
+      sidebar: "#f8f7f6",
+      card: "#ffffff",
+      primary: "#1aa14a",
+      accent: "#f5f3f0",
+      foreground: "#2c2826",
+      fontSans: '"Geist Variable", "Inter Variable", Inter, sans-serif',
+      fontMono:
+        '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#000000",
-      "sidebar": "#000000",
-      "card": "#2a1e1d",
-      "primary": "#3eb15f",
-      "accent": "#241b1a",
-      "foreground": "#ece9e7",
-      "fontSans": "\"Geist Variable\", \"Inter Variable\", Inter, sans-serif",
-      "fontMono": "\"Geist Mono Variable\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#000000",
+      sidebar: "#000000",
+      card: "#2a1e1d",
+      primary: "#3eb15f",
+      accent: "#241b1a",
+      foreground: "#ece9e7",
+      fontSans: '"Geist Variable", "Inter Variable", Inter, sans-serif',
+      fontMono:
+        '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "default": {
-    "light": {
-      "canvas": "oklch(1 0 0)",
-      "sidebar": "color-mix(in oklch, oklch(0.3211 0 0) 2.2%, oklch(1 0 0))",
-      "card": "oklch(1 0 0)",
-      "primary": "oklch(0.27 0 0)",
-      "accent": "oklch(0.55 0.1 250)",
-      "foreground": "oklch(0.3211 0 0)",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  default: {
+    light: {
+      canvas: "oklch(1 0 0)",
+      sidebar: "color-mix(in oklch, oklch(0.3211 0 0) 2.2%, oklch(1 0 0))",
+      card: "oklch(1 0 0)",
+      primary: "oklch(0.27 0 0)",
+      accent: "oklch(0.55 0.1 250)",
+      foreground: "oklch(0.3211 0 0)",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "oklch(0.195 0 0)",
-      "sidebar": "color-mix(in oklch, oklch(0.81 0 0) 4.3%, oklch(0.195 0 0))",
-      "card": "oklch(0.195 0 0)",
-      "primary": "oklch(0.82 0 0)",
-      "accent": "oklch(0.72 0.09 250)",
-      "foreground": "oklch(0.81 0 0)",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "oklch(0.195 0 0)",
+      sidebar: "color-mix(in oklch, oklch(0.81 0 0) 4.3%, oklch(0.195 0 0))",
+      card: "oklch(0.195 0 0)",
+      primary: "oklch(0.82 0 0)",
+      accent: "oklch(0.72 0.09 250)",
+      foreground: "oklch(0.81 0 0)",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "nord": {
-    "light": {
-      "canvas": "#eceff4",
-      "sidebar": "color-mix(in oklch, #2e3440 2.2%, #eceff4)",
-      "card": "#eceff4",
-      "primary": "#5e81ac",
-      "accent": "#5e81ac",
-      "foreground": "#2e3440",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  nord: {
+    light: {
+      canvas: "#eceff4",
+      sidebar: "color-mix(in oklch, #2e3440 2.2%, #eceff4)",
+      card: "#eceff4",
+      primary: "#5e81ac",
+      accent: "#5e81ac",
+      foreground: "#2e3440",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#2e3440",
-      "sidebar": "color-mix(in oklch, #d8dee9 4.3%, #2e3440)",
-      "card": "#2e3440",
-      "primary": "#88c0d0",
-      "accent": "#88c0d0",
-      "foreground": "#d8dee9",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#2e3440",
+      sidebar: "color-mix(in oklch, #d8dee9 4.3%, #2e3440)",
+      card: "#2e3440",
+      primary: "#88c0d0",
+      accent: "#88c0d0",
+      foreground: "#d8dee9",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "dracula": {
-    "light": {
-      "canvas": "#f8f8f2",
-      "sidebar": "color-mix(in oklch, #282a36 2.2%, #f8f8f2)",
-      "card": "#f8f8f2",
-      "primary": "#7d5bbe",
-      "accent": "#1f6f8b",
-      "foreground": "#282a36",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  dracula: {
+    light: {
+      canvas: "#f8f8f2",
+      sidebar: "color-mix(in oklch, #282a36 2.2%, #f8f8f2)",
+      card: "#f8f8f2",
+      primary: "#7d5bbe",
+      accent: "#1f6f8b",
+      foreground: "#282a36",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#282a36",
-      "sidebar": "color-mix(in oklch, #f8f8f2 4.3%, #282a36)",
-      "card": "#282a36",
-      "primary": "#bd93f9",
-      "accent": "#8be9fd",
-      "foreground": "#f8f8f2",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#282a36",
+      sidebar: "color-mix(in oklch, #f8f8f2 4.3%, #282a36)",
+      card: "#282a36",
+      primary: "#bd93f9",
+      accent: "#8be9fd",
+      foreground: "#f8f8f2",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "solarized": {
-    "light": {
-      "canvas": "#fdf6e3",
-      "sidebar": "color-mix(in oklch, #073642 2.2%, #fdf6e3)",
-      "card": "#fdf6e3",
-      "primary": "#268bd2",
-      "accent": "#268bd2",
-      "foreground": "#073642",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  solarized: {
+    light: {
+      canvas: "#fdf6e3",
+      sidebar: "color-mix(in oklch, #073642 2.2%, #fdf6e3)",
+      card: "#fdf6e3",
+      primary: "#268bd2",
+      accent: "#268bd2",
+      foreground: "#073642",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#002b36",
-      "sidebar": "color-mix(in oklch, #93a1a1 4.3%, #002b36)",
-      "card": "#002b36",
-      "primary": "#268bd2",
-      "accent": "#2aa198",
-      "foreground": "#93a1a1",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#002b36",
+      sidebar: "color-mix(in oklch, #93a1a1 4.3%, #002b36)",
+      card: "#002b36",
+      primary: "#268bd2",
+      accent: "#2aa198",
+      foreground: "#93a1a1",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "gruvbox": {
-    "light": {
-      "canvas": "#fbf1c7",
-      "sidebar": "color-mix(in oklch, #3c3836 2.2%, #fbf1c7)",
-      "card": "#fbf1c7",
-      "primary": "#076678",
-      "accent": "#076678",
-      "foreground": "#3c3836",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  gruvbox: {
+    light: {
+      canvas: "#fbf1c7",
+      sidebar: "color-mix(in oklch, #3c3836 2.2%, #fbf1c7)",
+      card: "#fbf1c7",
+      primary: "#076678",
+      accent: "#076678",
+      foreground: "#3c3836",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#282828",
-      "sidebar": "color-mix(in oklch, #ebdbb2 4.3%, #282828)",
-      "card": "#282828",
-      "primary": "#83a598",
-      "accent": "#83a598",
-      "foreground": "#ebdbb2",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
+    dark: {
+      canvas: "#282828",
+      sidebar: "color-mix(in oklch, #ebdbb2 4.3%, #282828)",
+      card: "#282828",
+      primary: "#83a598",
+      accent: "#83a598",
+      foreground: "#ebdbb2",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
   },
-  "catppuccin": {
-    "light": {
-      "canvas": "#eff1f5",
-      "sidebar": "color-mix(in oklch, #4c4f69 2.2%, #eff1f5)",
-      "card": "#eff1f5",
-      "primary": "#8839ef",
-      "accent": "#1e66f5",
-      "foreground": "#4c4f69",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+  catppuccin: {
+    light: {
+      canvas: "#eff1f5",
+      sidebar: "color-mix(in oklch, #4c4f69 2.2%, #eff1f5)",
+      card: "#eff1f5",
+      primary: "#8839ef",
+      accent: "#1e66f5",
+      foreground: "#4c4f69",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
-    "dark": {
-      "canvas": "#1e1e2e",
-      "sidebar": "color-mix(in oklch, #cdd6f4 4.3%, #1e1e2e)",
-      "card": "#1e1e2e",
-      "primary": "#cba6f7",
-      "accent": "#89b4fa",
-      "foreground": "#cdd6f4",
-      "fontSans": "\"Inter Variable\", Inter, sans-serif",
-      "fontMono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-    }
-  }
+    dark: {
+      canvas: "#1e1e2e",
+      sidebar: "color-mix(in oklch, #cdd6f4 4.3%, #1e1e2e)",
+      card: "#1e1e2e",
+      primary: "#cba6f7",
+      accent: "#89b4fa",
+      foreground: "#cdd6f4",
+      fontSans: '"Inter Variable", Inter, sans-serif',
+      fontMono:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
+  },
 };
 
 export async function buildCatalog(
@@ -340,7 +397,8 @@ export async function buildCatalog(
 ): Promise<z.infer<typeof catalogSchema>> {
   const c = (result ?? {}) as Record<string, unknown>;
   const active = c.active as Record<string, unknown> | undefined;
-  const activeThemeId = typeof active?.themeId === "string" ? active.themeId : null;
+  const activeThemeId =
+    typeof active?.themeId === "string" ? active.themeId : null;
 
   const entries: Array<{ id: string; name: string }> = [];
   for (const id of Array.isArray(c.custom) ? c.custom : []) {
@@ -349,11 +407,15 @@ export async function buildCatalog(
   for (const plugin of Array.isArray(c.plugins) ? c.plugins : []) {
     const entry = plugin as Record<string, unknown>;
     if (typeof entry.id === "string") {
-      entries.push({ id: entry.id, name: typeof entry.name === "string" ? entry.name : entry.id });
+      entries.push({
+        id: entry.id,
+        name: typeof entry.name === "string" ? entry.name : entry.id,
+      });
     }
   }
   for (const builtin of BUILTIN_THEMES) {
-    if (!entries.some((entry) => entry.id === builtin.id)) entries.push(builtin);
+    if (!entries.some((entry) => entry.id === builtin.id))
+      entries.push(builtin);
   }
   if (activeThemeId && !entries.some((entry) => entry.id === activeThemeId)) {
     entries.unshift({ id: activeThemeId, name: activeThemeId });
@@ -362,7 +424,9 @@ export async function buildCatalog(
   const themes = await Promise.all(
     entries.map(async (entry) => {
       const css = await readCss(entry.id);
-      const swatches = css ? parseThemeSwatches(css) : (BUILTIN_SWATCHES[entry.id] ?? { light: null, dark: null });
+      const swatches = css
+        ? parseThemeSwatches(css)
+        : (BUILTIN_SWATCHES[entry.id] ?? { light: null, dark: null });
       return { ...entry, light: swatches.light, dark: swatches.dark };
     }),
   );
@@ -371,8 +435,17 @@ export async function buildCatalog(
 
 const PLUGIN_THEME_ID_PATTERN = /^plugin:([^:]+):(.+)$/;
 
-async function pluginThemeCssPath(rootDir: string, localId: string, signal?: AbortSignal): Promise<string | null> {
-  const manifest = JSON.parse(await readFile(resolve(rootDir, "package.json"), { encoding: "utf8", signal })) as {
+async function pluginThemeCssPath(
+  rootDir: string,
+  localId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const manifest = JSON.parse(
+    await readFile(resolve(rootDir, "package.json"), {
+      encoding: "utf8",
+      signal,
+    }),
+  ) as {
     bb?: { themes?: Array<{ id?: string; css?: string }> };
   };
   const entry = manifest.bb?.themes?.find((theme) => theme.id === localId);
@@ -392,7 +465,9 @@ async function readPluginThemeCss(
   if (!rootDir) return null;
   try {
     const cssPath = await pluginThemeCssPath(rootDir, localId, signal);
-    return cssPath ? await readFile(cssPath, { encoding: "utf8", signal }) : null;
+    return cssPath
+      ? await readFile(cssPath, { encoding: "utf8", signal })
+      : null;
   } catch (error) {
     signal?.throwIfAborted();
     bb.log.warn(`theme-preview: could not read ${themeId}: ${String(error)}`);
@@ -444,9 +519,14 @@ export function createCatalogLoader(bb: BbPluginApi) {
     promise: Promise<z.infer<typeof catalogSchema>>;
   } | null = null;
 
-  const warnIfSlow = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+  const warnIfSlow = async <T>(
+    label: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
     const warning = setTimeout(() => {
-      bb.log.warn(`theme-preview: ${label} still pending after ${slowWarningMs}ms`);
+      bb.log.warn(
+        `theme-preview: ${label} still pending after ${slowWarningMs}ms`,
+      );
     }, slowWarningMs);
     try {
       return await operation();
@@ -463,71 +543,100 @@ export function createCatalogLoader(bb: BbPluginApi) {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
-        const error = new Error(`theme-preview: ${label} timed out after ${catalogOperationTimeoutMs}ms`);
+        const error = new Error(
+          `theme-preview: ${label} timed out after ${catalogOperationTimeoutMs}ms`,
+        );
         controller.abort(error);
         reject(error);
       }, catalogOperationTimeoutMs);
     });
     try {
-      return await warnIfSlow(label, () => Promise.race([operation(controller.signal), deadline]));
+      return await warnIfSlow(label, () =>
+        Promise.race([operation(controller.signal), deadline]),
+      );
     } finally {
       if (timeout) clearTimeout(timeout);
     }
   };
 
   const loadCatalog = async (selectionAtStart: number) => {
-    const raw = (await observeCatalogOperation("theme catalog", (signal) => bb.sdk.theme.catalog({ signal }))) as {
+    const raw = (await observeCatalogOperation("theme catalog", (signal) =>
+      bb.sdk.theme.catalog({ signal }),
+    )) as {
       dir?: unknown;
     };
     const dir = typeof raw?.dir === "string" ? raw.dir : null;
     const rootDirs = new Map<string, string>();
     try {
-      const listed = (await observeCatalogOperation("plugin list", (signal) => bb.sdk.plugins.list({ signal }))) as {
+      const listed = (await observeCatalogOperation("plugin list", (signal) =>
+        bb.sdk.plugins.list({ signal }),
+      )) as {
         plugins?: Array<{ id?: string; rootDir?: string }>;
       };
       for (const entry of listed.plugins ?? []) {
-        if (typeof entry.id === "string" && typeof entry.rootDir === "string") rootDirs.set(entry.id, entry.rootDir);
+        if (typeof entry.id === "string" && typeof entry.rootDir === "string")
+          rootDirs.set(entry.id, entry.rootDir);
       }
     } catch (error) {
       bb.log.warn(`theme-preview: plugin list unavailable: ${String(error)}`);
     }
-    const built = await observeCatalogOperation("catalog enrichment", (signal) =>
-      buildCatalog(raw, async (id) =>
-        id.startsWith("plugin:")
-          ? readPluginThemeCss(bb, id, rootDirs, signal)
-          : dir
-            ? readCustomThemeCss(dir, id, signal)
-            : null,
-      ),
+    const built = await observeCatalogOperation(
+      "catalog enrichment",
+      (signal) =>
+        buildCatalog(raw, async (id) =>
+          id.startsWith("plugin:")
+            ? readPluginThemeCss(bb, id, rootDirs, signal)
+            : dir
+              ? readCustomThemeCss(dir, id, signal)
+              : null,
+        ),
     );
 
     if (built.activeThemeId) {
-      const path = await observeCatalogOperation("active theme lookup", (signal) =>
-        activeThemePath(built.activeThemeId!, dir, rootDirs, signal),
+      const path = await observeCatalogOperation(
+        "active theme lookup",
+        (signal) =>
+          activeThemePath(built.activeThemeId!, dir, rootDirs, signal),
       );
       if (path) {
         try {
-          const info = await observeCatalogOperation("active theme stat", async (signal) => {
-            const result = await stat(path);
-            signal.throwIfAborted();
-            return result;
-          });
+          const info = await observeCatalogOperation(
+            "active theme stat",
+            async (signal) => {
+              const result = await stat(path);
+              signal.throwIfAborted();
+              return result;
+            },
+          );
           const stamp = `${path}:${info.mtimeMs}:${info.size}`;
           const previousStamp = stamps.get(path);
           stamps.set(path, stamp);
           if (previousStamp !== undefined && stamp !== previousStamp) {
-            const current = (await observeCatalogOperation("active theme confirmation", (signal) =>
-              bb.sdk.theme.catalog({ signal }),
+            const current = (await observeCatalogOperation(
+              "active theme confirmation",
+              (signal) => bb.sdk.theme.catalog({ signal }),
             )) as { active?: { themeId?: unknown } };
-            const currentThemeId = typeof current.active?.themeId === "string" ? current.active.themeId : null;
-            if (selectionGeneration === selectionAtStart && currentThemeId === built.activeThemeId) {
-              await warnIfSlow(`theme re-apply (${built.activeThemeId})`, () => bb.sdk.theme.set(built.activeThemeId!));
+            const currentThemeId =
+              typeof current.active?.themeId === "string"
+                ? current.active.themeId
+                : null;
+            if (
+              selectionGeneration === selectionAtStart &&
+              currentThemeId === built.activeThemeId
+            ) {
+              await warnIfSlow(`theme re-apply (${built.activeThemeId})`, () =>
+                bb.sdk.theme.set(built.activeThemeId!),
+              );
               revision += 1;
-              bb.log.info(`theme-preview: ${built.activeThemeId} changed on disk — re-applied (rev ${revision})`);
+              bb.log.info(
+                `theme-preview: ${built.activeThemeId} changed on disk — re-applied (rev ${revision})`,
+              );
             }
           }
         } catch (error) {
-          bb.log.warn(`theme-preview: could not stat ${path}: ${String(error)}`);
+          bb.log.warn(
+            `theme-preview: could not stat ${path}: ${String(error)}`,
+          );
         }
       }
     }
@@ -538,7 +647,8 @@ export function createCatalogLoader(bb: BbPluginApi) {
 
   const catalog = () => {
     const generation = selectionGeneration;
-    if (catalogInFlight?.generation === generation) return catalogInFlight.promise;
+    if (catalogInFlight?.generation === generation)
+      return catalogInFlight.promise;
 
     const promise = loadCatalog(generation).finally(() => {
       if (catalogInFlight?.promise === promise) catalogInFlight = null;
@@ -551,12 +661,14 @@ export function createCatalogLoader(bb: BbPluginApi) {
     selectionGeneration += 1;
     const generation = selectionGeneration;
     const apply = selectionQueue.then(async () => {
-      await warnIfSlow(`theme apply (${themeId})`, () => bb.sdk.theme.set(themeId));
+      await warnIfSlow(`theme apply (${themeId})`, () =>
+        bb.sdk.theme.set(themeId),
+      );
     });
     selectionQueue = apply.catch(() => undefined);
     await apply;
 
-    const base = latestCatalog ?? await catalog();
+    const base = latestCatalog ?? (await catalog());
     const selected = { ...base, activeThemeId: themeId };
     if (selectionGeneration === generation) latestCatalog = selected;
     return selected;
@@ -574,7 +686,9 @@ export default async function plugin(bb: BbPluginApi) {
       let watcher: FSWatcher | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
       try {
-        const raw = (await bb.sdk.theme.catalog({ signal })) as { dir?: unknown };
+        const raw = (await bb.sdk.theme.catalog({ signal })) as {
+          dir?: unknown;
+        };
         if (signal.aborted) return;
         const dir = typeof raw?.dir === "string" ? raw.dir : null;
         if (!dir) return;
@@ -583,15 +697,22 @@ export default async function plugin(bb: BbPluginApi) {
           timer = setTimeout(async () => {
             try {
               const next = await catalog();
-              bb.realtime.publish("theme-preview:changed", { revision: next.revision, at: Date.now() });
+              bb.realtime.publish("theme-preview:changed", {
+                revision: next.revision,
+                at: Date.now(),
+              });
             } catch (error) {
-              bb.log.warn(`theme-preview: watch refresh failed: ${String(error)}`);
+              bb.log.warn(
+                `theme-preview: watch refresh failed: ${String(error)}`,
+              );
             }
           }, 120);
         };
         try {
           watcher = watch(dir, { recursive: true }, onChange);
-          watcher.on("error", (error) => bb.log.warn(`theme-preview: watcher error: ${String(error)}`));
+          watcher.on("error", (error) =>
+            bb.log.warn(`theme-preview: watcher error: ${String(error)}`),
+          );
           bb.log.info(`theme-preview: watching ${dir}`);
         } catch (error) {
           bb.log.warn(`theme-preview: cannot watch ${dir}: ${String(error)}`);
@@ -599,7 +720,8 @@ export default async function plugin(bb: BbPluginApi) {
         }
         await new Promise<void>((resolve) => {
           if (signal.aborted) resolve();
-          else signal.addEventListener("abort", () => resolve(), { once: true });
+          else
+            signal.addEventListener("abort", () => resolve(), { once: true });
         });
       } catch (error) {
         if (!signal.aborted) throw error;
