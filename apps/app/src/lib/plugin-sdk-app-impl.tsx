@@ -155,6 +155,7 @@ function PluginMarkdown({
 
   return (
     <MarkdownPreview
+      allowHtml
       content={content}
       className={className}
       linkRouting={linkRouting}

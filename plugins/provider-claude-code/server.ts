@@ -55,7 +55,7 @@ export default function plugin(bb: BbPluginApi) {
     ...CLAUDE_NATIVE_ROOTS_DECLARATION,
     maintenance: { health: true, usage: true, installation: true },
     capabilities: {
-      supportsServiceTier: false,
+      supportsServiceTier: true,
       supportsNativeUserQuestion: true,
       reportsTokenUsage: true,
       fork: "checkpoint",
@@ -76,6 +76,15 @@ export default function plugin(bb: BbPluginApi) {
         description: "Extra-high effort plus standing workflow orchestration.",
       },
       { id: "max", label: "Max" },
+    ],
+    serviceTiers: [
+      { id: "default", label: "Default" },
+      {
+        id: "fast",
+        label: "Fast",
+        description:
+          "Faster responses on supported Opus models at a higher cost per token.",
+      },
     ],
     composerActions: ["plan"],
     completedTurnDisplay: "flat",

@@ -107,6 +107,7 @@ import {
   useStopThread,
 } from "@/hooks/mutations/thread-runtime-mutations";
 import {
+  useRestoreThreadEnvironment,
   useUnarchiveThread,
   useUpdateThread,
 } from "@/hooks/mutations/thread-state-mutations";
@@ -177,6 +178,7 @@ const EMPTY_QUEUED_MESSAGES: readonly ThreadQueuedMessage[] = [];
 
 interface ThreadDetailPromptAreaProps {
   activeBackgroundAgentCount: number;
+  canRestoreEnvironment: boolean;
   canUseGitUi: boolean;
   contextWindowUsage?: ThreadTimelineResponse["contextWindowUsage"];
   environmentCheckout?: WorkspaceCheckoutDisplay;
@@ -391,6 +393,7 @@ async function runWhileFollowUpShortcutSending(
 
 export function ThreadDetailPromptArea({
   activeBackgroundAgentCount,
+  canRestoreEnvironment,
   canUseGitUi,
   contextWindowUsage,
   environmentCheckout,
@@ -505,6 +508,7 @@ export function ThreadDetailPromptArea({
   const clearThreadGoal = useClearThreadGoal();
   const unarchiveThread = useUnarchiveThread();
   const updateThread = useUpdateThread();
+  const restoreThreadEnvironment = useRestoreThreadEnvironment();
   const createThread = useCreateThread();
   const projectName = useProjectDisplayName(
     thread.projectId === PERSONAL_PROJECT_ID ? undefined : thread.projectId,
@@ -1429,6 +1433,12 @@ export function ThreadDetailPromptArea({
   const handleUnarchiveCurrentThread = useCallback(() => {
     unarchiveThread.mutate({ id: thread.id });
   }, [thread.id, unarchiveThread]);
+  const isRestoreCurrentEnvironmentPending =
+    restoreThreadEnvironment.isPending &&
+    restoreThreadEnvironment.variables?.id === thread.id;
+  const handleRestoreCurrentEnvironment = useCallback(() => {
+    restoreThreadEnvironment.mutate({ id: thread.id });
+  }, [restoreThreadEnvironment, thread.id]);
   const bottomAttachmentsConfig = useMemo(
     () => ({
       items: currentPromptDraft.attachments,
@@ -2028,7 +2038,15 @@ export function ThreadDetailPromptArea({
           environmentGoneSection={
             environmentGoneStatus === null
               ? null
-              : { status: environmentGoneStatus }
+              : {
+                  status: environmentGoneStatus,
+                  ...(canRestoreEnvironment
+                    ? {
+                        onRestore: handleRestoreCurrentEnvironment,
+                        restorePending: isRestoreCurrentEnvironmentPending,
+                      }
+                    : {}),
+                }
           }
           parentThreadSection={parentThreadSection}
           childThreadsSection={childThreadsSection}
@@ -2096,8 +2114,11 @@ export function ThreadDetailPromptArea({
       handleSetQueuedMessageGroupBoundary,
       handleToggleBannerSection,
       handleUnarchiveCurrentThread,
+      handleRestoreCurrentEnvironment,
+      canRestoreEnvironment,
       environmentGoneStatus,
       isFollowUpSubmitting,
+      isRestoreCurrentEnvironmentPending,
       isUnarchiveCurrentThreadPending,
       isQueueMutationPending,
       queuedMessageEditor,
@@ -2167,6 +2188,7 @@ export function ThreadDetailPromptArea({
       activePromptMode={isHandoffSelection ? null : activePromptMode}
       composer={shouldHideComposer ? null : bottomComposerConfig}
       pluginComposerHost={normalPluginComposerHost}
+      voiceDraft={promptDraft}
       pluginComposerScope={normalPluginComposerHost.scope}
       textEffects={promptTextEffects}
       collapseResetKey={thread.id}

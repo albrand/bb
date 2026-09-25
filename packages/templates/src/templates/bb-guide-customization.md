@@ -170,6 +170,10 @@ the same per-provider switch.
 
 The default-off `changelogPreview` experiment shows the latest release notes
 as a compact, dismissible card on Settings → Updates.
+The default-off `legacyJitiPluginLoader` experiment restores the previous JITI
+loader the next time a plugin loads. Toggling it does not disturb running
+plugin instances. Enable it with
+`bb settings experiment legacyJitiPluginLoader true`.
 Message editing is available for eligible, accepted
 root user messages in Codex, Claude Code, and Pi threads, including failed or
 incomplete turns. Opening the editor is
@@ -399,7 +403,10 @@ Some Settings values live only in the current browser/client. Sidebar width
 and open state stay local because they depend on the window size. The Voice Input
 microphone picker stores the selected browser MediaDevices device id in
 localStorage as `bb.voiceInput.audioInputDeviceId`; it does not have a `bb`
-command and does not change the server-side transcription model.
+command and does not change the server-side transcription model. When the preferred
+microphone is disconnected, recording falls back to the system default (including
+the sole available microphone). The saved preference is used again when it
+reconnects. Select System default to follow system microphone changes.
 
 Anonymous usage telemetry can be disabled in Settings → General → Privacy & diagnostics → Share anonymous usage data,
 or with `bb settings general telemetryEnabled false`. The saved server-wide preference

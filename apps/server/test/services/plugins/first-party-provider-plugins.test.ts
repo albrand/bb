@@ -287,7 +287,7 @@ describe("first-party provider plugins", () => {
           capabilities: {
             supportsThreadArchive: false,
             supportsThreadRename: false,
-            supportsServiceTier: false,
+            supportsServiceTier: true,
             supportsNativeUserQuestion: true,
             permissionModes: ["accept-edits", "auto", "full"],
             supportsFork: true,
@@ -351,6 +351,10 @@ describe("first-party provider plugins", () => {
           "claude-opus-4-8[1m]",
           "claude-opus-4-7[1m]",
           "claude-sonnet-5",
+        ]);
+        expect(claude?.info.serviceTiers?.map((tier) => tier.id)).toEqual([
+          "default",
+          "fast",
         ]);
         expect(claude?.envPassthrough).toEqual([
           "BB_CLAUDE_CODE_EXECUTABLE",

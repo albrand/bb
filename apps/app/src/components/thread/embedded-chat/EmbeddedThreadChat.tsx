@@ -1148,6 +1148,7 @@ function EmbeddedThreadChatWithComposer({
           pendingInteraction={pendingInteractionBanner}
           composer={bottomComposerConfig}
           pluginComposerHost={bottomPluginComposerHost}
+          voiceDraft={promptDraft}
           pluginComposerScope={bottomPluginComposerHost?.scope ?? null}
           textEffects={bottomComposerTextEffects}
           environmentSummary={composer.environmentSummary}

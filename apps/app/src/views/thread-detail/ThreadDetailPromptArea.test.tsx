@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn(),
   stopThreadMutate: vi.fn(),
   toastError: vi.fn(),
+  restoreThreadEnvironmentMutate: vi.fn(),
   unarchiveThreadMutate: vi.fn(),
   updateThreadMutate: vi.fn(),
   uploadPromptAttachmentMutateAsync: vi.fn(),
@@ -588,6 +589,11 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
 }));
 
 vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
+  useRestoreThreadEnvironment: () => ({
+    isPending: false,
+    mutate: mocks.restoreThreadEnvironmentMutate,
+    variables: null,
+  }),
   useUnarchiveThread: () => ({
     isPending: false,
     mutate: mocks.unarchiveThreadMutate,
@@ -766,6 +772,7 @@ function buildPromptAreaElement({
         childThreadsSection={null}
         composerFocusRequestNonce={0}
         contextBannerMergeBase={null}
+        canRestoreEnvironment={false}
         environmentGoneStatus={environmentGoneStatus}
         goal={goal}
         modelFallback={modelFallback}

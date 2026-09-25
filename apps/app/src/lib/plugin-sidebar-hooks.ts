@@ -163,6 +163,7 @@ export function useSidebarThreads(
         experimental_archived: archiveState,
         status: query.isError ? "error" : "loading",
         threads: EMPTY_THREADS,
+        experimental_hosts: hosts ?? [],
         projects: EMPTY_PROJECTS,
         sections: EMPTY_SECTIONS,
       };
@@ -187,6 +188,7 @@ export function useSidebarThreads(
       threads: [...selected.values()].map((thread) =>
         toPluginSidebarThreadCached(thread, hostNamesById, titleResources),
       ),
+      experimental_hosts: hosts ?? [],
       projects: allProjects.map((project) => ({
         id: project.id,
         name: project.name,
@@ -199,6 +201,7 @@ export function useSidebarThreads(
   }, [
     data,
     hostNamesById,
+    hosts,
     query.isError,
     titleResources,
     active,
@@ -321,6 +324,10 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
             : {}),
           ...(options?.environmentId !== undefined
             ? { reuseEnvironmentId: options.environmentId }
+            : {}),
+          ...(typeof options?.hostId === "string" &&
+          options.hostId.trim().length > 0
+            ? { newEnvironmentHostId: options.hostId.trim() }
             : {}),
         };
         navigate(
