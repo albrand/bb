@@ -513,6 +513,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
         ...(compactViewport ? [] : [["Open in split", "Columns2"]]),
         ["View details", "Info"],
         ["Hide from sidebar", "EyeOff"],
+        ["Customize sidebar", "FilterHorizontal"],
         ["Disable", "Unavailable"],
       ] as const;
       const expectFocusedMenu = (menu: HTMLElement) => {
@@ -521,7 +522,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
             .getAllByRole("menuitem")
             .map((item) => item.textContent?.trim()),
         ).toEqual(expected.map(([label]) => label));
-        expect(within(menu).getAllByRole("separator")).toHaveLength(1);
+        expect(within(menu).getAllByRole("separator")).toHaveLength(2);
         for (const [label, icon] of expected) {
           const iconElement = within(menu)
             .getByRole("menuitem", { name: label })
