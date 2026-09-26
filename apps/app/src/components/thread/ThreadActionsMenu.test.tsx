@@ -19,10 +19,7 @@ import {
 import { makeThreadListEntry } from "../../../.ladle/story-fixtures";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import type { LayoutNode, SplitLayout } from "@/lib/split-layout";
-import {
-  ThreadActionsContextMenu,
-  ThreadActionsMenu,
-} from "./ThreadActionsMenu";
+import { ThreadActionsMenu } from "./ThreadActionsMenu";
 import {
   AppThreadSectionMoveProvider,
   ThreadSectionMoveProvider,
@@ -93,7 +90,7 @@ function renderCompact(children: ReactNode) {
   );
 }
 
-function InlineRenameMenuHarness({ context = false }: { context?: boolean }) {
+function InlineRenameMenuHarness() {
   const rename = useSidebarRename({
     kind: "thread",
     id: thread.id,
@@ -101,32 +98,18 @@ function InlineRenameMenuHarness({ context = false }: { context?: boolean }) {
     label: "Thread name",
     onSave: async () => {},
   });
-  const row = (
+  return (
     <div data-sidebar-rename-row="" data-testid="thread-row">
       <button type="button" data-sidebar-rename-anchor="">
         Open thread
       </button>
       {rename.editor ?? <span>{thread.title}</span>}
-      {!context && (
-        <ThreadActionsMenu
-          thread={thread}
-          onRename={rename.startEditingFromMenu}
-          onCloseAutoFocus={rename.onCloseAutoFocus}
-        />
-      )}
+      <ThreadActionsMenu
+        thread={thread}
+        onRename={rename.startEditingFromMenu}
+        onCloseAutoFocus={rename.onCloseAutoFocus}
+      />
     </div>
-  );
-  return context ? (
-    <ThreadActionsContextMenu
-      thread={thread}
-      onRename={rename.startEditingFromMenu}
-      onCloseAutoFocus={rename.onCloseAutoFocus}
-      disabled={rename.isEditing}
-    >
-      {row}
-    </ThreadActionsContextMenu>
-  ) : (
-    row
   );
 }
 
@@ -162,24 +145,13 @@ describe("ThreadActionsMenu", () => {
     });
   });
 
-  it.each([
-    { compact: false, context: false },
-    { compact: false, context: true },
-    { compact: true, context: false },
-    { compact: true, context: true },
-  ])(
-    "hands focus to inline rename ($compact, $context)",
-    async ({ compact, context }) => {
-      (compact ? renderCompact : renderWide)(
-        <InlineRenameMenuHarness context={context} />,
-      );
-      if (context) {
-        fireEvent.contextMenu(screen.getByTestId("thread-row"));
-      } else {
-        const trigger = screen.getByRole("button", { name: "Thread actions" });
-        if (compact) fireEvent.click(trigger);
-        else fireEvent.pointerDown(trigger, { button: 0 });
-      }
+  it.each([{ compact: false }, { compact: true }])(
+    "hands focus to inline rename ($compact)",
+    async ({ compact }) => {
+      (compact ? renderCompact : renderWide)(<InlineRenameMenuHarness />);
+      const trigger = screen.getByRole("button", { name: "Thread actions" });
+      if (compact) fireEvent.click(trigger);
+      else fireEvent.pointerDown(trigger, { button: 0 });
       const item = await screen.findByRole("menuitem", { name: "Rename" });
       if (compact) fireEvent.click(item);
       else fireEvent.keyDown(item, { key: "Enter" });
@@ -210,9 +182,7 @@ describe("ThreadActionsMenu", () => {
 
   it("offers Open beside with its shortcut, and only when a split is available", () => {
     const onOpenInSplit = vi.fn();
-    render(
-      <ThreadActionsMenu thread={thread} onOpenInSplit={onOpenInSplit} />,
-    );
+    render(<ThreadActionsMenu thread={thread} onOpenInSplit={onOpenInSplit} />);
 
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Thread actions" }),
@@ -323,33 +293,6 @@ describe("ThreadActionsMenu", () => {
       screen.queryByRole("menuitem", { name: /Open beside/ }),
     ).not.toBeNull();
   });
-
-  it("reaches the directions through the right-click context menu surface", () => {
-    const onOpenInSplit = vi.fn();
-    const store = createStore();
-    store.set(splitLayoutAtom, null);
-    render(
-      <Provider store={store}>
-        <ThreadActionsContextMenu
-          thread={thread}
-          onOpenInSplit={onOpenInSplit}
-        >
-          <button type="button">Row</button>
-        </ThreadActionsContextMenu>
-      </Provider>,
-    );
-
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Open beside/ }));
-    expect(onOpenInSplit).toHaveBeenCalledWith("right");
-
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Row" }));
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: /Open above or below/ }),
-    );
-    fireEvent.click(screen.getByRole("menuitem", { name: "Open below" }));
-    expect(onOpenInSplit).toHaveBeenCalledWith("bottom");
-  });
 });
 
 describe("ThreadActionsMenu section moves", () => {
@@ -419,23 +362,6 @@ describe("ThreadActionsMenu section moves", () => {
     });
   });
 
-  it("offers the same destinations from the thread context menu", async () => {
-    renderWide(
-      <ThreadActionsContextMenu thread={thread}>
-        <div data-testid="thread-row">Move me</div>
-      </ThreadActionsContextMenu>,
-    );
-
-    fireEvent.contextMenu(screen.getByTestId("thread-row"));
-    const building = await openMoveSubmenu();
-    fireEvent.click(building);
-
-    expect(moveThreadToSection).toHaveBeenCalledWith({
-      thread,
-      sectionId: "sec_building",
-    });
-  });
-
   it("does not add section controls outside Manual organization", async () => {
     renderWide(<ThreadActionsMenu thread={thread} />, false);
 
@@ -491,27 +417,6 @@ describe("ThreadActionsMenu section moves", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Building" }));
 
     fireEvent.click(trigger);
-    expect(
-      await screen.findByRole("menuitem", { name: "Move to section" }),
-    ).not.toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "Back" })).toBeNull();
-  });
-
-  it("reopens the compact long-press menu at the root after moving a thread", async () => {
-    renderCompact(
-      <ThreadActionsContextMenu thread={thread}>
-        <div data-testid="thread-row">Move me</div>
-      </ThreadActionsContextMenu>,
-    );
-
-    const row = screen.getByTestId("thread-row");
-    fireEvent.contextMenu(row);
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Move to section" }),
-    );
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Building" }));
-
-    fireEvent.contextMenu(row);
     expect(
       await screen.findByRole("menuitem", { name: "Move to section" }),
     ).not.toBeNull();

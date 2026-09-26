@@ -2,7 +2,6 @@
 
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { ReactNode } from "react";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -27,11 +26,7 @@ vi.mock("@/components/thread/ThreadActionsProvider", () => ({
 }));
 
 vi.mock("@/components/thread/ThreadActionsMenu", () => ({
-  ThreadActionsContextMenu: ({ children }: { children: ReactNode }) => (
-    <>{children}</>
-  ),
   ThreadActionsMenu: () => null,
-  ThreadArchiveQuickAction: () => null,
 }));
 
 import { SidebarOpenBesideCommandHandler } from "./SidebarOpenBesideCommandHandler";

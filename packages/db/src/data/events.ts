@@ -1405,12 +1405,6 @@ function resolvedItemPruningCandidates(
     FROM events WHERE id IN (${pruningCandidates(args, types)}) ORDER BY sequence`);
 }
 
-export interface PruneThreadEventsBeforeSequenceArgs extends PruningWindow {
-  sequenceCutoff: number;
-  threadId: string;
-  types: readonly ThreadEventType[];
-}
-
 export interface PruneContextWindowUsageEventsArgs extends PruningWindow {
   threadId: string;
 }
@@ -4011,30 +4005,6 @@ export function listCompletedTurnsByThreadIds(
     );
 }
 
-export function pruneThreadEventsBeforeSequenceInTransaction(
-  db: DbQueryConnection,
-  args: PruneThreadEventsBeforeSequenceArgs,
-): number {
-  if (args.sequenceCutoff <= 0 || args.types.length === 0) {
-    return 0;
-  }
-
-  const result = db
-    .delete(events)
-    .where(
-      and(
-        eq(events.threadId, args.threadId),
-        sql`${events.id} IN (${pruningCandidates(args, args.types)})`,
-        lte(events.sequence, args.sequenceCutoff),
-        isBeforeLatestThreadEvent(args.threadId),
-        inArray(events.type, [...args.types]),
-      ),
-    )
-    .run();
-
-  return result.changes;
-}
-
 function pruneUsageSnapshots(
   db: DbQueryConnection,
   args: PruningWindow & {
@@ -4288,15 +4258,6 @@ function runPruningBatch(
   const removed = db.transaction(work, { behavior: "immediate" });
   if (removed > 0) bumpThreadEventRewriteGeneration(args.threadId);
   return removed;
-}
-
-export function pruneThreadEventsBeforeSequence(
-  db: DbConnection,
-  args: PruneThreadEventsBeforeSequenceArgs,
-): number {
-  return runPruningBatch(db, args, (tx) =>
-    pruneThreadEventsBeforeSequenceInTransaction(tx, args),
-  );
 }
 
 export function pruneContextWindowUsageEvents(

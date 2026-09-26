@@ -1,5 +1,5 @@
 import {
-  claimQueuedThreadMessage,
+  claimQueuedThreadMessageGroup,
   createQueuedThreadMessage,
   createPendingInteraction,
   createPromptHistoryEntry,
@@ -1251,10 +1251,11 @@ describe("editThreadMessage", () => {
         threadId: thread.id,
       });
       expect(
-        claimQueuedThreadMessage(
+        claimQueuedThreadMessageGroup(
           harness.db,
           harness.deps.hub,
           queuedMessage.id,
+          { kind: "explicit-send" },
         ),
       ).not.toBeNull();
       const rejectedEdit = expect(editPromise).rejects.toThrow(
