@@ -5,6 +5,7 @@ import {
   deleteThreadEventSuffixInTransaction,
   getLatestCompletedThreadContextClearSequence,
   getLatestThreadSequence,
+  THREAD_EVENT_KEEP_RECENT_BY_MODE,
 } from "@bb/db";
 import {
   clearTimelineOrderingContextCache,
@@ -342,6 +343,17 @@ describe("timeline grouping context cache", () => {
     for (let seed = 1; seed <= SEEDS; seed += 1) {
       const random = createRandom(seed);
       withTestThread((testThread) => {
+        appendRows(
+          testThread,
+          Array.from(
+            { length: THREAD_EVENT_KEEP_RECENT_BY_MODE.active },
+            (): RowSpec => ({
+              data: {},
+              turnId: pick(random, RANDOM_TURN_IDS),
+              type: "turn/diff/updated",
+            }),
+          ),
+        );
         let previousBoundary: number | null = null;
         for (let step = 0; step < 40; step += 1) {
           prunedRows += applyRandomStep(testThread, random, step);
