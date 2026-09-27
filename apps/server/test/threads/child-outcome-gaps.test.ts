@@ -1,4 +1,5 @@
 import {
+  getQueuedMessageDispatchRetry,
   getQueuedThreadMessage,
   listEvents,
   listQueuedThreadMessages,
@@ -11,6 +12,7 @@ import { queueChildThreadTurnNotificationBestEffort } from "../../src/services/t
 import { interruptEnvironmentProvisioningForHost } from "../../src/services/environments/environment-engine.js";
 import { failThreadProvisioning } from "../../src/services/threads/thread-provisioning-environment.js";
 import { recordQueuedMessageDrainFailure } from "../../src/services/threads/queue-drain-failure.js";
+import { dispatchEnvironmentAndHost } from "../../src/services/threads/dispatch-hooks.js";
 import {
   seedQueuedMessage,
   seedEnvironment,
@@ -276,6 +278,10 @@ describe("child outcomes without provider completion", () => {
   it("notifies the parent only after a queued send exhausts retries", async () => {
     await withTestHarness(async (harness) => {
       const { parent, child } = seedParentAndChild(harness, "idle");
+      expect(
+        dispatchEnvironmentAndHost(harness.deps, child.environmentId).host
+          ?.status,
+      ).toBe("connected");
       const row = seedQueuedMessage(harness.deps, {
         threadId: child.id,
         content: textInput("Continue the child work"),
@@ -283,17 +289,17 @@ describe("child outcomes without provider completion", () => {
       });
 
       vi.useFakeTimers();
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
         recordQueuedMessageDrainFailure(harness.deps, {
           error: new Error("dispatch failed"),
           now: Date.now(),
           row,
           thread: child,
         });
+        expect(
+          getQueuedMessageDispatchRetry(harness.db, row.id)?.attempt,
+        ).toBe(attempt + 1);
       }
-      expect(
-        getQueuedThreadMessage(harness.db, row.id)?.nextAttemptAt,
-      ).not.toBeNull();
       expect(parentSystemRequests(harness, parent.id)).toHaveLength(0);
 
       recordQueuedMessageDrainFailure(harness.deps, {
@@ -304,9 +310,8 @@ describe("child outcomes without provider completion", () => {
       });
       await vi.advanceTimersByTimeAsync(2_000);
 
-      expect(
-        getQueuedThreadMessage(harness.db, row.id)?.nextAttemptAt,
-      ).toBeNull();
+      expect(getQueuedMessageDispatchRetry(harness.db, row.id)).toBeNull();
+      expect(getQueuedThreadMessage(harness.db, row.id)).not.toBeNull();
       expect(parentSystemRequests(harness, parent.id)).toMatchObject([
         { systemMessageKind: "child-failed" },
       ]);
