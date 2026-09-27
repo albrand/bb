@@ -95,7 +95,9 @@ describe("inline browser preview", () => {
     expect(slot.getByText("Connecting")).toBeTruthy();
     deliverFirst();
     const first = await slot.findByAltText("Live view of Cart");
-    expect(first.getAttribute("src")).toBe("data:image/jpeg;base64,bytes4");
+    await waitFor(() =>
+      expect(first.getAttribute("src")).toBe("data:image/jpeg;base64,bytes4"),
+    );
     expect(slot.getByText("shop.test/cart")).toBeTruthy();
     expect(slot.getByText("Live")).toBeTruthy();
     const second = await slot.findByAltText(
