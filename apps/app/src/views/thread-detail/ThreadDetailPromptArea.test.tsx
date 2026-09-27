@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => ({
   setReasoningLevel: vi.fn(),
   setQueuedMessageGroupBoundaryMutateAsync: vi.fn(),
   setSelectedModel: vi.fn(),
+  sendMessageMutateAsync: vi.fn(),
   stopThreadMutate: vi.fn(),
   toastError: vi.fn(),
   restoreThreadEnvironmentMutate: vi.fn(),
@@ -545,6 +546,10 @@ vi.mock("@/hooks/mutations/project-mutations", () => ({
 }));
 
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
+  useUpdateThreadDraft: () => ({
+    isPending: false,
+    mutate: vi.fn(),
+  }),
   useCancelThreadPlan: () => ({
     isPending: false,
     mutate: mocks.cancelThreadPlanMutate,
@@ -763,6 +768,7 @@ function buildPromptAreaElement({
   return (
     <QueryClientProvider client={testQueryClient}>
       <ThreadDetailPromptArea
+        serverDraft={null}
         activeBackgroundAgentCount={0}
         activeBackgroundCommands={[]}
         activePromptMode={activePromptMode}
@@ -789,7 +795,7 @@ function buildPromptAreaElement({
         resolveMentionLink={() => null}
         sendMessage={{
           isPending: false,
-          mutateAsync: vi.fn(),
+          mutateAsync: mocks.sendMessageMutateAsync,
         }}
         sentMessageEdit={sentMessageEdit}
         steerActiveThreadOnEnter={false}
@@ -880,6 +886,34 @@ describe("ThreadDetailPromptArea", () => {
       id: "thr_1",
       reasoningLevel: "xhigh",
     });
+  });
+
+  it("preserves plugin submission data through a follow-up composer", async () => {
+    mocks.defaultExecutionOptions = {
+      model: "gpt-5",
+      permissionMode: "auto",
+      reasoningLevel: "medium",
+      serviceTier: "default",
+      source: "client/turn/requested",
+    };
+    mocks.promptDraft.text = "Keep this follow-up queued";
+    renderPromptArea();
+    fireEvent.click(screen.getByRole("button", { name: "Capture plugin host" }));
+    const pluginSubmission = {
+      pluginId: "example-plugin",
+      data: { kind: "hold" } as const,
+    };
+
+    await act(async () => {
+      await mocks.pluginComposerHost?.submit?.(
+        { experimental_data: pluginSubmission.data },
+        pluginSubmission,
+      );
+    });
+
+    expect(mocks.sendMessageMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "thr_1", pluginSubmission }),
+    );
   });
 
   it("shows queued work while its message details are loading", () => {

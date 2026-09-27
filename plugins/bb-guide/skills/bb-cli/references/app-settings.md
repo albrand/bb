@@ -126,6 +126,16 @@ so they carry over between navigation plugins.
   provider default, and the next send records that default. Select the custom
   model again after you turn streamer mode off.
 
+## Fast service tier
+
+- `allowFastServiceTier` defaults to true. Set it with
+  `bb settings general allowFastServiceTier <true|false|on|off>` or use the
+  switch in Settings → Providers.
+- When disabled, new turns use the default tier even if a request, project
+  default, automation, or queued message selected fast. The app hides Fast mode.
+  Turn it on to choose fast again; project defaults saved while it was off
+  retain the default tier.
+
 ## New branch prefix
 
 - `managedBranchPrefix` defaults to `bb/`. Set it with
@@ -237,10 +247,17 @@ Changes apply to new turns, setup commands and terminals.
 Sidebar footer actions use `sidebar.footerOrder` and `sidebar.hiddenFooterItems`.
 Both are string lists shared across clients. Keys are `builtin:settings`,
 `builtin:report-bug`, or `plugin:<encoded pluginId>/<encoded registrationId>`.
-Right-click Hide moves an action into More; Settings → Appearance → Sidebar footer
-restores visibility and drag-reorders actions. CLI example:
+The footer shows as many icons as fit the sidebar's width. More is always
+available and holds hidden actions plus actions that don't fit; apart from
+Customize's minus, width overflow never changes saved visibility. More →
+Customize footer replaces the footer row with Footer and More menu zones: minus
+removes an icon and keeps current overflow hidden so its slot stays empty, plus
+adds a More item while the footer has room, and drag reorders within a zone. More → Hide footer
+hides every action, and Show footer shows them again.
+Right-click an action for Hide from footer or Customize footer.
+Settings → Appearance → Sidebar footer edits the same preferences. CLI example:
 `bb settings ui set sidebar.hiddenFooterItems '["plugin:provider-usage/usage"]'`.
-Use `bb settings ui reset sidebar.hiddenFooterItems` to show everything again.
+Use `bb settings ui reset sidebar.hiddenFooterItems` to restore the default footer.
 
 Disable anonymous usage telemetry with `bb settings general telemetryEnabled false`
 or Settings → General → Privacy & diagnostics → Share anonymous usage data. This server-wide preference

@@ -3095,7 +3095,10 @@ describe("bridge", () => {
         },
       });
       await bridge.waitForResponse(1);
-      expect(getLatestQueryOptions().extraArgs).toEqual({ chrome: null });
+      expect(getLatestQueryOptions().extraArgs).toEqual({
+        chrome: null,
+        "replay-user-messages": null,
+      });
 
       bridge.sendRequest(
         2,
@@ -3127,7 +3130,9 @@ describe("bridge", () => {
       expect(queries).toHaveLength(2);
       expect(queries[0]?.close).toHaveBeenCalled();
       expect(getLatestQueryOptions()).toMatchObject({ resume: threadId });
-      expect(getLatestQueryOptions()).not.toHaveProperty("extraArgs");
+      expect(getLatestQueryOptions().extraArgs).toEqual({
+        "replay-user-messages": null,
+      });
       await expect(readNextPromptText(getLatestQueryCall())).resolves.toBe(
         "chrome turned off",
       );

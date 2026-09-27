@@ -1,5 +1,7 @@
 import {
   getEnvironment,
+  getThreadDraft,
+  listQueuedThreadMessageCountsByThreadIds,
   countUnmanagedWorkspaceThreads,
   getLatestSessionForHost,
   getSessionById,
@@ -35,13 +37,13 @@ import { DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS } from "../../constants.js";
 import type { NotificationHub } from "../../ws/hub.js";
 import { resolveProviderPlanCommand } from "../providers/provider-plan-command.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
-import { listQueuedThreadMessageCountsByThreadIds } from "@bb/db";
 import {
   resolveEnvironmentWorkspaceDisplayKind,
   toEnvironmentResponse,
 } from "../environments/environment-response.js";
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { canRestoreThreadEnvironment } from "./thread-environment-restore.js";
+import { parseStoredThreadDraft } from "./thread-draft.js";
 import { toThreadEventWithMeta } from "./timeline.js";
 import { intendedThreadHostId } from "./dispatch-attempt.js";
 
@@ -371,6 +373,10 @@ export function toThreadResponseFromThread(
         return null;
       }
     })(),
+    draft: parseStoredThreadDraft({
+      id: args.thread.id,
+      draft: getThreadDraft(deps.db, args.thread.id),
+    }),
   };
 }
 

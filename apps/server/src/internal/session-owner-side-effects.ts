@@ -41,25 +41,9 @@ const DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON =
   "The connection to the host was lost while preparing the workspace. Retry provisioning to continue.";
 
 type HostSessionOpenedDeps = LoggedPendingInteractionWorkSessionDeps;
-type DaemonSocketClosedDeps = Pick<
-  AppDeps,
-  | "db"
-  | "hub"
-  | "logger"
-  | "pendingInteractions"
-  | "providerRegistry"
-  | "sharedPorts"
-  | "terminalSessions"
->;
-type DaemonDisconnectGraceDeps = Pick<
-  AppDeps,
-  | "db"
-  | "hub"
-  | "logger"
-  | "pendingInteractions"
-  | "providerRegistry"
-  | "terminalSessions"
->;
+type DaemonSocketClosedDeps = LoggedPendingInteractionWorkSessionDeps &
+  Pick<AppDeps, "sharedPorts">;
+type DaemonDisconnectGraceDeps = LoggedPendingInteractionWorkSessionDeps;
 
 interface HandleHostSessionOpenedArgs {
   activeThreads: HostDaemonActiveThread[];
@@ -302,10 +286,7 @@ function completeDaemonDisconnectGrace(
 }
 
 function completeDaemonActiveWorkDisconnectGrace(
-  deps: Pick<
-    AppDeps,
-    "db" | "hub" | "logger" | "pendingInteractions" | "providerRegistry"
-  >,
+  deps: LoggedPendingInteractionWorkSessionDeps,
   args: CompleteDaemonActiveWorkDisconnectGraceArgs,
 ): void {
   if (deps.hub.hasDaemonForHost(args.hostId)) {

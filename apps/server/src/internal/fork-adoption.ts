@@ -18,7 +18,10 @@ import { requireThreadEnvironment } from "../services/lib/entity-lookup.js";
 import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "../services/threads/background-task-reconciliation.js";
 import { appendThreadEventsInTransaction } from "../services/threads/thread-events.js";
 import { interruptActiveThreadsForHost } from "../services/threads/thread-lifecycle.js";
-import type { AppDeps } from "../types.js";
+import type {
+  AppDeps,
+  LoggedPendingInteractionWorkSessionDeps,
+} from "../types.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
 
 export const DETACHED_THREAD_ADOPTION_WINDOW_MS = 10 * 60_000;
@@ -97,10 +100,7 @@ export const ADOPTED_THREAD_TURN_REPLAY_GRACE_MS = 60_000;
 const pendingAdoptedTurnChecks = new Map<string, NodeJS.Timeout>();
 
 export function scheduleAdoptedThreadTurnCheck(
-  deps: Pick<
-    AppDeps,
-    "db" | "hub" | "logger" | "pendingInteractions" | "providerRegistry"
-  >,
+  deps: LoggedPendingInteractionWorkSessionDeps,
   args: { hostId: string; threadIds: ReadonlySet<string> },
 ): void {
   for (const threadId of args.threadIds) {
@@ -119,10 +119,7 @@ export function scheduleAdoptedThreadTurnCheck(
 }
 
 function interruptAdoptedThreadWithoutTurn(
-  deps: Pick<
-    AppDeps,
-    "db" | "hub" | "logger" | "pendingInteractions" | "providerRegistry"
-  >,
+  deps: LoggedPendingInteractionWorkSessionDeps,
   args: { hostId: string; threadId: string },
 ): void {
   if (getThread(deps.db, args.threadId)?.status !== "active") return;

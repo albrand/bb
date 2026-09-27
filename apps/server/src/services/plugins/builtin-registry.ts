@@ -153,11 +153,6 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
-    name: "drafts",
-    pluginId: "drafts",
-    defaultEnabled: true,
-  },
-  {
     name: "thread-list",
     pluginId: "thread-list",
     defaultEnabled: true,
@@ -165,6 +160,11 @@ export const BUILTIN_PLUGINS = [
   {
     name: "navigation",
     pluginId: "navigation",
+    defaultEnabled: true,
+  },
+  {
+    name: "drafts",
+    pluginId: "drafts",
     defaultEnabled: true,
   },
   {

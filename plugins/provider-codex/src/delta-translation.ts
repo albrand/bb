@@ -1051,9 +1051,7 @@ export function translateCodexEventToDeltas(
           ...(handledEvent.params.turn.error?.message
             ? { error: { message: handledEvent.params.turn.error.message } }
             : {}),
-          ...(status === "completed" || status === "interrupted"
-            ? { providerCheckpointId: handledEvent.params.turn.id }
-            : {}),
+          providerCheckpointId: handledEvent.params.turn.id,
         },
       ];
     }

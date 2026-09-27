@@ -13,10 +13,12 @@ import {
 } from "@bb/domain";
 import { sliceUtf16Head } from "@bb/text-utils";
 import { ApiError } from "../../errors.js";
-import type { AppDeps } from "../../types.js";
+import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { dispatchEnvironmentAndHost } from "./dispatch-hooks.js";
+import { isParentNotifiableChildThread } from "./thread-parent.js";
+import { queueChildThreadTurnNotificationBestEffort } from "./child-thread-notifications.js";
 
-type QueueDrainFailureDeps = Pick<AppDeps, "db" | "hub">;
+type QueueDrainFailureDeps = LoggedPendingInteractionWorkSessionDeps;
 
 export const QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS = 5;
 
@@ -134,7 +136,7 @@ export function recordQueuedMessageDrainFailure(
       return;
     }
   }
-  setQueuedThreadMessageFailureReason(deps.db, deps.hub, {
+  const updated = setQueuedThreadMessageFailureReason(deps.db, deps.hub, {
     id: args.row.id,
     threadId: args.row.threadId,
     failureReason,
@@ -142,4 +144,16 @@ export function recordQueuedMessageDrainFailure(
     retryDelaysMs: [],
   });
   clearQueuedMessageDispatchRetry(deps.db, args.row.id);
+  if (
+    updated !== null &&
+    updated.nextAttemptAt === null &&
+    isParentNotifiableChildThread(args.thread)
+  ) {
+    void queueChildThreadTurnNotificationBestEffort(deps, {
+      childThread: args.thread,
+      parentThreadId: args.thread.parentThreadId,
+      turnStatus: "failed",
+      failureContext: "could not send a queued message after retrying",
+    });
+  }
 }

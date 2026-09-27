@@ -112,6 +112,7 @@ export function threadResponse(
     canSpawnChild: true,
     queuedMessageCount: 0,
     workspaceSharing: null,
+    draft: null,
   };
 }
 

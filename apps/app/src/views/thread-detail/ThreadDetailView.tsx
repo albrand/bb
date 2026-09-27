@@ -379,6 +379,7 @@ function getPullRequestMergeLoadingTitle(
 
 interface ThreadDetailViewPageProps {
   surface: "page";
+  onRequestClose?: (() => void) | null;
 }
 
 interface ThreadDetailViewPaneProps extends ThreadRoutePathArgs {
@@ -500,7 +501,11 @@ function ThreadDetailNotFound() {
   );
 }
 
-function RoutedThreadDetailView() {
+function RoutedThreadDetailView({
+  onRequestClose,
+}: {
+  onRequestClose?: (() => void) | null;
+}) {
   const { projectId, threadId } = useRouteState();
 
   if (!projectId || !threadId) {
@@ -508,7 +513,7 @@ function RoutedThreadDetailView() {
   }
 
   return (
-    <DefaultPaneContextProvider>
+    <DefaultPaneContextProvider onRequestClose={onRequestClose}>
       <ThreadDetailViewInternal projectId={projectId} threadId={threadId} />
     </DefaultPaneContextProvider>
   );
@@ -518,7 +523,7 @@ export function ThreadDetailView(props: ThreadDetailViewProps) {
   if (props.surface === "pane") {
     return <ThreadDetailViewInternal {...props} />;
   }
-  return <RoutedThreadDetailView />;
+  return <RoutedThreadDetailView onRequestClose={props.onRequestClose} />;
 }
 
 function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
@@ -2551,6 +2556,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const composerFooter = (
     <ThreadDetailPromptArea
       activeBackgroundAgentCount={thread.activeBackgroundAgentCount}
+      serverDraft={thread.draft}
       canUseGitUi={canUseGitUi}
       contextWindowUsage={contextWindowUsage}
       environmentCheckout={threadCheckoutDisplay}

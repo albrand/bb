@@ -25,6 +25,7 @@ export function makeThreadResponse(
     canSpawnChild: true,
     queuedMessageCount: 0,
     workspaceSharing: null,
+    draft: null,
     ...overrides,
     runtime: thread.runtime,
   };
