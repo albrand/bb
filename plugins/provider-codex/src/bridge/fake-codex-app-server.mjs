@@ -535,9 +535,6 @@ async function handleRequest(message) {
         thread: { id: threadId },
         ...resolvedSessionSettings(params),
       });
-      // thread/fork replays the source rollout's last-turn usage the same way,
-      // after the response, under the NEW thread id but the SOURCE turn id
-      // (#1727).
       if (replaysUsage) {
         replayLastTurnUsage(threadId);
       }
