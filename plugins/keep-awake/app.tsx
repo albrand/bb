@@ -6,7 +6,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ResourceDetailPanel } from "@bb/shared-ui/resource-list";
+import { ResourceDetailPanel } from "@/components/ui/resource-list";
 import { Switch } from "@/components/ui/switch";
 import type { keepAwakeRpcContract } from "./server.js";
 

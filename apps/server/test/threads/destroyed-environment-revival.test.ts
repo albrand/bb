@@ -129,8 +129,11 @@ describe("destroyed environment revival", () => {
         environmentProviderId: providerId,
       });
 
-      await expect(sendToDestroyedEnvironment(harness, fixture)).resolves.toMatchObject({
-        delivery: "sent",
+      await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
+        body: {
+          code: "thread_environment_unavailable",
+          details: { reason: "destroyed" },
+        },
       });
       expect(getEnvironment(harness.db, fixture.environment.id)?.status).toBe(
         "destroyed",
@@ -146,8 +149,11 @@ describe("destroyed environment revival", () => {
         providerOwnsPath: true,
       });
 
-      await expect(sendToDestroyedEnvironment(harness, fixture)).resolves.toMatchObject({
-        delivery: "sent",
+      await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
+        body: {
+          code: "thread_environment_unavailable",
+          details: { reason: "destroyed" },
+        },
       });
       expect(getEnvironment(harness.db, fixture.environment.id)?.status).toBe(
         "destroyed",
