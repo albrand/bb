@@ -130,6 +130,7 @@ describe("destroyed environment revival", () => {
       });
 
       await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
+        status: 409,
         body: {
           code: "thread_environment_unavailable",
           details: { reason: "destroyed" },
@@ -150,6 +151,7 @@ describe("destroyed environment revival", () => {
       });
 
       await expect(sendToDestroyedEnvironment(harness, fixture)).rejects.toMatchObject({
+        status: 409,
         body: {
           code: "thread_environment_unavailable",
           details: { reason: "destroyed" },
