@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { getDefaultStore } from "jotai";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   CONTENT_MEASURE_CSS_VARIABLE,
   composerContentWidthAtom,
   resetComposerContentWidth,
+  setComposerContentWidth,
   setContentMeasure,
 } from "@/lib/content-measure";
 
@@ -241,6 +242,53 @@ describe("ComposerResizeHandle", () => {
         CONTENT_MEASURE_CSS_VARIABLE,
       ),
     ).toBe("784px");
+  });
+
+  it("keeps a saved width through a cancelled drag and a narrow-then-wide window cycle", () => {
+    const { rightWidthHandle, store } = renderHandle();
+    act(() => setComposerContentWidth(900));
+    fireEvent.pointerDown(rightWidthHandle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    expect(
+      document.documentElement.style.getPropertyValue(
+        CONTENT_MEASURE_CSS_VARIABLE,
+      ),
+    ).toBe("1000px");
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 800,
+    });
+    fireEvent(window, new Event("resize"));
+    fireEvent.pointerUp(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 200,
+      clientY: 100,
+    });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1_600,
+    });
+    fireEvent(window, new Event("resize"));
+
+    expect(store.get(composerContentWidthAtom)).toBe(900);
+    expect(window.localStorage.getItem(COMPOSER_CONTENT_WIDTH_STORAGE_KEY)).toBe(
+      "900",
+    );
+    expect(
+      document.documentElement.style.getPropertyValue(
+        CONTENT_MEASURE_CSS_VARIABLE,
+      ),
+    ).toBe("900px");
   });
 
   it("cancels a width drag in progress when the viewport resizes", () => {
