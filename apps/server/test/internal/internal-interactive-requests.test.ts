@@ -1,5 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { deleteThread, listPendingInteractionsByThread } from "@bb/db";
+import {
+  deleteThread,
+  environments,
+  listPendingInteractionsByThread,
+} from "@bb/db";
+import { eq } from "drizzle-orm";
 import type { HostDaemonInteractiveRequest } from "@bb/host-daemon-contract";
 import { renderTemplate } from "@bb/templates";
 import { describe, expect, it } from "vitest";
@@ -802,6 +807,88 @@ describe("internal interactive request lifecycle", () => {
         }).map(toPendingInteraction),
       ).toEqual([
         expect.objectContaining({
+          status: "interrupted",
+          statusReason: "Provider exited",
+        }),
+      ]);
+    });
+  });
+
+  it("interrupts pending interactive requests after the thread environment is destroyed", async () => {
+    await withTestHarness(async (harness) => {
+      const { session, environment, thread } = seedThreadFixture(harness, {
+        session: {
+          id: "host-interaction-interrupt-destroyed",
+        },
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        turnId: "turn-destroyed",
+        providerThreadId: "provider-thread-destroyed",
+      });
+
+      const response = await harness.app.request(
+        "/internal/session/interactive-request",
+        {
+          method: "POST",
+          headers: internalAuthHeaders(harness),
+          body: JSON.stringify({
+            sessionId: session.id,
+            interaction: {
+              threadId: thread.id,
+              turnId: "turn-destroyed",
+              providerId: "codex",
+              providerThreadId: "provider-thread-destroyed",
+              providerRequestId: "request-destroyed",
+              payload: createCommandApprovalPayload({
+                itemId: "item-destroyed",
+                reason: "Needs approval",
+                command: "git push",
+                cwd: "/tmp/project",
+              }),
+            },
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+
+      const interactionId = await waitForPendingInteractionId({
+        harness,
+        threadId: thread.id,
+      });
+      harness.db
+        .update(environments)
+        .set({ status: "destroyed", path: null })
+        .where(eq(environments.id, environment.id))
+        .run();
+
+      const interruptResponse = await harness.app.request(
+        "/internal/session/interactive-request/interrupt",
+        {
+          method: "POST",
+          headers: internalAuthHeaders(harness),
+          body: JSON.stringify({
+            sessionId: session.id,
+            providerId: "codex",
+            threadIds: [thread.id],
+            reason: "Provider exited",
+          }),
+        },
+      );
+
+      expect(interruptResponse.status).toBe(200);
+      await expect(readJson(interruptResponse)).resolves.toEqual({
+        ok: true,
+        interactionIds: [interactionId],
+      });
+      expect(
+        listPendingInteractionsByThread(harness.db, {
+          threadId: thread.id,
+        }).map(toPendingInteraction),
+      ).toEqual([
+        expect.objectContaining({
+          id: interactionId,
           status: "interrupted",
           statusReason: "Provider exited",
         }),
