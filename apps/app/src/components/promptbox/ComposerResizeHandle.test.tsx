@@ -225,7 +225,7 @@ describe("ComposerResizeHandle", () => {
     expect(store.get(composerContentWidthAtom)).toBe(1_000);
   });
 
-  it("supports horizontal keyboard resizing and restores the original width on viewport resize", () => {
+  it("keeps the chosen width when the viewport resizes", () => {
     const { rightWidthHandle, store } = renderHandle();
     fireEvent.keyDown(rightWidthHandle, { key: "ArrowRight" });
     expect(store.get(composerContentWidthAtom)).toBe(784);
@@ -235,12 +235,39 @@ describe("ComposerResizeHandle", () => {
       value: 900,
     });
     fireEvent(window, new Event("resize"));
-    expect(store.get(composerContentWidthAtom)).toBeNull();
+    expect(store.get(composerContentWidthAtom)).toBe(784);
+    expect(
+      document.documentElement.style.getPropertyValue(
+        CONTENT_MEASURE_CSS_VARIABLE,
+      ),
+    ).toBe("784px");
+  });
+
+  it("cancels a width drag in progress when the viewport resizes", () => {
+    const { rightWidthHandle, store } = renderHandle();
+    fireEvent.pointerDown(rightWidthHandle, {
+      button: 0,
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 300,
+      clientY: 100,
+    });
+    fireEvent(window, new Event("resize"));
     expect(
       document.documentElement.style.getPropertyValue(
         CONTENT_MEASURE_CSS_VARIABLE,
       ),
     ).toBe("760px");
+    fireEvent.pointerUp(rightWidthHandle, {
+      pointerId: 1,
+      clientX: 300,
+      clientY: 100,
+    });
+    expect(store.get(composerContentWidthAtom)).toBeNull();
   });
 
   it("resets each axis from its own resize handle", () => {
