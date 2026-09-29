@@ -95,27 +95,31 @@ function contextLine(entry: PromptHistorySearchResult): string {
 async function prepareDraftForProject(
   option: PromptHistorySearchOption,
   projectId: string,
-): Promise<PromptDraftState> {
-  if (option.entry.projectId === projectId) return option.draft;
+): Promise<{ draft: PromptDraftState; omittedAttachmentCount: number }> {
+  if (option.entry.projectId === projectId) {
+    return { draft: option.draft, omittedAttachmentCount: 0 };
+  }
   const paths = getProjectStoredPromptAttachmentPaths(option.draft.attachments);
-  if (paths.length === 0) return option.draft;
+  if (paths.length === 0) {
+    return { draft: option.draft, omittedAttachmentCount: 0 };
+  }
   try {
     await sdk.projects.attachments.copy({
       projectId,
       sourceProjectId: option.entry.projectId,
       paths,
     });
-    return option.draft;
+    return { draft: option.draft, omittedAttachmentCount: 0 };
   } catch {
-    appToast.warning("Attachments left out", {
-      description: `${paths.length === 1 ? "An attachment" : `${paths.length} attachments`} from ${option.entry.projectName} could not be copied to this project, so only the text was inserted.`,
-    });
     const unavailable = new Set(paths);
     return {
-      ...option.draft,
-      attachments: option.draft.attachments.filter(
-        (attachment) => !unavailable.has(attachment.path),
-      ),
+      draft: {
+        ...option.draft,
+        attachments: option.draft.attachments.filter(
+          (attachment) => !unavailable.has(attachment.path),
+        ),
+      },
+      omittedAttachmentCount: paths.length,
     };
   }
 }
@@ -232,8 +236,14 @@ function PromptHistorySearchBody({
       setInsertingId(option.entry.id);
       const commit = beginInsertion();
       try {
-        const draft = await prepareDraftForProject(option, projectId);
-        if (commit(draft)) onClose();
+        const prepared = await prepareDraftForProject(option, projectId);
+        if (!commit(prepared.draft)) return;
+        if (prepared.omittedAttachmentCount > 0) {
+          appToast.warning("Attachments left out", {
+            description: `${prepared.omittedAttachmentCount === 1 ? "An attachment" : `${prepared.omittedAttachmentCount} attachments`} from ${option.entry.projectName} could not be copied to this project, so they were not added to the composer.`,
+          });
+        }
+        onClose();
       } finally {
         setInsertingId(null);
       }

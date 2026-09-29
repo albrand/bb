@@ -138,6 +138,7 @@ describe("PromptHistorySearchDialog", () => {
       });
 
       expect(composer).toHaveProperty("value", "Newer draft");
+      expect(mocks.warning).not.toHaveBeenCalled();
     },
   );
 
@@ -153,5 +154,20 @@ describe("PromptHistorySearchDialog", () => {
         "Older prompt",
       ),
     );
+  });
+
+  it("warns only when an active insertion omits an attachment", async () => {
+    mocks.copy.mockRejectedValueOnce(new Error("copy failed"));
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("option"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Composer" })).toHaveProperty(
+        "value",
+        "Older prompt",
+      );
+      expect(mocks.warning).toHaveBeenCalledOnce();
+    });
   });
 });
