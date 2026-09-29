@@ -127,8 +127,30 @@ export function PromptHistorySearchDialog({
   onInsert,
   onAfterClose,
 }: PromptHistorySearchDialogProps) {
+  const insertionEpoch = useRef(0);
+  useEffect(
+    () => () => {
+      insertionEpoch.current += 1;
+    },
+    [],
+  );
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) insertionEpoch.current += 1;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
+  const beginInsertion = useCallback(() => {
+    const epoch = insertionEpoch.current;
+    return (draft: PromptDraftState) => {
+      if (insertionEpoch.current !== epoch) return false;
+      onInsert(draft);
+      return true;
+    };
+  }, [onInsert]);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         hideCloseButton
         aria-describedby={undefined}
@@ -140,8 +162,8 @@ export function PromptHistorySearchDialog({
         {open ? (
           <PromptHistorySearchBody
             projectId={projectId}
-            onClose={() => onOpenChange(false)}
-            onInsert={onInsert}
+            onClose={() => handleOpenChange(false)}
+            beginInsertion={beginInsertion}
           />
         ) : null}
       </DialogContent>
@@ -152,11 +174,11 @@ export function PromptHistorySearchDialog({
 function PromptHistorySearchBody({
   projectId,
   onClose,
-  onInsert,
+  beginInsertion,
 }: {
   projectId: string;
   onClose: () => void;
-  onInsert: (draft: PromptDraftState) => void;
+  beginInsertion: () => (draft: PromptDraftState) => boolean;
 }) {
   const listId = useId();
   const optionIdPrefix = useId();
@@ -208,15 +230,15 @@ function PromptHistorySearchBody({
     async (option: PromptHistorySearchOption) => {
       if (insertingId !== null) return;
       setInsertingId(option.entry.id);
+      const commit = beginInsertion();
       try {
         const draft = await prepareDraftForProject(option, projectId);
-        onInsert(draft);
-        onClose();
+        if (commit(draft)) onClose();
       } finally {
         setInsertingId(null);
       }
     },
-    [insertingId, onClose, onInsert, projectId],
+    [beginInsertion, insertingId, onClose, projectId],
   );
 
   const moveActive = useCallback(
