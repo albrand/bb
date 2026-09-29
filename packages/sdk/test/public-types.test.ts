@@ -388,6 +388,7 @@ type ExpectedThreadsKey =
   | "updatePluginMetadata"
   | "context"
   | "archive"
+  | "experimental_searchPromptHistory"
   | "archiveAll"
   | "cancelPlan"
   | "childSummary"

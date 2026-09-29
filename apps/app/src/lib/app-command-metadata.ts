@@ -255,6 +255,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Focus the active composer's input and move the caret to the end.",
       ),
       command(
+        "composer.searchPromptHistory",
+        "Search prompt history",
+        "Search prompts you sent in any thread and put one in the active composer.",
+      ),
+      command(
         "modelPicker.toggle",
         "Toggle model picker",
         "Open or close the focused composer's model picker.",

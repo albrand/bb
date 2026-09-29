@@ -174,6 +174,7 @@ move and downloads the new server's bb-app package for its service.
 - `bb thread section rename`
 - `bb thread section delete`
 - `bb thread search`
+- `bb thread prompt-search`
 - `bb thread history`
 - `bb thread read`
 - `bb thread unread`

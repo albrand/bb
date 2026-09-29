@@ -76,6 +76,7 @@ export const APP_COMMAND_IDS = [
   "diff.toggle",
   "terminal.open",
   "composer.focus",
+  "composer.searchPromptHistory",
   "modelPicker.toggle",
   "modelPicker.cycleModel",
   "modelPicker.cycleModelBackward",

@@ -169,6 +169,8 @@ Listing:
 
   bb thread search <query> [--limit <1-50>]
                                              Search threads and messages
+  bb thread prompt-search [query] [--project <id>] [--limit <1-200>]
+                                             Search prompts sent in any thread; omit query for recent prompts
   bb thread history <id>                   List prompt history
 
   bb thread count                          Count threads without listing them

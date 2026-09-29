@@ -287,6 +287,15 @@ function FollowUpPromptBoxWithComposer({
     promptBoxRef.current?.focusEnd();
     return promptBoxRef.current !== null;
   }, []);
+  const openPromptHistorySearch = useCallback(() => {
+    if (
+      !isPrimaryComposer &&
+      !composerInteractionRef.current?.contains(document.activeElement)
+    ) {
+      return false;
+    }
+    return promptBoxRef.current?.openPromptHistorySearch() ?? false;
+  }, [isPrimaryComposer]);
   const voice = usePromptVoice(
     promptBoxRef,
     voiceDraft ?? pluginComposerHost ?? undefined,
@@ -588,6 +597,7 @@ function FollowUpPromptBoxWithComposer({
     isPrimary: isPrimaryComposer,
     collapseIfFocused,
     focusDefault,
+    openPromptHistorySearch,
   });
   useEffect(
     () => () => {
@@ -718,6 +728,11 @@ function FollowUpPromptBoxWithComposer({
         onComposerLayoutChange={setComposerLayout}
         scrollToBottomOnSubmit={submitMode.kind !== "queue"}
         history={composer.history}
+        promptHistorySearch={
+          attachments.projectId === undefined
+            ? undefined
+            : { projectId: attachments.projectId }
+        }
         focusEndKey={focusEndKey}
         placeholder={composer.promptPlaceholder}
         containerCompactPlaceholder={composer.compactPromptPlaceholder}

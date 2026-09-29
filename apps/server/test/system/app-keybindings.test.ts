@@ -103,6 +103,52 @@ describe("app keybindings", () => {
     }
   });
 
+  it("binds prompt history search to Control+R on every platform outside terminals", () => {
+    const defaults = applyAppKeybindingOverrides(DEFAULT_APP_KEYBINDINGS, []);
+    const binding = defaults.find(
+      (item) => item.command === "composer.searchPromptHistory",
+    );
+    expect(binding).toMatchObject({
+      desktopOnly: false,
+      when: {
+        all: ["mainSurface", "promptAvailable"],
+        none: ["modalOpen", "terminalFocus", "browserFocus"],
+      },
+    });
+    const shortcut = binding?.shortcut;
+    if (shortcut === undefined) throw new Error("missing default binding");
+    for (const useMetaForMod of [true, false]) {
+      expect(
+        matchesAppShortcut(
+          {
+            altKey: false,
+            code: "KeyR",
+            ctrlKey: true,
+            key: "r",
+            metaKey: false,
+            shiftKey: false,
+          },
+          shortcut,
+          useMetaForMod,
+        ),
+      ).toBe(true);
+      expect(
+        matchesAppShortcut(
+          {
+            altKey: false,
+            code: "KeyR",
+            ctrlKey: false,
+            key: "r",
+            metaKey: true,
+            shiftKey: false,
+          },
+          shortcut,
+          useMetaForMod,
+        ),
+      ).toBe(false);
+    }
+  });
+
   it("preserves non-Mac Ctrl arrow editing while keeping navigation rebindable", () => {
     const defaults = applyAppKeybindingOverrides(DEFAULT_APP_KEYBINDINGS, []);
     const client = { isDesktop: false, isMac: false };

@@ -38,6 +38,7 @@ import {
   type TypeaheadMenuState,
   type TypeaheadTrigger,
 } from "@bb/client-core";
+import { PromptHistorySearchDialog } from "@/components/promptbox/PromptHistorySearchDialog";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import {
   useAppCommandKeyDispatch,
@@ -339,7 +340,10 @@ function PromptSubmitButton({
       )}
     >
       {isBusy ? (
-        <Icon name="Loading" className="size-4 animate-spin motion-reduce:animate-none" />
+        <Icon
+          name="Loading"
+          className="size-4 animate-spin motion-reduce:animate-none"
+        />
       ) : (
         <>
           <Icon name={icon ?? "CornerDownLeft"} className="size-4" />
@@ -447,8 +451,13 @@ export interface PromptVoiceConfig {
   cancel: () => void;
 }
 
+export interface PromptHistorySearchConfig {
+  projectId: string;
+}
+
 export interface PromptBoxHandle {
   focusEnd: () => void;
+  openPromptHistorySearch: () => boolean;
   captureHeightForLayoutChange: () => void;
   insertTextAtCursor: (text: string) => void;
   getTextBeforeCursor: () => string | undefined;
@@ -487,6 +496,7 @@ interface PromptBoxInternalProps {
   containerCompactPlaceholder?: string;
   heightAnimationKey?: string | number;
   history?: HistoryConfig;
+  promptHistorySearch?: PromptHistorySearchConfig;
   voice?: PromptVoiceConfig;
   promptBoxRef?: Ref<PromptBoxHandle>;
   focusEndKey?: string | number;
@@ -1226,11 +1236,21 @@ export function PromptBoxInternal({
   containerCompactPlaceholder,
   heightAnimationKey,
   history,
+  promptHistorySearch,
   voice,
   promptBoxRef,
   focusEndKey,
 }: PromptBoxInternalProps) {
   const focusComposerShortcut = useAppCommandShortcut("composer.focus");
+  const [isPromptHistorySearchOpen, setPromptHistorySearchOpen] =
+    useState(false);
+  const canSearchPromptHistory =
+    promptHistorySearch !== undefined && history !== undefined;
+  const openPromptHistorySearch = useCallback(() => {
+    if (!canSearchPromptHistory) return false;
+    setPromptHistorySearchOpen(true);
+    return true;
+  }, [canSearchPromptHistory]);
   const {
     isSubmitting = false,
     disabled: submitDisabled = false,
@@ -2645,6 +2665,7 @@ export function PromptBoxInternal({
       focusEnd,
       insertTextAtCursor,
       getTextBeforeCursor,
+      openPromptHistorySearch,
       playVoiceCompletionTransition,
     }),
     [
@@ -2652,6 +2673,7 @@ export function PromptBoxInternal({
       focusEnd,
       getTextBeforeCursor,
       insertTextAtCursor,
+      openPromptHistorySearch,
       playVoiceCompletionTransition,
     ],
   );
@@ -3515,6 +3537,15 @@ export function PromptBoxInternal({
           </PluginComposerViewProvider>
         </div>
       </div>
+      {promptHistorySearch !== undefined && history !== undefined ? (
+        <PromptHistorySearchDialog
+          open={isPromptHistorySearchOpen}
+          projectId={promptHistorySearch.projectId}
+          onOpenChange={setPromptHistorySearchOpen}
+          onInsert={applyHistoryDraft}
+          onAfterClose={focusEnd}
+        />
+      ) : null}
     </form>
   );
 }

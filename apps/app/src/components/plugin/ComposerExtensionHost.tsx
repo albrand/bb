@@ -23,6 +23,7 @@ interface UseComposerExtensionControllerOptions {
   isPrimary: boolean;
   collapseIfFocused?(): boolean;
   focusDefault(): boolean;
+  openPromptHistorySearch?(): boolean;
 }
 
 export function useComposerExtensionController({
@@ -32,6 +33,7 @@ export function useComposerExtensionController({
   isPrimary,
   collapseIfFocused,
   focusDefault,
+  openPromptHistorySearch,
 }: UseComposerExtensionControllerOptions): ComposerExtensionController {
   const focus = useCallback(() => {
     if (!isFocused || !isPrimary) return false;
@@ -44,6 +46,10 @@ export function useComposerExtensionController({
   }, [collapseIfFocused, focusDefault, host, isFocused, isPrimary]);
   useAppCommandContext("promptAvailable", true);
   useAppCommandHandler("composer.focus", focus);
+  useAppCommandHandler("composer.searchPromptHistory", () => {
+    if (!isFocused) return false;
+    return openPromptHistorySearch?.() ?? false;
+  });
 
   return useMemo(() => ({ host, view, focus }), [focus, host, view]);
 }

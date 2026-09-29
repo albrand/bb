@@ -200,7 +200,12 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
       desktopOnly: true,
     },
   ),
-  binding("thread.openBeside", "b", { mod: true, shift: true }, mainWithoutModal),
+  binding(
+    "thread.openBeside",
+    "b",
+    { mod: true, shift: true },
+    mainWithoutModal,
+  ),
   ...numberedChatBindings(THREAD_JUMP_APP_COMMAND_IDS, mainWithoutModal),
   ...(
     [
@@ -283,6 +288,12 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     "composer.focus",
     "c",
     { mod: true, shift: true },
+    composerWithoutModal,
+  ),
+  binding(
+    "composer.searchPromptHistory",
+    "r",
+    { control: true },
     composerWithoutModal,
   ),
   binding(
