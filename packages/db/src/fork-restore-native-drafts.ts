@@ -13,6 +13,8 @@ const FALLBACK_SERVICE_TIER = "default";
 
 interface NativeDraftRow {
   id: string;
+  projectId: string;
+  providerId: string;
   draft: string;
   model: string | null;
   reasoningLevel: string | null;
@@ -33,6 +35,8 @@ export function restoreNativeThreadDraftsToDraftsQueue(db: DbConnection): void {
     .prepare(
       `SELECT
         t.id AS id,
+        t.project_id AS projectId,
+        t.provider_id AS providerId,
         t.draft AS draft,
         COALESCE(json_extract(r.execution, '$.model'), q.model, t.model_override, pd.model, pq.model) AS model,
         COALESCE(json_extract(r.execution, '$.reasoningLevel'), q.reasoning_level, t.reasoning_level_override, pd.reasoning_level, pq.reasoning_level) AS reasoningLevel,
@@ -94,10 +98,49 @@ export function restoreNativeThreadDraftsToDraftsQueue(db: DbConnection): void {
   const clearDraft = sqlite.prepare(
     "UPDATE threads SET draft = NULL WHERE id = ?",
   );
+  const siblingTurnExecution = sqlite.prepare(
+    `SELECT execution FROM (
+      SELECT
+        s.project_id AS projectId,
+        s.updated_at AS updatedAt,
+        (
+          SELECT json_extract(e.data, '$.execution') FROM events AS e
+          WHERE e.thread_id = s.id AND e.type = 'client/turn/requested'
+          ORDER BY e.sequence DESC LIMIT 1
+        ) AS execution
+      FROM threads AS s
+      WHERE s.provider_id = ? AND s.id != ?
+    )
+    WHERE execution IS NOT NULL
+    ORDER BY (projectId = ?) DESC, updatedAt DESC
+    LIMIT 1`,
+  );
+  const withSiblingExecution = (row: NativeDraftRow): NativeDraftRow => {
+    if (row.model !== null && row.reasoningLevel !== null) {
+      return row;
+    }
+    const sibling = siblingTurnExecution.get(
+      row.providerId,
+      row.id,
+      row.projectId,
+    ) as { execution: string } | undefined;
+    const execution = sibling ? parseExecution(sibling.execution) : null;
+    if (execution === null) {
+      return row;
+    }
+    return {
+      ...row,
+      model: row.model ?? execution.model,
+      reasoningLevel: row.reasoningLevel ?? execution.reasoningLevel,
+      permissionMode: row.permissionMode ?? execution.permissionMode,
+      serviceTier: row.serviceTier ?? execution.serviceTier,
+    };
+  };
 
   sqlite.transaction(() => {
     const now = Date.now();
-    for (const row of rows) {
+    for (const found of rows) {
+      const row = withSiblingExecution(found);
       if (!isNonEmptyJsonArray(row.draft)) {
         if (row.draft.trim() !== "" && row.draft.trim() !== "[]") {
           preserve.run(row.id, row.draft, now);
@@ -133,6 +176,36 @@ export function restoreNativeThreadDraftsToDraftsQueue(db: DbConnection): void {
       clearDraft.run(row.id);
     }
   })();
+}
+
+interface SiblingExecution {
+  model: string | null;
+  reasoningLevel: string | null;
+  permissionMode: string | null;
+  serviceTier: string | null;
+}
+
+function parseExecution(value: string): SiblingExecution | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed === null || typeof parsed !== "object") {
+      return null;
+    }
+    const field = (key: string): string | null => {
+      const fieldValue = (parsed as Record<string, unknown>)[key];
+      return typeof fieldValue === "string" && fieldValue !== ""
+        ? fieldValue
+        : null;
+    };
+    return {
+      model: field("model"),
+      reasoningLevel: field("reasoningLevel"),
+      permissionMode: field("permissionMode"),
+      serviceTier: field("serviceTier"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function isNonEmptyJsonArray(value: string): boolean {

@@ -141,3 +141,101 @@ it("lets a user edit and send a first-message draft that the original 0132 moved
     db.$client.close();
   }
 });
+
+it("restores a first-message draft from a same-provider thread's turn history when no queued rows or project defaults remain", () => {
+  const db = createConnection(":memory:");
+  try {
+    migrate(db);
+    const earlier = createThread(db, noopNotifier, {
+      projectId: PERSONAL_PROJECT_ID,
+      providerId: "history-provider",
+      status: "idle",
+    });
+    db.$client
+      .prepare(
+        `INSERT INTO events (id, thread_id, scope_kind, sequence, type, data, created_at)
+         VALUES ('evt_history', ?, 'thread', 1, 'client/turn/requested', ?, 1)`,
+      )
+      .run(
+        earlier.id,
+        JSON.stringify({
+          input: [text("Earlier turn")],
+          execution: {
+            model: "history-model",
+            reasoningLevel: "low",
+            permissionMode: "accept-edits",
+            serviceTier: "default",
+          },
+        }),
+      );
+    const firstMessageDraft = createThread(db, noopNotifier, {
+      projectId: PERSONAL_PROJECT_ID,
+      providerId: "history-provider",
+      status: "pending",
+    });
+    db.$client
+      .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+      .run(THREAD_DRAFTS_MIGRATION_TIMESTAMP);
+    db.$client.exec(originalMigration);
+    db.$client
+      .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
+      .run(
+        createHash("sha256").update(originalMigration).digest("hex"),
+        THREAD_DRAFTS_MIGRATION_TIMESTAMP,
+      );
+    const draftContent: PromptInput[] = [
+      text("Draft from history"),
+      { type: "localFile", path: "/tmp/history.md", name: "history.md" },
+    ];
+    db.$client
+      .prepare("UPDATE threads SET draft = ? WHERE id = ?")
+      .run(JSON.stringify(draftContent), firstMessageDraft.id);
+    expect(
+      db.$client.prepare("SELECT count(*) AS n FROM queued_thread_messages").get(),
+    ).toEqual({ n: 0 });
+
+    migrate(db);
+
+    const held = listQueuedThreadMessagesByWaitHolder(db, "plugin:drafts");
+    expect(held.map((row) => row.threadId)).toEqual([firstMessageDraft.id]);
+    const [draft] = held;
+    if (draft === undefined) throw new Error("expected a held draft");
+    expect(promptInputSchema.array().parse(JSON.parse(draft.content))).toEqual(
+      draftContent,
+    );
+    expect({
+      model: draft.model,
+      reasoningLevel: draft.reasoningLevel,
+      permissionMode: draft.permissionMode,
+      serviceTier: draft.serviceTier,
+    }).toEqual({
+      model: "history-model",
+      reasoningLevel: "low",
+      permissionMode: "accept-edits",
+      serviceTier: "default",
+    });
+    const edited: PromptInput[] = [
+      text("Draft from history, edited"),
+      { type: "localFile", path: "/tmp/history.md", name: "history.md" },
+    ];
+    expect(
+      updateQueuedThreadMessage(db, noopNotifier, {
+        id: draft.id,
+        threadId: firstMessageDraft.id,
+        content: edited,
+        expectedUpdatedAt: draft.updatedAt,
+      }).kind,
+    ).toBe("updated");
+    const claimed = claimQueuedThreadMessageGroup(db, noopNotifier, draft.id, {
+      kind: "explicit-send",
+    });
+    expect(claimed?.map((row) => JSON.parse(row.content))).toEqual([edited]);
+    expect(
+      db.$client
+        .prepare("SELECT count(*) AS n FROM fork_unrestored_thread_drafts")
+        .get(),
+    ).toEqual({ n: 0 });
+  } finally {
+    db.$client.close();
+  }
+});
