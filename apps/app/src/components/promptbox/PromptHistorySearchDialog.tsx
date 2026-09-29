@@ -23,7 +23,7 @@ import { Dialog, DialogContent, DialogTitle } from "@bb/shared-ui/dialog";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
-import { PaletteShortcut } from "@/components/commands/PaletteShell";
+import { PaletteShortcut } from "@/components/commands/PaletteShortcut";
 import { appToast } from "@/components/ui/app-toast";
 import { usePromptHistorySearch } from "@/hooks/queries/prompt-history-search-queries";
 import { formatRelativeTime } from "@/lib/relative-time";
