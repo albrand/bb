@@ -37,6 +37,7 @@ export * from "./project-path.js";
 export * from "./project.js";
 export * from "./prompt-attachment-limits.js";
 export * from "./prompt-history.js";
+export * from "./prompt-history-search.js";
 export * from "./protocol-ids.js";
 export * from "./queued-message.js";
 export * from "./system-message.js";

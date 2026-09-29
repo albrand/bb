@@ -18,7 +18,13 @@ import {
   type ThreadSearchResultGroup as DbThreadSearchResultGroup,
   type UpdateThreadInput,
 } from "@bb/db";
-import type { Environment, Thread, ThreadListEntry } from "@bb/domain";
+import {
+  PROMPT_HISTORY_SEARCH_LIMIT_DEFAULT,
+  PROMPT_HISTORY_SEARCH_LIMIT_MAX,
+  type Environment,
+  type Thread,
+  type ThreadListEntry,
+} from "@bb/domain";
 import { toEnvironmentResponse } from "../../services/environments/environment-response.js";
 import {
   threadIncludeOptionSchema,
@@ -39,9 +45,11 @@ import type { Hono } from "hono";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import {
+  parseBoundedPositiveOptionalInteger,
   parseInteger,
   parsePaginationQuery,
 } from "../../services/lib/validation.js";
+import { searchPromptHistory } from "../../services/prompt-history-search.js";
 import {
   getNonDestroyedHostWithStatus,
   requireEnvironment,
@@ -298,6 +306,25 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     });
     return context.json(
       toThreadListEntryResponses(deps, { threads }) satisfies ThreadListEntry[],
+    );
+  });
+
+  get(routes.searchPromptHistory, (context, query) => {
+    if (query.projectId !== undefined) {
+      requirePublicProject(deps.db, query.projectId);
+    }
+    const limit = parseBoundedPositiveOptionalInteger({
+      defaultValue: PROMPT_HISTORY_SEARCH_LIMIT_DEFAULT,
+      max: PROMPT_HISTORY_SEARCH_LIMIT_MAX,
+      name: "limit",
+      value: query.limit,
+    });
+    return context.json(
+      searchPromptHistory(deps, {
+        limit,
+        projectId: query.projectId ?? null,
+        query: query.query ?? "",
+      }),
     );
   });
 

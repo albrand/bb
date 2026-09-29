@@ -55,6 +55,8 @@ import type {
   ThreadOpenFile,
   ThreadOpenSplit,
   PromptHistoryQuery,
+  PromptHistorySearchQuery,
+  PromptHistorySearchResponse,
   ReorderPinnedThreadRequest,
   ReorderQueuedMessageRequest,
   ResolveThreadMentionsRequest,
@@ -163,6 +165,7 @@ export type ThreadReadStateResult = ThreadResponse;
 export type ThreadRestoreEnvironmentResult = ThreadResponse;
 export type ThreadPinOrderResult = ThreadListResponse;
 export type ThreadPromptHistoryResult = PromptHistoryResponse;
+export type ExperimentalPromptHistorySearchResult = PromptHistorySearchResponse;
 export type ThreadQueuedMessagesResult = ThreadQueuedMessageListResponse;
 export type ThreadQueuedMessageCreateResult = ThreadQueuedMessage;
 export type ThreadQueuedMessageUpdateResult = ThreadQueuedMessage;
@@ -178,8 +181,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadExecutionProfileResult = ThreadExecutionProfileResponse;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
@@ -262,6 +264,10 @@ export interface ThreadStatusArgs extends ThreadActionArgs {
 export interface ThreadPromptHistoryArgs extends PromptHistoryQuery {
   signal?: AbortSignal;
   threadId: string;
+}
+
+export interface ExperimentalPromptHistorySearchArgs extends PromptHistorySearchQuery {
+  signal?: AbortSignal;
 }
 
 export interface ThreadPinOrderArgs extends ReorderPinnedThreadRequest {
@@ -506,7 +512,9 @@ export interface ThreadsArea {
   defaultExecutionOptions(
     args: ThreadStatusArgs,
   ): Promise<ThreadDefaultExecutionOptionsResult>;
-  executionProfile(args: ThreadStatusArgs): Promise<ThreadExecutionProfileResult>;
+  executionProfile(
+    args: ThreadStatusArgs,
+  ): Promise<ThreadExecutionProfileResult>;
   delete(args: ThreadDeleteArgs): Promise<ThreadDeleteResult>;
   editMessage(args: ThreadEditMessageArgs): Promise<ThreadEditMessageResult>;
   events: ThreadEventsArea;
@@ -531,6 +539,9 @@ export interface ThreadsArea {
   promptHistory(
     args: ThreadPromptHistoryArgs,
   ): Promise<ThreadPromptHistoryResult>;
+  experimental_searchPromptHistory(
+    args?: ExperimentalPromptHistorySearchArgs,
+  ): Promise<ExperimentalPromptHistorySearchResult>;
   queuedMessages: ThreadQueuedMessagesArea;
   reorderPinned(args: ThreadPinOrderArgs): Promise<ThreadPinOrderResult>;
   resolveMentions(
@@ -1155,16 +1166,22 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
     async markRead(input) {
       return transport.readJson(
-        transport.api.v1.threads[":id"].read.$post({
-          param: { id: input.threadId },
-        }, ...signalRequestArgs(input.signal)),
+        transport.api.v1.threads[":id"].read.$post(
+          {
+            param: { id: input.threadId },
+          },
+          ...signalRequestArgs(input.signal),
+        ),
       );
     },
     async markUnread(input) {
       return transport.readJson(
-        transport.api.v1.threads[":id"].unread.$post({
-          param: { id: input.threadId },
-        }, ...signalRequestArgs(input.signal)),
+        transport.api.v1.threads[":id"].unread.$post(
+          {
+            param: { id: input.threadId },
+          },
+          ...signalRequestArgs(input.signal),
+        ),
       );
     },
     async output(input) {
@@ -1208,6 +1225,18 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
             param: { id: input.threadId },
             query: { limit: input.limit },
           },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async experimental_searchPromptHistory(input = {}) {
+      const query: PromptHistorySearchQuery = {};
+      if (input.query !== undefined) query.query = input.query;
+      if (input.projectId !== undefined) query.projectId = input.projectId;
+      if (input.limit !== undefined) query.limit = input.limit;
+      return transport.readJson(
+        transport.api.v1["prompt-history"].search.$get(
+          { query },
           ...signalRequestArgs(input.signal),
         ),
       );

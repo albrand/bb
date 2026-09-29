@@ -106,7 +106,9 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
 ## Inspecting Results
 
 - Use `bb thread search <query> [--limit <1-50>]` for sidebar search. Use
-  `history`, `read|unread`, and `section` for organization and recall. The
+  `bb thread prompt-search [query] [--project <id>] [--limit <1-200>]` to find
+  previously sent prompts across threads, or omit the query for recent prompts.
+  Use `history`, `read|unread`, and `section` for organization and recall. The
   `bb thread queue` group contains the queued-message operations. Queue updates
   use the listed version and accept repeatable `--file` and `--image` options;
   absolute file/image paths and `file:` URLs are uploaded from the CLI machine before the update.

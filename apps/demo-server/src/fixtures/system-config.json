@@ -1137,6 +1137,22 @@
       }
     },
     {
+      "command": "composer.searchPromptHistory",
+      "desktopOnly": false,
+      "shortcut": {
+        "key": "r",
+        "mod": false,
+        "meta": false,
+        "control": true,
+        "alt": false,
+        "shift": false
+      },
+      "when": {
+        "all": ["mainSurface", "promptAvailable"],
+        "none": ["modalOpen", "terminalFocus", "browserFocus"]
+      }
+    },
+    {
       "command": "modelPicker.toggle",
       "desktopOnly": false,
       "shortcut": {
@@ -2752,6 +2768,22 @@
         "control": false,
         "alt": false,
         "shift": true
+      },
+      "when": {
+        "all": ["mainSurface", "promptAvailable"],
+        "none": ["modalOpen", "terminalFocus", "browserFocus"]
+      }
+    },
+    {
+      "command": "composer.searchPromptHistory",
+      "desktopOnly": false,
+      "shortcut": {
+        "key": "r",
+        "mod": false,
+        "meta": false,
+        "control": true,
+        "alt": false,
+        "shift": false
       },
       "when": {
         "all": ["mainSurface", "promptAvailable"],

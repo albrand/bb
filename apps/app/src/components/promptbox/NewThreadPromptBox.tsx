@@ -8,7 +8,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { Host, ProjectSource, PromptTextMention } from "@bb/domain";
+import {
+  PERSONAL_PROJECT_ID,
+  type Host,
+  type ProjectSource,
+  type PromptTextMention,
+} from "@bb/domain";
 import type {
   SystemEnvironmentProvider,
   SystemMachineProvider,
@@ -185,6 +190,10 @@ export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
     promptBoxRef.current?.focusEnd();
     return promptBoxRef.current !== null;
   }, []);
+  const openPromptHistorySearch = useCallback(
+    () => promptBoxRef.current?.openPromptHistorySearch() ?? false,
+    [],
+  );
   const voice = usePromptVoice(promptBoxRef, pluginComposerHost ?? undefined);
   const attachmentCount = attachments.items?.length ?? 0;
   const [composerLayout, setComposerLayout] =
@@ -203,6 +212,7 @@ export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
     isFocused: isFocusedPane,
     isPrimary: true,
     focusDefault,
+    openPromptHistorySearch,
   });
 
   return (
@@ -311,6 +321,9 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         textEffects={textEffects}
         onComposerLayoutChange={onComposerLayoutChange}
         history={history}
+        promptHistorySearch={{
+          projectId: project?.value ?? PERSONAL_PROJECT_ID,
+        }}
         typeahead={typeahead}
         mentionMenuPlacement={mentionMenuPlacement}
         attachments={attachments}

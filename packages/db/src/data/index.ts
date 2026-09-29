@@ -33,6 +33,11 @@ export {
   listStoredThreadPromptHistoryRows,
 } from "./prompt-history.js";
 export type { StoredPromptHistoryEntryRow } from "./prompt-history.js";
+export { searchStoredPromptHistoryRows } from "./fork-prompt-history-search.js";
+export type {
+  SearchStoredPromptHistoryArgs,
+  StoredPromptHistorySearchRow,
+} from "./fork-prompt-history-search.js";
 
 export {
   getProjectExecutionDefaults,

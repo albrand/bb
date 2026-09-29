@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   collapseIfFocused: vi.fn(() => false),
   focusDefault: vi.fn(() => true),
   focusHost: vi.fn(),
+  openPromptHistorySearch: vi.fn(() => true),
 }));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
@@ -30,6 +31,22 @@ vi.mock("@/hooks/queries/system-queries", () => ({
           desktopOnly: false,
           shortcut: {
             key: "c",
+            mod: false,
+            meta: false,
+            control: true,
+            alt: false,
+            shift: false,
+          },
+          when: {
+            all: ["mainSurface", "promptAvailable"],
+            none: [],
+          },
+        },
+        {
+          command: "composer.searchPromptHistory",
+          desktopOnly: false,
+          shortcut: {
+            key: "r",
             mod: false,
             meta: false,
             control: true,
@@ -101,6 +118,7 @@ function Harness({
     isPrimary,
     collapseIfFocused: mocks.collapseIfFocused,
     focusDefault: mocks.focusDefault,
+    openPromptHistorySearch: mocks.openPromptHistorySearch,
   });
   return (
     <ComposerExtensionHost
@@ -161,5 +179,19 @@ describe("ComposerExtensionHost", () => {
     fireEvent.keyDown(window, { key: "c", ctrlKey: true });
 
     expect(mocks.focusDefault).toHaveBeenCalledOnce();
+  });
+
+  it("opens prompt search with Ctrl+R only in the focused pane", () => {
+    const view = renderHarness({ isFocused: false });
+    fireEvent.keyDown(window, { key: "r", ctrlKey: true });
+    expect(mocks.openPromptHistorySearch).not.toHaveBeenCalled();
+
+    view.rerender(
+      <AppCommandProvider>
+        <Harness />
+      </AppCommandProvider>,
+    );
+    fireEvent.keyDown(window, { key: "r", ctrlKey: true });
+    expect(mocks.openPromptHistorySearch).toHaveBeenCalledOnce();
   });
 });

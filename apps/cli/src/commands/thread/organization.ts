@@ -1,11 +1,15 @@
 import { Command } from "commander";
 import { updateThreadTabsRequestSchema } from "@bb/server-contract";
 import {
+  PROMPT_HISTORY_SEARCH_LIMIT_MAX,
   queuedMessageWaitHolderSchema,
   type PromptInput,
   type QueuedMessageWaitHolder,
 } from "@bb/domain";
-import type { ThreadQueuedMessagesResult } from "@bb/sdk";
+import type {
+  ExperimentalPromptHistorySearchResult,
+  ThreadQueuedMessagesResult,
+} from "@bb/sdk";
 import {
   columnWidths,
   printBorderlessTable,
@@ -42,6 +46,11 @@ interface SearchOptions extends JsonOptions {
 
 interface HistoryOptions extends JsonOptions {
   limit?: string;
+}
+
+interface PromptSearchOptions extends JsonOptions {
+  limit?: string;
+  project?: string;
 }
 
 interface QueueListOptions extends JsonOptions {
@@ -134,6 +143,29 @@ function printQueueTable(rows: ThreadQueuedMessagesResult): void {
     console.log(`Failed ${row.id}: ${row.failureReason}`);
     console.log(`Retry: bb thread queue send ${row.threadId} ${row.id}`);
   }
+}
+
+function printPromptSearchTable(
+  rows: ExperimentalPromptHistorySearchResult,
+): void {
+  if (rows.length === 0) {
+    console.log("No matching prompts.");
+    return;
+  }
+  const table = rows.map((row) => [
+    new Date(row.lastUsedAt).toISOString(),
+    String(row.useCount),
+    truncateCell(row.projectName, 24),
+    row.threadId,
+    truncateCell(queuedMessagePreview(row.input), 60),
+  ]);
+  printBorderlessTable(
+    {
+      head: ["Last used", "Uses", "Project", "Thread", "Prompt"],
+      colWidths: columnWidths(table, [9, 4, 7, 6, 6]),
+    },
+    table,
+  );
 }
 
 function queuedMessagePreview(content: PromptInput[]): string {
@@ -247,6 +279,36 @@ export function registerOrganizationCommands(
         });
         if (outputJson(opts, result)) return;
         printHumanJson(result);
+      }),
+    );
+
+  parent
+    .command("prompt-search [query]")
+    .description(
+      "Search prompts you sent in any thread, newest first; omit the query to list recent prompts",
+    )
+    .option("--project <id>", "Only search prompts sent in this project")
+    .option(
+      "--limit <count>",
+      `Maximum prompts (1-${PROMPT_HISTORY_SEARCH_LIMIT_MAX})`,
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (query: string | undefined, opts: PromptSearchOptions) => {
+        const limit = parsePositiveInteger(
+          opts.limit,
+          "--limit",
+          PROMPT_HISTORY_SEARCH_LIMIT_MAX,
+        );
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).threads.experimental_searchPromptHistory({
+          ...(query === undefined ? {} : { query }),
+          ...(opts.project === undefined ? {} : { projectId: opts.project }),
+          ...(limit === undefined ? {} : { limit }),
+        });
+        if (outputJson(opts, result)) return;
+        printPromptSearchTable(result);
       }),
     );
 

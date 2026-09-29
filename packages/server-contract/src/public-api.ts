@@ -280,6 +280,11 @@ import type {
 } from "./api-types.js";
 import type { ThreadExecutionProfileResponse } from "./api/threads.js";
 import {
+  promptHistorySearchQuerySchema,
+  type PromptHistorySearchQuery,
+  type PromptHistorySearchResponse,
+} from "./api/prompt-history-search.js";
+import {
   spendAnalysisPayloadQuerySchema,
   spendAssessmentListQuerySchema,
   spendAssessmentSchema,
@@ -1269,6 +1274,14 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest(),
       response: jsonResponse<ThreadRunningResponse>(),
+    }),
+    searchPromptHistory: defineRoute({
+      path: "/prompt-history/search",
+      method: "get",
+      request: optionalQueryRequest<EmptyInput, PromptHistorySearchQuery>(
+        promptHistorySearchQuerySchema,
+      ),
+      response: jsonResponse<PromptHistorySearchResponse>(),
     }),
     search: defineRoute({
       path: "/threads/search",
