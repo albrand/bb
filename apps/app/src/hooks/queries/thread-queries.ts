@@ -696,7 +696,6 @@ function liftThreadListPlaceholder(
     canSpawnChild: false,
     queuedMessageCount: 0,
     workspaceSharing: null,
-    draft: null,
   };
 }
 

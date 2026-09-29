@@ -135,12 +135,6 @@ export function hasThreadListWorkingActivity(
   );
 }
 
-export function isDraftThread(
-  thread: Pick<ThreadListEntry, "queuedWork" | "status">,
-): boolean {
-  return thread.status === "pending" && thread.queuedWork === "none";
-}
-
 export function threadListIndicatorStateForThread(
   thread: ThreadListEntry,
   hasUnsubmittedDraft: boolean,

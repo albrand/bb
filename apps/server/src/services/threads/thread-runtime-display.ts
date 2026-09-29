@@ -1,6 +1,5 @@
 import {
   getEnvironment,
-  getThreadDraft,
   getSessionById,
   listActiveBackgroundTaskCountsByThreadIds,
   listLatestClosedSessionsForHosts,
@@ -44,7 +43,6 @@ import {
 } from "../environments/environment-response.js";
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { canRestoreThreadEnvironment } from "./thread-environment-restore.js";
-import { parseStoredThreadDraft } from "./thread-draft.js";
 import { toThreadEventWithMeta } from "./timeline.js";
 import { intendedThreadHostId } from "./dispatch-attempt.js";
 
@@ -355,10 +353,6 @@ export function toThreadResponseFromThread(
         return null;
       }
     })(),
-    draft: parseStoredThreadDraft({
-      id: args.thread.id,
-      draft: getThreadDraft(deps.db, args.thread.id),
-    }),
   };
 }
 

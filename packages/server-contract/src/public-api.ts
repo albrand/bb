@@ -278,11 +278,7 @@ import type {
   WorkspaceFileListResponse,
   WorkspacePathListResponse,
 } from "./api-types.js";
-import type {
-  ThreadExecutionProfileResponse,
-  UpdateThreadDraftRequest,
-} from "./api/threads.js";
-import { updateThreadDraftRequestSchema } from "./api/threads.js";
+import type { ThreadExecutionProfileResponse } from "./api/threads.js";
 import {
   spendAnalysisPayloadQuerySchema,
   spendAssessmentListQuerySchema,
@@ -1398,14 +1394,6 @@ export const publicApiRoutes = {
         UpdateQueuedMessageRequest
       >(updateQueuedMessageRequestSchema),
       response: jsonResponse<ThreadQueuedMessage>(),
-    }),
-    updateDraft: defineRoute({
-      path: "/threads/:id/draft",
-      method: "put",
-      request: jsonRequest<PathId, UpdateThreadDraftRequest>(
-        updateThreadDraftRequestSchema,
-      ),
-      response: jsonResponse<ThreadResponse>(),
     }),
     sendQueuedMessage: defineRoute({
       path: "/threads/:id/queued-messages/:queuedMessageId/send",

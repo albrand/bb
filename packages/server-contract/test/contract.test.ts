@@ -49,7 +49,7 @@ interface OptionalServerFieldGroup {
   reason: string;
 }
 
-const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 48;
+const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
 
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   {
@@ -341,11 +341,6 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
     reason:
       "Thread creation may omit visibility for backward compatibility; the server fills visible at the creation boundary.",
     fields: ["createThreadRequestSchema.visibility"],
-  },
-  {
-    reason:
-      "A draft-only creation request opts into saving unsent input; omission keeps ordinary thread creation semantics.",
-    fields: ["createThreadRequestSchema.draft"],
   },
   {
     reason:

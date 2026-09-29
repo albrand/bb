@@ -263,7 +263,7 @@ describe("a restarted daemon that adopted threads", () => {
     });
   });
 
-  it("settles a detached thread's background tasks once the adoption window ends without a daemon", async () => {
+  it("keeps a detached thread's background tasks open while the host stays silent, and settles them when a daemon that did not adopt it opens", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, adopted, environment } =
         seedTwoActiveTurns(harness);
@@ -312,12 +312,31 @@ describe("a restarted daemon that adopted threads", () => {
       expect(settled()).toBe(false);
 
       await vi.advanceTimersByTimeAsync(DETACHED_THREAD_ADOPTION_WINDOW_MS);
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
+      expect(settled()).toBe(false);
+      vi.useRealTimers();
+
+      await openRestartedSession(harness, host, {});
       expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
       expect(settled()).toBe(true);
     });
   });
 
-  it("holds the active-work grace for threads named in a detach notice, until the adoption window ends", async () => {
+  it("stops reporting a host as restarting once the reconnect grace ends without a daemon", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedTwoActiveTurns(harness);
+      harness.deps.hub.markHostRestarting(host.id);
+
+      vi.useFakeTimers({ now: Date.now() });
+      handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
+      expect(harness.deps.hub.isHostRestarting(host.id)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(HOST_RECONNECT_GRACE_MS + 1);
+      expect(harness.deps.hub.isHostRestarting(host.id)).toBe(false);
+    });
+  });
+
+  it("keeps every thread's work while the host stays silent past the adoption window, then interrupts only what the restarted daemon did not adopt", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, adopted, other } = seedTwoActiveTurns(harness);
       const notice = await harness.app.request(
@@ -342,14 +361,18 @@ describe("a restarted daemon that adopted threads", () => {
         HOST_RECONNECT_GRACE_MS + 1,
       );
 
+      await vi.advanceTimersByTimeAsync(DETACHED_THREAD_ADOPTION_WINDOW_MS);
+      expect(getThread(harness.deps.db, other.id)?.status).toBe("active");
+      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
+      vi.useRealTimers();
+
+      await openRestartedSession(harness, host, {
+        adoptedThreads: [
+          { threadId: adopted.id, activeTurnId: "turn-adopted" },
+        ],
+      });
       expect(getThread(harness.deps.db, other.id)?.status).toBe("error");
       expect(getThread(harness.deps.db, adopted.id)?.status).toBe("active");
-
-      await vi.advanceTimersByTimeAsync(
-        DETACHED_THREAD_ADOPTION_WINDOW_MS -
-          HOST_RECONNECT_GRACE_MS,
-      );
-      expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
     });
   });
 });

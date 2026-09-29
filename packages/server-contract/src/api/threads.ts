@@ -117,32 +117,8 @@ export const createThreadRequestSchema = z
     pluginSubmission: z
       .object({ pluginId: pluginIdSchema, data: jsonValueSchema })
       .optional(),
-    draft: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.draft === true) {
-      for (const field of [
-        "sendAt",
-        "pluginSubmission",
-        "sourceThreadId",
-        "sourceSeqEnd",
-      ] as const) {
-        if (value[field] !== undefined) {
-          ctx.addIssue({
-            code: "custom",
-            message: `${field} cannot be combined with draft`,
-            path: [field],
-          });
-        }
-      }
-      if (value.originKind !== null) {
-        ctx.addIssue({
-          code: "custom",
-          message: "originKind cannot be combined with draft",
-          path: ["originKind"],
-        });
-      }
-    }
     if (value.origin === "plugin" && value.originPluginId === undefined) {
       ctx.addIssue({
         code: "custom",
@@ -368,16 +344,6 @@ export type CreateQueuedMessageRequest = z.infer<
   typeof createQueuedMessageRequestSchema
 >;
 
-export const updateThreadDraftRequestSchema = z
-  .object({
-    input: z.array(promptInputSchema),
-  })
-  .strict();
-export type UpdateThreadDraftRequest = z.infer<
-  typeof updateThreadDraftRequestSchema
->;
-
-
 export const updateQueuedMessageRequestSchema = z.object({
   expectedUpdatedAt: z.number().int().nonnegative(),
   input: z.array(promptInputSchema).min(1),
@@ -503,7 +469,6 @@ export const threadResponseSchema = threadWithRuntimeSchema.extend({
     .object({ threadCount: z.number().int().positive() })
     .nullable()
     .default(null),
-  draft: z.array(promptInputSchema).nullable(),
 });
 export type ThreadResponse = z.infer<typeof threadResponseSchema>;
 

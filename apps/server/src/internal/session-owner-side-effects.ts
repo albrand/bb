@@ -37,9 +37,6 @@ const DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON =
   "Host daemon disconnected while awaiting user interaction; retry the thread to continue";
 const DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON =
   "The connection to the host was lost while preparing the workspace. Retry provisioning to continue.";
-const ACTIVE_WORK_DISCONNECT_GRACE_MS =
-  Math.max(LEASE_TIMEOUT_MS, HOST_RECONNECT_GRACE_MS) + 1;
-const PENDING_INTERACTION_DISCONNECT_GRACE_MS = 5_000;
 
 type HostSessionOpenedDeps = LoggedPendingInteractionWorkSessionDeps;
 type DaemonSocketClosedDeps = LoggedPendingInteractionWorkSessionDeps &
@@ -93,7 +90,6 @@ export async function handleHostSessionOpened(
     args.previousSession.id !== args.openedSession.id
   ) {
     deps.hub.cancelPendingDaemonDisconnect(args.previousSession.id);
-    cancelDisconnectGraceTimers(args.previousSession.id);
 
     if (args.previousSession.status === "active") {
       if (sameDaemonInstance) {
@@ -213,52 +209,11 @@ function handleDaemonSessionLost(
       if (deps.hub.hasDaemonForHost(session.hostId)) {
         return;
       }
+      deps.hub.clearHostRestarting(session.hostId);
       deps.hub.notifyHost(session.hostId, ["host-disconnected"]);
       notifyHostThreadRuntimeStatusChanged(deps, session.hostId);
     },
   );
-  schedulePendingInteractionDisconnectGrace(deps, {
-    hostId: session.hostId,
-    sessionId: args.sessionId,
-  });
-  scheduleActiveWorkDisconnectGrace(deps, {
-    hostId: session.hostId,
-    sessionId: args.sessionId,
-  });
-}
-
-const disconnectGraceTimersBySessionId = new Map<string, Set<NodeJS.Timeout>>();
-
-function scheduleDisconnectGraceTimer(
-  args: { sessionId: string },
-  delayMs: number,
-  fire: () => void,
-): void {
-  const timers = disconnectGraceTimersBySessionId.get(args.sessionId) ?? new Set();
-  disconnectGraceTimersBySessionId.set(args.sessionId, timers);
-  const timer = setTimeout(() => {
-    timers.delete(timer);
-    if (
-      timers.size === 0 &&
-      disconnectGraceTimersBySessionId.get(args.sessionId) === timers
-    ) {
-      disconnectGraceTimersBySessionId.delete(args.sessionId);
-    }
-    fire();
-  }, delayMs);
-  timer.unref();
-  timers.add(timer);
-}
-
-function cancelDisconnectGraceTimers(sessionId: string): void {
-  const timers = disconnectGraceTimersBySessionId.get(sessionId);
-  if (timers === undefined) {
-    return;
-  }
-  disconnectGraceTimersBySessionId.delete(sessionId);
-  for (const timer of timers) {
-    clearTimeout(timer);
-  }
 }
 
 function detachedThreadIdsAt(deps: LoggedPendingInteractionWorkSessionDeps, hostId: string): Set<string> {
@@ -267,33 +222,6 @@ function detachedThreadIdsAt(deps: LoggedPendingInteractionWorkSessionDeps, host
       hostId,
       now: Date.now(),
     }).map((thread) => thread.threadId),
-  );
-}
-
-function completePendingInteractionDisconnectGrace(
-  deps: DaemonSocketClosedDeps,
-  args: { hostId: string; sessionId: string },
-): void {
-  if (deps.hub.hasDaemonForHost(args.hostId)) {
-    return;
-  }
-  deps.hub.clearHostRestarting(args.hostId);
-  interruptPendingInteractionsForHostThreads(deps, {
-    hostId: args.hostId,
-    reason: DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON,
-  });
-  settleDanglingBackgroundTasks(deps, {
-    exceptThreadIds: detachedThreadIdsAt(deps, args.hostId),
-    hostId: args.hostId,
-  });
-}
-
-function schedulePendingInteractionDisconnectGrace(
-  deps: DaemonSocketClosedDeps,
-  args: { hostId: string; sessionId: string },
-): void {
-  scheduleDisconnectGraceTimer(args, PENDING_INTERACTION_DISCONNECT_GRACE_MS, () =>
-    completePendingInteractionDisconnectGrace(deps, args),
   );
 }
 
@@ -388,55 +316,6 @@ export function disconnectImportedDaemonSessions(
     { hosts: hostIds.size, sessions: args.sessions.length },
     "Closed the daemon sessions an imported server snapshot left active",
   );
-}
-
-function scheduleActiveWorkDisconnectGrace(
-  deps: LoggedPendingInteractionWorkSessionDeps,
-  args: { hostId: string; sessionId: string },
-  delayMs = ACTIVE_WORK_DISCONNECT_GRACE_MS,
-): void {
-  scheduleDisconnectGraceTimer(args, delayMs, () =>
-    completeActiveWorkDisconnectGrace(deps, args),
-  );
-}
-
-function completeActiveWorkDisconnectGrace(
-  deps: LoggedPendingInteractionWorkSessionDeps,
-  args: { hostId: string; sessionId: string },
-): void {
-  if (deps.hub.hasDaemonForHost(args.hostId)) {
-    return;
-  }
-
-  const now = Date.now();
-  const detached = listPendingDetachedThreads(deps.db, {
-    hostId: args.hostId,
-    now,
-  });
-  const detachedThreadIds = new Set(detached.map((thread) => thread.threadId));
-  interruptActiveThreadsForHost(deps, {
-    exceptThreadIds: detachedThreadIds,
-    includeStopping: false,
-    hostId: args.hostId,
-    reason: "host-daemon-restarted",
-    cause: "host-connection-lost",
-  });
-  interruptEnvironmentProvisioningForHost(deps, {
-    hostId: args.hostId,
-    reason: DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON,
-  });
-  settleDanglingBackgroundTasks(deps, {
-    exceptThreadIds: detachedThreadIds,
-    hostId: args.hostId,
-  });
-  if (detached.length > 0) {
-    const nextExpiry = Math.min(...detached.map((thread) => thread.expiresAt));
-    scheduleActiveWorkDisconnectGrace(
-      deps,
-      args,
-      Math.max(nextExpiry - now, 0) + 1,
-    );
-  }
 }
 
 function classifyAdoptedThreads(

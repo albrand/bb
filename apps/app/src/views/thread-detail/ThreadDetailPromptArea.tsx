@@ -1,4 +1,3 @@
-import { useServerThreadDraftSync } from "./useServerThreadDraftSync";
 import type { MachineRemovalStatus } from "@/lib/machine-removal-display";
 import { ThreadMachineStatus } from "@/components/promptbox/banner/ThreadMachineStatus";
 import {
@@ -200,7 +199,6 @@ interface ThreadDetailPromptAreaProps {
   pendingInteractions: readonly PendingInteraction[];
   pendingInteractionsInitialLoading: boolean;
   queuedMessageCount: number;
-  serverDraft: PromptInput[] | null;
   onChangedFileClick: (selection: WorkspaceChangedFileSelection) => void;
   projectId: string;
   resolveMentionLink: PromptMentionLinkResolver;
@@ -416,7 +414,6 @@ export function ThreadDetailPromptArea({
   pendingInteractions,
   pendingInteractionsInitialLoading,
   queuedMessageCount,
-  serverDraft,
   onChangedFileClick,
   projectId,
   resolveMentionLink,
@@ -533,14 +530,6 @@ export function ThreadDetailPromptArea({
     },
     inlineDraft: inlineEditingQueuedMessage?.draft ?? null,
     inlineSessionRef: inlineDraftSessionRef,
-  });
-  useServerThreadDraftSync({
-    threadId: thread.id,
-    status: thread.status,
-    archived: thread.archivedAt !== null,
-    serverDraft,
-    localDraft: currentPromptDraft,
-    setLocalDraft: promptDraft.setDraft,
   });
   const subscribeInlineQueuedDraft = useComposerHostDraftNotifier(
     inlineEditingQueuedMessage?.draft ?? null,
