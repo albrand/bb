@@ -127,7 +127,7 @@ export function ComposerResizeHandle({
       setDragAxis(null);
       setDragWidthHandleSide(null);
       clearPreview();
-      resetComposerContentWidth();
+      applyContentMeasure();
     };
     window.addEventListener("resize", handleViewportResize);
     return () => window.removeEventListener("resize", handleViewportResize);
