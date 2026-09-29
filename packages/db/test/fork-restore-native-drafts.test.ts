@@ -239,3 +239,107 @@ it("restores a first-message draft from a same-provider thread's turn history wh
     db.$client.close();
   }
 });
+
+it("restores a first-message draft with the most recent same-provider turn's execution, not the most recently updated thread's", () => {
+  const db = createConnection(":memory:");
+  try {
+    migrate(db);
+    const seedSiblingTurn = (
+      eventId: string,
+      requestedAt: number,
+      threadUpdatedAt: number,
+      execution: Record<string, string>,
+    ) => {
+      const sibling = createThread(db, noopNotifier, {
+        projectId: PERSONAL_PROJECT_ID,
+        providerId: "ranked-provider",
+        status: "idle",
+      });
+      db.$client
+        .prepare(
+          `INSERT INTO events (id, thread_id, scope_kind, sequence, type, data, created_at)
+           VALUES (?, ?, 'thread', 1, 'client/turn/requested', ?, ?)`,
+        )
+        .run(
+          eventId,
+          sibling.id,
+          JSON.stringify({ input: [text("Sibling turn")], execution }),
+          requestedAt,
+        );
+      db.$client
+        .prepare("UPDATE threads SET updated_at = ? WHERE id = ?")
+        .run(threadUpdatedAt, sibling.id);
+    };
+    seedSiblingTurn("evt_old_turn", 1_000, 9_000, {
+      model: "old-model",
+      reasoningLevel: "high",
+      permissionMode: "full",
+      serviceTier: "default",
+    });
+    seedSiblingTurn("evt_new_turn", 5_000, 2_000, {
+      model: "new-model",
+      reasoningLevel: "medium",
+      permissionMode: "accept-edits",
+      serviceTier: "default",
+    });
+    const firstMessageDraft = createThread(db, noopNotifier, {
+      projectId: PERSONAL_PROJECT_ID,
+      providerId: "ranked-provider",
+      status: "pending",
+    });
+    db.$client
+      .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+      .run(THREAD_DRAFTS_MIGRATION_TIMESTAMP);
+    db.$client.exec(originalMigration);
+    db.$client
+      .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
+      .run(
+        createHash("sha256").update(originalMigration).digest("hex"),
+        THREAD_DRAFTS_MIGRATION_TIMESTAMP,
+      );
+    const draftContent: PromptInput[] = [
+      text("Ranked draft"),
+      { type: "localFile", path: "/tmp/ranked.md", name: "ranked.md" },
+    ];
+    db.$client
+      .prepare("UPDATE threads SET draft = ? WHERE id = ?")
+      .run(JSON.stringify(draftContent), firstMessageDraft.id);
+
+    migrate(db);
+
+    const held = listQueuedThreadMessagesByWaitHolder(db, "plugin:drafts");
+    expect(held.map((row) => row.threadId)).toEqual([firstMessageDraft.id]);
+    const [draft] = held;
+    if (draft === undefined) throw new Error("expected a held draft");
+    expect({
+      model: draft.model,
+      reasoningLevel: draft.reasoningLevel,
+      permissionMode: draft.permissionMode,
+    }).toEqual({
+      model: "new-model",
+      reasoningLevel: "medium",
+      permissionMode: "accept-edits",
+    });
+    expect(promptInputSchema.array().parse(JSON.parse(draft.content))).toEqual(
+      draftContent,
+    );
+    const edited: PromptInput[] = [
+      text("Ranked draft, edited"),
+      { type: "localFile", path: "/tmp/ranked.md", name: "ranked.md" },
+    ];
+    expect(
+      updateQueuedThreadMessage(db, noopNotifier, {
+        id: draft.id,
+        threadId: firstMessageDraft.id,
+        content: edited,
+        expectedUpdatedAt: draft.updatedAt,
+      }).kind,
+    ).toBe("updated");
+    const claimed = claimQueuedThreadMessageGroup(db, noopNotifier, draft.id, {
+      kind: "explicit-send",
+    });
+    expect(claimed?.map((row) => JSON.parse(row.content))).toEqual([edited]);
+  } finally {
+    db.$client.close();
+  }
+});

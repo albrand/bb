@@ -102,17 +102,18 @@ export function restoreNativeThreadDraftsToDraftsQueue(db: DbConnection): void {
     `SELECT execution FROM (
       SELECT
         s.project_id AS projectId,
-        s.updated_at AS updatedAt,
-        (
-          SELECT json_extract(e.data, '$.execution') FROM events AS e
-          WHERE e.thread_id = s.id AND e.type = 'client/turn/requested'
-          ORDER BY e.sequence DESC LIMIT 1
-        ) AS execution
+        e.created_at AS turnRequestedAt,
+        json_extract(e.data, '$.execution') AS execution
       FROM threads AS s
+      JOIN events AS e ON e.id = (
+        SELECT latest.id FROM events AS latest
+        WHERE latest.thread_id = s.id AND latest.type = 'client/turn/requested'
+        ORDER BY latest.sequence DESC LIMIT 1
+      )
       WHERE s.provider_id = ? AND s.id != ?
     )
     WHERE execution IS NOT NULL
-    ORDER BY (projectId = ?) DESC, updatedAt DESC
+    ORDER BY (projectId = ?) DESC, turnRequestedAt DESC
     LIMIT 1`,
   );
   const withSiblingExecution = (row: NativeDraftRow): NativeDraftRow => {
