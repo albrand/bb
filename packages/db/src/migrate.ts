@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DbConnection } from "./connection.js";
+import { restoreNativeThreadDraftsToDraftsQueue } from "./fork-restore-native-drafts.js";
 import {
   compatibleMigrationHashes,
   publishedMigrationWhensByTag,
@@ -1573,6 +1574,7 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
       db,
       migrationsFolder,
     );
+    restoreNativeThreadDraftsToDraftsQueue(db);
     skipEventLargeValuesRoundTripForInlineEvents(db, migrationsFolder);
     repairBranchLocalQueuedGroupingBeforeInitialThreadSections(
       db,

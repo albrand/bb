@@ -107,11 +107,62 @@ it.each([false, true])(
       migrate(db);
       migrate(db);
 
-      expect(
-        db.$client
-          .prepare("SELECT * FROM queued_thread_messages ORDER BY id")
-          .all(),
-      ).toEqual(queueBefore);
+      const queueAfter = db.$client
+        .prepare("SELECT * FROM queued_thread_messages ORDER BY id")
+        .all() as Array<Record<string, unknown>>;
+      const beforeIds = new Set(
+        (queueBefore as Array<{ id: string }>).map((row) => row.id),
+      );
+      expect(queueAfter.filter((row) => beforeIds.has(String(row.id)))).toEqual(
+        queueBefore,
+      );
+      const restored = queueAfter.filter((row) => !beforeIds.has(String(row.id)));
+      const preserved = alreadyMigrated
+        ? db.$client
+            .prepare(
+              "SELECT thread_id AS threadId, content FROM fork_unrestored_thread_drafts",
+            )
+            .all()
+        : [];
+      if (alreadyMigrated) {
+        expect(
+          restored.map((row) => ({
+            threadId: row.thread_id,
+            content: JSON.parse(String(row.content)),
+            model: row.model,
+            reasoningLevel: row.reasoning_level,
+            permissionMode: row.permission_mode,
+            serviceTier: row.service_tier,
+            waitingOn: JSON.parse(String(row.waiting_on)),
+            waitHolder: row.wait_holder,
+          })),
+        ).toEqual([
+          {
+            threadId: followUpThread.id,
+            content: [
+              text("Draft one"),
+              text("Draft two"),
+              { type: "localFile", path: "/tmp/notes.md", name: "notes.md" },
+            ],
+            model: "test-model",
+            reasoningLevel: "medium",
+            permissionMode: "auto",
+            serviceTier: "default",
+            waitingOn: { kind: "plugin", pluginId: "drafts", reason: "Draft" },
+            waitHolder: "plugin:drafts",
+          },
+        ]);
+        expect(
+          (preserved as Array<{ threadId: string; content: string }>).map(
+            (row) => ({
+              threadId: row.threadId,
+              content: JSON.parse(row.content),
+            }),
+          ),
+        ).toEqual([{ threadId: draftThread.id, content: [text("First draft")] }]);
+      } else {
+        expect(restored).toEqual([]);
+      }
       expect(
         db.$client.prepare("SELECT * FROM plugins ORDER BY id").all(),
       ).toEqual(pluginsBefore);
