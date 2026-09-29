@@ -131,6 +131,7 @@ jobs:
           - shard: packages
             filter: --filter='!@bb/server' --filter='!@bb/app' --filter='!@bb/integration-tests'
             args: ""
+            concurrency: 2
 
     steps:
       - name: Checkout repository
@@ -157,7 +158,7 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 pnpm --filter @bb/desktop exec electron --version
 
       - name: Test
-        run: pnpm exec turbo run test ${{ matrix.filter }} --cache-dir=.turbo/cache --output-logs=new-only --concurrency=4 ${{ matrix.args }}
+        run: pnpm exec turbo run test ${{ matrix.filter }} --cache-dir=.turbo/cache --output-logs=new-only --concurrency=${{ matrix.concurrency || 4 }} ${{ matrix.args }}
 
   # Every other suite mocks the Agent SDK, so an upstream CLI release that
   # breaks the model probe passes CI silently. This runs it against a real,
