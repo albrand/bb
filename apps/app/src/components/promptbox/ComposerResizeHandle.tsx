@@ -311,12 +311,12 @@ export function ComposerResizeHandle({
             onDoubleClick={resetComposerContentWidth}
             onKeyDown={(event) => handleKeyDown(event, "width", side)}
             className={cn(
-              "absolute -top-1.5 z-30 size-6 cursor-col-resize touch-none outline-none",
-              isLeft ? "-left-1.5" : "-right-1.5",
-              "before:absolute before:top-1.5 before:size-3.5 before:border-muted-foreground before:opacity-40 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
+              "absolute -top-2 z-30 size-6 cursor-col-resize touch-none outline-none",
+              isLeft ? "-left-2" : "-right-2",
+              "before:absolute before:top-2 before:size-3.5 before:border-muted-foreground before:opacity-40 before:transition-opacity before:duration-150 motion-reduce:before:transition-none",
               isLeft
-                ? "before:left-1.5 before:rounded-tl-md before:border-l-2 before:border-t-2"
-                : "before:right-1.5 before:rounded-tr-md before:border-r-2 before:border-t-2",
+                ? "before:left-2 before:rounded-tl-md before:border-l-2 before:border-t-2"
+                : "before:right-2 before:rounded-tr-md before:border-r-2 before:border-t-2",
               "group-hover/promptbox:before:opacity-70 group-focus-within/promptbox:before:opacity-70 hover:before:border-ring hover:before:opacity-100 focus-visible:before:border-ring focus-visible:before:opacity-100",
               dragging &&
                 dragAxis === "width" &&
