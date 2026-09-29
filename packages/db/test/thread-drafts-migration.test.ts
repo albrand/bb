@@ -125,8 +125,12 @@ it.each([false, true])(
             .all()
         : [];
       if (alreadyMigrated) {
+        const draftFirst = (row: Record<string, unknown>) =>
+          row.thread_id === draftThread.id ? 0 : 1;
         expect(
-          restored.map((row) => ({
+          [...restored]
+            .sort((left, right) => draftFirst(left) - draftFirst(right))
+            .map((row) => ({
             threadId: row.thread_id,
             content: JSON.parse(String(row.content)),
             model: row.model,
@@ -137,6 +141,16 @@ it.each([false, true])(
             waitHolder: row.wait_holder,
           })),
         ).toEqual([
+          {
+            threadId: draftThread.id,
+            content: [text("First draft")],
+            model: "test-model",
+            reasoningLevel: "medium",
+            permissionMode: "auto",
+            serviceTier: "default",
+            waitingOn: { kind: "plugin", pluginId: "drafts", reason: "Draft" },
+            waitHolder: "plugin:drafts",
+          },
           {
             threadId: followUpThread.id,
             content: [
@@ -159,7 +173,7 @@ it.each([false, true])(
               content: JSON.parse(row.content),
             }),
           ),
-        ).toEqual([{ threadId: draftThread.id, content: [text("First draft")] }]);
+        ).toEqual([]);
       } else {
         expect(restored).toEqual([]);
       }

@@ -34,15 +34,24 @@ export function restoreNativeThreadDraftsToDraftsQueue(db: DbConnection): void {
       `SELECT
         t.id AS id,
         t.draft AS draft,
-        COALESCE(json_extract(r.execution, '$.model'), q.model, t.model_override) AS model,
-        COALESCE(json_extract(r.execution, '$.reasoningLevel'), q.reasoning_level, t.reasoning_level_override) AS reasoningLevel,
-        COALESCE(json_extract(r.execution, '$.permissionMode'), q.permission_mode) AS permissionMode,
-        COALESCE(json_extract(r.execution, '$.serviceTier'), q.service_tier) AS serviceTier
+        COALESCE(json_extract(r.execution, '$.model'), q.model, t.model_override, pd.model, pq.model) AS model,
+        COALESCE(json_extract(r.execution, '$.reasoningLevel'), q.reasoning_level, t.reasoning_level_override, pd.reasoning_level, pq.reasoning_level) AS reasoningLevel,
+        COALESCE(json_extract(r.execution, '$.permissionMode'), q.permission_mode, pd.permission_mode, pq.permission_mode) AS permissionMode,
+        COALESCE(json_extract(r.execution, '$.serviceTier'), q.service_tier, pd.service_tier, pq.service_tier) AS serviceTier
       FROM threads AS t
       LEFT JOIN queued_thread_messages AS q ON q.id = (
         SELECT latest.id FROM queued_thread_messages AS latest
         WHERE latest.thread_id = t.id
         ORDER BY latest.sort_key DESC, latest.id DESC
+        LIMIT 1
+      )
+      LEFT JOIN project_execution_defaults AS pd
+        ON pd.project_id = t.project_id AND pd.provider_id = t.provider_id
+      LEFT JOIN queued_thread_messages AS pq ON pq.id = (
+        SELECT latest.id FROM queued_thread_messages AS latest
+        JOIN threads AS sibling ON sibling.id = latest.thread_id
+        WHERE sibling.provider_id = t.provider_id
+        ORDER BY latest.created_at DESC, latest.id DESC
         LIMIT 1
       )
       LEFT JOIN (
