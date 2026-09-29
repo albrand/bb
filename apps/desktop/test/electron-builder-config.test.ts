@@ -579,6 +579,39 @@ describe("electron-builder signing config", () => {
     }
   });
 
+  it("explains every macOS permission prompt bb can raise", async () => {
+    const configText = await readFile(
+      resolve(desktopPackageRoot, "electron-builder.config.json"),
+      "utf8",
+    );
+    const { mac } = z
+      .object({
+        mac: z.object({ extendInfo: z.record(z.string(), z.string()) }),
+      })
+      .parse(JSON.parse(configText));
+    const promptableUsageKeys = [
+      "NSAppDataUsageDescription",
+      "NSAppBundlesUsageDescription",
+      "NSDesktopFolderUsageDescription",
+      "NSDocumentsFolderUsageDescription",
+      "NSDownloadsFolderUsageDescription",
+      "NSNetworkVolumesUsageDescription",
+      "NSRemovableVolumesUsageDescription",
+      "NSMicrophoneUsageDescription",
+      "NSAudioCaptureUsageDescription",
+      "NSBluetoothAlwaysUsageDescription",
+      "NSBluetoothPeripheralUsageDescription",
+    ];
+
+    for (const key of promptableUsageKeys) {
+      expect(mac.extendInfo[key], key).toMatch(/\bbb\b/u);
+      expect(mac.extendInfo[key], key).not.toMatch(/^This app needs access/u);
+    }
+    expect(mac.extendInfo.NSAppDataUsageDescription).toMatch(
+      /agent.*another app/u,
+    );
+  });
+
   it("keeps the updater provider pointed at desktop-latest release assets", async () => {
     const configText = await readFile(
       resolve(desktopPackageRoot, "electron-builder.config.json"),
