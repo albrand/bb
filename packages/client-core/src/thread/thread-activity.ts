@@ -148,7 +148,7 @@ export function threadListIndicatorStateForThread(
   const unreadDone = isUnreadDoneThread(thread);
   return {
     hasPendingInteraction: thread.hasPendingInteraction,
-    hasUnsubmittedDraft: hasUnsubmittedDraft || isDraftThread(thread),
+    hasUnsubmittedDraft,
     hasUnreadError: unreadDone && thread.status === "error",
     hasUnreadSuccess: unreadDone && thread.status !== "error",
     isBackgroundAgentActive: hasActiveBackgroundAgentActivity(thread),

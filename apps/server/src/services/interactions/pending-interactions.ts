@@ -65,6 +65,7 @@ import {
   validatePendingInteractionResolution,
 } from "./pending-interaction-validation.js";
 import { emitPluginInteractionPending } from "../plugins/plugin-thread-events.js";
+import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import {
   SERVER_MOVE_FROZEN_RETRY_MS,
   isServerMoveFrozen,
@@ -959,6 +960,7 @@ export class PendingInteractionLifecycle {
         threadEnvironmentUnavailableDetails("destroyed", null),
       );
     }
+    requireConnectedHostSession(this.deps, environment.hostId);
 
     const command = buildInteractiveResolveCommand({
       environmentId: environment.id,

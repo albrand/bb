@@ -161,11 +161,14 @@ export interface ThreadRowParentOptions {
 function isThreadBusy(thread: ThreadListEntry): boolean {
   switch (thread.runtime.displayStatus) {
     case "active":
-    case "host-reconnecting":
+    case "provisioning":
+    case "starting":
+    case "stopping":
       return true;
+    case "error":
     case "idle":
-    case "interrupted":
-    case "failed":
+    case "pending":
+    case "waiting-for-host":
       return false;
   }
 }

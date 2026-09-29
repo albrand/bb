@@ -49,6 +49,7 @@ export interface CreateEventSinkOptions {
 export interface EventSink {
   emit(event: EventSinkInput): void;
   flush(): Promise<void>;
+  listUndeliveredThreadIds(): string[];
   dispose(): Promise<void>;
 }
 
@@ -477,6 +478,9 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       );
     },
     flush,
+    listUndeliveredThreadIds(): string[] {
+      return [...new Set(queue.map((envelope) => envelope.threadId))];
+    },
     async dispose(): Promise<void> {
       disposed = true;
       clearScheduledFlush();

@@ -49,7 +49,7 @@ interface OptionalServerFieldGroup {
   reason: string;
 }
 
-const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
+const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 48;
 
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   {
@@ -344,6 +344,11 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
+      "A draft-only creation request opts into saving unsent input; omission keeps ordinary thread creation semantics.",
+    fields: ["createThreadRequestSchema.draft"],
+  },
+  {
+    reason:
       "Lifecycle ownership is explicitly assigned at creation; omission creates an independent thread.",
     fields: [
       "createThreadRequestSchema.lifecycleOwnerThreadId",
@@ -565,9 +570,8 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "sendAt is present only when the caller is scheduling the dispatch, and draft only when it is saving the input as a draft thread instead; omission of both means attempt the dispatch now, which allocates no queued row at all when nothing blocks it.",
+      "sendAt is present only when the caller is scheduling the dispatch; omission means attempt the dispatch now, which allocates no queued row at all when nothing blocks it.",
     fields: [
-      "createThreadRequestSchema.draft",
       "createThreadRequestSchema.sendAt",
       "sendMessageRequestSchema.sendAt",
     ],
@@ -1225,7 +1229,6 @@ describe("server-contract canonical schemas", () => {
           updatedAt: 2,
           runtime: {
             displayStatus: "idle",
-            hostReconnectGraceExpiresAt: null,
           },
           activity: {
             activeWorkflowCount: 0,

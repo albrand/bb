@@ -65,14 +65,15 @@ function getOpenDaemonSessionForHost(
   return session;
 }
 
-function toHostStatus(deps: HostLookupDeps, hostId: string): Host["status"] {
-  const host = getNonDestroyedHost(deps.db, hostId);
-  if (!host) {
-    return "disconnected";
-  }
-
-  if (getOpenDaemonSessionForHost(deps, hostId)) return "connected";
-  return deps.hub.isHostRestarting(hostId) ? "restarting" : "disconnected";
+export function toHostWithStatus(deps: HostLookupDeps, row: HostRow): Host {
+  return toHostRecord(
+    row,
+    getOpenDaemonSessionForHost(deps, row.id)
+      ? "connected"
+      : deps.hub.isHostRestarting(row.id)
+        ? "restarting"
+        : "disconnected",
+  );
 }
 
 export function toHostRecord(row: HostRow, status: Host["status"]): Host {
@@ -115,13 +116,8 @@ export function listPublicHostsWithStatus(
   deps: HostLookupDeps,
   options?: { includeCreating?: boolean; type?: HostType },
 ): Host[] {
-  const rows = listPublicHosts(deps.db, options);
-
-  return rows.map((row) =>
-    toHostRecord(
-      row,
-      getOpenDaemonSessionForHost(deps, row.id) ? "connected" : "disconnected",
-    ),
+  return listPublicHosts(deps.db, options).map((row) =>
+    toHostWithStatus(deps, row),
   );
 }
 
@@ -140,7 +136,7 @@ export function requireNonDestroyedHostWithStatus(
       destroyedHostUnavailableDetails(host.destroyedAt),
     );
   }
-  return toHostRecord(host, toHostStatus(deps, host.id));
+  return toHostWithStatus(deps, host);
 }
 
 export function getNonDestroyedHostWithStatus(
@@ -151,7 +147,7 @@ export function getNonDestroyedHostWithStatus(
   if (!host) {
     return null;
   }
-  return toHostRecord(host, toHostStatus(deps, host.id));
+  return toHostWithStatus(deps, host);
 }
 
 export function requireConnectedHostSession(

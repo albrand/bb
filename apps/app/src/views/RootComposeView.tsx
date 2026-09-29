@@ -95,11 +95,11 @@ import {
 import { PluginComposerHostProvider } from "@/components/plugin/plugin-composer-host";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import { useQuickCreateProjectController } from "@/hooks/useQuickCreateProject";
+import type { PromptDraftAttachment } from "@bb/client-core";
 import {
   arePromptDraftStatesEqual,
   emptyPromptDraftState,
   isPromptDraftEmpty,
-  type PromptDraftAttachment,
   type PromptDraftState,
 } from "@bb/client-core";
 import {

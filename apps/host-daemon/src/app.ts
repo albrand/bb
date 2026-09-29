@@ -826,6 +826,7 @@ export async function createHostDaemonApp(
     createWebSocket: options.createWebSocket,
     getActiveThreads: () => runtimeManager.listActiveThreads(),
     hasOpenBackgroundWork: () => runtimeManager.hasOpenBackgroundWork(),
+    getUndeliveredEventThreadIds: () => eventSink.listUndeliveredThreadIds(),
     getLoadedEnvironments: () => runtimeManager.listLoadedEnvironments(),
     getAdoptedThreads: () => runtimeManager.listAdoptedBridgeThreads(),
     onHostRpcRequest: async (message) => {

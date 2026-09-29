@@ -1090,7 +1090,6 @@ describe("ThreadDetailPromptArea", () => {
       thread: makeThread({
         runtime: {
           displayStatus: "provisioning",
-          hostReconnectGraceExpiresAt: null,
         },
         status: "starting",
       }),

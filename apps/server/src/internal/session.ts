@@ -178,6 +178,7 @@ export function registerInternalSessionRoutes(
       activeThreads: payload.activeThreads,
       adoptedThreads: payload.adoptedThreads ?? [],
       hostId: daemon.hostId,
+      undeliveredEventThreadIds: payload.undeliveredEventThreadIds,
       openedSession: session,
       previousSession,
     });

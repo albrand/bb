@@ -377,6 +377,7 @@ export type UpdateThreadDraftRequest = z.infer<
   typeof updateThreadDraftRequestSchema
 >;
 
+
 export const updateQueuedMessageRequestSchema = z.object({
   expectedUpdatedAt: z.number().int().nonnegative(),
   input: z.array(promptInputSchema).min(1),

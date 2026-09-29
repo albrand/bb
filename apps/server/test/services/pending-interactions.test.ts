@@ -924,6 +924,7 @@ describe("pending interaction lifecycle", () => {
       await handleHostSessionOpened(harness.deps, {
         activeThreads: [],
         adoptedThreads: [],
+        undeliveredEventThreadIds: [],
         hostId: host.id,
         openedSession: replacementSession,
         previousSession: session,

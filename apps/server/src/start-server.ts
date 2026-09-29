@@ -42,6 +42,7 @@ import { createLifecycleDedupers } from "./lifecycle-dedupers.js";
 import { TURN_ACCEPTANCE_GRACE_MS } from "./constants.js";
 import type { ServerLogger, ServerRuntimeConfig } from "./types.js";
 import { NotificationHub } from "./ws/hub.js";
+import { startDaemonLivenessChecks } from "./ws/daemon-protocol.js";
 import { WatchInterestCoordinator } from "./ws/watch-interests.js";
 import { WorkspaceReadCaches } from "./services/environments/workspace-read-cache.js";
 import { HostSharedPortCoordinator } from "./ws/host-shared-ports.js";
@@ -312,6 +313,22 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
   resetWorkspaceWriteClaims({ db });
   startWorkspaceWriteClaimHeartbeat({ db });
   const eventLoopStallMonitor = startEventLoopStallMonitor({ logger });
+  const stopDaemonLivenessChecks = startDaemonLivenessChecks({
+    config: runtimeConfig,
+    db,
+    hub,
+    lifecycleDedupers,
+    logger,
+    machineAuth,
+    pendingInteractions,
+    providerRegistry,
+    pluginHostArtifacts,
+    aiServices,
+    sharedPorts,
+    skillTreeRegistry,
+    telemetry,
+    terminalSessions,
+  });
 
   const sweepDeps = {
     config: runtimeConfig,
@@ -406,6 +423,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       appUpdate.dispose();
       providerModelCatalogPrewarm?.stop();
       eventLoopStallMonitor.stop();
+      stopDaemonLivenessChecks();
       stopWorkspaceWriteClaimHeartbeat({ db });
       if (sweepInterval !== null) {
         clearInterval(sweepInterval);

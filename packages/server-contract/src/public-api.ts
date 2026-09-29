@@ -274,12 +274,15 @@ import type {
   UpdateThreadPluginMetadataRequest,
   UpdateThreadRequest,
   UpdateQueuedMessageRequest,
-  UpdateThreadDraftRequest,
   UploadedPromptAttachment,
   WorkspaceFileListResponse,
   WorkspacePathListResponse,
 } from "./api-types.js";
-import type { ThreadExecutionProfileResponse } from "./api/threads.js";
+import type {
+  ThreadExecutionProfileResponse,
+  UpdateThreadDraftRequest,
+} from "./api/threads.js";
+import { updateThreadDraftRequestSchema } from "./api/threads.js";
 import {
   spendAnalysisPayloadQuerySchema,
   spendAssessmentListQuerySchema,
@@ -321,7 +324,6 @@ import {
   createQueuedMessageRequestSchema,
   queuedMessageListQuerySchema,
   updateQueuedMessageRequestSchema,
-  updateThreadDraftRequestSchema,
   createThreadRequestSchema,
   forkThreadRequestSchema,
   updateThreadPluginMetadataRequestSchema,
@@ -1207,6 +1209,12 @@ export const publicApiRoutes = {
   },
 
   threadSections: {
+    list: defineRoute({
+      path: "/thread-sections",
+      method: "get",
+      request: noRequest<EmptyInput>(),
+      response: jsonResponse<ThreadSectionResponse[]>(),
+    }),
     create: defineRoute({
       path: "/thread-sections",
       method: "post",
@@ -1391,6 +1399,14 @@ export const publicApiRoutes = {
       >(updateQueuedMessageRequestSchema),
       response: jsonResponse<ThreadQueuedMessage>(),
     }),
+    updateDraft: defineRoute({
+      path: "/threads/:id/draft",
+      method: "put",
+      request: jsonRequest<PathId, UpdateThreadDraftRequest>(
+        updateThreadDraftRequestSchema,
+      ),
+      response: jsonResponse<ThreadResponse>(),
+    }),
     sendQueuedMessage: defineRoute({
       path: "/threads/:id/queued-messages/:queuedMessageId/send",
       method: "post",
@@ -1474,14 +1490,6 @@ export const publicApiRoutes = {
         threadPaneActionRequestSchema,
       ),
       response: jsonResponse<ThreadPaneActionResponse>(),
-    }),
-    updateDraft: defineRoute({
-      path: "/threads/:id/draft",
-      method: "put",
-      request: jsonRequest<PathId, UpdateThreadDraftRequest>(
-        updateThreadDraftRequestSchema,
-      ),
-      response: jsonResponse<ThreadResponse>(),
     }),
     tabs: defineRoute({
       path: "/threads/:id/tabs",

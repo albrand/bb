@@ -68,6 +68,7 @@ describe("createServerClient", () => {
       instanceId: "instance-1",
       localApiPort: null,
       activeThreads: [],
+      undeliveredEventThreadIds: [],
       loadedEnvironments: [],
       adoptedThreads: [],
     });
@@ -175,6 +176,7 @@ describe("createServerClient", () => {
           localApiPort: null,
           activeThreads: [],
           adoptedThreads: [],
+          undeliveredEventThreadIds: [],
           loadedEnvironments: [],
         }),
       ).rejects.toMatchObject({
@@ -226,6 +228,7 @@ describe("createServerClient", () => {
         instanceId: "instance-1",
         localApiPort: 38_888,
         activeThreads: [],
+        undeliveredEventThreadIds: [],
         loadedEnvironments: [],
         adoptedThreads: [],
       });
@@ -266,6 +269,7 @@ describe("createServerClient", () => {
         activeThreads: [],
         loadedEnvironments: [],
         adoptedThreads,
+        undeliveredEventThreadIds: [],
       });
 
     await open([]);

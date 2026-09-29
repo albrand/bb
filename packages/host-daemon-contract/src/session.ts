@@ -114,6 +114,7 @@ export const hostDaemonSessionOpenRequestSchema = z
     localApiPort: z.number().int().min(1).max(65_535).nullable().default(null),
     protocolVersion: z.number().int().positive(),
     activeThreads: z.array(hostDaemonActiveThreadSchema),
+    undeliveredEventThreadIds: z.array(z.string().min(1)).default([]),
     loadedEnvironments: z.array(hostDaemonLoadedEnvironmentSchema).default([]),
     adoptedThreads: z.array(hostDaemonAdoptedThreadSchema).optional(),
   })

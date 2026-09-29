@@ -2,7 +2,7 @@ import { getActiveStoredTurnId, getThread, listEvents } from "@bb/db";
 import { turnScope } from "@bb/domain";
 import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS } from "../../src/constants.js";
+import { HOST_RECONNECT_GRACE_MS } from "../../src/constants.js";
 import { DETACHED_THREAD_ADOPTION_WINDOW_MS } from "../../src/internal/fork-adoption.js";
 import { handleDaemonSocketClosed } from "../../src/internal/session-owner-side-effects.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
@@ -307,7 +307,7 @@ describe("a restarted daemon that adopted threads", () => {
       vi.useFakeTimers({ now: Date.now() });
       handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
       await vi.advanceTimersByTimeAsync(
-        DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS + 1,
+        HOST_RECONNECT_GRACE_MS + 1,
       );
       expect(settled()).toBe(false);
 
@@ -339,7 +339,7 @@ describe("a restarted daemon that adopted threads", () => {
       vi.useFakeTimers({ now: Date.now() });
       handleDaemonSocketClosed(harness.deps, { sessionId: session.id });
       await vi.advanceTimersByTimeAsync(
-        DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS + 1,
+        HOST_RECONNECT_GRACE_MS + 1,
       );
 
       expect(getThread(harness.deps.db, other.id)?.status).toBe("error");
@@ -347,7 +347,7 @@ describe("a restarted daemon that adopted threads", () => {
 
       await vi.advanceTimersByTimeAsync(
         DETACHED_THREAD_ADOPTION_WINDOW_MS -
-          DAEMON_ACTIVE_WORK_DISCONNECT_GRACE_MS,
+          HOST_RECONNECT_GRACE_MS,
       );
       expect(getThread(harness.deps.db, adopted.id)?.status).toBe("error");
     });

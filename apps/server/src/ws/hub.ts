@@ -209,9 +209,11 @@ export class NotificationHub implements DbNotifier {
   private readonly daemonSessions = new Map<
     string,
     {
+      heardSinceLivenessCheck: boolean;
       hostId: string;
       localApiPort: number | null;
       platform: HostPlatform;
+      quietLivenessChecks: number;
       socket: HubSocket;
     }
   >();
@@ -240,10 +242,6 @@ export class NotificationHub implements DbNotifier {
   private readonly restartingHostIds = new Set<string>();
   private readonly changedMessageListeners = new Set<ChangedMessageListener>();
   private readonly pendingDaemonDisconnects = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-  private readonly pendingDaemonActiveWorkDisconnects = new Map<
     string,
     ReturnType<typeof setTimeout>
   >();
@@ -393,6 +391,10 @@ export class NotificationHub implements DbNotifier {
       socket,
       JSON.stringify(terminalServerMessageSchema.parse(message)),
     );
+  }
+
+  hasTerminalClients(terminalId: string): boolean {
+    return (this.terminalClientSocketsById.get(terminalId)?.size ?? 0) > 0;
   }
 
   sendTerminalClientMessage(
@@ -547,11 +549,13 @@ export class NotificationHub implements DbNotifier {
       this.unregisterDaemon(existingSessionId);
     }
     this.daemonSessions.set(sessionId, {
+      heardSinceLivenessCheck: true,
       hostId,
       localApiPort:
         this.daemonSessionLocalApiPortsBySessionId.get(sessionId) ?? null,
       platform:
         this.daemonSessionPlatformsBySessionId.get(sessionId) ?? "unknown",
+      quietLivenessChecks: 0,
       socket,
     });
     this.daemonSessionIdsByHost.set(hostId, sessionId);
@@ -579,6 +583,29 @@ export class NotificationHub implements DbNotifier {
         waiter.resolve(true);
       }
     }
+  }
+
+  recordDaemonActivity(sessionId: string): void {
+    const entry = this.daemonSessions.get(sessionId);
+    if (entry) {
+      entry.heardSinceLivenessCheck = true;
+    }
+  }
+
+  takeSilentDaemonSessionIds(maxQuietChecks: number): string[] {
+    const silentSessionIds: string[] = [];
+    for (const [sessionId, entry] of this.daemonSessions) {
+      if (entry.heardSinceLivenessCheck) {
+        entry.heardSinceLivenessCheck = false;
+        entry.quietLivenessChecks = 0;
+        continue;
+      }
+      entry.quietLivenessChecks += 1;
+      if (entry.quietLivenessChecks >= maxQuietChecks) {
+        silentSessionIds.push(sessionId);
+      }
+    }
+    return silentSessionIds;
   }
 
   hasDaemonForHost(hostId: string): boolean {
@@ -721,22 +748,8 @@ export class NotificationHub implements DbNotifier {
     scheduleTimer(this.pendingDaemonDisconnects, sessionId, delayMs, callback);
   }
 
-  scheduleDaemonActiveWorkDisconnect(
-    sessionId: string,
-    delayMs: number,
-    callback: () => void,
-  ): void {
-    scheduleTimer(
-      this.pendingDaemonActiveWorkDisconnects,
-      sessionId,
-      delayMs,
-      callback,
-    );
-  }
-
   cancelPendingDaemonDisconnect(sessionId: string): void {
     cancelTimer(this.pendingDaemonDisconnects, sessionId);
-    cancelTimer(this.pendingDaemonActiveWorkDisconnects, sessionId);
   }
 
   requestHostOnlineRpc(args: {

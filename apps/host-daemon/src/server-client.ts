@@ -216,6 +216,7 @@ interface OpenSessionArgs {
   instanceId: string;
   localApiPort: number | null;
   activeThreads: HostDaemonActiveThread[] | Promise<HostDaemonActiveThread[]>;
+  undeliveredEventThreadIds: string[];
   loadedEnvironments:
     | HostDaemonLoadedEnvironment[]
     | Promise<HostDaemonLoadedEnvironment[]>;
@@ -511,6 +512,7 @@ export function createServerClient(
         localApiPort: args.localApiPort,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: await args.activeThreads,
+        undeliveredEventThreadIds: args.undeliveredEventThreadIds,
         loadedEnvironments: await args.loadedEnvironments,
         ...(args.adoptedThreads.length > 0
           ? { adoptedThreads: args.adoptedThreads }

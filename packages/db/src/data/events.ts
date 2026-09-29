@@ -394,6 +394,10 @@ export interface ListThreadIdsWithLatestHostDaemonRestartInterruptionArgs {
   threadIds: readonly string[];
 }
 
+export interface ListThreadIdsStoppedSinceLastTurnStartArgs {
+  threadIds: readonly string[];
+}
+
 export interface ListThreadTurnInterruptionEventStatesArgs {
   threadIds: readonly string[];
 }
@@ -1555,7 +1559,8 @@ export function listLatestThreadStateEventRowsByThreadIds(
       return db
         .select(storedEventRowFields)
         .from(events)
-        .where(sql`${events}.rowid IN (
+        .where(
+          sql`${events}.rowid IN (
         SELECT latest_state.rowid
         FROM ${events} AS latest_state INDEXED BY events_thread_state_thread_sequence_idx
         WHERE latest_state.thread_id IN (${threadIdList})
@@ -1567,7 +1572,8 @@ export function listLatestThreadStateEventRowsByThreadIds(
               AND candidate.type ${stateTypesPredicate}
               AND ${kindPredicate}
           )
-      )`)
+      )`,
+        )
         .all();
     },
 
@@ -3913,6 +3919,34 @@ export function listThreadTurnInterruptionEventStates(
     const state = statesByThreadId.get(threadId);
     return state ? [state] : [];
   });
+}
+
+export function listThreadIdsStoppedSinceLastTurnStart(
+  db: DbConnection,
+  args: ListThreadIdsStoppedSinceLastTurnStartArgs,
+): string[] {
+  if (args.threadIds.length === 0) {
+    return [];
+  }
+
+  return db
+    .select({ threadId: events.threadId })
+    .from(events)
+    .where(
+      and(
+        inArray(events.threadId, [...args.threadIds]),
+        eq(events.type, "system/thread/interrupted"),
+        sql`json_extract(${events.data}, '$.reason') = 'manual-stop'`,
+        sql`${events.sequence} = (
+          SELECT MAX(latest.sequence)
+          FROM events AS latest
+          WHERE latest.thread_id = ${events.threadId}
+            AND latest.type IN ('turn/started', 'system/thread/interrupted')
+        )`,
+      ),
+    )
+    .all()
+    .map((row) => row.threadId);
 }
 
 export function listThreadIdsWithLatestHostDaemonRestartInterruption(

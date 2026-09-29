@@ -718,7 +718,6 @@ function applyOptimisticAcceptedTurnThreadState({
     runtime: {
       ...thread.runtime,
       displayStatus:
-        thread.runtime.displayStatus === "host-reconnecting" ||
         thread.runtime.displayStatus === "waiting-for-host"
           ? thread.runtime.displayStatus
           : "active",
@@ -886,11 +885,6 @@ export function prefetchThreadQueuedMessages({
   });
 }
 
-interface ThreadResultCacheArgs {
-  queryClient: QueryClient;
-  thread: ThreadResponse;
-}
-
 export function applyCreateThreadResult({
   queryClient,
   request,
@@ -936,6 +930,11 @@ export function applyCreateThreadResult({
     });
   }
   refetchThreadListsAfterComposerThreadCreate({ queryClient });
+}
+
+interface ThreadResultCacheArgs {
+  queryClient: QueryClient;
+  thread: ThreadResponse;
 }
 
 export function applyCreateDraftThreadResult({
