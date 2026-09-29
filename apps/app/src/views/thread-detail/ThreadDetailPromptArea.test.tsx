@@ -263,10 +263,6 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
         <div data-testid="selected-service-tier">
           {execution.serviceTier?.value}
         </div>
-
-        <div data-testid="selected-service-tier">
-          {execution.serviceTier?.value}
-        </div>
         <div data-testid="selected-permission">{permission.value}</div>
         <div data-testid="execution-read-only">
           {executionReadOnly ? "true" : "false"}
