@@ -1,3 +1,4 @@
+import { androidAppPrepareRequestSchema } from "./api/system.js";
 import {
   machineEnvironmentSetSchema,
   machineEnvironmentDeleteSchema,
@@ -195,6 +196,9 @@ import type {
   SystemAttentionResponse,
   SystemConfigReloadResponse,
   SystemConfigResponse,
+  SystemAndroidAppResponse,
+  AndroidAppPreparation,
+  AndroidAppPrepareRequest,
   SystemCliSkillsStatusQuery,
   SystemCliSkillsStatusResponse,
   SystemInstallCliSkillsRequest,
@@ -1812,6 +1816,26 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest(),
       response: jsonResponse<SystemAttentionResponse>(),
+    }),
+    androidAppPreparation: defineRoute({
+      path: "/system/android-app/preparation",
+      method: "get",
+      request: noRequest(),
+      response: jsonResponse<AndroidAppPreparation>(),
+    }),
+    prepareAndroidApp: defineRoute({
+      path: "/system/android-app/prepare",
+      method: "post",
+      request: jsonRequest<EmptyInput, AndroidAppPrepareRequest>(
+        androidAppPrepareRequestSchema,
+      ),
+      response: jsonResponse<AndroidAppPreparation>(),
+    }),
+    androidApp: defineRoute({
+      path: "/system/android-app",
+      method: "get",
+      request: noRequest(),
+      response: jsonResponse<SystemAndroidAppResponse>(),
     }),
     config: defineRoute({
       path: "/system/config",

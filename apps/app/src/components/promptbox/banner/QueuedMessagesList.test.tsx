@@ -26,9 +26,9 @@ import {
   queuedMessageSortingStrategy,
   resolveQueuedMessageDrag,
   snapGroupBoundaryDragTransform,
-  type QueuedMessagesListProps,
   SIDE_CHAT_ALWAYS_VISIBLE_CLASS,
 } from "./QueuedMessagesList";
+import type { QueuedMessagesListProps } from "./LazyQueuedMessagesList";
 import {
   QueuedEditorTypeaheadLayoutContext,
   type QueuedEditorTypeaheadLayout,
@@ -2032,9 +2032,7 @@ describe("queued row affordances", () => {
         sendAt: 0,
       }),
     ]);
-    expect(
-      container.querySelector("[data-queued-message-sender]"),
-    ).toBeNull();
+    expect(container.querySelector("[data-queued-message-sender]")).toBeNull();
     expect(
       getByText(/^Rate limited · retrying at .* · attempt 2$/u),
     ).toBeDefined();

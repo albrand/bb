@@ -353,9 +353,6 @@ export function PluginSidebarFooterItems({
                 </ContextMenuTrigger>
                 <ContextMenuContent
                   onCloseAutoFocus={handleCloseAutoFocus}
-                  onPointerUpCapture={(event) => {
-                    if (event.button !== 0) event.preventDefault();
-                  }}
                 >
                   <ContextMenuItem
                     onSelect={() => preferences.hideFromFooter(item.key)}

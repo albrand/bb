@@ -33,7 +33,9 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
 - Spawn also accepts `--title`, `--origin-kind`, `--source-thread`,
   `--source-seq-end`, `--agent-context-seed`, and `--json`.
 - Add repeatable `--file <path>` / `--image <path>` flags for structured prompt
-  attachments, and `--section <id>` to add the new thread to a section.
+  attachments, `--section <id>` to add the new thread to a section, and
+  `--pinned` to pin it at creation. Section and pinning can be combined;
+  unpinning then reveals the thread in its section.
   Both flags upload absolute paths and `file:` URLs from the CLI machine
   before sending and pass relative server-upload tokens through unchanged.
   Use an absolute path (for example, `--file "$PWD/report.pdf"`) for local files.

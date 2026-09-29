@@ -45,6 +45,14 @@
     "raw, 7.1 KB above the summed raw limit, so the raw cap is the measured",
     "closure plus 4 KB of allowance.",
     "",
+    "On 2026-09-29 sidebar footer customization moved behind React.lazy.",
+    "Its static import had put @dnd-kit back on the boot path on 2026-09-26.",
+    "The boot limits dropped by the full win (61,053 bytes raw, 15,730",
+    "brotli), and the @dnd-kit packages joined forbiddenBootPackages. The",
+    "thread route's queued-message reorder still loads @dnd-kit statically, so",
+    "the SplitWorkspaceRoute closure grew by 49,568 bytes raw and 14,918",
+    "brotli within its existing limits, which already assumed @dnd-kit there.",
+    "",
     "On 2026-09-23 the SplitWorkspaceRoute brotli limit rose 2 KB. main sat",
     "0.1 KB under it, and a change that shrank the raw closure by 29 bytes",
     "still moved the compressed closure 0.6 KB through minifier renaming and",
@@ -80,11 +88,23 @@
     "The composer (tiptap/prosemirror) is visible on every thread page and is",
     "allowed until it moves behind a first-focus handoff. Run",
     "`node scripts/why-eager.mjs --from=views/SplitWorkspaceRoute.tsx <package>`",
-    "to print the static chain that pulled a package into the closure."
+    "to print the static chain that pulled a package into the closure.",
+    "",
+    "On 2026-09-29 the second split wave moved terminal output, queued messages,",
+    "model-menu contents and command-palette contents behind demand/intent gates.",
+    "The panel policy audit also removed blanket idle preloading and gated first",
+    "panel/browser mounts. Compared with fc92e220a6, the integrated changes saved",
+    "13,894 boot raw / 3,514 boot brotli bytes and",
+    "175,237 thread-route raw / 41,117 thread-route brotli bytes.",
+    "All four limits dropped by those net measured savings; none were raised."
   ],
-  "maxBootBytes": 1643213,
-  "maxBootBrotliBytes": 401629,
+  "maxBootBytes": 1568266,
+  "maxBootBrotliBytes": 382385,
   "forbiddenBootPackages": [
+    "@dnd-kit/accessibility",
+    "@dnd-kit/core",
+    "@dnd-kit/sortable",
+    "@dnd-kit/utilities",
     "@pierre/diffs",
     "@pierre/theming",
     "@pierre/trees",
@@ -98,6 +118,7 @@
     "@tiptap/react",
     "@tiptap/starter-kit",
     "@xterm/xterm",
+    "ansi-to-html",
     "katex",
     "oniguruma-to-es",
     "prosemirror-model",
@@ -107,16 +128,82 @@
     "rehype-katex",
     "shiki"
   ],
+  "splitBoundaries": {
+    "src/components/code/BbDiff.tsx": ["boot", "SplitWorkspaceRoute"],
+    "src/components/code/BbSourceCode.tsx": ["boot", "SplitWorkspaceRoute"],
+    "src/components/sidebar/SidebarFooterCustomize.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/FilePreview.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/ThreadSecondaryPanel.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/sidebar/SidebarVisibilityCustomize.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/thread/timeline/TimelineFileDiffBlock.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/BrowserTabDeck.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/NewTabPage.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/ThreadSecondaryPanelTabContent.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/secondary-panel/ThreadStorageFileTree.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/promptbox/banner/QueuedMessagesList.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/thread/terminal/ThreadTerminalPanel.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/thread/timeline/TerminalOutputBlock.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/pickers/ModelReasoningMenu.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/commands/CommandPaletteBody.tsx": [
+      "boot",
+      "SplitWorkspaceRoute"
+    ],
+    "src/components/commands/PaletteShell.tsx": ["boot", "SplitWorkspaceRoute"]
+  },
   "onDemandPackages": {
     "@pierre/trees": "src/components/secondary-panel/ThreadStorageFileTree.tsx",
+    "ansi-to-html": "src/components/thread/timeline/TerminalOutputBlock.tsx",
     "katex": "src/components/ui/markdown-katex.ts",
     "rehype-katex": "src/components/ui/markdown-katex.ts"
   },
   "routeClosures": {
     "SplitWorkspaceRoute": {
-      "maxBytes": 2376224,
-      "maxBrotliBytes": 635341,
+      "maxBytes": 2200987,
+      "maxBrotliBytes": 594224,
       "forbiddenPackages": [
+        "@dnd-kit/accessibility",
+        "@dnd-kit/core",
+        "@dnd-kit/sortable",
+        "@dnd-kit/utilities",
         "@pierre/diffs",
         "@pierre/theming",
         "@pierre/trees",
@@ -126,6 +213,7 @@
         "@shikijs/langs",
         "@shikijs/vscode-textmate",
         "@xterm/xterm",
+        "ansi-to-html",
         "katex",
         "mermaid",
         "oniguruma-to-es",

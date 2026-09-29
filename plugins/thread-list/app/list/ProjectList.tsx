@@ -1390,11 +1390,16 @@ function ProjectListComponent({
     [sdk],
   );
   const openRootComposeForProject = useCallback(
-    (projectId: string | null, sectionId?: string, hostId?: string) => {
+    (
+      projectId: string | null,
+      sectionId?: string,
+      hostId?: string,
+      pinned = false,
+    ) => {
       onProjectSelect?.();
       sidebarActions.openNewThread({
         ...(projectId !== null ? { projectId } : {}),
-        ...(sectionId ? { sectionId } : {}),
+        experimental_placement: { sectionId: sectionId ?? null, pinned },
         ...(hostId ? { hostId } : {}),
         focusPrompt: true,
       });
@@ -1548,8 +1553,15 @@ function ProjectListComponent({
         sectionId={sectionId}
         onNewThread={
           hostId
-            ? () => openRootComposeForProject(personalProjectId, undefined, hostId)
-            : handleCreateProjectlessThread
+            ? () =>
+                openRootComposeForProject(personalProjectId, undefined, hostId)
+            : () =>
+                openRootComposeForProject(
+                  sectionId === "pinned" ? null : personalProjectId,
+                  undefined,
+                  undefined,
+                  sectionId === "pinned",
+                )
         }
         showNewProject={sectionId === "threads"}
         open={openSidebarMenu === menuId}

@@ -262,3 +262,21 @@ Use `bb settings ui reset sidebar.hiddenFooterItems` to restore the default foot
 Disable anonymous usage telemetry with `bb settings general telemetryEnabled false`
 or Settings → General → Privacy & diagnostics → Share anonymous usage data. This server-wide preference
 applies immediately and persists across restarts. `BB_TELEMETRY=false` overrides it.
+
+The default-off `androidTesting` experiment adds **Android App** below the flags
+in Settings → Experiments. **Download APK** fetches and caches a checksum-verified
+APK from the public `get-bb/bb` release tagged `android-testing`. No Android tools
+are required. If no release/cache is available, **Build on this server** explicitly
+runs a local arm64 build; it requires `BB_ANDROID_SOURCE_DIR` pointing to a dedicated
+source checkout with dependencies, pnpm, Java 17+, and `ANDROID_HOME` or
+`ANDROID_SDK_ROOT`. Missing tools and build failures are reported in the page.
+
+Use `bb settings experiment androidTesting true`, then
+`bb settings android-app-prepare github --json` (or `local`) to wait for a download
+or build. `bb settings android-app --json` reads cached version/download metadata.
+SDK equivalents: `system.prepareAndroidApp({ source })`,
+`system.androidAppPreparation()`, and `system.androidApp()`.
+Downloads use `/install/bb-android.apk`; remote access requires an account session.
+Publish the first release using **Mobile Android (EAS)** with profile `preview`
+and **publish** enabled. Local fallback APKs use the debug signing key, which may
+differ from the release key. See `docs/configuration.md` for setup and publishing.

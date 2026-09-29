@@ -492,3 +492,11 @@ This prevents legacy `apps/server/dist/builtin-plugins` artifacts left by a
 Turbo cache restore from overriding newly prepared plugins. Installed packages
 use their shipped `server/dist/builtin-plugins` directory. Built-in plugins
 update with the server; users do not update them separately.
+
+## Reviewing UI Code Splits
+
+See [UI code splitting](ui-code-splitting.md) for the app's `defineSplit`
+contract, explicit preload scopes, bundle-boundary guards, and parallel worker
+handoff requirements. Use an isolated production build with browser request
+interception to review loading and failure states and verify cold-download
+behavior. Keep temporary review stories and fixtures out of the final diff.

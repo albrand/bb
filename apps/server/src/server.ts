@@ -1,4 +1,6 @@
 import { registerInternalForkAdoptionRoutes } from "./internal/fork-adoption.js";
+import { getExperiments } from "@bb/db";
+import { androidApkResponse } from "./services/install/android-app-artifact.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
 import { enrolledInstallerScript } from "./services/machines/manual-enrollment-command.js";
 import { reconnectBootstrapForCredential } from "./services/machines/reconnect.js";
@@ -578,6 +580,15 @@ export function createApp(
       },
     );
   });
+  app.get("/install/bb-android.apk", (context) => {
+    if (!getExperiments(deps.db).androidTesting) {
+      return new Response("Android testing is disabled.", {
+        status: 404,
+        headers: { "cache-control": "no-store" },
+      });
+    }
+    return androidApkResponse(deps.config.dataDir, context.req.raw);
+  });
   app.get("/install/version", async (context) => {
     return context.json({
       version: await bbAppArtifactService.getVersion(),
@@ -747,11 +758,11 @@ export function createApp(
           });
         })
         .catch((error: unknown) => {
-        deps.logger.warn(
-          { err: error, threadId: interaction.threadId },
-          "Could not queue an answer that arrived after its tool call ended",
-        );
-      });
+          deps.logger.warn(
+            { err: error, threadId: interaction.threadId },
+            "Could not queue an answer that arrived after its tool call ended",
+          );
+        });
     },
   );
   setPluginThreadEventEmitter(pluginService.events);
