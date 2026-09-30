@@ -1,5 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
+  closeSync,
+  openSync,
+  truncateSync,
+  writeSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -171,6 +175,34 @@ it.each([
     expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
   },
 );
+
+it("reloads after a byte past 2 GiB of a sparse config changes with the same inode, size, and modification time", async () => {
+  const configPath = join(codexHome, "config.toml");
+  const farOffset = 2 ** 31;
+  const writeByteAt = (byte: string): void => {
+    const descriptor = openSync(configPath, "r+");
+    writeSync(descriptor, Buffer.from(byte), 0, 1, farOffset);
+    closeSync(descriptor);
+  };
+  truncateSync(configPath, farOffset + 2);
+  writeByteAt("a");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  startHarness({});
+  const providerThreadId = await startThread();
+  const before = statSync(configPath);
+
+  writeByteAt("b");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const after = statSync(configPath);
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([
+    before.ino,
+    before.size,
+    before.mtimeMs,
+  ]);
+  await runTurn(2, providerThreadId);
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+}, 120_000);
 
 it("starts the turn when a watched config is replaced by a FIFO with no writer", async () => {
   startHarness({});

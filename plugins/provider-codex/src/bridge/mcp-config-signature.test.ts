@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
 import {
+  closeSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   rmSync,
   statSync,
+  truncateSync,
   utimesSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +76,35 @@ it("changes when a watched config file is created, edited, or removed", () => {
   rmSync(join(rootDir, "home", "config.toml"));
   expect(signature()).toBe(absent);
 });
+
+function writeByteAt(path: string, position: number, byte: string): void {
+  const descriptor = openSync(path, "r+");
+  writeSync(descriptor, Buffer.from(byte), 0, 1, position);
+  closeSync(descriptor);
+}
+
+it("changes when a byte past 2 GiB of a sparse config changes but its inode, size, and modification time do not", () => {
+  const env = { CODEX_HOME: rootDir };
+  const configPath = join(rootDir, "config.toml");
+  const farOffset = 2 ** 31;
+  writeFileSync(configPath, "");
+  truncateSync(configPath, farOffset + 2);
+  writeByteAt(configPath, farOffset, "a");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const before = statSync(configPath);
+  const original = codexMcpConfigSignature({ cwd: rootDir, env });
+
+  writeByteAt(configPath, farOffset, "b");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const after = statSync(configPath);
+
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([
+    before.ino,
+    before.size,
+    before.mtimeMs,
+  ]);
+  expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
+}, 120_000);
 
 it("signs a FIFO or a directory without reading it", () => {
   const env = { CODEX_HOME: rootDir };

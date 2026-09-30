@@ -1,11 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readFileSync,
-} from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -35,6 +29,20 @@ function errorCode(error: unknown): string {
     : "error";
 }
 
+const HASH_CHUNK_BYTES = 1024 * 1024;
+
+function hashDescriptor(descriptor: number): string {
+  const hash = createHash("sha256");
+  const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+  for (;;) {
+    const bytesRead = readSync(descriptor, chunk, 0, chunk.length, null);
+    if (bytesRead === 0) {
+      return hash.digest("hex");
+    }
+    hash.update(chunk.subarray(0, bytesRead));
+  }
+}
+
 function fileSignature(path: string): string {
   let descriptor: number;
   try {
@@ -51,7 +59,11 @@ function fileSignature(path: string): string {
     if (!stats.isFile()) {
       return `not-a-file:${stats.ino}:${stats.mode}`;
     }
-    return createHash("sha256").update(readFileSync(descriptor)).digest("hex");
+    try {
+      return hashDescriptor(descriptor);
+    } catch (error) {
+      return `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+    }
   } catch (error) {
     return errorCode(error);
   } finally {
