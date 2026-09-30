@@ -160,8 +160,12 @@ it.each<StalledOperation>(["open", "stat", "read", "close"])(
     io.stalls.delete(configPath);
     release();
     await waitFor(() => (io.closes.get(configPath) ?? 0) >= 2);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(await signature()).toBe(healthy);
+    await vi.waitFor(
+      async () => {
+        expect(await signature()).toBe(healthy);
+      },
+      { timeout: 5_000 },
+    );
   },
 );
 

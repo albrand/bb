@@ -19,6 +19,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
 import { z } from "zod";
 import { handleLine } from "./bridge.js";
+import { codexMcpConfigSignature } from "./mcp-config-signature.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
   stubFakeCodexAppServer,
@@ -350,7 +351,18 @@ it("reloads before the turn when reading a watched config stalls, and stops relo
   await vi.waitFor(() => {
     expect(io.closes.get(configPath) ?? 0).toBe(closesBefore + 1);
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await vi.waitFor(
+    async () => {
+      expect(
+        await codexMcpConfigSignature({
+          cwd: workspaceDir,
+          env: { CODEX_HOME: codexHome },
+          deadlineMs: 2_000,
+        }),
+      ).not.toMatch(/^unhashed:/);
+    },
+    { timeout: 10_000 },
+  );
 
   await runTurn(3, providerThreadId);
   await runTurn(4, providerThreadId);
