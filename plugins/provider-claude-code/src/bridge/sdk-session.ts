@@ -35,6 +35,7 @@ export interface SdkSessionOptions {
   allowedTools?: string[];
   disallowedTools?: string[];
   canUseTool?: CanUseTool;
+  onElicitation?: Options["onElicitation"];
   env?: NodeJS.ProcessEnv;
   pathToClaudeCodeExecutable?: Options["pathToClaudeCodeExecutable"];
   plugins?: Options["plugins"];
@@ -263,6 +264,9 @@ export class SdkSession {
         : {}),
       ...(this.options.canUseTool
         ? { canUseTool: this.options.canUseTool }
+        : {}),
+      ...(this.options.onElicitation
+        ? { onElicitation: this.options.onElicitation }
         : {}),
       ...(this.options.sandbox ? { sandbox: this.options.sandbox } : {}),
       ...(this.options.hooks ? { hooks: this.options.hooks } : {}),

@@ -9,6 +9,7 @@ export * from "./bridge-socket-server.js";
 export * from "./bridge-tool-calls.js";
 export * from "./contracts.js";
 export * from "./json-rpc-envelope.js";
+export * from "./mcp-elicitation.js";
 export * from "./mime-types.js";
 export * from "./pending-tool-call-tracker.js";
 export * from "./permission-policy.js";

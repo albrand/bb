@@ -1261,6 +1261,67 @@ unterminated line is emitted before it.
    reasonably want to fail the session instead. Decide whether the reader
    should offer a fail-closed mode before the signature is a promise.
 
+## `experimental_runMcpElicitation` (`@get-bb/plugin-sdk/provider-bridge`)
+
+Requires plugin SDK 0.6.7. Types: `experimental_McpElicitationRequest`,
+`experimental_McpElicitationResult`, `experimental_McpElicitationValue`.
+
+**What it does.** Runs one MCP form elicitation through bb's question card and
+returns the MCP result. A provider bridge passes the request (`serverName`,
+`message`, `mode`, `requestedSchema`) and an `ask` callback that sends a
+`user_question` interaction and resolves with its raw resolution. An optional
+`signal` cancels it. The Codex and Claude Code bridges both use it, so their
+forms behave the same.
+
+- Field support:
+  - Each field becomes one question with bb-side ids: `field-N` for questions
+    and `field-N:option-M` for options. Property names never become ids or
+    object keys before the final content object is built, so names such as
+    `__proto__` stay plain keys.
+  - Enums become options; multi-select arrays become a multi-select question;
+    booleans become Yes/No.
+  - Strings and numbers are typed answers. Their limits and formats appear in
+    the prompt and are checked.
+  - An optional field gets a Skip option when there is room for one.
+  - A form with no fields asks Continue or Decline.
+- Invalid answers are asked again with the error shown on that question, up
+  to 3 attempts, then the elicitation is cancelled.
+- Declined without asking:
+  - URL and `openai/form` modes;
+  - more than 4 fields or 4 choices;
+  - nested or unknown field types;
+  - any schema keyword the helper does not check, such as `pattern`,
+    `exclusiveMinimum`, `multipleOf`, string limits on a choice field, or a
+    form-level `allOf`, so an accepted result always satisfies the requested
+    schema;
+  - `required` names that the form does not define;
+  - a blank message.
+- A rejected `ask`, an answer of the wrong shape, or an aborted signal
+  cancels.
+
+**Audit before stabilizing.**
+
+1. **Card limits shape the contract.** The 4-question and 4-option caps come
+   from the question card. Decide whether larger forms should page through
+   several cards instead of being declined.
+2. **Optional fields.** The card needs every question answered, so an
+   optional field is skipped with an explicit Skip option. An optional choice
+   that already has 4 options cannot be skipped. A card-level "leave empty"
+   would remove that gap.
+3. **Decline without cancelling.** Cancelling the card stops the thread, so a
+   user can decline a form only when it has no fields. Decide whether the card
+   should offer a Decline action that returns `decline` and keeps the turn
+   running.
+4. **Format checks are bb's own.** Email, URI, date and date-time use local
+   checks that accept a strict subset of what ajv-formats accepts: RFC 3339
+   dates and date-times with a checked offset, emails with a DNS-style domain,
+   and only `http://` or `https://` addresses for `uri`. The mapper tests
+   validate every accepted value with ajv. Decide whether other URI schemes are
+   needed.
+5. **Result shape.** `decline` and `cancel` carry a `reason` for logs, which
+   MCP results do not have; each bridge drops it when it replies. Decide
+   whether the reason belongs in the public result.
+
 ## Live-file navigation (`experimental_FileLink`, `BbNavigate.experimental_openFilePreview`, `BbNavigate.experimental_openFileExternally`, and `PluginFileOpenerSource.experimental_hostId`)
 
 **Kept experimental (2026-08-22).** `experimental_hostId` is persisted inside opener-tab `paramsJson` (a rename needs a read-compat shim), Windows/UNC paths were never verified, and `experimental_openFilePreview` has no consumer.

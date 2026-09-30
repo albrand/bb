@@ -101,6 +101,7 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `experimental_readCliVersion`
 - `experimental_recordProviderChildIo`
 - `experimental_resolveExecutablePath`
+- `experimental_runMcpElicitation`
 - `experimental_searchPresentation`
 - `experimental_toolPresentation`
 - `experimental_versionFrom`
@@ -195,6 +196,9 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `turnSteerParamsSchema`
 - `userQuestionInteractionOutcomeSchema`
 - `withoutBridgeRuntimeEnv`
+- `experimental_McpElicitationRequest`
+- `experimental_McpElicitationResult`
+- `experimental_McpElicitationValue`
 - `ApprovalInteractionOutcome`
 - `ApprovalPendingInteractionPayload`
 - `AvailableModel`

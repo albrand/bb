@@ -549,6 +549,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Publish context snapshots through contextWindow deltas, with provider-defined category IDs and labels. Each category declares used, free, reserved, or deferred accounting; entries are included in its total and may be partial. Snapshots include capture time, session identity, model, totals, and an optional auto-compaction threshold",
           "Receive every message in a thread started with it, through a bridge process the plugin ships",
           "Contribute validated environment variables to any provider for each session and turn",
+          "Show an MCP server's form elicitation as a bb question card with experimental_runMcpElicitation, which checks the answers and returns typed MCP content, or a decline or cancel",
         ],
         apiSymbols: [
           "contextSnapshotSchema",
@@ -563,6 +564,10 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalPluginProviderEnvEntry",
           "ExperimentalPluginProviderEnvHealthContext",
           "ExperimentalPluginProviderEnvHealth",
+          "experimental_runMcpElicitation",
+          "experimental_McpElicitationRequest",
+          "experimental_McpElicitationResult",
+          "experimental_McpElicitationValue",
         ],
         firstParty: [
           "ACP providers",

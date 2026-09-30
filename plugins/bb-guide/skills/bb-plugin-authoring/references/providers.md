@@ -276,6 +276,16 @@ and environment setup, installation and version checks, tool presentation,
 bounded output, and recording. Read `provider-bridge-api-index.md` for every
 symbol, then read the installed declaration for its exact signature.
 
+When the agent's MCP servers can ask for input, call
+`experimental_runMcpElicitation({ request, ask, signal })` with the
+elicitation's `serverName`, `message`, `mode`, and `requestedSchema`. In `ask`,
+send the given `user_question` payload with `interaction/request` and return
+the raw result. The helper checks the answers, asks again when one is invalid,
+and resolves to an MCP `accept` with typed `content`, a `decline`, or a
+`cancel`. It declines URL-mode requests, forms the question card cannot
+show, and forms with schema keywords it does not check, so an accepted result
+always satisfies the requested schema.
+
 For an ACP agent, use `@get-bb/plugin-sdk/provider-bridge/acp`. Re-export
 `experimental_acpProviderBridge` as `experimental_providerBridge`. Supply a
 validated `acpLaunchSpec` and an ACP dialect in the static bridge options. The

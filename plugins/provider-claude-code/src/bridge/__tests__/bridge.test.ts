@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CanUseTool,
+  OnElicitation,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -109,6 +110,7 @@ interface ControlledClaudeQuery {
 
 interface ClaudeQueryCallOptions {
   canUseTool?: CanUseTool;
+  onElicitation?: OnElicitation;
   env?: Record<string, string | undefined>;
   extraArgs?: Record<string, string | null>;
   hooks?: BridgeSessionHooks;
@@ -254,6 +256,27 @@ function getLastCanUseTool(): CanUseTool {
   }
   return latestCall.options.canUseTool;
 }
+
+function getLastOnElicitation(): OnElicitation {
+  const onElicitation = getLatestQueryOptions().onElicitation;
+  if (!onElicitation) {
+    throw new Error("Expected Claude SDK query to receive onElicitation");
+  }
+  return onElicitation;
+}
+
+const COLOR_ELICITATION = {
+  serverName: "design",
+  message: "Pick a banner color.",
+  mode: "form" as const,
+  requestedSchema: {
+    type: "object",
+    properties: {
+      color: { type: "string", title: "Color", enum: ["red", "green"] },
+    },
+    required: ["color"],
+  },
+};
 
 function createControlledClaudeQuery(): ControlledClaudeQuery {
   let finishNext: ((result: IteratorResult<SDKMessage>) => void) | undefined;
@@ -1611,6 +1634,192 @@ describe("bridge", () => {
 
       await stopBridgeThread({ bridge, queries, threadId });
     } finally {
+      bridge.restore();
+    }
+  });
+
+  it("answers an MCP elicitation form through a bb question card", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+
+    try {
+      const threadId = "thread-mcp-elicitation";
+      await startBridgeThread({ bridge, threadId });
+      const resultPromise = getLastOnElicitation()(COLOR_ELICITATION, {
+        signal: new AbortController().signal,
+        requestId: "elicit-1",
+      });
+      await bridge.flushWork();
+
+      const questionRequest = bridge.messages.find(isUserQuestionInteraction);
+      if (questionRequest?.id === undefined) {
+        throw new Error("Expected an elicitation question request");
+      }
+      expect(questionRequest.params).toMatchObject({
+        threadId,
+        turnId: null,
+        payload: {
+          kind: "user_question",
+          questions: [
+            {
+              id: "field-1",
+              prompt: "The design MCP server asks: Pick a banner color. Color",
+              options: [
+                { value: "field-1:option-1", label: "red" },
+                { value: "field-1:option-2", label: "green" },
+              ],
+            },
+          ],
+        },
+      });
+
+      handleLine(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: questionRequest.id,
+          result: {
+            kind: "user_answer",
+            answers: { "field-1": { selected: ["field-1:option-2"] } },
+          },
+        }),
+      );
+
+      await expect(resultPromise).resolves.toEqual({
+        action: "accept",
+        content: { color: "green" },
+      });
+      await stopBridgeThread({ bridge, queries, threadId });
+    } finally {
+      bridge.restore();
+    }
+  });
+
+  it("asks an MCP date-time field again after an impossible offset", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+
+    try {
+      const threadId = "thread-mcp-elicitation-format";
+      await startBridgeThread({ bridge, threadId });
+      const resultPromise = getLastOnElicitation()(
+        {
+          serverName: "calendar",
+          message: "When is the meeting?",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              when: { type: "string", title: "Starts", format: "date-time" },
+            },
+            required: ["when"],
+          },
+        },
+        { signal: new AbortController().signal, requestId: "elicit-format" },
+      );
+
+      for (const [index, freeText] of [
+        "2026-09-30T12:00:00+99:99",
+        "2026-09-30T12:00:00-04:00",
+      ].entries()) {
+        await bridge.flushWork();
+        const questionRequest = bridge.messages.filter(
+          isUserQuestionInteraction,
+        )[index];
+        if (questionRequest?.id === undefined) {
+          throw new Error(`Expected question request ${index + 1}`);
+        }
+        handleLine(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: questionRequest.id,
+            result: {
+              kind: "user_answer",
+              answers: { "field-1": { selected: [], freeText } },
+            },
+          }),
+        );
+      }
+
+      await expect(resultPromise).resolves.toEqual({
+        action: "accept",
+        content: { when: "2026-09-30T12:00:00-04:00" },
+      });
+      expect(bridge.messages.filter(isUserQuestionInteraction)).toHaveLength(2);
+      await stopBridgeThread({ bridge, queries, threadId });
+    } finally {
+      bridge.restore();
+    }
+  });
+
+  it("cancels a pending MCP elicitation when Claude aborts it or the thread stops", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    try {
+      const threadId = "thread-mcp-elicitation-cancel";
+      await startBridgeThread({ bridge, threadId });
+      const controller = new AbortController();
+      const aborted = getLastOnElicitation()(COLOR_ELICITATION, {
+        signal: controller.signal,
+        requestId: "elicit-2",
+      });
+      await bridge.flushWork();
+      controller.abort();
+      await expect(aborted).resolves.toEqual({ action: "cancel" });
+
+      const stopped = getLastOnElicitation()(COLOR_ELICITATION, {
+        signal: new AbortController().signal,
+        requestId: "elicit-3",
+      });
+      await bridge.flushWork();
+      expect(bridge.messages.filter(isUserQuestionInteraction)).toHaveLength(2);
+      await stopBridgeThread({ bridge, queries, threadId });
+      await expect(stopped).resolves.toEqual({ action: "cancel" });
+
+      const unsupported = await getLastOnElicitation()(
+        { ...COLOR_ELICITATION, mode: "url", url: "https://example.com" },
+        { signal: new AbortController().signal, requestId: "elicit-4" },
+      );
+      expect(unsupported).toEqual({ action: "decline" });
+      for (const [index, color] of [
+        { type: "string", enum: ["x", "long"], minLength: 2 },
+        { type: "string", pattern: "^[a-z]+$" },
+      ].entries()) {
+        const constrained = await getLastOnElicitation()(
+          {
+            ...COLOR_ELICITATION,
+            requestedSchema: {
+              type: "object",
+              properties: { color },
+              required: ["color"],
+            },
+          },
+          {
+            signal: new AbortController().signal,
+            requestId: `elicit-constrained-${index}`,
+          },
+        );
+        expect(constrained).toEqual({ action: "decline" });
+      }
+      expect(bridge.messages.filter(isUserQuestionInteraction)).toHaveLength(2);
+    } finally {
+      stderr.mockRestore();
       bridge.restore();
     }
   });
