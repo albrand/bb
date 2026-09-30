@@ -138,25 +138,39 @@ it("reloads Codex MCP servers before the first turn after the MCP config changes
   ]);
 });
 
-it("reloads after an edit that keeps the config's inode, size, and modification time", async () => {
-  const configPath = join(codexHome, "config.toml");
-  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
-  startHarness({});
-  const providerThreadId = await startThread();
-  const before = statSync(configPath);
+it.each([
+  ["a small config", 0],
+  ["a config over 1 MiB", 1024 * 1024],
+])(
+  "reloads after an edit to %s that keeps its inode, size, and modification time",
+  async (_label, padding) => {
+    const configPath = join(codexHome, "config.toml");
+    const comment = padding === 0 ? "" : `# ${"x".repeat(padding)}\n`;
+    writeFileSync(
+      configPath,
+      `${comment}[mcp_servers.alpha]\ncommand = "alpha"\n`,
+    );
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    startHarness({});
+    const providerThreadId = await startThread();
+    const before = statSync(configPath);
 
-  writeFileSync(configPath, '[mcp_servers.alpha]\ncommand = "bravo"\n');
-  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
-  const after = statSync(configPath);
-  expect([after.ino, after.size, after.mtimeMs]).toEqual([
-    before.ino,
-    before.size,
-    before.mtimeMs,
-  ]);
-  await runTurn(2, providerThreadId);
+    writeFileSync(
+      configPath,
+      `${comment}[mcp_servers.alpha]\ncommand = "bravo"\n`,
+    );
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    const after = statSync(configPath);
+    expect([after.ino, after.size, after.mtimeMs]).toEqual([
+      before.ino,
+      before.size,
+      before.mtimeMs,
+    ]);
+    await runTurn(2, providerThreadId);
 
-  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
-});
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  },
+);
 
 it("starts the turn when a watched config is replaced by a FIFO with no writer", async () => {
   startHarness({});

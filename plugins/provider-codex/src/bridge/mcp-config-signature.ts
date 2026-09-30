@@ -29,8 +29,6 @@ export function codexMcpConfigPaths(args: {
   }
 }
 
-const MAX_HASHED_CONFIG_BYTES = 1024 * 1024;
-
 function errorCode(error: unknown): string {
   return error instanceof Error && "code" in error
     ? String(error.code)
@@ -52,9 +50,6 @@ function fileSignature(path: string): string {
     const stats = fstatSync(descriptor);
     if (!stats.isFile()) {
       return `not-a-file:${stats.ino}:${stats.mode}`;
-    }
-    if (stats.size > MAX_HASHED_CONFIG_BYTES) {
-      return `large:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
     }
     return createHash("sha256").update(readFileSync(descriptor)).digest("hex");
   } catch (error) {

@@ -90,22 +90,29 @@ it("signs a FIFO or a directory without reading it", () => {
   expect(directory).not.toBe(fifo);
 });
 
-it("changes when the contents change but the inode, size, and modification time do not", () => {
-  const env = { CODEX_HOME: rootDir };
-  const configPath = join(rootDir, "config.toml");
-  writeFileSync(configPath, 'command = "alpha"\n');
-  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
-  const before = statSync(configPath);
-  const original = codexMcpConfigSignature({ cwd: rootDir, env });
+it.each([
+  ["a small config", 0],
+  ["a config over 1 MiB", 1024 * 1024],
+])(
+  "changes when the contents of %s change but the inode, size, and modification time do not",
+  (_label, padding) => {
+    const env = { CODEX_HOME: rootDir };
+    const configPath = join(rootDir, "config.toml");
+    const comment = padding === 0 ? "" : `# ${"x".repeat(padding)}\n`;
+    writeFileSync(configPath, `${comment}command = "alpha"\n`);
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    const before = statSync(configPath);
+    const original = codexMcpConfigSignature({ cwd: rootDir, env });
 
-  writeFileSync(configPath, 'command = "bravo"\n');
-  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
-  const after = statSync(configPath);
+    writeFileSync(configPath, `${comment}command = "bravo"\n`);
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    const after = statSync(configPath);
 
-  expect([after.ino, after.size, after.mtimeMs]).toEqual([
-    before.ino,
-    before.size,
-    before.mtimeMs,
-  ]);
-  expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
-});
+    expect([after.ino, after.size, after.mtimeMs]).toEqual([
+      before.ino,
+      before.size,
+      before.mtimeMs,
+    ]);
+    expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
+  },
+);
