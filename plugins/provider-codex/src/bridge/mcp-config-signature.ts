@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { type FileHandle, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -31,51 +32,70 @@ function errorCode(error: unknown): string {
 
 const HASH_CHUNK_BYTES = 1024 * 1024;
 
-function hashDescriptor(descriptor: number): string {
+async function hashFile(
+  handle: FileHandle,
+  size: number,
+  deadline: number,
+): Promise<string | null> {
   const hash = createHash("sha256");
   const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
-  for (;;) {
-    const bytesRead = readSync(descriptor, chunk, 0, chunk.length, null);
+  let position = 0;
+  while (position < size) {
+    if (Date.now() > deadline) {
+      return null;
+    }
+    const { bytesRead } = await handle.read(
+      chunk,
+      0,
+      Math.min(chunk.length, size - position),
+      position,
+    );
     if (bytesRead === 0) {
-      return hash.digest("hex");
+      break;
     }
     hash.update(chunk.subarray(0, bytesRead));
+    position += bytesRead;
   }
+  return `${position}:${hash.digest("hex")}`;
 }
 
-function fileSignature(path: string): string {
-  let descriptor: number;
+async function fileSignature(path: string, deadline: number): Promise<string> {
+  let handle: FileHandle;
   try {
-    descriptor = openSync(
-      path,
-      constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
-    );
+    handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   } catch (error) {
     const code = errorCode(error);
     return code === "ENOENT" || code === "ENOTDIR" ? "absent" : code;
   }
   try {
-    const stats = fstatSync(descriptor);
+    const stats = await handle.stat();
     if (!stats.isFile()) {
       return `not-a-file:${stats.ino}:${stats.mode}`;
     }
     try {
-      return hashDescriptor(descriptor);
+      return (
+        (await hashFile(handle, stats.size, deadline)) ??
+        `unhashed:${randomUUID()}`
+      );
     } catch (error) {
       return `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
     }
   } catch (error) {
     return errorCode(error);
   } finally {
-    closeSync(descriptor);
+    await handle.close();
   }
 }
 
-export function codexMcpConfigSignature(args: {
+export async function codexMcpConfigSignature(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
-}): string {
-  return codexMcpConfigPaths(args)
-    .map((path) => `${path}=${fileSignature(path)}`)
-    .join("\n");
+  deadlineMs: number;
+}): Promise<string> {
+  const deadline = Date.now() + args.deadlineMs;
+  const lines: string[] = [];
+  for (const path of codexMcpConfigPaths(args)) {
+    lines.push(`${path}=${await fileSignature(path, deadline)}`);
+  }
+  return lines.join("\n");
 }

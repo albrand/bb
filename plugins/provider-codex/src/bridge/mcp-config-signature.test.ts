@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
   mkdirSync,
@@ -18,6 +18,8 @@ import {
   codexMcpConfigPaths,
   codexMcpConfigSignature,
 } from "./mcp-config-signature.js";
+
+const HASH_DEADLINE_MS = 60_000;
 
 let rootDir: string;
 
@@ -51,30 +53,31 @@ it("falls back to ~/.codex when CODEX_HOME is unset or blank", () => {
   ).toBe(join(homedir(), ".codex", "config.toml"));
 });
 
-it("changes when a watched config file is created, edited, or removed", () => {
+it("changes when a watched config file is created, edited, or removed", async () => {
   const env = { CODEX_HOME: join(rootDir, "home") };
   const cwd = join(rootDir, "repo");
   mkdirSync(join(rootDir, "home"));
   mkdirSync(join(cwd, ".codex"), { recursive: true });
-  const signature = () => codexMcpConfigSignature({ cwd, env });
+  const signature = () =>
+    codexMcpConfigSignature({ cwd, env, deadlineMs: HASH_DEADLINE_MS });
 
-  const absent = signature();
-  expect(signature()).toBe(absent);
+  const absent = await signature();
+  expect(await signature()).toBe(absent);
 
   writeFileSync(join(rootDir, "home", "config.toml"), "a = 1\n");
-  const created = signature();
+  const created = await signature();
   expect(created).not.toBe(absent);
 
   writeFileSync(join(cwd, ".codex", "config.toml"), "b = 2\n");
-  const projectCreated = signature();
+  const projectCreated = await signature();
   expect(projectCreated).not.toBe(created);
 
   writeFileSync(join(rootDir, "home", "config.toml"), "a = 12\n");
-  expect(signature()).not.toBe(projectCreated);
+  expect(await signature()).not.toBe(projectCreated);
 
   rmSync(join(cwd, ".codex", "config.toml"));
   rmSync(join(rootDir, "home", "config.toml"));
-  expect(signature()).toBe(absent);
+  expect(await signature()).toBe(absent);
 });
 
 function writeByteAt(path: string, position: number, byte: string): void {
@@ -83,7 +86,7 @@ function writeByteAt(path: string, position: number, byte: string): void {
   closeSync(descriptor);
 }
 
-it("changes when a byte past 2 GiB of a sparse config changes but its inode, size, and modification time do not", () => {
+it("changes when a byte past 2 GiB of a sparse config changes but its inode, size, and modification time do not", async () => {
   const env = { CODEX_HOME: rootDir };
   const configPath = join(rootDir, "config.toml");
   const farOffset = 2 ** 31;
@@ -92,7 +95,11 @@ it("changes when a byte past 2 GiB of a sparse config changes but its inode, siz
   writeByteAt(configPath, farOffset, "a");
   utimesSync(configPath, 1_700_000_000, 1_700_000_000);
   const before = statSync(configPath);
-  const original = codexMcpConfigSignature({ cwd: rootDir, env });
+  const original = await codexMcpConfigSignature({
+    cwd: rootDir,
+    env,
+    deadlineMs: HASH_DEADLINE_MS,
+  });
 
   writeByteAt(configPath, farOffset, "b");
   utimesSync(configPath, 1_700_000_000, 1_700_000_000);
@@ -103,22 +110,40 @@ it("changes when a byte past 2 GiB of a sparse config changes but its inode, siz
     before.size,
     before.mtimeMs,
   ]);
-  expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
+  expect(
+    await codexMcpConfigSignature({
+      cwd: rootDir,
+      env,
+      deadlineMs: HASH_DEADLINE_MS,
+    }),
+  ).not.toBe(original);
 }, 120_000);
 
-it("signs a FIFO or a directory without reading it", () => {
+it("signs a FIFO or a directory without reading it", async () => {
   const env = { CODEX_HOME: rootDir };
   const configPath = join(rootDir, "config.toml");
-  const absent = codexMcpConfigSignature({ cwd: rootDir, env });
+  const absent = await codexMcpConfigSignature({
+    cwd: rootDir,
+    env,
+    deadlineMs: HASH_DEADLINE_MS,
+  });
 
   execFileSync("mkfifo", [configPath]);
-  const fifo = codexMcpConfigSignature({ cwd: rootDir, env });
+  const fifo = await codexMcpConfigSignature({
+    cwd: rootDir,
+    env,
+    deadlineMs: HASH_DEADLINE_MS,
+  });
   expect(fifo).not.toBe(absent);
   expect(fifo).toContain(`${configPath}=not-a-file:`);
 
   rmSync(configPath);
   mkdirSync(configPath);
-  const directory = codexMcpConfigSignature({ cwd: rootDir, env });
+  const directory = await codexMcpConfigSignature({
+    cwd: rootDir,
+    env,
+    deadlineMs: HASH_DEADLINE_MS,
+  });
   expect(directory).toContain(`${configPath}=not-a-file:`);
   expect(directory).not.toBe(fifo);
 });
@@ -128,14 +153,18 @@ it.each([
   ["a config over 1 MiB", 1024 * 1024],
 ])(
   "changes when the contents of %s change but the inode, size, and modification time do not",
-  (_label, padding) => {
+  async (_label, padding) => {
     const env = { CODEX_HOME: rootDir };
     const configPath = join(rootDir, "config.toml");
     const comment = padding === 0 ? "" : `# ${"x".repeat(padding)}\n`;
     writeFileSync(configPath, `${comment}command = "alpha"\n`);
     utimesSync(configPath, 1_700_000_000, 1_700_000_000);
     const before = statSync(configPath);
-    const original = codexMcpConfigSignature({ cwd: rootDir, env });
+    const original = await codexMcpConfigSignature({
+      cwd: rootDir,
+      env,
+      deadlineMs: HASH_DEADLINE_MS,
+    });
 
     writeFileSync(configPath, `${comment}command = "bravo"\n`);
     utimesSync(configPath, 1_700_000_000, 1_700_000_000);
@@ -146,6 +175,76 @@ it.each([
       before.size,
       before.mtimeMs,
     ]);
-    expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
+    expect(
+      await codexMcpConfigSignature({
+        cwd: rootDir,
+        env,
+        deadlineMs: HASH_DEADLINE_MS,
+      }),
+    ).not.toBe(original);
   },
 );
+
+function growSparseFileForever(path: string): () => void {
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      "const fs = require('node:fs'); const path = process.argv[1]; let size = fs.statSync(path).size; for (;;) { size += 1024 * 1024; fs.truncateSync(path, size); }",
+      path,
+    ],
+    { stdio: "ignore" },
+  );
+  return () => {
+    child.kill("SIGKILL");
+  };
+}
+
+it("keeps the event loop responsive while it hashes a 2 GiB config", async () => {
+  const env = { CODEX_HOME: rootDir };
+  const configPath = join(rootDir, "config.toml");
+  writeFileSync(configPath, "");
+  truncateSync(configPath, 2 ** 31 + 2);
+  let ticks = 0;
+  const timer = setInterval(() => {
+    ticks += 1;
+  }, 1);
+  try {
+    await codexMcpConfigSignature({
+      cwd: rootDir,
+      env,
+      deadlineMs: HASH_DEADLINE_MS,
+    });
+  } finally {
+    clearInterval(timer);
+  }
+
+  expect(ticks).toBeGreaterThan(5);
+}, 120_000);
+
+it("returns within its deadline while a watched config keeps growing, and reports a change every time", async () => {
+  const env = { CODEX_HOME: rootDir };
+  const configPath = join(rootDir, "config.toml");
+  writeFileSync(configPath, "a = 1\n");
+  const stopGrowing = growSparseFileForever(configPath);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const startedAt = Date.now();
+    const first = await codexMcpConfigSignature({
+      cwd: rootDir,
+      env,
+      deadlineMs: 300,
+    });
+    const second = await codexMcpConfigSignature({
+      cwd: rootDir,
+      env,
+      deadlineMs: 300,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(first).toContain(`${configPath}=unhashed:`);
+    expect(second).not.toBe(first);
+  } finally {
+    stopGrowing();
+  }
+}, 30_000);

@@ -1436,7 +1436,9 @@ Before each turn the Codex bridge checks `$CODEX_HOME/config.toml` (default
 `~/.codex/config.toml`) and every `.codex/config.toml` from the thread's working
 directory up to the filesystem root. When any of them was created, edited, or
 removed since the last check, it asks Codex to reload its MCP servers before it
-starts the turn, and Codex restarts them with the new configuration. A failed
+starts the turn, and Codex restarts them with the new configuration. If the
+files cannot be read within two seconds, for example because one keeps growing,
+the bridge treats them as changed and reloads before that turn. A failed
 reload is logged, the turn still runs, and the next turn tries again. An MCP
 sign-in that Codex keeps only in the OS keychain does not change these files, so
 it does not trigger a reload. Claude Code threads still read MCP servers only

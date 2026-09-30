@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
   openSync,
@@ -238,3 +238,28 @@ it("still starts the turn and retries on the next turn when the reload fails", a
   ).toBe(true);
   stderr.mockRestore();
 });
+
+it("starts the turn within the hashing deadline while a watched config keeps growing", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  const grower = spawn(
+    process.execPath,
+    [
+      "-e",
+      "const fs = require('node:fs'); const path = process.argv[1]; let size = fs.statSync(path).size; for (;;) { size += 1024 * 1024; fs.truncateSync(path, size); }",
+      configPath,
+    ],
+    { stdio: "ignore" },
+  );
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const startedAt = Date.now();
+    await runTurn(2, providerThreadId);
+
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  } finally {
+    grower.kill("SIGKILL");
+  }
+}, 30_000);

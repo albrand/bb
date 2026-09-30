@@ -292,6 +292,7 @@ const CODEX_INITIALIZE_PARAMS = {
 const CHILD_REQUEST_TIMEOUT_MS = 60_000;
 const RATE_LIMIT_RECOVERY_TIMEOUT_MS = 5_000;
 const MCP_RELOAD_TIMEOUT_MS = 10_000;
+const MCP_CONFIG_HASH_DEADLINE_MS = 2_000;
 const INTERRUPT_SETTLEMENT_TIMEOUT_MS = 5_000;
 const CODEX_ARCHIVED_SESSION_ERROR_PATTERN =
   /\b(?:session|thread)\s+\S+\s+is archived\b/i;
@@ -1109,6 +1110,11 @@ async function constructThreadSession(
     })),
   );
   const launchEnv = appServerLaunchEnv(decoded.sessionOptions.envVars);
+  const mcpConfigSignature = await codexMcpConfigSignature({
+    cwd: args.cwd,
+    env: launchEnv,
+    deadlineMs: MCP_CONFIG_HASH_DEADLINE_MS,
+  });
   const session: CodexBridgeSession = {
     bbThreadId: args.threadId,
     codexThreadId:
@@ -1130,10 +1136,7 @@ async function constructThreadSession(
     unopenedCompactionDispatches: [],
     collaborationMode: args.request.kind === "start" ? "default" : null,
     model: null,
-    mcpConfigSignature: codexMcpConfigSignature({
-      cwd: args.cwd,
-      env: launchEnv,
-    }),
+    mcpConfigSignature,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: args.request.kind !== "start",
     identityAnnounced: false,
@@ -1840,9 +1843,10 @@ async function reloadMcpServersIfConfigChanged(args: {
   connection: CodexAppServerConnection;
   env: NodeJS.ProcessEnv;
 }): Promise<void> {
-  const signature = codexMcpConfigSignature({
+  const signature = await codexMcpConfigSignature({
     cwd: args.session.construction.cwd,
     env: args.env,
+    deadlineMs: MCP_CONFIG_HASH_DEADLINE_MS,
   });
   if (signature === args.session.mcpConfigSignature) {
     return;
