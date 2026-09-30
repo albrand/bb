@@ -1164,6 +1164,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Have the threads it creates attributed back to the plugin",
           "Read the server's loopback URL, public app URL, and data directory when it needs server facts",
           "Read or toggle plugin safe mode with sdk.plugins.experimental_getSafeMode and experimental_setSafeMode; safe mode stops every installed plugin not included with bb and restores the enabled ones when it ends, reporting any that fail to start",
+          "Search prompts the user sent in any live thread with sdk.threads.experimental_searchPromptHistory({ query, projectId, limit }); every term must match, identical prompts collapse with a use count, and results arrive newest first",
         ],
         apiSymbols: [
           "BbPluginApi",
@@ -1172,6 +1173,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "EnvironmentsArea.experimental_cleanup",
           "PluginsArea.experimental_getSafeMode",
           "PluginsArea.experimental_setSafeMode",
+          "ThreadsArea.experimental_searchPromptHistory",
         ],
         firstParty: [
           "Automations",
