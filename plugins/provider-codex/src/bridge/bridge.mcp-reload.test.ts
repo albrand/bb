@@ -12,6 +12,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -22,6 +23,30 @@ import {
   FULL_ACCESS_SESSION_OPTIONS,
   stubFakeCodexAppServer,
 } from "./fake-codex-app-server-harness.js";
+
+const io = vi.hoisted(() => ({
+  stalledReads: new Map<string, Promise<void>>(),
+  closes: new Map<string, number>(),
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const open = async (path: string, flags: number) => {
+    const handle = await actual.open(path, flags);
+    return {
+      stat: () => handle.stat(),
+      read: async (...readArgs: Parameters<FileHandle["read"]>) => {
+        await io.stalledReads.get(path);
+        return handle.read(...readArgs);
+      },
+      close: async () => {
+        await handle.close();
+        io.closes.set(path, (io.closes.get(path) ?? 0) + 1);
+      },
+    };
+  };
+  return { ...actual, open };
+});
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
 let rootDir: string;
@@ -50,6 +75,8 @@ beforeEach(() => {
   );
   requestLogPath = join(rootDir, "requests.jsonl");
   vi.stubEnv("CODEX_HOME", codexHome);
+  io.stalledReads.clear();
+  io.closes.clear();
   threadCounter += 1;
   threadId = `thr_mcp_reload_${threadCounter}`;
 });
@@ -262,4 +289,43 @@ it("starts the turn within the hashing deadline while a watched config keeps gro
   } finally {
     grower.kill("SIGKILL");
   }
+}, 30_000);
+
+it("reloads before the turn when reading a watched config stalls, and stops reloading once the read completes", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  let releaseRead = (): void => undefined;
+  io.stalledReads.set(
+    configPath,
+    new Promise((resolve) => {
+      releaseRead = resolve;
+    }),
+  );
+  const closesBefore = io.closes.get(configPath) ?? 0;
+
+  try {
+    const startedAt = Date.now();
+    await runTurn(2, providerThreadId);
+    expect(Date.now() - startedAt).toBeLessThan(8_000);
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  } finally {
+    io.stalledReads.delete(configPath);
+    releaseRead();
+  }
+  await vi.waitFor(() => {
+    expect(io.closes.get(configPath) ?? 0).toBe(closesBefore + 1);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  await runTurn(3, providerThreadId);
+  await runTurn(4, providerThreadId);
+
+  expect(loggedMethods()).toEqual([
+    "config/mcpServer/reload",
+    "turn/start",
+    "config/mcpServer/reload",
+    "turn/start",
+    "turn/start",
+  ]);
 }, 30_000);

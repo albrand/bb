@@ -242,7 +242,7 @@ it("returns within its deadline while a watched config keeps growing, and report
     });
 
     expect(Date.now() - startedAt).toBeLessThan(5_000);
-    expect(first).toContain(`${configPath}=unhashed:`);
+    expect(first).toContain("unhashed:");
     expect(second).not.toBe(first);
   } finally {
     stopGrowing();

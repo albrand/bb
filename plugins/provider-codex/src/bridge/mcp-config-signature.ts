@@ -32,6 +32,10 @@ function errorCode(error: unknown): string {
 
 const HASH_CHUNK_BYTES = 1024 * 1024;
 
+function unhashedSignature(): string {
+  return `unhashed:${randomUUID()}`;
+}
+
 async function hashFile(
   handle: FileHandle,
   size: number,
@@ -74,8 +78,7 @@ async function fileSignature(path: string, deadline: number): Promise<string> {
     }
     try {
       return (
-        (await hashFile(handle, stats.size, deadline)) ??
-        `unhashed:${randomUUID()}`
+        (await hashFile(handle, stats.size, deadline)) ?? unhashedSignature()
       );
     } catch (error) {
       return `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
@@ -87,15 +90,44 @@ async function fileSignature(path: string, deadline: number): Promise<string> {
   }
 }
 
+async function computeSignature(
+  paths: string[],
+  deadline: number,
+): Promise<string> {
+  const lines: string[] = [];
+  for (const path of paths) {
+    lines.push(`${path}=${await fileSignature(path, deadline)}`);
+  }
+  return lines.join("\n");
+}
+
+const signaturesInFlight = new Map<string, Promise<string>>();
+
 export async function codexMcpConfigSignature(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
   deadlineMs: number;
 }): Promise<string> {
-  const deadline = Date.now() + args.deadlineMs;
-  const lines: string[] = [];
-  for (const path of codexMcpConfigPaths(args)) {
-    lines.push(`${path}=${await fileSignature(path, deadline)}`);
+  const paths = codexMcpConfigPaths(args);
+  const key = paths.join("\n");
+  if (signaturesInFlight.has(key)) {
+    return unhashedSignature();
   }
-  return lines.join("\n");
+  const computation = computeSignature(paths, Date.now() + args.deadlineMs)
+    .catch(unhashedSignature)
+    .finally(() => {
+      signaturesInFlight.delete(key);
+    });
+  signaturesInFlight.set(key, computation);
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<string>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(unhashedSignature());
+    }, args.deadlineMs);
+  });
+  try {
+    return await Promise.race([computation, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
