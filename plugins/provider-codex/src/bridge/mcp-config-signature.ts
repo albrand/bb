@@ -90,7 +90,10 @@ async function fileSignature(path: string, deadline: number): Promise<string> {
   }
 }
 
-const fileSignaturesInFlight = new Map<string, Promise<string>>();
+const fileSignaturesInFlight = new Map<
+  string,
+  { signature: Promise<string>; deadline: number }
+>();
 
 async function singleFlightFileSignature(
   path: string,
@@ -101,7 +104,10 @@ async function singleFlightFileSignature(
     inFlight !== undefined;
     inFlight = fileSignaturesInFlight.get(path)
   ) {
-    await inFlight;
+    if (performance.now() > inFlight.deadline) {
+      return unhashedSignature();
+    }
+    await inFlight.signature;
     if (performance.now() > deadline) {
       return unhashedSignature();
     }
@@ -111,7 +117,7 @@ async function singleFlightFileSignature(
     .finally(() => {
       fileSignaturesInFlight.delete(path);
     });
-  fileSignaturesInFlight.set(path, signature);
+  fileSignaturesInFlight.set(path, { signature, deadline });
   return signature;
 }
 

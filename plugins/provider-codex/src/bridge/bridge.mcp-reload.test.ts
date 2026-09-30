@@ -359,7 +359,7 @@ it("reloads before the turn when reading a watched config stalls, and stops relo
           env: { CODEX_HOME: codexHome },
           deadlineMs: 2_000,
         }),
-      ).not.toMatch(/^unhashed:/);
+      ).not.toContain("unhashed:");
     },
     { timeout: 10_000 },
   );

@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { queryObjects } from "node:v8";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { codexMcpConfigSignature } from "./mcp-config-signature.js";
 
@@ -156,7 +157,7 @@ it.each<StalledOperation>(["open", "stat", "read", "close"])(
     expect(elapsed).toBeLessThan(DEADLINE_MS + 1_000);
 
     const whileStalled = await signature();
-    expect(whileStalled).toMatch(/^unhashed:/);
+    expect(whileStalled).toContain("unhashed:");
     expect(whileStalled).not.toBe(stalled);
     expect(io.opens.get(configPath)).toBe(1);
 
@@ -193,7 +194,7 @@ it("keeps one read of a stalled shared config open across workspaces, and recove
   const elapsed = Date.now() - startedAt;
 
   for (const value of [...stalled, ...again]) {
-    expect(value).toMatch(/^unhashed:/);
+    expect(value).toContain("unhashed:");
   }
   expect(elapsed).toBeLessThan(2 * DEADLINE_MS + 1_000);
   expect(io.opens.get(configPath)).toBe(1);
@@ -212,6 +213,48 @@ it("keeps one read of a stalled shared config open across workspaces, and recove
   );
   await waitFor(() => io.closes.get(configPath) === io.opens.get(configPath));
 });
+
+it("stops waiting on a stalled config once its read is past the deadline, so repeated calls return at once and retain nothing", async () => {
+  const healthy = await signature();
+  const release = stall("open");
+  io.opens.clear();
+  expect(await signature()).toMatch(/^unhashed:/);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const livePromises = () => queryObjects(Promise, { format: "count" });
+  const results: string[] = [];
+  const durations: number[] = [];
+  const measure = async (calls: number) => {
+    for (let call = 0; call < calls; call += 1) {
+      const startedAt = Date.now();
+      results.push(await signature());
+      durations.push(Date.now() - startedAt);
+    }
+  };
+  await measure(20);
+  expect(Math.max(...durations)).toBeLessThan(DEADLINE_MS / 2);
+  const baseline = livePromises();
+  await measure(300);
+  const retained = livePromises() - baseline;
+
+  expect(Math.max(...durations)).toBeLessThan(DEADLINE_MS / 2);
+  expect(retained).toBeLessThan(100);
+  expect(new Set(results).size).toBe(results.length);
+  for (const result of results) {
+    expect(result).toContain(`${configPath}=unhashed:`);
+  }
+  expect(io.opens.get(configPath)).toBe(1);
+
+  io.stalls.delete(configPath);
+  release();
+  await waitFor(() => (io.closes.get(configPath) ?? 0) >= 1);
+  await vi.waitFor(
+    async () => {
+      expect(await signature()).toBe(healthy);
+    },
+    { timeout: 5_000 },
+  );
+}, 30_000);
 
 it("gives concurrent healthy calls from different workspaces the same signature as a lone call", async () => {
   const workspaces = ["one", "two", "three"].map((name) =>
