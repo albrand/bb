@@ -71,6 +71,7 @@ function codexRateLimitSnapshot(
   return {
     limitId: "codex",
     limitName: null,
+    normalModelSlug: null,
     primary: null,
     secondary: null,
     credits: null,
@@ -235,6 +236,7 @@ describe("codex turn lifecycle translation", () => {
             message: "rate limited",
             codexErrorInfo: null,
             additionalDetails: "try again",
+            misalignment: null,
           },
         }),
       }),
@@ -304,6 +306,10 @@ describe("codex thread lifecycle translation", () => {
 
           projectId: null,
           modelProvider: "openai",
+          model: null,
+          reasoningEffort: null,
+          originator: null,
+          historyMode: "legacy",
           createdAt: 0,
           updatedAt: 0,
           recencyAt: null,
@@ -368,6 +374,49 @@ describe("codex thread lifecycle translation", () => {
       harness.translate(codexEvent("thread/unarchived", { threadId: "t1" })),
     ).toEqual([]);
   });
+
+  it.each([
+    ["blocked", "paused"],
+    ["usageLimited", "budgetLimited"],
+    ["someFutureStatus", "paused"],
+  ] as const)(
+    "keeps a goal whose status is %s, shown as %s",
+    (codexStatus, bbStatus) => {
+      const harness = createHarness();
+      expect(
+        harness.translate({
+          jsonrpc: "2.0",
+          method: "thread/goal/updated",
+          params: {
+            threadId: "t1",
+            turnId: null,
+            goal: {
+              threadId: "t1",
+              objective: "Finish the task",
+              status: codexStatus,
+              tokenBudget: 1000,
+              tokensUsed: 1000,
+              timeUsedSeconds: 60,
+              createdAt: 0,
+              updatedAt: 0,
+            },
+          },
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          type: "thread/extensionState/updated",
+          kind: "provider-codex/goal",
+          payload: {
+            objective: "Finish the task",
+            status: bbStatus,
+            tokenBudget: 1000,
+            tokensUsed: 1000,
+            timeUsedSeconds: 60,
+          },
+        }),
+      ]);
+    },
+  );
 
   it("maps native thread goal notifications to the codex goal state", () => {
     const harness = createHarness();
@@ -448,6 +497,7 @@ describe("codex item translation", () => {
           phase: null,
           memoryCitation: null,
           delivery: null,
+          questions: null,
         },
       }),
     );
@@ -925,6 +975,7 @@ describe("codex item translation", () => {
           tool: "search",
           pluginId: null,
           appContext: null,
+          mcpAppUi: null,
           readOnlyHint: null,
           status: "completed",
           arguments: { query: "test" },
@@ -1237,6 +1288,41 @@ describe("codex item translation", () => {
             },
             icon: { glyph: "UserRound" },
           },
+        }),
+      }),
+    );
+  });
+
+  it("closes an interrupted collabAgentToolCall as interrupted", () => {
+    const harness = createHarness();
+    const events = harness.translate({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "t1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-interrupted-1",
+          tool: "spawnAgent",
+          status: "interrupted",
+          senderThreadId: "t1",
+          receiverThreadIds: ["sub-thread-1"],
+          prompt: null,
+          model: null,
+          reasoningEffort: null,
+          agentsStates: {},
+        },
+      },
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "item/completed",
+        item: expect.objectContaining({
+          type: "delegation",
+          childRef: "sub-thread-1",
+          status: "interrupted",
         }),
       }),
     );
@@ -1880,6 +1966,7 @@ describe("codex error and warning translation", () => {
           message: "Rate limited",
           codexErrorInfo: null,
           additionalDetails: "retry after 30s",
+          misalignment: null,
         },
         willRetry: true,
       }),
@@ -1912,6 +1999,7 @@ describe("codex error and warning translation", () => {
           message: "startup failed",
           codexErrorInfo: null,
           additionalDetails: null,
+          misalignment: null,
         },
       },
     });
@@ -1936,6 +2024,7 @@ describe("codex error and warning translation", () => {
             responseStreamDisconnected: { httpStatusCode: 502 },
           },
           additionalDetails: null,
+          misalignment: null,
         },
         willRetry: false,
       }),
@@ -1960,6 +2049,9 @@ describe("codex error and warning translation", () => {
   it.each([
     ["sessionBudgetExceeded", "budget-exceeded"],
     ["misalignmentPolicyViolation", "policy"],
+    ["rateLimitExceeded", "rate-limit"],
+    ["flexUnavailable", "overloaded"],
+    ["tooManyDenials", "policy"],
   ] as const)(
     "normalizes %s errors and failed turn completion",
     (codexErrorInfo, category) => {
@@ -1974,6 +2066,7 @@ describe("codex error and warning translation", () => {
               message: "terminal failure",
               codexErrorInfo,
               additionalDetails: null,
+              misalignment: null,
             },
             willRetry: false,
           }),
@@ -2001,6 +2094,7 @@ describe("codex error and warning translation", () => {
                 message: "terminal failure",
                 codexErrorInfo,
                 additionalDetails: null,
+                misalignment: null,
               },
             }),
           }),
@@ -2009,6 +2103,56 @@ describe("codex error and warning translation", () => {
         expect.objectContaining({
           type: "turn/completed",
           scope: turnScope(harness.turnId("turn-1")),
+          status: "failed",
+          error: { message: "terminal failure" },
+        }),
+      ]);
+    },
+  );
+
+  it.each([
+    ["futureStringCode", "futureStringCode"],
+    [{ futureObjectCode: { httpStatusCode: 503 } }, "futureObjectCode"],
+  ] as const)(
+    "completes a failed turn whose error code bb does not know (%j)",
+    (codexErrorInfo, providerCode) => {
+      const harness = createHarness();
+      const error = {
+        message: "terminal failure",
+        codexErrorInfo,
+        additionalDetails: null,
+        misalignment: null,
+      } as unknown as NonNullable<Turn["error"]>;
+
+      expect(
+        harness.translate(
+          codexEvent("error", {
+            threadId: "t1",
+            turnId: "turn-1",
+            error,
+            willRetry: false,
+          }),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          type: "provider/error",
+          errorInfo: {
+            category: "unknown",
+            providerCode,
+            httpStatusCode: null,
+          },
+        }),
+      ]);
+      expect(
+        harness.translate(
+          codexEvent("turn/completed", {
+            threadId: "t1",
+            turn: codexTurn({ id: "turn-1", status: "failed", error }),
+          }),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          type: "turn/completed",
           status: "failed",
           error: { message: "terminal failure" },
         }),
@@ -2086,6 +2230,7 @@ describe("codex account rate-limit translation", () => {
   const blockedSpendControlSnapshot = {
     limitId: "codex",
     limitName: "Codex",
+    normalModelSlug: null,
     primary: null,
     secondary: null,
     credits: null,
@@ -2149,6 +2294,7 @@ describe("codex account rate-limit translation", () => {
         rateLimits: {
           limitId: "codex",
           limitName: "Codex",
+          normalModelSlug: null,
           primary: {
             usedPercent: 100,
             windowDurationMins: 300,
@@ -2416,6 +2562,7 @@ describe("codex account rate-limit translation", () => {
         rateLimits: codexRateLimitSnapshot({
           limitId: "model-a",
           limitName: "Model A",
+          normalModelSlug: null,
           primary: {
             usedPercent: 100,
             windowDurationMins: 300,
@@ -2431,6 +2578,7 @@ describe("codex account rate-limit translation", () => {
         rateLimits: codexRateLimitSnapshot({
           limitId: "model-b",
           limitName: "Model B",
+          normalModelSlug: null,
           primary: {
             usedPercent: 10,
             windowDurationMins: 300,
@@ -2563,6 +2711,7 @@ describe("codex account rate-limit translation", () => {
         rateLimits: {
           limitId: "codex",
           limitName: "Codex",
+          normalModelSlug: null,
           primary: {
             usedPercent: 100,
             windowDurationMins: 300,
@@ -2604,6 +2753,7 @@ describe("codex account rate-limit translation", () => {
       rateLimits: {
         limitId: "codex",
         limitName: "Codex",
+        normalModelSlug: null,
         primary: {
           usedPercent: 20,
           windowDurationMins: null,

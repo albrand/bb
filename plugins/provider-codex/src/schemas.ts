@@ -22,6 +22,7 @@ const codexItemStatusSchema = z.enum([
   "completed",
   "failed",
   "declined",
+  "interrupted",
 ]);
 export type CodexItemStatus = z.infer<typeof codexItemStatusSchema>;
 
@@ -32,11 +33,15 @@ const codexPlanStepStatusSchema = z.enum([
   "failed",
 ]);
 
-const codexThreadGoalStatusSchema = z.enum([
-  "active",
-  "paused",
-  "budgetLimited",
-  "complete",
+const codexThreadGoalStatusSchema = z.union([
+  z.enum(["active", "paused", "budgetLimited", "complete"]),
+  z
+    .string()
+    .transform((status) =>
+      status === "usageLimited"
+        ? ("budgetLimited" as const)
+        : ("paused" as const),
+    ),
 ]);
 
 const codexThreadGoalSchema = z
@@ -94,6 +99,7 @@ const codexToolReferenceStatusSchema = z.enum([
   "completed",
   "failed",
   "declined",
+  "interrupted",
 ]);
 
 const codexFileChangeKindSchema = z.discriminatedUnion("type", [
@@ -502,9 +508,12 @@ const codexErrorInfoSchema = z.union([
   z.literal("contextWindowExceeded"),
   z.literal("sessionBudgetExceeded"),
   z.literal("usageLimitExceeded"),
+  z.literal("rateLimitExceeded"),
+  z.literal("flexUnavailable"),
   z.literal("serverOverloaded"),
   z.literal("cyberPolicy"),
   z.literal("misalignmentPolicyViolation"),
+  z.literal("tooManyDenials"),
   z.object({ httpConnectionFailed: codexErrorHttpStatusSchema }),
   z.object({ responseStreamConnectionFailed: codexErrorHttpStatusSchema }),
   z.literal("internalServerError"),
@@ -531,10 +540,22 @@ const codexErrorInfoSchemaMatchesGenerated: GeneratedCodexErrorInfo extends Code
   : false = true;
 void codexErrorInfoSchemaMatchesGenerated;
 
+const unrecognizedCodexErrorInfoSchema = z
+  .union([z.string(), z.record(z.string(), z.unknown())])
+  .transform((raw) => ({
+    unrecognized:
+      typeof raw === "string" ? raw : (Object.keys(raw)[0] ?? "unknown"),
+  }));
+const tolerantCodexErrorInfoSchema = z.union([
+  codexErrorInfoSchema,
+  unrecognizedCodexErrorInfoSchema,
+]);
+export type CodexParsedErrorInfo = z.infer<typeof tolerantCodexErrorInfoSchema>;
+
 const codexTurnErrorSchema = z
   .object({
     message: z.string(),
-    codexErrorInfo: codexErrorInfoSchema.nullish(),
+    codexErrorInfo: tolerantCodexErrorInfoSchema.nullish(),
     additionalDetails: z.string().nullish(),
   })
   .passthrough();

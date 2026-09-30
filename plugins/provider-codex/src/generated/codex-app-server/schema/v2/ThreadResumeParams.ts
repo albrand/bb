@@ -5,8 +5,9 @@ import type { ApprovalsReviewer } from "./ApprovalsReviewer.js";
 import type { AskForApproval } from "./AskForApproval.js";
 import type { SandboxMode } from "./SandboxMode.js";
 
-export type ThreadResumeParams = {threadId: string,
 
-model?: string | null, modelProvider?: string | null, serviceTier?: string | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null,
-
-approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, config?: { [key in string]?: JsonValue } | null, baseInstructions?: string | null, developerInstructions?: string | null, personality?: Personality | null};
+export type ThreadResumeParams = {threadId: string, 
+model?: string | null, modelProvider?: string | null, serviceTier?: string | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null, 
+approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, config?: { [key in string]?: JsonValue } | null, baseInstructions?: string | null, developerInstructions?: string | null, 
+personality?: Personality | null, 
+excludeTurns?: boolean};

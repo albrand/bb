@@ -24,6 +24,24 @@ describe("toCodexExecutionDelta (get-bb/bb#1787)", () => {
     });
   });
 
+  it("reads Codex's priority tier, its name for Fast since 0.159, as fast", () => {
+    expect(
+      toCodexExecutionDelta({
+        thread: { id: "codex-thread" },
+        model: "gpt-6.1-sol",
+        reasoningEffort: "high",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandbox: { type: "workspaceWrite", writableRoots: [] },
+        serviceTier: "priority",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        execution: expect.objectContaining({ serviceTier: "fast" }),
+      }),
+    );
+  });
+
   it("leaves a setting bb has no word for as null instead of guessing", () => {
     expect(
       toCodexExecutionDelta({

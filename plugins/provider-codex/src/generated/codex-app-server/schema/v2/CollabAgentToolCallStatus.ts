@@ -1,3 +1,3 @@
 
 
-export type CollabAgentToolCallStatus = "inProgress" | "completed" | "failed";
+export type CollabAgentToolCallStatus = "inProgress" | "completed" | "failed" | "interrupted";
