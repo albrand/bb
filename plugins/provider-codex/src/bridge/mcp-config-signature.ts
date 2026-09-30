@@ -45,7 +45,7 @@ async function hashFile(
   const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
   let position = 0;
   while (position < size) {
-    if (Date.now() > deadline) {
+    if (performance.now() > deadline) {
       return null;
     }
     const { bytesRead } = await handle.read(
@@ -113,7 +113,7 @@ export async function codexMcpConfigSignature(args: {
   if (signaturesInFlight.has(key)) {
     return unhashedSignature();
   }
-  const deadline = Date.now() + args.deadlineMs;
+  const deadline = performance.now() + args.deadlineMs;
   const computation = computeSignature(paths, deadline)
     .catch(unhashedSignature)
     .finally(() => {
@@ -128,7 +128,7 @@ export async function codexMcpConfigSignature(args: {
   });
   try {
     const signature = await Promise.race([computation, timedOut]);
-    return Date.now() > deadline ? unhashedSignature() : signature;
+    return performance.now() > deadline ? unhashedSignature() : signature;
   } finally {
     clearTimeout(timer);
   }

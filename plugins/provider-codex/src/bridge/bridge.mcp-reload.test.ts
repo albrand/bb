@@ -27,7 +27,8 @@ import {
 const io = vi.hoisted(() => ({
   stalledReads: new Map<string, Promise<void>>(),
   closes: new Map<string, number>(),
-  overdue: { path: null as string | null, blockMs: 0 },
+  overdue: { path: null as string | null, blockMs: 0, clockSetBackMs: 0 },
+  wallClockOffsetMs: 0,
 }));
 
 function blockEventLoop(ms: number): void {
@@ -52,6 +53,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       ) => {
         if (overdue) {
           blockEventLoop(io.overdue.blockMs);
+          io.wallClockOffsetMs = -io.overdue.clockSetBackMs;
           const bytesRead = readSync(
             handle.fd,
             buffer,
@@ -107,6 +109,8 @@ beforeEach(() => {
   io.stalledReads.clear();
   io.closes.clear();
   io.overdue.path = null;
+  io.overdue.clockSetBackMs = 0;
+  io.wallClockOffsetMs = 0;
   threadCounter += 1;
   threadId = `thr_mcp_reload_${threadCounter}`;
 });
@@ -360,17 +364,30 @@ it("reloads before the turn when reading a watched config stalls, and stops relo
   ]);
 }, 30_000);
 
-it("reloads before the turn when the config hash completes after the deadline but before the timer runs", async () => {
-  startHarness({});
-  const providerThreadId = await startThread();
-  io.overdue.path = join(codexHome, "config.toml");
-  io.overdue.blockMs = 2_100;
+it.each([
+  ["a steady wall clock", 0],
+  ["a wall clock set back 5 s", 5_000],
+])(
+  "reloads before the turn when the config hash completes after the deadline but before the timer runs, with %s",
+  async (_label, clockSetBackMs) => {
+    startHarness({});
+    const providerThreadId = await startThread();
+    const realNow = Date.now.bind(Date);
+    const now = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => realNow() + io.wallClockOffsetMs);
+    io.overdue.path = join(codexHome, "config.toml");
+    io.overdue.blockMs = 2_100;
+    io.overdue.clockSetBackMs = clockSetBackMs;
 
-  try {
-    await runTurn(2, providerThreadId);
-  } finally {
-    io.overdue.path = null;
-  }
+    try {
+      await runTurn(2, providerThreadId);
+    } finally {
+      io.overdue.path = null;
+      now.mockRestore();
+    }
 
-  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
-}, 30_000);
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  },
+  30_000,
+);

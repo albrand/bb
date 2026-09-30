@@ -19,7 +19,8 @@ const io = vi.hoisted(() => ({
   >(),
   opens: new Map<string, number>(),
   closes: new Map<string, number>(),
-  overdue: { path: null as string | null, blockMs: 0 },
+  overdue: { path: null as string | null, blockMs: 0, clockSetBackMs: 0 },
+  wallClockOffsetMs: 0,
 }));
 
 function blockEventLoop(ms: number): void {
@@ -57,6 +58,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       ) => {
         if (overdue) {
           blockEventLoop(io.overdue.blockMs);
+          io.wallClockOffsetMs = -io.overdue.clockSetBackMs;
           const bytesRead = readSync(
             handle.fd,
             buffer,
@@ -98,6 +100,8 @@ beforeEach(() => {
   io.opens.clear();
   io.closes.clear();
   io.overdue.path = null;
+  io.overdue.clockSetBackMs = 0;
+  io.wallClockOffsetMs = 0;
 });
 
 afterEach(() => {
@@ -184,13 +188,28 @@ it("stops reading an abandoned config soon after the deadline", async () => {
   expect(Date.now() - startedAt).toBeLessThan(DEADLINE_MS + 700);
 });
 
-it("treats a digest that completes after the deadline as changed even when the timer has not run yet", async () => {
-  const healthy = await signature();
-  io.overdue.path = configPath;
-  io.overdue.blockMs = DEADLINE_MS + 100;
+it.each([
+  ["a steady wall clock", 0],
+  ["a wall clock set back 5 s", 5_000],
+])(
+  "treats a digest that completes after the deadline as changed even when the timer has not run yet, with %s",
+  async (_label, clockSetBackMs) => {
+    const healthy = await signature();
+    const realNow = Date.now.bind(Date);
+    const now = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => realNow() + io.wallClockOffsetMs);
+    io.overdue.path = configPath;
+    io.overdue.blockMs = DEADLINE_MS + 100;
+    io.overdue.clockSetBackMs = clockSetBackMs;
 
-  const overdue = await signature();
+    try {
+      const overdue = await signature();
 
-  expect(overdue).toMatch(/^unhashed:/);
-  expect(overdue).not.toBe(healthy);
-});
+      expect(overdue).toMatch(/^unhashed:/);
+      expect(overdue).not.toBe(healthy);
+    } finally {
+      now.mockRestore();
+    }
+  },
+);
