@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexInteractiveResponse,
   buildCodexUserInputResponse,
+  codexUserInputQuestionIds,
   decodeCodexInteractiveRequest,
   extractCodexMacOsPermissionRequest,
 } from "./interactive-requests.js";
@@ -636,22 +637,22 @@ describe("Codex requestUserInput", () => {
         kind: "user_question",
         questions: [
           {
-            id: "color",
+            id: "question-1",
             prompt: "Which color should the button use?",
             shortLabel: "Color",
             multiSelect: false,
             options: [
               {
-                value: "color:option-1",
+                value: "question-1:option-1",
                 label: "Blue (Recommended)",
                 description: "Matches the brand.",
               },
-              { value: "color:option-2", label: "Green" },
+              { value: "question-1:option-2", label: "Green" },
             ],
             allowFreeText: true,
           },
           {
-            id: "name",
+            id: "question-2",
             prompt: "What should the component be called?",
             multiSelect: false,
             allowFreeText: true,
@@ -709,15 +710,75 @@ describe("Codex requestUserInput", () => {
 
     expect(
       buildCodexUserInputResponse({
-        payload,
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            color: { selected: ["color:option-2"], freeText: "teal" },
+        outcome: {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "question-1": {
+                selected: ["question-1:option-2"],
+                freeText: "teal",
+              },
+            },
           },
         },
+        codexQuestionIds: ["color"],
       }),
     ).toEqual({ answers: { color: { answers: ["Green", "teal"] } } });
+  });
+
+  it("answers Codex under its own question ids, including __proto__", () => {
+    const params = userInputRequest([
+      { ...COLOR_QUESTION, id: "__proto__" },
+      { ...COLOR_QUESTION, id: "constructor" },
+    ]);
+    const payload = decodeCodexInteractiveRequest(params)?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(payload.questions.map((entry) => entry.id)).toEqual([
+      "question-1",
+      "question-2",
+    ]);
+    expect(
+      JSON.stringify(
+        buildCodexUserInputResponse({
+          outcome: {
+            payload,
+            resolution: {
+              kind: "user_answer",
+              answers: {
+                "question-1": { selected: ["question-1:option-1"] },
+                "question-2": { selected: ["question-2:option-2"] },
+              },
+            },
+          },
+          codexQuestionIds: codexUserInputQuestionIds(params.params),
+        }),
+      ),
+    ).toBe(
+      '{"answers":{"__proto__":{"answers":["Blue (Recommended)"]},"constructor":{"answers":["Green"]}}}',
+    );
+  });
+
+  it("refuses to answer when the Codex request has a different number of questions", () => {
+    const payload = decodeCodexInteractiveRequest(
+      userInputRequest([COLOR_QUESTION]),
+    )?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(() =>
+      buildCodexUserInputResponse({
+        outcome: {
+          payload,
+          resolution: { kind: "user_answer", answers: {} },
+        },
+        codexQuestionIds: ["color", "size"],
+      }),
+    ).toThrow(/do not match/);
   });
 
   it("refuses an answer that names an option the card never offered", () => {
@@ -730,11 +791,14 @@ describe("Codex requestUserInput", () => {
 
     expect(() =>
       buildCodexUserInputResponse({
-        payload,
-        resolution: {
-          kind: "user_answer",
-          answers: { color: { selected: ["color:option-9"] } },
+        outcome: {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: { "question-1": { selected: ["question-1:option-9"] } },
+          },
         },
+        codexQuestionIds: ["color"],
       }),
     ).toThrow(/unknown option/);
   });

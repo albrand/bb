@@ -14,7 +14,8 @@ import {
   stubFakeCodexAppServer,
 } from "./fake-codex-app-server-harness.js";
 
-const THREAD_ID = "thr_user_question_1";
+let threadCounter = 0;
+let threadId = "";
 const OPTIONS = { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-5.5" };
 
 function question(overrides: Record<string, unknown>) {
@@ -88,7 +89,15 @@ let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
 const asked: unknown[] = [];
 let answered = 0;
 
+const askedQuestionSchema = z.object({
+  payload: z.object({
+    questions: z.tuple([z.object({ id: z.string() })]),
+  }),
+});
+
 beforeEach(() => {
+  threadCounter += 1;
+  threadId = `thr_user_question_${threadCounter}`;
   workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-user-question-"));
   requestLogPath = join(workspaceDir, "requests.jsonl");
   const scriptPath = join(workspaceDir, "script.json");
@@ -111,7 +120,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   harness.sendRequest(991_002, "thread/stop", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId: "user-question-cleanup",
     intent: "release",
     activeTurnId: null,
@@ -123,7 +132,11 @@ afterEach(async () => {
 });
 
 async function settle(id: number): Promise<void> {
-  while (!harness.hasResponse(id)) {
+  await answerUntil(() => harness.hasResponse(id));
+}
+
+async function answerUntil(done: () => boolean): Promise<void> {
+  while (!done()) {
     for (const message of harness.messages.slice(answered)) {
       if (
         message.method !== BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest ||
@@ -132,13 +145,17 @@ async function settle(id: number): Promise<void> {
         continue;
       }
       asked.push(message.params);
+      const [first] = askedQuestionSchema.parse(message.params).payload
+        .questions;
       handleLine(
         JSON.stringify({
           jsonrpc: "2.0",
           id: message.id,
           result: {
             kind: "user_answer",
-            answers: { color: { selected: ["color:option-2"] } },
+            answers: {
+              [first.id]: { selected: [`${first.id}:option-2`] },
+            },
           },
         }),
       );
@@ -171,7 +188,7 @@ function userInputResponses() {
 
 it("asks Codex's plan-mode questions in a bb question card and returns the answer", async () => {
   harness.sendRequest(1, "thread/start", {
-    threadId: THREAD_ID,
+    threadId,
     cwd: workspaceDir,
     instructionMode: "append",
     options: OPTIONS,
@@ -183,7 +200,7 @@ it("asks Codex's plan-mode questions in a bb question card and returns the answe
     .parse((await harness.waitForResponse(1)).result);
 
   harness.sendRequest(2, "turn/start", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId,
     clientRequestId: "creq_234567892a",
     input: PLAN_INPUT,
@@ -209,19 +226,20 @@ it("asks Codex's plan-mode questions in a bb question card and returns the answe
         kind: "user_question",
         questions: [
           expect.objectContaining({
-            id: "color",
+            id: "question-1",
             prompt: "Which color should the button use?",
           }),
         ],
       },
     }),
   ]);
+  await answerUntil(() => userInputResponses().length > 0);
   expect(userInputResponses()[0]).toMatchObject({
     result: { answers: { color: { answers: ["Green"] } } },
   });
 
   harness.sendRequest(3, "turn/start", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId,
     clientRequestId: "creq_234567892b",
     input: PLAN_INPUT,
@@ -232,12 +250,13 @@ it("asks Codex's plan-mode questions in a bb question card and returns the answe
 
   expect(turnStarts()[1]?.params).not.toHaveProperty("collaborationMode");
   expect(asked).toHaveLength(1);
+  await answerUntil(() => userInputResponses().length > 1);
   expect(userInputResponses()[1]).toMatchObject({
     error: { message: expect.stringContaining("secret") },
   });
 
   harness.sendRequest(4, "turn/start", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId,
     clientRequestId: "creq_234567892c",
     input: [{ type: "text", text: "go ahead", mentions: [] }],
@@ -263,7 +282,7 @@ it.each([
       JSON.stringify({ requestLogPath, turns: [[]] }),
     );
     harness.sendRequest(1, `thread/${kind}`, {
-      threadId: THREAD_ID,
+      threadId,
       ...(kind === "resume" ? { providerThreadId: "provider-resumed" } : {}),
       cwd: workspaceDir,
       instructionMode: "append",
@@ -275,7 +294,7 @@ it.each([
       .parse((await harness.waitForResponse(1)).result);
 
     harness.sendRequest(2, "turn/start", {
-      threadId: THREAD_ID,
+      threadId,
       providerThreadId,
       clientRequestId: "creq_234567892d",
       input: [{ type: "text", text: "go ahead", mentions: [] }],
@@ -300,7 +319,7 @@ it("switches modes with the model Codex reported when turns name no model", asyn
     JSON.stringify({ requestLogPath, turns: [[], []] }),
   );
   harness.sendRequest(1, "thread/start", {
-    threadId: THREAD_ID,
+    threadId,
     cwd: workspaceDir,
     instructionMode: "append",
     options: FULL_ACCESS_SESSION_OPTIONS,
@@ -311,7 +330,7 @@ it("switches modes with the model Codex reported when turns name no model", asyn
     .parse((await harness.waitForResponse(1)).result);
 
   harness.sendRequest(2, "turn/start", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId,
     clientRequestId: "creq_234567892e",
     input: PLAN_INPUT,
@@ -321,7 +340,7 @@ it("switches modes with the model Codex reported when turns name no model", asyn
   expect((await harness.waitForResponse(2)).error).toBeUndefined();
 
   harness.sendRequest(3, "turn/start", {
-    threadId: THREAD_ID,
+    threadId,
     providerThreadId,
     clientRequestId: "creq_234567892f",
     input: [{ type: "text", text: "go ahead", mentions: [] }],
@@ -345,4 +364,42 @@ it("switches modes with the model Codex reported when turns name no model", asyn
       }),
     }),
   ]);
+}, 30_000);
+
+it("returns the answer to a question whose id is __proto__", async () => {
+  writeFileSync(
+    join(workspaceDir, "script.json"),
+    JSON.stringify({
+      requestLogPath,
+      turns: [askingTurn("turn-proto", question({ id: "__proto__" }))],
+    }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: OPTIONS,
+  });
+  await settle(1);
+  const { providerThreadId } = z
+    .object({ providerThreadId: z.string() })
+    .parse((await harness.waitForResponse(1)).result);
+
+  harness.sendRequest(2, "turn/start", {
+    threadId,
+    providerThreadId,
+    clientRequestId: "creq_234567892g",
+    input: PLAN_INPUT,
+    options: { ...OPTIONS, promptMode: "plan" },
+  });
+  await settle(2);
+  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+  await answerUntil(() => userInputResponses().length > 0);
+
+  const responseLine = readFileSync(requestLogPath, "utf8")
+    .split("\n")
+    .find((line) => line.includes("response:item/tool/requestUserInput"));
+  expect(responseLine).toContain(
+    '"result":{"answers":{"__proto__":{"answers":["Green"]}}}',
+  );
 }, 30_000);

@@ -56,6 +56,7 @@ import {
 import {
   buildCodexInteractiveResponse,
   buildCodexUserInputResponse,
+  codexUserInputQuestionIds,
   decodeCodexInteractiveRequest,
   extractCodexMacOsPermissionRequest,
   type CodexMacOsPermissionRequest,
@@ -876,12 +877,13 @@ function handleChildRequest(
     .then((result) => {
       if (request.payload.kind === "user_question") {
         responder.result(
-          buildCodexUserInputResponse(
-            userQuestionInteractionOutcomeSchema.parse({
+          buildCodexUserInputResponse({
+            outcome: userQuestionInteractionOutcomeSchema.parse({
               payload: request.payload,
               resolution: result,
             }),
-          ),
+            codexQuestionIds: codexUserInputQuestionIds(params),
+          }),
         );
         return;
       }

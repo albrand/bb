@@ -55,6 +55,7 @@ function codexUserInputOptionValue(
 
 function toUserQuestion(
   question: CodexUserInputQuestion,
+  questionIndex: number,
 ): PendingInteractionUserQuestionQuestion {
   if (question.isSecret) {
     throw new ProviderRequestDecodeErrorValue(
@@ -77,8 +78,9 @@ function toUserQuestion(
     throw new ProviderRequestDecodeErrorValue("Every option needs a label.");
   }
   const shortLabel = nonBlank(question.header);
+  const id = `question-${questionIndex + 1}`;
   return {
-    id: question.id,
+    id,
     prompt,
     ...(shortLabel !== undefined && shortLabel !== prompt
       ? { shortLabel }
@@ -89,7 +91,7 @@ function toUserQuestion(
           options: options.map((option, optionIndex) => {
             const description = nonBlank(option.description);
             return {
-              value: codexUserInputOptionValue(question.id, optionIndex),
+              value: codexUserInputOptionValue(id, optionIndex),
               label: option.label,
               ...(description !== undefined ? { description } : {}),
             };
@@ -116,16 +118,40 @@ function toUserQuestionPayload(
   ) {
     throw new ProviderRequestDecodeErrorValue("Question ids must be unique.");
   }
-  return { kind: "user_question", questions: questions.map(toUserQuestion) };
+  return {
+    kind: "user_question",
+    questions: questions.map((question, questionIndex) =>
+      toUserQuestion(question, questionIndex),
+    ),
+  };
 }
 
-export function buildCodexUserInputResponse(
-  outcome: UserQuestionInteractionOutcome,
-): CodexUserInputResponse {
-  const answers: CodexUserInputResponse["answers"] = {};
-  for (const question of outcome.payload.questions) {
-    const answer = outcome.resolution.answers[question.id];
-    if (answer === undefined) {
+export function codexUserInputQuestionIds(params: unknown): string[] {
+  const parsed = codexToolRequestUserInputParamsSchema.safeParse(params);
+  if (!parsed.success) {
+    throw new ProviderResponseEncodeError(
+      "Codex user-input request params no longer parse",
+    );
+  }
+  return parsed.data.questions.map((question) => question.id);
+}
+
+export function buildCodexUserInputResponse(args: {
+  outcome: UserQuestionInteractionOutcome;
+  codexQuestionIds: readonly string[];
+}): CodexUserInputResponse {
+  const { outcome } = args;
+  if (args.codexQuestionIds.length !== outcome.payload.questions.length) {
+    throw new ProviderResponseEncodeError(
+      "The answered questions do not match the Codex request",
+    );
+  }
+  const resolved = new Map(Object.entries(outcome.resolution.answers));
+  const answers: Array<[string, { answers: string[] }]> = [];
+  for (const [questionIndex, question] of outcome.payload.questions.entries()) {
+    const answer = resolved.get(question.id);
+    const codexQuestionId = args.codexQuestionIds[questionIndex];
+    if (answer === undefined || codexQuestionId === undefined) {
       continue;
     }
     const labels = answer.selected.map((value) => {
@@ -137,12 +163,15 @@ export function buildCodexUserInputResponse(
       }
       return option.label;
     });
-    answers[question.id] = {
-      answers:
-        answer.freeText === undefined ? labels : [...labels, answer.freeText],
-    };
+    answers.push([
+      codexQuestionId,
+      {
+        answers:
+          answer.freeText === undefined ? labels : [...labels, answer.freeText],
+      },
+    ]);
   }
-  return { answers };
+  return { answers: Object.fromEntries(answers) };
 }
 
 function assertNever(value: never): never {
