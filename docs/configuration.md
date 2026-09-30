@@ -1429,6 +1429,18 @@ login, such as a CI runner. Mint the token with `claude setup-token`, which is
 long-lived where the credentials from `/login` are not. A logged-in machine
 needs neither.
 
+### Codex provider
+
+A running Codex thread picks up MCP server changes on its next turn. Before each
+turn the Codex bridge checks `$CODEX_HOME/config.toml` (default
+`~/.codex/config.toml`) and every `.codex/config.toml` from the thread's working
+directory up to the filesystem root. When any of them was created, edited, or
+removed since the last check, it asks Codex to reload its MCP servers, which
+restarts them with the new configuration. A failed reload is logged, the turn
+still runs, and the next turn tries again. An MCP sign-in that Codex keeps only
+in the OS keychain does not change these files, so it does not trigger a reload.
+Claude Code threads still read MCP servers only when their session starts.
+
 ### Provider retry plugin
 
 The builtin Provider retry plugin is enabled on fresh installations. When a turn

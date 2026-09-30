@@ -779,6 +779,13 @@ async function handleRequest(message) {
       respond(id, {});
       runCompaction(params.threadId);
       return;
+    case "config/mcpServer/reload":
+      if (script?.mcpReloadError) {
+        respondError(id, -32603, "MCP reload unavailable");
+        return;
+      }
+      respond(id, {});
+      return;
     case "thread/goal/clear":
       respond(id, {});
       return;

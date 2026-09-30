@@ -34,6 +34,13 @@ Workspace instructions (.bb/AGENTS.md):
   Claude Code versions and sessions without its built-in AGENTS.md support
   still require CLAUDE.md.
 
+Codex MCP servers:
+
+  A running Codex thread reloads its MCP servers at the start of the next turn
+  after ~/.codex/config.toml ($CODEX_HOME/config.toml) or a .codex/config.toml
+  in the working directory or its parents changes. Claude Code threads read MCP
+  servers only when their session starts.
+
 Skills (.bb/skills/):
 
   A skill is a reusable instruction file that bb injects into a thread and
