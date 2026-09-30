@@ -226,6 +226,7 @@ move and downloads the new server's bb-app package for its service.
 - `bb environment providers`
 - `bb environment list`
 - `bb environment delete`
+- `bb environment cleanup`
 - `bb environment show`
 - `bb environment get`
 - `bb environment status`

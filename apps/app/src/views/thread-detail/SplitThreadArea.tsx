@@ -1,3 +1,4 @@
+import { focusPaneComposer } from "@/lib/pane-composer-focus";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
   PANE_DIRECTION_APP_COMMAND_IDS,
@@ -76,7 +77,7 @@ import {
   type PaneSecondaryPanelRegistration,
   type PaneSecondaryPanelRegistry,
 } from "./PaneContext";
-import { ThreadDetailView } from "./ThreadDetailView";
+import { LazyThreadDetailView as ThreadDetailView } from "./LazyThreadDetailView";
 import { RootComposeView } from "@/views/RootComposeView";
 import { PluginPanelView } from "@/views/PluginPanelView";
 import {
@@ -393,6 +394,82 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     [navigate, setLayout],
   );
 
+  const [keyboardFocusRequest, setKeyboardFocusRequest] = useState<{
+    paneId: string;
+  } | null>(null);
+  useEffect(() => {
+    if (keyboardFocusRequest === null) return;
+    const paneId = keyboardFocusRequest.paneId;
+    const pane = layout === null ? null : findPane(layout.root, paneId);
+    const workspace = preservedScrollWorkspaceRef.current;
+    const root = Array.from(
+      workspace?.querySelectorAll<HTMLElement>("[data-split-pane-id]") ?? [],
+    ).find((element) => element.dataset.splitPaneId === paneId);
+    if (!root || !pane || layout?.focusedPaneId !== paneId) return;
+    let observer: MutationObserver | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => {
+      observer?.disconnect();
+      clearTimeout(timeout);
+    };
+    const finish = () => {
+      cancelAnimationFrame(frame);
+      cancel();
+      setKeyboardFocusRequest((current) =>
+        current === keyboardFocusRequest ? null : current,
+      );
+    };
+    const focus = () => {
+      if (!root.isConnected || root.getAttribute("aria-hidden") === "true")
+        return false;
+      const composer = root.querySelector<HTMLElement>(
+        "[data-promptbox] [contenteditable='true'], [data-promptbox] textarea:not(:disabled)",
+      );
+      if (composer) {
+        focusPaneComposer(composer);
+        return document.activeElement === composer;
+      }
+      return false;
+    };
+    const frame = requestAnimationFrame(() => {
+      if (focus()) {
+        finish();
+        return;
+      }
+      const content =
+        root.querySelector<HTMLElement>("[data-pane-content]") ?? root;
+      const control =
+        pane.content.kind === "thread"
+          ? null
+          : content.querySelector<HTMLElement>(
+              "input:not(:disabled), textarea:not(:disabled), [contenteditable='true'], button:not(:disabled), a[href], [tabindex='0']",
+            );
+      (control ?? root).focus({ preventScroll: true });
+      observer = new MutationObserver(() => {
+        if (document.activeElement !== root) {
+          finish();
+          return;
+        }
+        if (focus()) finish();
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["contenteditable", "disabled"],
+      });
+      timeout = setTimeout(finish, 1000);
+    });
+    document.addEventListener("pointerdown", finish, true);
+    document.addEventListener("keydown", finish, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      cancel();
+      document.removeEventListener("pointerdown", finish, true);
+      document.removeEventListener("keydown", finish, true);
+    };
+  }, [keyboardFocusRequest, layout, preservedScrollWorkspaceRef]);
+
   const focusPane = useCallback(
     (paneId: string) => {
       const current = store.get(splitLayoutAtom);
@@ -614,7 +691,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const commandHandlers = (
     <SplitPaneCommandHandlers
       closePane={closePane}
-      focusPane={focusPane}
+      focusPane={(paneId) => {
+        focusPane(paneId);
+        setKeyboardFocusRequest({ paneId });
+      }}
       isSplitActive={isSplitActive}
       layout={layout}
       maximizedPaneId={effectiveMaximizedPaneId}
@@ -633,9 +713,12 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
           paneId={firstPane.paneId}
           isFocused
           isSplitPane={false}
+          timelineEnabled
           secondaryPanelRegistry={null}
           reservesWindowPanelToggle={false}
-          onClosePane={firstPane.content.kind === "new-thread" ? null : closePane}
+          onClosePane={
+            firstPane.content.kind === "new-thread" ? null : closePane
+          }
           isMaximized={false}
           onToggleMaximizePane={null}
           isBoundedPane={false}
@@ -669,7 +752,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
             focusedPaneId={effectiveMaximizedPaneId ?? layout.focusedPaneId}
             maximizedPaneId={effectiveMaximizedPaneId}
             secondaryPanelRegistry={secondaryPanelRegistry}
-            onFocusPane={focusPane}
+            onFocusPane={(paneId) => {
+              setKeyboardFocusRequest(null);
+              focusPane(paneId);
+            }}
             onClosePane={closePane}
             onToggleMaximizePane={toggleMaximizePane}
             onMovePaneToSide={movePaneToSide}
@@ -800,6 +886,7 @@ function SplitTree(props: SplitTreeProps) {
           isHiddenByMaximize && "invisible pointer-events-none",
           isMaximized && "absolute inset-0 z-30",
         )}
+        tabIndex={-1}
         data-split-pane-id={node.paneId}
         data-focused={isFocused ? "true" : "false"}
         data-maximized={isMaximized ? "true" : undefined}
@@ -816,6 +903,7 @@ function SplitTree(props: SplitTreeProps) {
           paneId={node.paneId}
           isFocused={isFocused}
           isSplitPane
+          timelineEnabled={!isHiddenByMaximize}
           secondaryPanelRegistry={props.secondaryPanelRegistry}
           reservesWindowPanelToggle={isMaximized || (isTopRow && isRightEdge)}
           onClosePane={props.onClosePane}
@@ -892,6 +980,7 @@ interface WorkspacePaneContentProps {
   paneId: string;
   isFocused: boolean;
   isSplitPane: boolean;
+  timelineEnabled: boolean;
   secondaryPanelRegistry: PaneSecondaryPanelRegistry | null;
   reservesWindowPanelToggle: boolean;
   onClosePane: ((paneId: string) => void) | null;
@@ -910,6 +999,7 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
   paneId,
   isFocused,
   isSplitPane,
+  timelineEnabled,
   secondaryPanelRegistry,
   reservesWindowPanelToggle,
   onClosePane,
@@ -1016,6 +1106,7 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
         surface="pane"
         projectId={content.projectId}
         threadId={content.threadId}
+        timelineEnabled={timelineEnabled}
       />
     </PaneContext.Provider>
   );
@@ -1258,6 +1349,7 @@ function NonThreadPaneContent({
         />
       ) : null}
       <div
+        data-pane-content=""
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col p-4 md:p-5",
           isBoundedPane && content.kind === "plugin-panel" && "isolate",
@@ -1554,7 +1646,13 @@ function PaneStaleWatcher({ threadId, onStale }: PaneStaleWatcherProps) {
     ) {
       onStaleRef.current();
     }
-  }, [isConfirmedArchived, isDeleted, isGone, isUnarchived, unarchivesInFlight]);
+  }, [
+    isConfirmedArchived,
+    isDeleted,
+    isGone,
+    isUnarchived,
+    unarchivesInFlight,
+  ]);
 
   return null;
 }

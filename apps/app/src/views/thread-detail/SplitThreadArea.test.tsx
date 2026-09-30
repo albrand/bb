@@ -12,7 +12,7 @@ import {
 import { createStore, Provider as JotaiProvider } from "jotai";
 import { useContext, useMemo, useState, type ReactNode } from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import type { BbDesktopInfo } from "@bb/desktop-contract";
@@ -74,6 +74,10 @@ const commandHandlers = vi.hoisted(() => new Map<string, () => boolean>());
 const paneContextRenders = vi.hoisted(
   () => new Map<string, Array<PaneContextValue | null>>(),
 );
+const timelineProbe = vi.hoisted(() => ({
+  active: false,
+  calls: new Map<string, number>(),
+}));
 interface ShortcutPresentationFixture {
   ariaKeyshortcuts: string;
   label: string;
@@ -291,10 +295,21 @@ vi.mock("./ThreadDetailView", () => ({
   ThreadDetailView: ({
     projectId = "proj_personal",
     threadId = "thr-a",
+    timelineEnabled = true,
   }: {
     projectId: string;
     threadId: string;
+    timelineEnabled?: boolean;
   }) => {
+    useQuery({
+      queryKey: ["timeline-probe", threadId],
+      queryFn: () => {
+        const next = (timelineProbe.calls.get(threadId) ?? 0) + 1;
+        timelineProbe.calls.set(threadId, next);
+        return next;
+      },
+      enabled: timelineProbe.active && timelineEnabled,
+    });
     const pane = useContext(PaneContext);
     paneContextRenders.set(threadId, [
       ...(paneContextRenders.get(threadId) ?? []),
@@ -347,11 +362,15 @@ vi.mock("./ThreadDetailView", () => ({
           data-testid={`drag-${threadId}`}
           onPointerDown={(event) => pane?.beginPaneDrag?.(event, threadId)}
         />
-        <textarea
-          data-testid={`draft-${threadId}`}
-          value={draft.text}
-          onChange={(event) => draft.setTextAndMentions(event.target.value, [])}
-        />
+        <div data-promptbox="">
+          <textarea
+            data-testid={`draft-${threadId}`}
+            value={draft.text}
+            onChange={(event) =>
+              draft.setTextAndMentions(event.target.value, [])
+            }
+          />
+        </div>
         <div
           data-testid={`scroll-${threadId}`}
           style={{ height: 20, overflow: "auto" }}
@@ -705,6 +724,8 @@ beforeEach(() => {
   panelGroupLayoutState.layout = [100, 0];
   commandHandlers.clear();
   paneContextRenders.clear();
+  timelineProbe.active = false;
+  timelineProbe.calls.clear();
   commandPresentationState.isModifierHeld = false;
   commandPresentationState.shortcut = null;
   threadStore.set("thr-a", { archivedAt: null, deletedAt: null });
@@ -857,6 +878,30 @@ describe("SplitThreadArea", () => {
     fireEvent.change(screen.getByTestId("draft-thr-b"), {
       target: { value: "" },
     });
+  });
+
+  it("pauses a hidden pane timeline and refreshes it when restored", async () => {
+    timelineProbe.active = true;
+    renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: twoPaneLayout("pane-1"),
+    });
+
+    await waitFor(() => {
+      expect(timelineProbe.calls.get("thr-a")).toBe(1);
+      expect(timelineProbe.calls.get("thr-b")).toBe(1);
+    });
+
+    fireEvent.click(screen.getByTestId("maximize-thr-a"));
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["timeline-probe", "thr-b"],
+      });
+    });
+    expect(timelineProbe.calls.get("thr-b")).toBe(1);
+
+    fireEvent.click(screen.getByTestId("maximize-thr-a"));
+    await waitFor(() => expect(timelineProbe.calls.get("thr-b")).toBe(2));
   });
 
   it("temporarily replaces panel full screen with a clean thread full screen", async () => {
@@ -1968,6 +2013,136 @@ describe("SplitThreadArea", () => {
     expect(store.get(splitLayoutAtom)?.focusedPaneId).toBe("pane-2");
   });
 
+  it.each([
+    ["pane.focus.right", "row"],
+    ["pane.focus.down", "col"],
+    ["pane.focus.next", "row"],
+    ["pane.focus.previous", "row"],
+    ["pane.focus.2", "row"],
+  ] as const)(
+    "%s transfers typing focus without changing drafts or selection",
+    async (command, dir) => {
+      renderSplitArea({
+        path: threadPath("thr-a"),
+        layout: twoPaneLayout("pane-1", dir),
+      });
+      const source = await screen.findByTestId("draft-thr-a");
+      const destination = screen.getByTestId(
+        "draft-thr-b",
+      ) as HTMLTextAreaElement;
+      fireEvent.change(destination, { target: { value: "destination draft" } });
+      destination.setSelectionRange(3, 7);
+      source.focus();
+      act(() => {
+        expect(commandHandlers.get(command)?.()).toBe(true);
+      });
+      await waitFor(() => expect(document.activeElement).toBe(destination));
+      expect(destination.value).toBe("destination draft");
+      expect([destination.selectionStart, destination.selectionEnd]).toEqual([
+        3, 7,
+      ]);
+      fireEvent.pointerDown(source);
+      await waitFor(() =>
+        expect(screen.getByTestId("pane-thr-a").dataset.focused).toBe("true"),
+      );
+      expect(document.activeElement).toBe(destination);
+    },
+  );
+
+  it("focuses the same numbered pane and transfers focus when maximized", async () => {
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: twoPaneLayout("pane-1"),
+    });
+    const source = await screen.findByTestId("draft-thr-a");
+    const target = screen.getByTestId("draft-thr-b");
+    screen.getByTestId("close-thr-a").focus();
+    act(() => {
+      commandHandlers.get("pane.focus.1")?.();
+    });
+    await waitFor(() => expect(document.activeElement).toBe(source));
+    act(() => {
+      store.set(maximizedPaneIdAtom, "pane-1");
+    });
+    act(() => {
+      commandHandlers.get("pane.focus.right")?.();
+    });
+    await waitFor(() => expect(document.activeElement).toBe(target));
+    expect(
+      target.closest("[data-split-pane-id]")?.getAttribute("aria-hidden"),
+    ).toBeNull();
+    act(() => {
+      commandHandlers.get("pane.focus.left")?.();
+    });
+    await waitFor(() => expect(document.activeElement).toBe(source));
+  });
+
+  it.each([false, true])(
+    "handles a late composer and cancels pending focus on pointer activity: %s",
+    async (cancel) => {
+      renderSplitArea({
+        path: threadPath("thr-a"),
+        layout: twoPaneLayout("pane-1"),
+      });
+      const source = await screen.findByTestId("draft-thr-a");
+      const target = screen.getByTestId("draft-thr-b") as HTMLTextAreaElement;
+      target.disabled = true;
+      source.focus();
+      act(() => {
+        commandHandlers.get("pane.focus.next")?.();
+      });
+      const root = target.closest("[data-split-pane-id]");
+      await waitFor(() => expect(document.activeElement).toBe(root));
+      if (cancel) fireEvent.pointerDown(root!);
+      target.disabled = false;
+      if (cancel) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(document.activeElement).toBe(root);
+      } else {
+        await waitFor(() => expect(document.activeElement).toBe(target));
+      }
+    },
+  );
+
+  it("focuses plugin content controls instead of pane chrome", async () => {
+    setPluginSlotRegistrations(
+      "docs",
+      makePluginRegistrationSet({
+        navPanels: [
+          {
+            id: "docs",
+            title: "Docs",
+            icon: "FileText",
+            path: "docs",
+            component: () => <input aria-label="Search docs" />,
+          },
+        ],
+        threadPanelActions: [],
+        pendingInteractions: [],
+        sidebarFooterActions: [],
+        fileOpeners: [],
+      }),
+    );
+    const layout = pluginSplitLayout();
+    layout.focusedPaneId = "pane-1";
+    renderSplitArea({
+      path: threadPath("thr-a"),
+      layout,
+      routeAwareContent: true,
+    });
+    (await screen.findByTestId("draft-thr-a")).focus();
+    act(() => {
+      commandHandlers.get("pane.focus.next")?.();
+    });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Search docs" }),
+      ),
+    );
+  });
+
   it("restores eight successive default-right opens, then focuses and closes with valid URL state", async () => {
     const layout = eightPaneThreadLayout();
     expect(layout.root).toMatchObject({
@@ -2279,8 +2454,8 @@ describe("SplitThreadArea", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getAllByRole("button", { name: "Close pane" })[0]
-          ?.parentElement?.nextElementSibling,
+        screen.getAllByRole("button", { name: "Close pane" })[0]?.parentElement
+          ?.nextElementSibling,
       ).toBeNull(),
     );
   });

@@ -868,7 +868,12 @@ export const publicApiRoutes = {
       path: "/hosts/:id",
       method: "get",
       request: noRequest<PathId>(),
-      response: jsonResponse<Host & { connectMachineId: string | null }>(),
+      response: jsonResponse<
+        Host & {
+          connectMachineId: string | null;
+          threadStorageRootPath: string | null;
+        }
+      >(),
     }),
     enrollmentCommand: defineRoute({
       path: "/hosts/:id/enrollment-command",
@@ -1096,6 +1101,12 @@ export const publicApiRoutes = {
   },
 
   environments: {
+    cleanup: defineRoute({
+      path: "/environments/:id/cleanup",
+      method: "post",
+      request: noRequest<PathId>(),
+      response: jsonResponse<{ ok: true }>(),
+    }),
     list: defineRoute({
       path: "/environments",
       method: "get",

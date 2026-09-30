@@ -18,6 +18,9 @@ patchedDependencies:
   '@react-native-cookies/cookies@6.2.1':
     hash: ujy2rsr7cvytwrazuebhhzq3zu
     path: patches/@react-native-cookies__cookies@6.2.1.patch
+  '@tiptap/extension-blockquote@3.26.0':
+    hash: 5ybzdv3kkwrykbgdydwjdtpqom
+    path: patches/@tiptap__extension-blockquote@3.26.0.patch
   expo-modules-jsi@57.0.4:
     hash: raucdrgf3mznkb7qkl7fkzjw5u
     path: patches/expo-modules-jsi@57.0.4.patch
@@ -77,6 +80,49 @@ importers:
       vitest:
         specifier: ^4.1.1
         version: 4.1.1(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@29.0.1(@noble/hashes@2.4.0))(msw@2.12.14(@types/node@24.12.4)(@typescript/typescript6@6.0.2))(vite@8.0.12(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.1)(yaml@2.9.0))
+
+  apps/ai-gateway:
+    dependencies:
+      '@bb/connect-db':
+        specifier: workspace:*
+        version: link:../../packages/connect-db
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@cloudflare/workers-types@4.20260702.1)(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(@types/react@19.2.13)(better-sqlite3@12.10.0)(kysely@0.29.3)(react@19.2.4)
+    devDependencies:
+      '@bb/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@cloudflare/workers-types':
+        specifier: ^4.20260610.0
+        version: 4.20260702.1
+      '@types/better-sqlite3':
+        specifier: ^7.6.12
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.10
+      better-sqlite3:
+        specifier: 12.10.0
+        version: 12.10.0
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      miniflare:
+        specifier: ^4.20260701.0
+        version: 4.20260701.0
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: npm:typescript@^7.0.2
+        version: typescript@7.0.2
+      vitest:
+        specifier: ^4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.1)(@types/node@22.19.10)(jsdom@29.0.1(@noble/hashes@2.4.0))(msw@2.12.14(@types/node@22.19.10)(@typescript/typescript6@6.0.2))(vite@8.0.12(@types/node@22.19.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.1)(yaml@2.9.0))
+      wrangler:
+        specifier: ^4.100.0
+        version: 4.107.0(@cloudflare/workers-types@4.20260702.1)
 
   apps/app:
     dependencies:
@@ -203,21 +249,51 @@ importers:
       '@tiptap/core':
         specifier: ^3.26.0
         version: 3.26.0(@tiptap/pm@3.26.0)
+      '@tiptap/extension-blockquote':
+        specifier: ^3.26.0
+        version: 3.26.0(patch_hash=5ybzdv3kkwrykbgdydwjdtpqom)(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-bold':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-code':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-document':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-hard-break':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-heading':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-italic':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-list':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0)
       '@tiptap/extension-mention':
         specifier: ^3.26.0
         version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0)(@tiptap/suggestion@3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0))
+      '@tiptap/extension-paragraph':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
       '@tiptap/extension-placeholder':
         specifier: ^3.26.0
         version: 3.26.0(@tiptap/extensions@3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0))
+      '@tiptap/extension-text':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extensions':
+        specifier: ^3.26.0
+        version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0)
       '@tiptap/pm':
         specifier: ^3.26.0
         version: 3.26.0
       '@tiptap/react':
         specifier: ^3.26.0
         version: 3.26.0(@floating-ui/dom@1.7.6)(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@tiptap/starter-kit':
-        specifier: ^3.26.0
-        version: 3.26.0
       '@tiptap/suggestion':
         specifier: ^3.26.0
         version: 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0)
@@ -351,6 +427,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@tiptap/starter-kit':
+        specifier: ^3.26.0
+        version: 3.26.0
       '@types/cacache':
         specifier: ^20.0.1
         version: 20.0.1
@@ -1061,7 +1140,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       drizzle-orm:
         specifier: ^0.38.4
         version: 0.38.4(@cloudflare/workers-types@4.20260702.1)(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(@types/react@19.2.13)(better-sqlite3@12.10.0)(kysely@0.29.3)(react@19.2.4)
@@ -1520,6 +1599,12 @@ importers:
       bb-plugin-automations:
         specifier: workspace:*
         version: link:../../plugins/automations
+      bb-plugin-bb-account:
+        specifier: workspace:*
+        version: link:../../plugins/bb-account
+      bb-plugin-bb-ai:
+        specifier: workspace:*
+        version: link:../../plugins/bb-ai
       bb-plugin-bb-guide:
         specifier: workspace:*
         version: link:../../plugins/bb-guide
@@ -2303,7 +2388,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       esbuild:
         specifier: ^0.28.0
         version: 0.28.1
@@ -2961,7 +3046,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3022,7 +3107,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3083,7 +3168,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3113,7 +3198,7 @@ importers:
         version: 1.3.0(@types/react@19.2.13)(react@19.2.4)
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       cronstrue:
         specifier: ^3.14.0
         version: 3.14.0
@@ -3182,6 +3267,83 @@ importers:
         specifier: ^4.1.1
         version: 4.1.1(@opentelemetry/api@1.9.1)(@types/node@22.19.10)(jsdom@29.0.1(@noble/hashes@2.4.0))(msw@2.12.14(@types/node@22.19.10)(@typescript/typescript6@6.0.2))(vite@8.0.12(@types/node@22.19.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.1)(yaml@2.9.0))
 
+  plugins/bb-account:
+    dependencies:
+      '@bb/connect-client':
+        specifier: workspace:*
+        version: link:../../packages/connect-client
+      '@bb/shared-ui':
+        specifier: workspace:*
+        version: link:../../packages/shared-ui
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@bb/plugin-build':
+        specifier: workspace:*
+        version: link:../../packages/plugin-build
+      '@get-bb/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@radix-ui/react-dialog':
+        specifier: ^1.1.19
+        version: 1.1.19(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.10
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      jsdom:
+        specifier: ^29.0.1
+        version: 29.0.1(@noble/hashes@2.4.0)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+      vaul:
+        specifier: ^1.1.2
+        version: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      vitest:
+        specifier: ^4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.1)(@types/node@22.19.10)(jsdom@29.0.1(@noble/hashes@2.4.0))(msw@2.12.14(@types/node@22.19.10)(@typescript/typescript6@6.0.2))(vite@8.0.12(@types/node@22.19.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.1)(yaml@2.9.0))
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
+
+  plugins/bb-ai:
+    dependencies:
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@bb/plugin-build':
+        specifier: workspace:*
+        version: link:../../packages/plugin-build
+      '@get-bb/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.10
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+      vitest:
+        specifier: ^4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.1)(@types/node@22.19.10)(jsdom@29.0.1(@noble/hashes@2.4.0))(msw@2.12.14(@types/node@22.19.10)(@typescript/typescript6@6.0.2))(vite@8.0.12(@types/node@22.19.10)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.1)(yaml@2.9.0))
+
   plugins/bb-guide:
     devDependencies:
       '@bb/plugin-build':
@@ -3201,7 +3363,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3253,7 +3415,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3314,7 +3476,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3388,6 +3550,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      bb-plugin-bb-account:
+        specifier: workspace:*
+        version: link:../bb-account
       better-sqlite3:
         specifier: 12.10.0
         version: 12.10.0
@@ -3436,7 +3601,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3551,7 +3716,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3611,7 +3776,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3712,7 +3877,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3752,7 +3917,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3853,7 +4018,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3920,7 +4085,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -3981,7 +4146,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4048,7 +4213,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4115,7 +4280,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       esbuild:
         specifier: ^0.28.0
         version: 0.28.1
@@ -4364,7 +4529,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4410,7 +4575,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4447,7 +4612,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4505,7 +4670,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4597,7 +4762,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4649,7 +4814,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4707,7 +4872,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4808,7 +4973,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       dotenv:
         specifier: ^17.4.1
         version: 17.4.1
@@ -4863,7 +5028,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -4990,7 +5155,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -5139,7 +5304,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -5218,7 +5383,7 @@ importers:
         version: 12.10.0
       cron-parser:
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.10.1
       hono:
         specifier: 4.11.9
         version: 4.11.9
@@ -11616,8 +11781,8 @@ packages:
   crelt@1.0.7:
     resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
 
-  cron-parser@5.5.0:
-    resolution: {integrity: sha512-oML4lKUXxizYswqmxuOCpgFS8BNUJpIu6k/2HVHyaL8Ynnf3wdf9tkns0yRdJLSIjkJ+b0DXHMZEHGpMwjnPww==}
+  cron-parser@5.10.1:
+    resolution: {integrity: sha512-pKRrRagItwk9rGIStcUyMxFX34x56zoX3KDf9HJ4ttwkXIK1qxK63EvXvEDmlxI9AdPJ+Y7TEKRftRlW5eSS7A==}
     engines: {node: '>=18'}
 
   cronstrue@3.14.0:
@@ -22189,7 +22354,7 @@ snapshots:
     dependencies:
       '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
 
-  '@tiptap/extension-blockquote@3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))':
+  '@tiptap/extension-blockquote@3.26.0(patch_hash=5ybzdv3kkwrykbgdydwjdtpqom)(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))':
     dependencies:
       '@tiptap/core': 3.26.0(@tiptap/pm@3.26.0)
 
@@ -22512,7 +22677,7 @@ snapshots:
   '@tiptap/starter-kit@3.26.0':
     dependencies:
       '@tiptap/core': 3.26.0(@tiptap/pm@3.26.0)
-      '@tiptap/extension-blockquote': 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
+      '@tiptap/extension-blockquote': 3.26.0(patch_hash=5ybzdv3kkwrykbgdydwjdtpqom)(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
       '@tiptap/extension-bold': 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
       '@tiptap/extension-bullet-list': 3.26.0(@tiptap/extension-list@3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))(@tiptap/pm@3.26.0))
       '@tiptap/extension-code': 3.26.0(@tiptap/core@3.26.0(@tiptap/pm@3.26.0))
@@ -24218,7 +24383,7 @@ snapshots:
 
   crelt@1.0.7: {}
 
-  cron-parser@5.5.0:
+  cron-parser@5.10.1:
     dependencies:
       luxon: 3.7.2
 
