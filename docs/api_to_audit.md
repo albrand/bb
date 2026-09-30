@@ -3538,3 +3538,18 @@ the legacy section or the general thread list, unpinned. The composer sends
 this placement with normal and scheduled creation. Audit pinned groups, custom sections, project/machine groups,
 route transitions, draft recovery, and third-party sidebar compatibility
 before stabilizing this option.
+
+## `ThreadsArea.experimental_searchPromptHistory`
+
+`bb.sdk.threads.experimental_searchPromptHistory({ query?, projectId?, limit? })`
+returns prompts the user sent in any live thread, newest first, as
+`{ id, input, lastUsedAt, useCount, projectId, projectName, threadId, threadTitle }`.
+It reads the recorded prompt history, not thread events. Whitespace separates up
+to eight terms; every term must appear in a text item (ASCII case-insensitive,
+wildcards literal). An omitted query lists recent prompts. Identical inputs
+collapse into one result carrying the count and the latest thread. `projectId`
+limits the search to one project and rejects unknown or deleted projects. `limit`
+defaults to 50 and is capped at 200. Deleted threads and projects are excluded.
+Backs Ctrl+R in the composer and `bb thread prompt-search`. Audit non-ASCII case
+folding, ranking beyond recency, pagination, and whether hidden or archived
+threads belong in results before stabilizing.
