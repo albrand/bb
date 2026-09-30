@@ -3,12 +3,35 @@ import {
   type UserQuestionPendingInteractionPayload,
   userQuestionPendingInteractionPayloadSchema,
 } from "@bb/domain";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   MCP_ELICITATION_MAX_ATTEMPTS,
   type McpElicitationRequest,
-  runMcpElicitation,
+  type McpElicitationResult,
+  type RunMcpElicitationArgs,
+  runMcpElicitation as runMapper,
 } from "./mcp-elicitation.js";
+
+const schemaValidator = new Ajv({ strict: false, allErrors: true });
+addFormats.default(schemaValidator);
+
+async function runMcpElicitation(
+  args: RunMcpElicitationArgs,
+): Promise<McpElicitationResult> {
+  const result = await runMapper(args);
+  if (result.action === "accept") {
+    const validate = schemaValidator.compile(
+      z.record(z.string(), z.unknown()).parse(args.request.requestedSchema),
+    );
+    expect(validate(result.content), JSON.stringify(validate.errors)).toBe(
+      true,
+    );
+  }
+  return result;
+}
 
 type Answers = Record<string, PendingInteractionUserAnswer>;
 
@@ -423,6 +446,100 @@ describe("runMcpElicitation", () => {
     ["a non-string enum", form({ x: { type: "string", enum: [1, 2] } })],
     ["an unsupported format", form({ x: { type: "string", format: "ipv4" } })],
     ["duplicate choices", form({ x: { type: "string", enum: ["a", "a"] } })],
+    [
+      "string limits on a choice field",
+      form({ x: { type: "string", enum: ["x", "long"], minLength: 2 } }),
+    ],
+    [
+      "a pattern on a text field",
+      form({ x: { type: "string", pattern: "^[a-z]+$" } }),
+    ],
+    [
+      "string limits on a titled choice field",
+      form({
+        x: {
+          type: "string",
+          maxLength: 1,
+          oneOf: [
+            { const: "a", title: "A" },
+            { const: "bb", title: "B" },
+          ],
+        },
+      }),
+    ],
+    [
+      "a choice with its own constraint",
+      form({
+        x: {
+          type: "string",
+          anyOf: [{ const: "a" }, { const: "b", pattern: "^a$" }],
+        },
+      }),
+    ],
+    [
+      "an exclusive bound on a number",
+      form({ x: { type: "number", exclusiveMinimum: 0 } }),
+    ],
+    ["a step on a number", form({ x: { type: "integer", multipleOf: 5 } })],
+    [
+      "a const on a yes/no field",
+      form({ x: { type: "boolean", const: true } }),
+    ],
+    [
+      "an item pattern on a list",
+      form({
+        x: {
+          type: "array",
+          items: { type: "string", enum: ["a", "b"], pattern: "^a$" },
+        },
+      }),
+    ],
+    [
+      "a contains rule on a list",
+      form({
+        x: {
+          type: "array",
+          items: { enum: ["a", "b"] },
+          contains: { const: "a" },
+        },
+      }),
+    ],
+    [
+      "non-string list items",
+      form({ x: { type: "array", items: { type: "integer", enum: ["1"] } } }),
+    ],
+    [
+      "a field with both oneOf and anyOf",
+      form({
+        x: {
+          type: "string",
+          oneOf: [{ const: "a" }, { const: "b" }],
+          anyOf: [{ const: "a" }],
+        },
+      }),
+    ],
+    [
+      "list items with both enum and anyOf",
+      form({
+        x: {
+          type: "array",
+          items: { enum: ["a", "b"], anyOf: [{ const: "a" }] },
+        },
+      }),
+    ],
+    [
+      "a form-level rule",
+      {
+        ...COLOR,
+        requestedSchema: {
+          type: "object",
+          properties: {
+            color: { type: "string", enum: ["red", "blue"] },
+          },
+          allOf: [{ required: ["color"] }],
+        },
+      },
+    ],
     ["a missing schema", { serverName: "tickets", message: "Hi" }],
     ["a blank message", { ...COLOR, message: "  " }],
   ])("declines %s without asking", async (_label, request) => {

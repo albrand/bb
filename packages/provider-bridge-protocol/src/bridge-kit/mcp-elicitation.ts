@@ -75,6 +75,14 @@ const CONFIRM_QUESTION_ID = "confirm";
 const CONFIRM_ACCEPT_VALUE = "confirm:accept";
 const CONFIRM_DECLINE_VALUE = "confirm:decline";
 const TEXT_FORMATS = ["email", "uri", "date", "date-time"] as const;
+const ANNOTATION_KEYWORDS = ["title", "description", "default"];
+const FORM_KEYWORDS = [
+  "$schema",
+  "type",
+  "properties",
+  "required",
+  "additionalProperties",
+];
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -88,6 +96,21 @@ function ownValue(record: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(record, key)
     ? record[key]
     : undefined;
+}
+
+function allowOnlyKeywords(
+  record: Record<string, unknown>,
+  keywords: readonly string[],
+  context: string,
+): void {
+  const unsupported = Object.keys(record).find(
+    (key) => !keywords.includes(key) && !ANNOTATION_KEYWORDS.includes(key),
+  );
+  if (unsupported !== undefined) {
+    throw new UnsupportedElicitationError(
+      `${context} uses the unsupported keyword ${unsupported}`,
+    );
+  }
 }
 
 function optionalText(
@@ -127,6 +150,7 @@ function optionsFromConstList(list: unknown): ElicitationOption[] {
     if (!isPlainObject(entry)) {
       throw new UnsupportedElicitationError("choices must be objects");
     }
+    allowOnlyKeywords(entry, ["const"], "a choice");
     const value = ownValue(entry, "const");
     if (typeof value !== "string") {
       throw new UnsupportedElicitationError("choice values must be strings");
@@ -189,9 +213,15 @@ function parseFieldShape(
   const anyOf = ownValue(property, "anyOf");
   const enumValues = ownValue(property, "enum");
   if (type === "boolean") {
+    allowOnlyKeywords(property, ["type"], "a yes/no field");
     return { kind: "boolean" };
   }
   if (type === "number" || type === "integer") {
+    allowOnlyKeywords(
+      property,
+      ["type", "minimum", "maximum"],
+      "a number field",
+    );
     return {
       kind: "number",
       integer: type === "integer",
@@ -200,9 +230,36 @@ function parseFieldShape(
     };
   }
   if (type === "array") {
+    allowOnlyKeywords(
+      property,
+      ["type", "items", "minItems", "maxItems", "uniqueItems"],
+      "a list field",
+    );
+    const uniqueItems = ownValue(property, "uniqueItems");
+    if (uniqueItems !== undefined && typeof uniqueItems !== "boolean") {
+      throw new UnsupportedElicitationError("uniqueItems must be a boolean");
+    }
     const items = ownValue(property, "items");
     if (!isPlainObject(items)) {
       throw new UnsupportedElicitationError("a list field has no items");
+    }
+    allowOnlyKeywords(
+      items,
+      ["type", "enum", "anyOf", "oneOf"],
+      "a list field's items",
+    );
+    const itemType = ownValue(items, "type");
+    if (itemType !== undefined && itemType !== "string") {
+      throw new UnsupportedElicitationError("list items must be strings");
+    }
+    if (
+      ["enum", "anyOf", "oneOf"].filter(
+        (key) => ownValue(items, key) !== undefined,
+      ).length > 1
+    ) {
+      throw new UnsupportedElicitationError(
+        "list items combine several choice lists",
+      );
     }
     const itemChoices = ownValue(items, "anyOf") ?? ownValue(items, "oneOf");
     const options =
@@ -217,13 +274,27 @@ function parseFieldShape(
     };
   }
   if (type === "string" || type === undefined) {
+    if (
+      [oneOf, anyOf, enumValues].filter((choices) => choices !== undefined)
+        .length > 1
+    ) {
+      throw new UnsupportedElicitationError(
+        "a field combines several choice lists",
+      );
+    }
     if (oneOf !== undefined || anyOf !== undefined) {
+      allowOnlyKeywords(property, ["type", "oneOf", "anyOf"], "a choice field");
       return {
         kind: "single",
         options: checkedOptions(optionsFromConstList(oneOf ?? anyOf)),
       };
     }
     if (enumValues !== undefined) {
+      allowOnlyKeywords(
+        property,
+        ["type", "enum", "enumNames"],
+        "a choice field",
+      );
       return {
         kind: "single",
         options: checkedOptions(
@@ -234,6 +305,11 @@ function parseFieldShape(
     if (type === undefined) {
       throw new UnsupportedElicitationError("a field has no type");
     }
+    allowOnlyKeywords(
+      property,
+      ["type", "minLength", "maxLength", "format"],
+      "a text field",
+    );
     const format = ownValue(property, "format");
     if (
       format !== undefined &&
@@ -259,6 +335,7 @@ function parseElicitationForm(requestedSchema: unknown): ElicitationForm {
   if (!isPlainObject(requestedSchema)) {
     throw new UnsupportedElicitationError("the form has no schema");
   }
+  allowOnlyKeywords(requestedSchema, FORM_KEYWORDS, "the form");
   const schemaType = ownValue(requestedSchema, "type");
   if (schemaType !== undefined && schemaType !== "object") {
     throw new UnsupportedElicitationError("the form schema is not an object");

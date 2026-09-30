@@ -1290,6 +1290,10 @@ forms behave the same.
   - URL and `openai/form` modes;
   - more than 4 fields or 4 choices;
   - nested or unknown field types;
+  - any schema keyword the helper does not check, such as `pattern`,
+    `exclusiveMinimum`, `multipleOf`, string limits on a choice field, or a
+    form-level `allOf`, so an accepted result always satisfies the requested
+    schema;
   - `required` names that the form does not define;
   - a blank message.
 - A rejected `ask`, an answer of the wrong shape, or an aborted signal

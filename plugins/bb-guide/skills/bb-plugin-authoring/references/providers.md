@@ -282,8 +282,9 @@ elicitation's `serverName`, `message`, `mode`, and `requestedSchema`. In `ask`,
 send the given `user_question` payload with `interaction/request` and return
 the raw result. The helper checks the answers, asks again when one is invalid,
 and resolves to an MCP `accept` with typed `content`, a `decline`, or a
-`cancel`. It declines URL-mode requests and forms the question card cannot
-show.
+`cancel`. It declines URL-mode requests, forms the question card cannot
+show, and forms with schema keywords it does not check, so an accepted result
+always satisfies the requested schema.
 
 For an ACP agent, use `@get-bb/plugin-sdk/provider-bridge/acp`. Re-export
 `experimental_acpProviderBridge` as `experimental_providerBridge`. Supply a

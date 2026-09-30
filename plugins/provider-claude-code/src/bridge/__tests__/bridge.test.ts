@@ -1735,6 +1735,26 @@ describe("bridge", () => {
         { signal: new AbortController().signal, requestId: "elicit-4" },
       );
       expect(unsupported).toEqual({ action: "decline" });
+      for (const [index, color] of [
+        { type: "string", enum: ["x", "long"], minLength: 2 },
+        { type: "string", pattern: "^[a-z]+$" },
+      ].entries()) {
+        const constrained = await getLastOnElicitation()(
+          {
+            ...COLOR_ELICITATION,
+            requestedSchema: {
+              type: "object",
+              properties: { color },
+              required: ["color"],
+            },
+          },
+          {
+            signal: new AbortController().signal,
+            requestId: `elicit-constrained-${index}`,
+          },
+        );
+        expect(constrained).toEqual({ action: "decline" });
+      }
       expect(bridge.messages.filter(isUserQuestionInteraction)).toHaveLength(2);
     } finally {
       stderr.mockRestore();

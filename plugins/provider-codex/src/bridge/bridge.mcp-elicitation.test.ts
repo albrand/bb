@@ -220,6 +220,36 @@ it("declines a URL elicitation without showing a card", async () => {
   stderr.mockRestore();
 });
 
+it.each([
+  [
+    "string limits on a choice field",
+    { type: "string", enum: ["x", "long"], minLength: 2 },
+  ],
+  ["a pattern on a text field", { type: "string", pattern: "^[a-z]+$" }],
+])("declines a form with %s without showing a card", async (_label, field) => {
+  startHarness([
+    elicitingTurn("turn-e5", {
+      mode: "form",
+      _meta: null,
+      message: "Name the release",
+      requestedSchema: {
+        type: "object",
+        properties: { field },
+        required: ["field"],
+      },
+    }),
+  ]);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  await runOneTurn();
+
+  expect(elicitationResponses()).toEqual([
+    { action: "decline", content: null, _meta: null },
+  ]);
+  expect(asked).toEqual([]);
+  stderr.mockRestore();
+});
+
 it("cancels the elicitation when the question card is cancelled", async () => {
   startHarness([
     elicitingTurn("turn-e3", {
