@@ -851,17 +851,14 @@ async function sweepProviderEnvironmentInSlot(
     return;
   }
   const grace = providerRetireGraceMs(row, record);
-  if (
-    !cancelled &&
-    row.teardownStatus === null &&
-    grace === null &&
-    row.status !== "destroyed"
-  ) {
-    if (row.retireAt !== null)
-      writeEnvironment(deps, environmentId, { retireAt: null });
-    return;
-  }
   if (row.retireAt === null) {
+    if (
+      !cancelled &&
+      row.teardownStatus === null &&
+      grace === null &&
+      row.status !== "destroyed"
+    )
+      return;
     const retireAt =
       row.status === "destroyed" || cancelled ? now : now + (grace ?? 0);
     writeEnvironment(deps, environmentId, { retireAt });
