@@ -3,6 +3,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -135,6 +137,26 @@ it("reloads Codex MCP servers before the first turn after the MCP config changes
     "config/mcpServer/reload",
     "turn/start",
   ]);
+});
+
+it("reloads after an edit that keeps the config's inode, size, and modification time", async () => {
+  const configPath = join(codexHome, "config.toml");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  startHarness({});
+  const providerThreadId = await startThread();
+  const before = statSync(configPath);
+
+  writeFileSync(configPath, '[mcp_servers.alpha]\ncommand = "bravo"\n');
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const after = statSync(configPath);
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([
+    before.ino,
+    before.size,
+    before.mtimeMs,
+  ]);
+  await runTurn(2, providerThreadId);
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
 });
 
 it("still starts the turn and retries on the next turn when the reload fails", async () => {

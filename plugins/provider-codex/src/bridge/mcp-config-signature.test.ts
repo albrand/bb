@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -63,4 +70,24 @@ it("changes when a watched config file is created, edited, or removed", () => {
   rmSync(join(cwd, ".codex", "config.toml"));
   rmSync(join(rootDir, "home", "config.toml"));
   expect(signature()).toBe(absent);
+});
+
+it("changes when the contents change but the inode, size, and modification time do not", () => {
+  const env = { CODEX_HOME: rootDir };
+  const configPath = join(rootDir, "config.toml");
+  writeFileSync(configPath, 'command = "alpha"\n');
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const before = statSync(configPath);
+  const original = codexMcpConfigSignature({ cwd: rootDir, env });
+
+  writeFileSync(configPath, 'command = "bravo"\n');
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const after = statSync(configPath);
+
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([
+    before.ino,
+    before.size,
+    before.mtimeMs,
+  ]);
+  expect(codexMcpConfigSignature({ cwd: rootDir, env })).not.toBe(original);
 });

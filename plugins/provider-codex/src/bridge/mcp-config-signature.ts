@@ -1,4 +1,5 @@
-import { statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -24,8 +25,7 @@ export function codexMcpConfigPaths(args: {
 
 function fileSignature(path: string): string {
   try {
-    const stats = statSync(path);
-    return `${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
   } catch (error) {
     const code =
       error instanceof Error && "code" in error ? String(error.code) : "error";
