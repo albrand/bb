@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -70,6 +71,23 @@ it("changes when a watched config file is created, edited, or removed", () => {
   rmSync(join(cwd, ".codex", "config.toml"));
   rmSync(join(rootDir, "home", "config.toml"));
   expect(signature()).toBe(absent);
+});
+
+it("signs a FIFO or a directory without reading it", () => {
+  const env = { CODEX_HOME: rootDir };
+  const configPath = join(rootDir, "config.toml");
+  const absent = codexMcpConfigSignature({ cwd: rootDir, env });
+
+  execFileSync("mkfifo", [configPath]);
+  const fifo = codexMcpConfigSignature({ cwd: rootDir, env });
+  expect(fifo).not.toBe(absent);
+  expect(fifo).toContain(`${configPath}=not-a-file:`);
+
+  rmSync(configPath);
+  mkdirSync(configPath);
+  const directory = codexMcpConfigSignature({ cwd: rootDir, env });
+  expect(directory).toContain(`${configPath}=not-a-file:`);
+  expect(directory).not.toBe(fifo);
 });
 
 it("changes when the contents change but the inode, size, and modification time do not", () => {

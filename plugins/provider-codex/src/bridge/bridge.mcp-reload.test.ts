@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -154,6 +155,18 @@ it("reloads after an edit that keeps the config's inode, size, and modification 
     before.size,
     before.mtimeMs,
   ]);
+  await runTurn(2, providerThreadId);
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+});
+
+it("starts the turn when a watched config is replaced by a FIFO with no writer", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  rmSync(configPath);
+  execFileSync("mkfifo", [configPath]);
+
   await runTurn(2, providerThreadId);
 
   expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
