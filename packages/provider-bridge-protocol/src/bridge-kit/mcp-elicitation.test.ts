@@ -385,6 +385,80 @@ describe("runMcpElicitation", () => {
     expect(payloads).toHaveLength(2);
   });
 
+  const FORMAT_FALLBACKS: Record<string, string> = {
+    email: "someone@example.com",
+    uri: "https://example.com",
+    date: "2026-02-28",
+    "date-time": "2026-09-30T10:00:00Z",
+  };
+
+  it.each([
+    ["date-time", "2026-09-30T12:00:00+99:99"],
+    ["date-time", "2026-09-30T12:00:00+24:00"],
+    ["date-time", "2026-09-30T12:00:00-05:60"],
+    ["date-time", "2026-09-30T24:00:00Z"],
+    ["date-time", "2026-09-30T12:00:60Z"],
+    ["date-time", "2026-02-30T12:00:00Z"],
+    ["date-time", "2026-09-30T12:00:00"],
+    ["date", "2023-02-29"],
+    ["date", "2026-13-01"],
+    ["date", "2026-00-10"],
+    ["date", "2026-04-31"],
+    ["date", "2026-09-00"],
+    ["email", "a@b..c"],
+    ["email", "a..b@example.com"],
+    ["email", ".a@example.com"],
+    ["email", "a@-example.com"],
+    ["email", "a@example"],
+    ["email", "a b@example.com"],
+    ["email", "a@exa_mple.com"],
+    ["uri", "http://a:b"],
+    ["uri", "https://exa mple.com"],
+    ["uri", "https://example.com/a b"],
+    ["uri", "https://example.com/%zz"],
+    ["uri", "https://example.com:123456"],
+    ["uri", "javascript:alert(1)"],
+    ["uri", "https://"],
+    ["uri", "example.com"],
+    ["uri", "https://[::1]/"],
+  ])("asks again for the %s value %s", async (format, invalid) => {
+    const valid = FORMAT_FALLBACKS[format]!;
+    const request = form({ value: { type: "string", format } });
+    const { ask, payloads } = scriptedAsk([
+      { "field-1": { selected: [], freeText: invalid } },
+      { "field-1": { selected: [], freeText: valid } },
+    ]);
+
+    expect(await runMcpElicitation({ request, ask })).toEqual({
+      action: "accept",
+      content: { value: valid },
+    });
+    expect(payloads).toHaveLength(2);
+  });
+
+  it.each([
+    ["date-time", "2026-09-30T12:00:00+05:30"],
+    ["date-time", "2026-09-30t12:00:00.125z"],
+    ["date-time", "2024-02-29T23:59:59-23:59"],
+    ["date", "2024-02-29"],
+    ["date", "2000-02-29"],
+    ["email", "first.last+tag@example.co.uk"],
+    ["email", "a_b%c@sub-domain.example.org"],
+    ["uri", "https://example.com:8080/p/a-b?q=1&r=%20#frag"],
+    ["uri", "http://localhost"],
+  ])("accepts the %s value %s on the first answer", async (format, value) => {
+    const request = form({ value: { type: "string", format } });
+    const { ask, payloads } = scriptedAsk([
+      { "field-1": { selected: [], freeText: value } },
+    ]);
+
+    expect(await runMcpElicitation({ request, ask })).toEqual({
+      action: "accept",
+      content: { value },
+    });
+    expect(payloads).toHaveLength(1);
+  });
+
   it("enforces maxLength in characters, not UTF-16 units", async () => {
     const request = form({ code: { type: "string", maxLength: 2 } });
     const { ask, payloads } = scriptedAsk([

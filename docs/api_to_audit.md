@@ -1312,9 +1312,12 @@ forms behave the same.
    user can decline a form only when it has no fields. Decide whether the card
    should offer a Decline action that returns `decline` and keeps the turn
    running.
-4. **Format checks are bb's own.** Email, URI, date and date-time use simple
-   local checks rather than a JSON Schema validator. Decide whether servers
-   need stricter validation.
+4. **Format checks are bb's own.** Email, URI, date and date-time use local
+   checks that accept a strict subset of what ajv-formats accepts: RFC 3339
+   dates and date-times with a checked offset, emails with a DNS-style domain,
+   and only `http://` or `https://` addresses for `uri`. The mapper tests
+   validate every accepted value with ajv. Decide whether other URI schemes are
+   needed.
 5. **Result shape.** `decline` and `cancel` carry a `reason` for logs, which
    MCP results do not have; each bridge drops it when it replies. Decide
    whether the reason belongs in the public result.

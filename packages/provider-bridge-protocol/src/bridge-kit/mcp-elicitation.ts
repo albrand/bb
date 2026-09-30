@@ -407,7 +407,7 @@ function describeTextRule(field: {
 }): string | null {
   const parts: string[] = [];
   if (field.format === "email") parts.push("an email address");
-  if (field.format === "uri") parts.push("a URL");
+  if (field.format === "uri") parts.push("an http:// or https:// address");
   if (field.format === "date") parts.push("a date as YYYY-MM-DD");
   if (field.format === "date-time") {
     parts.push("a date and time as YYYY-MM-DDTHH:MM:SSZ");
@@ -541,18 +541,27 @@ function codePointLength(value: string): number {
 }
 
 const DECIMAL_NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL =
+  /^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
+const WEB_URL =
+  /^https?:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/i;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isValidDate(year: string, month: string, day: string): boolean {
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-  return (
-    date.getUTCFullYear() === Number(year) &&
-    date.getUTCMonth() === Number(month) - 1 &&
-    date.getUTCDate() === Number(day)
-  );
+  const yearNumber = Number(year);
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  if (dayNumber < 1) {
+    return false;
+  }
+  const leapYear =
+    yearNumber % 4 === 0 && (yearNumber % 100 !== 0 || yearNumber % 400 === 0);
+  const daysInMonth =
+    monthNumber === 2 && leapYear ? 29 : (DAYS_IN_MONTH[monthNumber - 1] ?? 0);
+  return dayNumber <= daysInMonth;
 }
 
 function formatError(
@@ -562,12 +571,10 @@ function formatError(
   switch (format) {
     case "email":
       return EMAIL.test(value) ? null : "Enter an email address";
-    case "uri": {
-      if (!URL.canParse(value)) {
-        return "Enter a full URL such as https://example.com";
-      }
-      return null;
-    }
+    case "uri":
+      return WEB_URL.test(value)
+        ? null
+        : "Enter a web address starting with http:// or https://";
     case "date": {
       const match = DATE.exec(value);
       return match !== null && isValidDate(match[1]!, match[2]!, match[3]!)
@@ -580,9 +587,11 @@ function formatError(
         isValidDate(match[1]!, match[2]!, match[3]!) &&
         Number(match[4]) < 24 &&
         Number(match[5]) < 60 &&
-        Number(match[6]) < 60
+        Number(match[6]) < 60 &&
+        Number(match[7] ?? 0) < 24 &&
+        Number(match[8] ?? 0) < 60
         ? null
-        : "Enter a date and time as YYYY-MM-DDTHH:MM:SSZ";
+        : "Enter a date and time as YYYY-MM-DDTHH:MM:SSZ, or with an offset such as +02:00";
     }
   }
 }

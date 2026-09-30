@@ -1699,6 +1699,68 @@ describe("bridge", () => {
     }
   });
 
+  it("asks an MCP date-time field again after an impossible offset", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+
+    try {
+      const threadId = "thread-mcp-elicitation-format";
+      await startBridgeThread({ bridge, threadId });
+      const resultPromise = getLastOnElicitation()(
+        {
+          serverName: "calendar",
+          message: "When is the meeting?",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              when: { type: "string", title: "Starts", format: "date-time" },
+            },
+            required: ["when"],
+          },
+        },
+        { signal: new AbortController().signal, requestId: "elicit-format" },
+      );
+
+      for (const [index, freeText] of [
+        "2026-09-30T12:00:00+99:99",
+        "2026-09-30T12:00:00-04:00",
+      ].entries()) {
+        await bridge.flushWork();
+        const questionRequest = bridge.messages.filter(
+          isUserQuestionInteraction,
+        )[index];
+        if (questionRequest?.id === undefined) {
+          throw new Error(`Expected question request ${index + 1}`);
+        }
+        handleLine(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: questionRequest.id,
+            result: {
+              kind: "user_answer",
+              answers: { "field-1": { selected: [], freeText } },
+            },
+          }),
+        );
+      }
+
+      await expect(resultPromise).resolves.toEqual({
+        action: "accept",
+        content: { when: "2026-09-30T12:00:00-04:00" },
+      });
+      expect(bridge.messages.filter(isUserQuestionInteraction)).toHaveLength(2);
+      await stopBridgeThread({ bridge, queries, threadId });
+    } finally {
+      bridge.restore();
+    }
+  });
+
   it("cancels a pending MCP elicitation when Claude aborts it or the thread stops", async () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     const queries: ControlledClaudeQuery[] = [];

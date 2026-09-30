@@ -250,6 +250,43 @@ it.each([
   stderr.mockRestore();
 });
 
+it("asks again when a date-time answer has an impossible offset and returns the corrected value", async () => {
+  startHarness([
+    elicitingTurn("turn-e6", {
+      mode: "form",
+      _meta: null,
+      message: "When should it ship?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          when: { type: "string", title: "Ship at", format: "date-time" },
+        },
+        required: ["when"],
+      },
+    }),
+  ]);
+  replies = ["2026-09-30T12:00:00+99:99", "2026-09-30T12:00:00+05:30"].map(
+    (freeText) => ({
+      result: {
+        kind: "user_answer",
+        answers: { "field-1": { selected: [], freeText } },
+      },
+    }),
+  );
+
+  await runOneTurn();
+
+  expect(elicitationResponses()).toEqual([
+    {
+      action: "accept",
+      content: { when: "2026-09-30T12:00:00+05:30" },
+      _meta: null,
+    },
+  ]);
+  expect(asked).toHaveLength(2);
+  expect(JSON.stringify(asked[1])).toContain("offset such as +02:00");
+});
+
 it("cancels the elicitation when the question card is cancelled", async () => {
   startHarness([
     elicitingTurn("turn-e3", {
