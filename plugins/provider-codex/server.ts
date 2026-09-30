@@ -34,6 +34,8 @@ export default function plugin(bb: BbPluginApi) {
       expiredHint: "Your Codex session expired. Run `codex`, then reload.",
       installUrl: "https://developers.openai.com/codex/cli",
       brandPrefix: "GPT-",
+      planModeCopy:
+        "Codex will plan in its plan mode and can stop to ask you questions before changing anything.",
     },
     models: { scope: "host" },
     ...CODEX_NATIVE_ROOTS_DECLARATION,

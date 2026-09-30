@@ -1,5 +1,6 @@
 import {
   jsonValueSchema,
+  removeCommandMentionsFromPromptInput,
   type PermissionEscalation,
   type PromptInput,
   type ReasoningLevel,
@@ -22,6 +23,7 @@ import { mapBbReasoningLevelToCodex } from "./models.js";
 
 export type CodexSessionOptions = {
   model?: string;
+  promptMode?: "plan";
   serviceTier?: ServiceTier;
   reasoningLevel?: ReasoningLevel;
   memoryEnabled?: boolean;
@@ -558,6 +560,54 @@ export function toCodexReasoningEffort(
     );
   }
   return codexEffort;
+}
+
+export type CodexCollaborationModeKind = "plan" | "default";
+
+export interface CodexCollaborationMode {
+  mode: CodexCollaborationModeKind;
+  settings: {
+    model: string;
+    reasoning_effort: CodexReasoningEffort | null;
+    developer_instructions: null;
+  };
+}
+
+export function nextCodexCollaborationMode(args: {
+  options: CodexSessionOptions;
+  current: CodexCollaborationModeKind | null;
+}): CodexCollaborationMode | null {
+  const mode: CodexCollaborationModeKind =
+    args.options.promptMode === "plan" ? "plan" : "default";
+  if (mode === args.current || args.options.model === undefined) {
+    return null;
+  }
+  const effort =
+    args.options.reasoningLevel === undefined
+      ? null
+      : mapBbReasoningLevelToCodex(args.options.reasoningLevel);
+  return {
+    mode,
+    settings: {
+      model: args.options.model,
+      reasoning_effort: effort,
+      developer_instructions: null,
+    },
+  };
+}
+
+export function toCodexTurnInput(
+  input: readonly PromptInput[],
+  options: CodexSessionOptions,
+): CodexUserInput[] {
+  return toCodexUserInput(
+    options.promptMode === "plan"
+      ? removeCommandMentionsFromPromptInput(input, {
+          trigger: "/",
+          name: "plan",
+        })
+      : [...input],
+  );
 }
 
 export function toCodexUserInput(input: PromptInput[]): CodexUserInput[] {

@@ -16,12 +16,14 @@ import type {
 import {
   buildCodexConfig,
   gitWritableRootsForWorkspace,
+  nextCodexCollaborationMode,
   resolveCodexInstructionOverrides,
   toCodexDynamicTools,
   toCodexPermissionSettings,
   toCodexReasoningEffort,
   toCodexServiceTier,
   toCodexThreadPermissionSettings,
+  toCodexTurnInput,
   toCodexUserInput,
 } from "./session-params.js";
 import type { CodexSessionOptions } from "./session-params.js";
@@ -726,5 +728,113 @@ describe("toCodexUserInput", () => {
         text_elements: [],
       },
     ]);
+  });
+});
+
+const PLAN_MENTION_INPUT: PromptInput[] = [
+  {
+    type: "text",
+    text: "/plan outline the migration",
+    mentions: [
+      {
+        start: 0,
+        end: 5,
+        resource: {
+          kind: "command",
+          trigger: "/",
+          name: "plan",
+          source: "command",
+          origin: "builtin",
+          label: "plan",
+          argumentHint: null,
+        },
+      },
+    ],
+  },
+];
+
+describe("toCodexTurnInput", () => {
+  it("strips the /plan command mention that opened plan mode", () => {
+    expect(
+      toCodexTurnInput(PLAN_MENTION_INPUT, {
+        ...FULL_OPTIONS,
+        promptMode: "plan",
+      }),
+    ).toEqual([
+      { type: "text", text: "outline the migration", text_elements: [] },
+    ]);
+  });
+
+  it("sends the prompt unchanged outside plan mode", () => {
+    expect(toCodexTurnInput(PLAN_MENTION_INPUT, FULL_OPTIONS)).toEqual([
+      { type: "text", text: "/plan outline the migration", text_elements: [] },
+    ]);
+  });
+});
+
+describe("nextCodexCollaborationMode", () => {
+  const options = {
+    ...FULL_OPTIONS,
+    model: "gpt-5.5",
+    reasoningLevel: "high",
+  } satisfies CodexSessionOptions;
+
+  it("switches a default thread into plan mode with the turn's model and effort", () => {
+    expect(
+      nextCodexCollaborationMode({
+        options: { ...options, promptMode: "plan" },
+        current: "default",
+      }),
+    ).toEqual({
+      mode: "plan",
+      settings: {
+        model: "gpt-5.5",
+        reasoning_effort: "high",
+        developer_instructions: null,
+      },
+    });
+  });
+
+  it("sends nothing while the thread stays in the mode it is in", () => {
+    expect(
+      nextCodexCollaborationMode({
+        options: { ...options, promptMode: "plan" },
+        current: "plan",
+      }),
+    ).toBeNull();
+    expect(
+      nextCodexCollaborationMode({ options, current: "default" }),
+    ).toBeNull();
+  });
+
+  it("switches back to default on the first ordinary turn after plan mode", () => {
+    expect(nextCodexCollaborationMode({ options, current: "plan" })).toEqual(
+      expect.objectContaining({ mode: "default" }),
+    );
+  });
+
+  it("sends an explicit default when the thread's mode is unknown", () => {
+    expect(
+      nextCodexCollaborationMode({
+        options: { ...FULL_OPTIONS, model: "gpt-5.5" },
+        current: null,
+      }),
+    ).toEqual({
+      mode: "default",
+      settings: {
+        model: "gpt-5.5",
+        reasoning_effort: null,
+        developer_instructions: null,
+      },
+    });
+  });
+
+  it("cannot switch modes without a model", () => {
+    expect(
+      nextCodexCollaborationMode({
+        options: { ...FULL_OPTIONS, promptMode: "plan" },
+        current: "default",
+      }),
+    ).toBeNull();
   });
 });
