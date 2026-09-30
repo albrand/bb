@@ -48,13 +48,14 @@ function toBbServiceTier(
   if (tier === null) {
     return "default";
   }
-  return tier === "fast" ? "fast" : null;
+  return tier === "fast" || tier === "priority" ? "fast" : null;
 }
 
 export function toCodexExecutionDelta(
   threadSessionResult: unknown,
 ): ThreadExecutionDelta | null {
-  const parsed = codexSessionSettingsResultSchema.safeParse(threadSessionResult);
+  const parsed =
+    codexSessionSettingsResultSchema.safeParse(threadSessionResult);
   if (!parsed.success) {
     return null;
   }

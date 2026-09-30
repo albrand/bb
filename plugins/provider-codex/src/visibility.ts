@@ -120,6 +120,14 @@ const CODEX_SERVER_NOTIFICATION_METHODS = {
   warning: true,
   "windows/worldWritableWarning": true,
   "windowsSandbox/setupCompleted": true,
+  "account/gatewayOAuth/changed": true,
+  "mcpServer/event/stream/notification": true,
+  "modelProvider/authRecoveryCompleted": true,
+  "modelProvider/authRecoveryStarted": true,
+  "thread/attachment/updated": true,
+  "thread/realtime/item/completed": true,
+  "thread/realtime/item/started": true,
+  "thread/realtime/item/transcript/delta": true,
 } satisfies Record<CodexServerNotificationMethod, true>;
 
 const CODEX_NOTIFICATION_COVERAGE = {
@@ -200,6 +208,14 @@ const CODEX_NOTIFICATION_COVERAGE = {
   warning: "normalized",
   "windows/worldWritableWarning": "unknown",
   "windowsSandbox/setupCompleted": "unknown",
+  "account/gatewayOAuth/changed": "unknown",
+  "mcpServer/event/stream/notification": "unknown",
+  "modelProvider/authRecoveryCompleted": "unknown",
+  "modelProvider/authRecoveryStarted": "unknown",
+  "thread/attachment/updated": "unknown",
+  "thread/realtime/item/completed": "unknown",
+  "thread/realtime/item/started": "unknown",
+  "thread/realtime/item/transcript/delta": "unknown",
 } satisfies Record<CodexServerNotificationMethod, ProviderRawEventCoverage>;
 
 function assertNever(value: never): never {

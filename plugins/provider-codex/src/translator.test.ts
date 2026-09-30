@@ -878,6 +878,7 @@ describe("codex subagent activity correlation", () => {
             phase: null,
             memoryCitation: null,
             delivery: null,
+            questions: null,
           },
         }),
       ),
@@ -1481,6 +1482,7 @@ function codexReconnectError(turnId: string) {
       message: "Reconnecting... 5/5",
       codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } },
       additionalDetails: STREAM_DISCONNECT_MESSAGE,
+      misalignment: null,
     },
     willRetry: true,
   });
@@ -1490,7 +1492,12 @@ function codexTerminalOtherError(turnId: string, message: string) {
   return codexEvent("error", {
     threadId: "t1",
     turnId,
-    error: { message, codexErrorInfo: "other", additionalDetails: null },
+    error: {
+      message,
+      codexErrorInfo: "other",
+      additionalDetails: null,
+      misalignment: null,
+    },
     willRetry: false,
   });
 }
@@ -1828,6 +1835,7 @@ describe("codex delegation-turn nesting", () => {
             phase: null,
             memoryCitation: null,
             delivery: null,
+            questions: null,
           },
         }),
       )
@@ -1932,6 +1940,7 @@ describe("codex delegation-turn nesting", () => {
               phase: null,
               memoryCitation: null,
               delivery: null,
+              questions: null,
             },
           }),
         ),
@@ -2007,6 +2016,7 @@ describe("codex delegation-turn nesting", () => {
               phase: null,
               memoryCitation: null,
               delivery: null,
+              questions: null,
             },
           }),
         ),

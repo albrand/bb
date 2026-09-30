@@ -25,7 +25,7 @@ import {
   codexHandledThreadItemSchema,
   isHandledCodexMethod,
   type CodexDynamicToolCallContentItem,
-  type CodexErrorInfo,
+  type CodexParsedErrorInfo,
   type CodexHandledEvent,
   type CodexHandledThreadItem,
   type CodexItemStatus,
@@ -60,7 +60,7 @@ export interface CodexInjectedTool {
 }
 
 interface CodexRetryErrorContext {
-  errorInfo: CodexErrorInfo;
+  errorInfo: CodexParsedErrorInfo;
   failureText: string;
 }
 
@@ -346,7 +346,7 @@ type CodexItemTranslationResult =
   | { kind: "ignored" }
   | { kind: "unhandled" };
 
-function getCodexErrorProviderCode(errorInfo: CodexErrorInfo): string {
+function getCodexErrorProviderCode(errorInfo: CodexParsedErrorInfo): string {
   if (typeof errorInfo === "string") {
     return errorInfo;
   }
@@ -365,10 +365,15 @@ function getCodexErrorProviderCode(errorInfo: CodexErrorInfo): string {
   if ("activeTurnNotSteerable" in errorInfo) {
     return "activeTurnNotSteerable";
   }
+  if ("unrecognized" in errorInfo) {
+    return errorInfo.unrecognized;
+  }
   return assertNever(errorInfo);
 }
 
-function getCodexErrorHttpStatusCode(errorInfo: CodexErrorInfo): number | null {
+function getCodexErrorHttpStatusCode(
+  errorInfo: CodexParsedErrorInfo,
+): number | null {
   if (typeof errorInfo === "string") {
     return null;
   }
@@ -387,11 +392,14 @@ function getCodexErrorHttpStatusCode(errorInfo: CodexErrorInfo): number | null {
   if ("activeTurnNotSteerable" in errorInfo) {
     return null;
   }
+  if ("unrecognized" in errorInfo) {
+    return null;
+  }
   return assertNever(errorInfo);
 }
 
 function getProviderErrorCategory(
-  errorInfo: CodexErrorInfo,
+  errorInfo: CodexParsedErrorInfo,
 ): ProviderErrorCategory {
   if (typeof errorInfo === "string") {
     switch (errorInfo) {
@@ -400,11 +408,14 @@ function getProviderErrorCategory(
       case "sessionBudgetExceeded":
         return "budget-exceeded";
       case "usageLimitExceeded":
+      case "rateLimitExceeded":
         return "rate-limit";
       case "serverOverloaded":
+      case "flexUnavailable":
         return "overloaded";
       case "cyberPolicy":
       case "misalignmentPolicyViolation":
+      case "tooManyDenials":
         return "policy";
       case "internalServerError":
         return "internal";
@@ -435,11 +446,14 @@ function getProviderErrorCategory(
   if ("activeTurnNotSteerable" in errorInfo) {
     return "active-turn-not-steerable";
   }
+  if ("unrecognized" in errorInfo) {
+    return "unknown";
+  }
   return assertNever(errorInfo);
 }
 
 function toProviderErrorInfo(
-  errorInfo: CodexErrorInfo | null | undefined,
+  errorInfo: CodexParsedErrorInfo | null | undefined,
 ): ProviderErrorInfo | null {
   if (!errorInfo) {
     return null;
@@ -480,7 +494,7 @@ export function clearCodexEventTranslationThreadState(
 function resolveCodexErrorInfo(
   state: CodexEventTranslationState,
   params: CodexErrorParams,
-): CodexErrorInfo | null | undefined {
+): CodexParsedErrorInfo | null | undefined {
   const errorInfo = params.error.codexErrorInfo;
   const failureText = params.error.additionalDetails ?? params.error.message;
   if (params.willRetry === true) {
@@ -570,6 +584,8 @@ function toItemStatus(status: CodexItemStatus): ThreadEventItemStatus {
     case "failed":
       return "failed";
     case "declined":
+      return "interrupted";
+    case "interrupted":
       return "interrupted";
     default:
       return assertNever(status);

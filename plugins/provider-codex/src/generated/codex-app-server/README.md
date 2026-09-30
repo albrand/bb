@@ -32,7 +32,7 @@ transitive type-import closure of the hand-written importers:
 - `translator.ts`, `visibility.ts`, `interactive-requests.ts`,
   `session-params.ts`, `bridge/bridge.ts`, and their `*.test.ts` files.
 
-At the last regenerate (Codex 0.149.1) that was 235 of the 663 emitted
+At the last regenerate (Codex 0.159.2) that was 257 of the 734 emitted
 files; the unreachable files and all three `export *` barrels (`index.ts`,
 `schema/index.ts`, `schema/v2/index.ts`) were removed. Nothing imports the
 barrels, so their removal is type-safe.
