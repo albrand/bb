@@ -3544,12 +3544,14 @@ before stabilizing this option.
 `bb.sdk.threads.experimental_searchPromptHistory({ query?, projectId?, limit? })`
 returns prompts the user sent in any live thread, newest first, as
 `{ id, input, lastUsedAt, useCount, projectId, projectName, threadId, threadTitle }`.
-It reads the recorded prompt history, not thread events. Whitespace separates up
-to eight terms; every term must appear in a text item (ASCII case-insensitive,
-wildcards literal). An omitted query lists recent prompts. Identical inputs
-collapse into one result carrying the count and the latest thread. `projectId`
-limits the search to one project and rejects unknown or deleted projects. `limit`
-defaults to 50 and is capped at 200. Deleted threads and projects are excluded.
+It reads the recorded prompt history, not thread events. Whitespace separates
+terms, and every distinct term must appear in a text item (ASCII
+case-insensitive, wildcards literal); the query is limited to 500 characters.
+An omitted query lists recent prompts. Identical inputs collapse into one result carrying
+the count and the latest thread. `projectId` limits the search to one project;
+an unknown or deleted project returns HTTP 404. `limit` defaults to 50, larger
+values are clamped to 200, and a zero or non-numeric value returns HTTP 400.
+Deleted threads and projects are excluded.
 Backs Ctrl+R in the composer and `bb thread prompt-search`. Audit non-ASCII case
 folding, ranking beyond recency, pagination, and whether hidden or archived
 threads belong in results before stabilizing.
