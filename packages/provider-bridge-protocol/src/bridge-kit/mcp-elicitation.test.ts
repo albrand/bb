@@ -35,6 +35,45 @@ async function runMcpElicitation(
 
 type Answers = Record<string, PendingInteractionUserAnswer>;
 
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+type Pick = <T>(values: readonly T[]) => T;
+
+const FUZZ_SEEDS: Record<string, number> = {
+  "date-time": 1,
+  date: 2,
+  email: 3,
+  uri: 4,
+};
+
+const twoDigits = (limit: number) =>
+  Array.from({ length: limit }, (_, index) => String(index).padStart(2, "0"));
+
+const FUZZ_YEARS = ["0000", "1900", "2000", "2023", "2024", "9999", "20x6"];
+const FUZZ_DATE = (pick: Pick) =>
+  `${pick(FUZZ_YEARS)}-${pick([...twoDigits(14), "1", "001"])}-${pick([...twoDigits(33), "7"])}`;
+
+const FUZZ_GENERATORS: Record<
+  string,
+  (pick: Pick, random: () => number) => string
+> = {
+  date: (pick) => FUZZ_DATE(pick),
+  "date-time": (pick, random) =>
+    `${FUZZ_DATE(pick)}${pick(["T", "t", " ", "x"])}${pick(twoDigits(26))}:${pick(twoDigits(62))}:${pick([...twoDigits(62), "59", "59", "59"])}${pick(["", ".", ".5", ".999", `.${"9".repeat(1 + Math.floor(random() * 24))}`, `.${"9".repeat(14 + Math.floor(random() * 10))}`, ".0000000000000000001"])}${pick(["Z", "z", "", "+00:00", "-23:59", "+23:59", "+24:00", "+05:60", "+0530", "+05", "-99:99"])}`,
+  email: (pick) =>
+    `${pick(["a", "a.b", "a..b", ".a", "a.", "a+b", "a_b", "a%b", "a b", "A", "\u00e4", "a!b", ""])}${pick(["@", "@", "@", "@@", ""])}${pick(["example.com", "ex-ample.com", "-ex.com", "ex-.com", "example", "a.b.c", "exa_mple.com", "xn--ls8h.la", "1.2.3.4", "[1.2.3.4]", "example..com", "EXAMPLE.COM", ""])}`,
+  uri: (pick) =>
+    `${pick(["http", "https", "https", "https", "HTTP", "ftp", "javascript", "", "h"])}${pick(["://", "://", "://", "://", "://", ":/", ":", ""])}${pick(["example.com", "example.com", "sub.example.org", "localhost", "ex ample.com", "[::1]", "1.2.3.4", "-a.com", "a-.com", "a..com", "", "user@host", "EXAMPLE.com"])}${pick(["", "", ":80", ":65535", ":123456", ":", ":x"])}${pick(["", "", "/a", "/a/b-c_d~e", "/", "/a b", "/%20", "/%zz", "/a/../b", "/\u00e9", "//", "/a:b@c"])}${pick(["", "", "?q=1&r=2", "?q=1", "?q=a b", "?%", "?a=[1]", "?/?"])}${pick(["", "", "#frag", "#f", "#a#b", "#%41", "#[x]"])}`,
+};
+
 function scriptedAsk(replies: Array<Answers | Error | unknown>) {
   const payloads: UserQuestionPendingInteractionPayload[] = [];
   const ask = async (
@@ -400,6 +439,7 @@ describe("runMcpElicitation", () => {
     ["date-time", "2026-09-30T12:00:60Z"],
     ["date-time", "2026-02-30T12:00:00Z"],
     ["date-time", "2026-09-30T12:00:00"],
+    ["date-time", "2026-09-30T12:00:59.99999999999999999Z"],
     ["date", "2023-02-29"],
     ["date", "2026-13-01"],
     ["date", "2026-00-10"],
@@ -458,6 +498,43 @@ describe("runMcpElicitation", () => {
     });
     expect(payloads).toHaveLength(1);
   });
+
+  it.each(["date-time", "date", "email", "uri"])(
+    "accepts only %s values that ajv-formats also accepts, over 3000 seeded near-boundary inputs",
+    async (format) => {
+      const random = seededRandom(FUZZ_SEEDS[format]!);
+      const pick = <T>(values: readonly T[]): T =>
+        values[Math.floor(random() * values.length)]!;
+      const candidates = Array.from({ length: 3000 }, () =>
+        FUZZ_GENERATORS[format]!(pick, random),
+      );
+      const validate = schemaValidator.compile({ type: "string", format });
+      const request = form({ value: { type: "string", format } });
+      const escaped: string[] = [];
+      let accepted = 0;
+      for (const candidate of candidates) {
+        const { ask, payloads } = scriptedAsk([
+          { "field-1": { selected: [], freeText: candidate } },
+          { "field-1": { selected: [], freeText: FORMAT_FALLBACKS[format]! } },
+        ]);
+        const result = await runMapper({ request, ask });
+        if (
+          payloads.length === 1 &&
+          result.action === "accept" &&
+          result.content.value === candidate
+        ) {
+          accepted += 1;
+          if (!validate(candidate)) {
+            escaped.push(candidate);
+          }
+        }
+      }
+
+      expect(escaped).toEqual([]);
+      expect(accepted).toBeGreaterThan(100);
+    },
+    60_000,
+  );
 
   it("enforces maxLength in characters, not UTF-16 units", async () => {
     const request = form({ code: { type: "string", maxLength: 2 } });
