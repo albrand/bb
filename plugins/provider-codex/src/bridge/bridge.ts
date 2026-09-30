@@ -46,6 +46,7 @@ import {
   type PreparedProviderCommandDispatch,
   type ProviderRuntimeEvent,
   experimental_defineProviderBridge,
+  experimental_runMcpElicitation,
   type ProviderRecoveryHint,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
@@ -839,6 +840,11 @@ function handleChildRequest(
     return;
   }
 
+  if (method === CODEX_MCP_ELICITATION_METHOD) {
+    handleCodexMcpElicitation(session, params, responder);
+    return;
+  }
+
   const macOsPermission = extractCodexMacOsPermissionRequest({
     id: 0,
     method,
@@ -892,6 +898,71 @@ function handleChildRequest(
         resolution: result,
       });
       responder.result(buildCodexInteractiveResponse(outcome));
+    })
+    .catch((error: unknown) => {
+      responder.error(
+        BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+}
+
+const CODEX_MCP_ELICITATION_METHOD = "mcpServer/elicitation/request";
+
+const codexMcpElicitationParamsSchema = z
+  .object({
+    threadId: z.string(),
+    turnId: z.string().min(1).nullable().optional(),
+    serverName: z.string(),
+    mode: z.string(),
+    message: z.string().optional(),
+    requestedSchema: z.unknown().optional(),
+  })
+  .passthrough();
+
+function handleCodexMcpElicitation(
+  session: CodexBridgeSession,
+  params: unknown,
+  responder: CodexAppServerRequestResponder,
+): void {
+  const parsed = codexMcpElicitationParamsSchema.safeParse(params);
+  if (!parsed.success) {
+    responder.error(
+      BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
+      `Invalid codex MCP elicitation params: ${parsed.error.message}`,
+    );
+    return;
+  }
+  const request = parsed.data;
+  void experimental_runMcpElicitation({
+    request: {
+      serverName: request.serverName,
+      message: request.message ?? "",
+      mode: request.mode,
+      requestedSchema: request.requestedSchema,
+    },
+    ask: (payload) =>
+      sendRuntimeRequest(BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest, {
+        providerThreadId: session.codexThreadId ?? request.threadId,
+        threadId: session.bbThreadId,
+        turnId: request.turnId ?? null,
+        payload,
+        providerNativeIds: true,
+      }),
+  })
+    .then((result) => {
+      if (result.action === "accept") {
+        responder.result({
+          action: "accept",
+          content: result.content,
+          _meta: null,
+        });
+        return;
+      }
+      process.stderr.write(
+        `codex MCP elicitation from ${request.serverName} ended with ${result.action}: ${result.reason}\n`,
+      );
+      responder.result({ action: result.action, content: null, _meta: null });
     })
     .catch((error: unknown) => {
       responder.error(

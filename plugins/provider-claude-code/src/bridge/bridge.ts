@@ -25,8 +25,10 @@ import {
   runBridgeRequest,
   shouldAutoDenyInteractiveRequest,
   withoutBridgeRuntimeEnv,
+  type BridgeJsonRpcResponse,
   type BridgeToolCallRequest,
   experimental_defineProviderBridge,
+  experimental_runMcpElicitation,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
@@ -35,6 +37,7 @@ import {
   forkSession,
   type CanUseTool,
   type HookCallback,
+  type OnElicitation,
   type PermissionResult,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -364,6 +367,129 @@ let interactiveRequestIdCounter = 0;
 function nextInteractiveRequestId(): string {
   interactiveRequestIdCounter += 1;
   return `interaction-${interactiveRequestIdCounter}`;
+}
+
+type ElicitationQuestionOutcome =
+  | { ok: true; result: unknown }
+  | { ok: false; message: string };
+
+interface PendingElicitationQuestion {
+  threadSession: ThreadSession;
+  settle: (outcome: ElicitationQuestionOutcome) => void;
+}
+
+const pendingElicitationQuestions = new Map<
+  string | number,
+  PendingElicitationQuestion
+>();
+
+function askElicitationQuestion(args: {
+  threadIdRef: ThreadIdRef;
+  payload: unknown;
+  signal: AbortSignal;
+}): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    const threadSession = threadAttachments.get(
+      args.threadIdRef.current,
+    )?.residentSession;
+    if (!threadSession) {
+      reject(new Error("Thread session not found"));
+      return;
+    }
+    const requestId = nextInteractiveRequestId();
+    const onAbort = (): void => {
+      if (pendingElicitationQuestions.delete(requestId)) {
+        reject(new Error("MCP elicitation cancelled"));
+      }
+    };
+    args.signal.addEventListener("abort", onAbort, { once: true });
+    pendingElicitationQuestions.set(requestId, {
+      threadSession,
+      settle: (outcome) => {
+        args.signal.removeEventListener("abort", onAbort);
+        if (outcome.ok) {
+          resolve(outcome.result);
+        } else {
+          reject(new Error(outcome.message));
+        }
+      },
+    });
+    send({
+      jsonrpc: "2.0",
+      id: requestId,
+      method: BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
+      params: {
+        threadId: args.threadIdRef.current,
+        providerThreadId:
+          threadSession.attachment.providerThreadId ?? args.threadIdRef.current,
+        turnId: null,
+        providerNativeIds: true,
+        payload: args.payload,
+      },
+    });
+  });
+}
+
+function createOnElicitation(threadIdRef: ThreadIdRef): OnElicitation {
+  return async (request, { signal }) => {
+    try {
+      const result = await experimental_runMcpElicitation({
+        request: {
+          serverName: request.serverName,
+          message: request.message,
+          mode: request.mode,
+          requestedSchema: request.requestedSchema,
+        },
+        signal,
+        ask: (payload) =>
+          askElicitationQuestion({ threadIdRef, payload, signal }),
+      });
+      if (result.action === "accept") {
+        return { action: "accept", content: result.content };
+      }
+      logBridgeError(
+        `MCP elicitation from ${request.serverName} ended with ${result.action}: ${result.reason}`,
+      );
+      return { action: result.action };
+    } catch (error) {
+      logBridgeError(
+        `MCP elicitation from ${request.serverName} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { action: "cancel" };
+    }
+  };
+}
+
+function settlePendingElicitationQuestion(
+  response: BridgeJsonRpcResponse,
+): boolean {
+  const pending = pendingElicitationQuestions.get(response.id);
+  if (!pending) {
+    return false;
+  }
+  pendingElicitationQuestions.delete(response.id);
+  pending.settle(
+    "error" in response
+      ? {
+          ok: false,
+          message: response.error.message ?? "Interactive request failed",
+        }
+      : { ok: true, result: response.result },
+  );
+  return true;
+}
+
+function cancelPendingElicitationQuestions(
+  threadSession: ThreadSession,
+  message: string,
+): void {
+  for (const [requestId, pending] of pendingElicitationQuestions) {
+    if (pending.threadSession !== threadSession) {
+      continue;
+    }
+    pendingElicitationQuestions.delete(requestId);
+    pending.settle({ ok: false, message });
+  }
 }
 let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
 let skillPluginsRoot: string | null = null;
@@ -1511,6 +1637,7 @@ function resolvePendingInteractiveRequests(
       toolUseID: pending.itemId,
     });
   }
+  cancelPendingElicitationQuestions(threadSession, message);
 }
 
 async function closeClaudeThreadSession(
@@ -2140,6 +2267,7 @@ function attachThreadSession(
     sessionOptions.sessionId = providerThreadId;
   }
   sessionOptions.canUseTool = createCanUseTool(threadIdRef);
+  sessionOptions.onElicitation = createOnElicitation(threadIdRef);
   if (params.dynamicTools && params.dynamicTools.length > 0) {
     const mcpServer = buildBridgeMcpServer(
       params.dynamicTools,
@@ -2512,6 +2640,9 @@ function buildPromptText(input: unknown): string | undefined {
 function handleParsedMessage(parsed: unknown): void {
   const response = decodeBridgeJsonRpcResponse(parsed);
   if (response && handleToolCallResponse(response)) {
+    return;
+  }
+  if (response && settlePendingElicitationQuestion(response)) {
     return;
   }
 

@@ -356,6 +356,15 @@ Interactions:
   A provider's plugin-defined request cannot be cancelled; stop the thread to
   back out of it.
 
+  When an MCP server asks for input with a form, Codex and Claude Code threads
+  show it as a user question with one question per field (ids field-1,
+  field-2, ...). Answer it with `answer`: use --choice for a choice, Yes/No or
+  Skip, and --text for typed text or numbers. bb checks the answers against the
+  form and asks again, up to 3 times, if one is invalid. Forms with more than 4
+  fields or choices, nested fields, or a URL to open are declined. Codex asks
+  only in approval modes that can prompt the user. In full access, or when
+  escalation is set to deny, Codex declines MCP forms itself.
+
 Queued messages:
 
   bb thread queue list [<thread-id>] [--wait-holder plugin:<plugin-id>]
