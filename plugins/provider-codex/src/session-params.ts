@@ -576,11 +576,21 @@ export interface CodexCollaborationMode {
 export function nextCodexCollaborationMode(args: {
   options: CodexSessionOptions;
   current: CodexCollaborationModeKind | null;
+  threadModel: string | null;
 }): CodexCollaborationMode | null {
   const mode: CodexCollaborationModeKind =
     args.options.promptMode === "plan" ? "plan" : "default";
-  if (mode === args.current || args.options.model === undefined) {
+  if (mode === args.current) {
     return null;
+  }
+  const model = args.options.model ?? args.threadModel;
+  if (model === null) {
+    if (mode === "default" && args.current === null) {
+      return null;
+    }
+    throw new Error(
+      `Codex has not reported this thread's model, so bb cannot switch it to ${mode} mode.`,
+    );
   }
   const effort =
     args.options.reasoningLevel === undefined
@@ -589,7 +599,7 @@ export function nextCodexCollaborationMode(args: {
   return {
     mode,
     settings: {
-      model: args.options.model,
+      model,
       reasoning_effort: effort,
       developer_instructions: null,
     },

@@ -471,6 +471,7 @@ interface CodexBridgeSession {
   responseOpenedTurns: Map<string, ResponseOpenedTurn>;
   unopenedCompactionDispatches: PendingCompactionDispatch[];
   collaborationMode: "plan" | "default" | null;
+  model: string | null;
   turnSettledWaiters: Map<string, Array<() => void>>;
   awaitingReplayedUsage: boolean;
   identityAnnounced: boolean;
@@ -1123,6 +1124,7 @@ async function constructThreadSession(
     responseOpenedTurns: new Map(),
     unopenedCompactionDispatches: [],
     collaborationMode: args.request.kind === "start" ? "default" : null,
+    model: null,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: args.request.kind !== "start",
     identityAnnounced: false,
@@ -1268,6 +1270,7 @@ async function constructThreadSession(
     announceSessionIdentity(session, codexThreadId);
     const executionDelta = toCodexExecutionDelta(result);
     if (executionDelta !== null) {
+      session.model = executionDelta.execution.model;
       sendThreadDeltas(session, [executionDelta]);
     }
     return { session, codexThreadId };
@@ -1309,6 +1312,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     responseOpenedTurns: new Map(),
     unopenedCompactionDispatches: [],
     collaborationMode: null,
+    model: session.model,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: true,
     identityAnnounced: session.identityAnnounced,
@@ -1877,6 +1881,7 @@ async function handleTurnStart(
       const collaborationMode = nextCodexCollaborationMode({
         options: decoded.sessionOptions,
         current: session.collaborationMode,
+        threadModel: session.model,
       });
       result = await connection.request({
         method: "turn/start",
@@ -1895,6 +1900,9 @@ async function handleTurnStart(
       });
       if (collaborationMode !== null) {
         session.collaborationMode = collaborationMode.mode;
+      }
+      if (decoded.sessionOptions.model !== undefined) {
+        session.model = decoded.sessionOptions.model;
       }
     }
     sendResult(id, { threadId: params.threadId });

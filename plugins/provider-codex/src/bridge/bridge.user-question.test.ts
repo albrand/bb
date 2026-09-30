@@ -293,3 +293,56 @@ it.each([
   },
   30_000,
 );
+
+it("switches modes with the model Codex reported when turns name no model", async () => {
+  writeFileSync(
+    join(workspaceDir, "script.json"),
+    JSON.stringify({ requestLogPath, turns: [[], []] }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: FULL_ACCESS_SESSION_OPTIONS,
+  });
+  await settle(1);
+  const { providerThreadId } = z
+    .object({ providerThreadId: z.string() })
+    .parse((await harness.waitForResponse(1)).result);
+
+  harness.sendRequest(2, "turn/start", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    clientRequestId: "creq_234567892e",
+    input: PLAN_INPUT,
+    options: { ...FULL_ACCESS_SESSION_OPTIONS, promptMode: "plan" },
+  });
+  await settle(2);
+  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+
+  harness.sendRequest(3, "turn/start", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    clientRequestId: "creq_234567892f",
+    input: [{ type: "text", text: "go ahead", mentions: [] }],
+    options: FULL_ACCESS_SESSION_OPTIONS,
+  });
+  await settle(3);
+  expect((await harness.waitForResponse(3)).error).toBeUndefined();
+
+  expect(turnStarts().map((entry) => entry.params)).toEqual([
+    expect.objectContaining({
+      input: [expect.objectContaining({ text: "outline the migration" })],
+      collaborationMode: expect.objectContaining({
+        mode: "plan",
+        settings: expect.objectContaining({ model: "fake-codex-model" }),
+      }),
+    }),
+    expect.objectContaining({
+      collaborationMode: expect.objectContaining({
+        mode: "default",
+        settings: expect.objectContaining({ model: "fake-codex-model" }),
+      }),
+    }),
+  ]);
+}, 30_000);
