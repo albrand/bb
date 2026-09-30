@@ -1,0 +1,405 @@
+import { execFileSync, spawn } from "node:child_process";
+import {
+  closeSync,
+  openSync,
+  truncateSync,
+  writeSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { z } from "zod";
+import { handleLine } from "./bridge.js";
+import { codexMcpConfigSignature } from "./mcp-config-signature.js";
+import {
+  FULL_ACCESS_SESSION_OPTIONS,
+  stubFakeCodexAppServer,
+} from "./fake-codex-app-server-harness.js";
+
+const io = vi.hoisted(() => ({
+  stalledReads: new Map<string, Promise<void>>(),
+  closes: new Map<string, number>(),
+  overdue: { path: null as string | null, blockMs: 0, clockSetBackMs: 0 },
+  wallClockOffsetMs: 0,
+}));
+
+function blockEventLoop(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const open = async (path: string, flags: number) => {
+    if (io.overdue.path !== null && path !== io.overdue.path) {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+    }
+    const overdue = path === io.overdue.path;
+    const handle = await actual.open(path, flags);
+    return {
+      stat: () => handle.stat(),
+      read: async (
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) => {
+        if (overdue) {
+          blockEventLoop(io.overdue.blockMs);
+          io.wallClockOffsetMs = -io.overdue.clockSetBackMs;
+          const bytesRead = readSync(
+            handle.fd,
+            buffer,
+            offset,
+            length,
+            position,
+          );
+          return { bytesRead, buffer };
+        }
+        await io.stalledReads.get(path);
+        return handle.read(buffer, offset, length, position);
+      },
+      close: async () => {
+        if (overdue) {
+          void handle.close();
+        } else {
+          await handle.close();
+        }
+        io.closes.set(path, (io.closes.get(path) ?? 0) + 1);
+      },
+    };
+  };
+  return { ...actual, open };
+});
+
+let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+let rootDir: string;
+let workspaceDir: string;
+let codexHome: string;
+let requestLogPath: string;
+let threadId: string;
+let threadCounter = 0;
+
+function startHarness(script: Record<string, unknown>): void {
+  const scriptPath = join(rootDir, "script.json");
+  writeFileSync(scriptPath, JSON.stringify({ requestLogPath, ...script }));
+  stubFakeCodexAppServer(scriptPath);
+  harness = createBridgeJsonRpcTestHarness(handleLine);
+}
+
+beforeEach(() => {
+  rootDir = mkdtempSync(join(tmpdir(), "bb-codex-mcp-reload-"));
+  workspaceDir = join(rootDir, "workspace");
+  codexHome = join(rootDir, "codex-home");
+  mkdirSync(workspaceDir);
+  mkdirSync(codexHome);
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    '[mcp_servers.alpha]\ncommand = "alpha"\n',
+  );
+  requestLogPath = join(rootDir, "requests.jsonl");
+  vi.stubEnv("CODEX_HOME", codexHome);
+  io.stalledReads.clear();
+  io.closes.clear();
+  io.overdue.path = null;
+  io.overdue.clockSetBackMs = 0;
+  io.wallClockOffsetMs = 0;
+  threadCounter += 1;
+  threadId = `thr_mcp_reload_${threadCounter}`;
+});
+
+afterEach(async () => {
+  const cleanupId = 992_001;
+  harness.sendRequest(cleanupId, "thread/stop", {
+    threadId,
+    providerThreadId: "mcp-reload-cleanup",
+    intent: "release",
+    activeTurnId: null,
+  });
+  await harness.waitForResponse(cleanupId).catch(() => undefined);
+  harness.restore();
+  vi.unstubAllEnvs();
+  rmSync(rootDir, { recursive: true, force: true });
+});
+
+function loggedMethods(): string[] {
+  return readFileSync(requestLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .map(
+      (line) => z.object({ method: z.string() }).parse(JSON.parse(line)).method,
+    )
+    .filter(
+      (method) =>
+        method === "config/mcpServer/reload" || method === "turn/start",
+    );
+}
+
+async function startThread(): Promise<string> {
+  harness.sendRequest(1, "thread/start", {
+    threadId,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: { ...FULL_ACCESS_SESSION_OPTIONS },
+  });
+  const started = await harness.waitForResponse(1);
+  return z.object({ providerThreadId: z.string() }).parse(started.result)
+    .providerThreadId;
+}
+
+async function runTurn(id: number, providerThreadId: string): Promise<void> {
+  harness.sendRequest(id, "turn/start", {
+    threadId,
+    providerThreadId,
+    clientRequestId: `creq_mcpreadyx${id}`,
+    input: [{ type: "text", text: "say hello", mentions: [] }],
+    options: { ...FULL_ACCESS_SESSION_OPTIONS },
+  });
+  expect((await harness.waitForResponse(id)).error).toBeUndefined();
+}
+
+it("reloads Codex MCP servers before the first turn after the MCP config changes", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+
+  await runTurn(2, providerThreadId);
+  expect(loggedMethods()).toEqual(["turn/start"]);
+
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    '[mcp_servers.alpha]\ncommand = "alpha"\n\n[mcp_servers.beta]\ncommand = "beta"\n',
+  );
+  await runTurn(3, providerThreadId);
+  expect(loggedMethods()).toEqual([
+    "turn/start",
+    "config/mcpServer/reload",
+    "turn/start",
+  ]);
+
+  await runTurn(4, providerThreadId);
+  expect(loggedMethods()).toEqual([
+    "turn/start",
+    "config/mcpServer/reload",
+    "turn/start",
+    "turn/start",
+  ]);
+
+  mkdirSync(join(workspaceDir, ".codex"));
+  writeFileSync(
+    join(workspaceDir, ".codex", "config.toml"),
+    '[mcp_servers.gamma]\ncommand = "gamma"\n',
+  );
+  await runTurn(5, providerThreadId);
+  expect(loggedMethods().slice(4)).toEqual([
+    "config/mcpServer/reload",
+    "turn/start",
+  ]);
+});
+
+it.each([
+  ["a small config", 0],
+  ["a config over 1 MiB", 1024 * 1024],
+])(
+  "reloads after an edit to %s that keeps its inode, size, and modification time",
+  async (_label, padding) => {
+    const configPath = join(codexHome, "config.toml");
+    const comment = padding === 0 ? "" : `# ${"x".repeat(padding)}\n`;
+    writeFileSync(
+      configPath,
+      `${comment}[mcp_servers.alpha]\ncommand = "alpha"\n`,
+    );
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    startHarness({});
+    const providerThreadId = await startThread();
+    const before = statSync(configPath);
+
+    writeFileSync(
+      configPath,
+      `${comment}[mcp_servers.alpha]\ncommand = "bravo"\n`,
+    );
+    utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+    const after = statSync(configPath);
+    expect([after.ino, after.size, after.mtimeMs]).toEqual([
+      before.ino,
+      before.size,
+      before.mtimeMs,
+    ]);
+    await runTurn(2, providerThreadId);
+
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  },
+);
+
+it("reloads after a byte past 2 GiB of a sparse config changes with the same inode, size, and modification time", async () => {
+  const configPath = join(codexHome, "config.toml");
+  const farOffset = 2 ** 31;
+  const writeByteAt = (byte: string): void => {
+    const descriptor = openSync(configPath, "r+");
+    writeSync(descriptor, Buffer.from(byte), 0, 1, farOffset);
+    closeSync(descriptor);
+  };
+  truncateSync(configPath, farOffset + 2);
+  writeByteAt("a");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  startHarness({});
+  const providerThreadId = await startThread();
+  const before = statSync(configPath);
+
+  writeByteAt("b");
+  utimesSync(configPath, 1_700_000_000, 1_700_000_000);
+  const after = statSync(configPath);
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([
+    before.ino,
+    before.size,
+    before.mtimeMs,
+  ]);
+  await runTurn(2, providerThreadId);
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+}, 120_000);
+
+it("starts the turn when a watched config is replaced by a FIFO with no writer", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  rmSync(configPath);
+  execFileSync("mkfifo", [configPath]);
+
+  await runTurn(2, providerThreadId);
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+});
+
+it("still starts the turn and retries on the next turn when the reload fails", async () => {
+  startHarness({ mcpReloadError: true });
+  const providerThreadId = await startThread();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  rmSync(join(codexHome, "config.toml"));
+  await runTurn(2, providerThreadId);
+  await runTurn(3, providerThreadId);
+
+  expect(loggedMethods()).toEqual([
+    "config/mcpServer/reload",
+    "turn/start",
+    "config/mcpServer/reload",
+    "turn/start",
+  ]);
+  expect(
+    stderr.mock.calls.some(([chunk]) =>
+      String(chunk).includes("reloading its MCP servers failed"),
+    ),
+  ).toBe(true);
+  stderr.mockRestore();
+});
+
+it("starts the turn within the hashing deadline while a watched config keeps growing", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  const grower = spawn(
+    process.execPath,
+    [
+      "-e",
+      "const fs = require('node:fs'); const path = process.argv[1]; let size = fs.statSync(path).size; for (;;) { size += 1024 * 1024; fs.truncateSync(path, size); }",
+      configPath,
+    ],
+    { stdio: "ignore" },
+  );
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const startedAt = Date.now();
+    await runTurn(2, providerThreadId);
+
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  } finally {
+    grower.kill("SIGKILL");
+  }
+}, 30_000);
+
+it("reloads before the turn when reading a watched config stalls, and stops reloading once the read completes", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  const configPath = join(codexHome, "config.toml");
+  let releaseRead = (): void => undefined;
+  io.stalledReads.set(
+    configPath,
+    new Promise((resolve) => {
+      releaseRead = resolve;
+    }),
+  );
+  const closesBefore = io.closes.get(configPath) ?? 0;
+
+  try {
+    const startedAt = Date.now();
+    await runTurn(2, providerThreadId);
+    expect(Date.now() - startedAt).toBeLessThan(8_000);
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  } finally {
+    io.stalledReads.delete(configPath);
+    releaseRead();
+  }
+  await vi.waitFor(() => {
+    expect(io.closes.get(configPath) ?? 0).toBe(closesBefore + 1);
+  });
+  await vi.waitFor(
+    async () => {
+      expect(
+        await codexMcpConfigSignature({
+          cwd: workspaceDir,
+          env: { CODEX_HOME: codexHome },
+          deadlineMs: 2_000,
+        }),
+      ).not.toContain("unhashed:");
+    },
+    { timeout: 10_000 },
+  );
+
+  await runTurn(3, providerThreadId);
+  await runTurn(4, providerThreadId);
+
+  expect(loggedMethods()).toEqual([
+    "config/mcpServer/reload",
+    "turn/start",
+    "config/mcpServer/reload",
+    "turn/start",
+    "turn/start",
+  ]);
+}, 30_000);
+
+it.each([
+  ["a steady wall clock", 0],
+  ["a wall clock set back 5 s", 5_000],
+])(
+  "reloads before the turn when the config hash completes after the deadline but before the timer runs, with %s",
+  async (_label, clockSetBackMs) => {
+    startHarness({});
+    const providerThreadId = await startThread();
+    const realNow = Date.now.bind(Date);
+    const now = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => realNow() + io.wallClockOffsetMs);
+    io.overdue.path = join(codexHome, "config.toml");
+    io.overdue.blockMs = 2_100;
+    io.overdue.clockSetBackMs = clockSetBackMs;
+
+    try {
+      await runTurn(2, providerThreadId);
+    } finally {
+      io.overdue.path = null;
+      now.mockRestore();
+    }
+
+    expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
+  },
+  30_000,
+);

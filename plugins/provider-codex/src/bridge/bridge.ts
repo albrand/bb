@@ -101,6 +101,7 @@ import {
   getCodexProviderInstallationStatus,
   getCodexProviderUsage,
 } from "./provider-maintenance.js";
+import { codexMcpConfigSignature } from "./mcp-config-signature.js";
 
 type BbThreadResumeParams = ThreadResumeParams & { excludeTurns: boolean };
 
@@ -291,6 +292,8 @@ const CODEX_INITIALIZE_PARAMS = {
 
 const CHILD_REQUEST_TIMEOUT_MS = 60_000;
 const RATE_LIMIT_RECOVERY_TIMEOUT_MS = 5_000;
+const MCP_RELOAD_TIMEOUT_MS = 10_000;
+const MCP_CONFIG_HASH_DEADLINE_MS = 2_000;
 const INTERRUPT_SETTLEMENT_TIMEOUT_MS = 5_000;
 const CODEX_ARCHIVED_SESSION_ERROR_PATTERN =
   /\b(?:session|thread)\s+\S+\s+is archived\b/i;
@@ -474,6 +477,7 @@ interface CodexBridgeSession {
   unopenedCompactionDispatches: PendingCompactionDispatch[];
   collaborationMode: "plan" | "default" | null;
   model: string | null;
+  mcpConfigSignature: string;
   turnSettledWaiters: Map<string, Array<() => void>>;
   awaitingReplayedUsage: boolean;
   identityAnnounced: boolean;
@@ -1177,6 +1181,11 @@ async function constructThreadSession(
     })),
   );
   const launchEnv = appServerLaunchEnv(decoded.sessionOptions.envVars);
+  const mcpConfigSignature = await codexMcpConfigSignature({
+    cwd: args.cwd,
+    env: launchEnv,
+    deadlineMs: MCP_CONFIG_HASH_DEADLINE_MS,
+  });
   const session: CodexBridgeSession = {
     bbThreadId: args.threadId,
     codexThreadId:
@@ -1198,6 +1207,7 @@ async function constructThreadSession(
     unopenedCompactionDispatches: [],
     collaborationMode: args.request.kind === "start" ? "default" : null,
     model: null,
+    mcpConfigSignature,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: args.request.kind !== "start",
     identityAnnounced: false,
@@ -1386,6 +1396,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     unopenedCompactionDispatches: [],
     collaborationMode: null,
     model: session.model,
+    mcpConfigSignature: session.mcpConfigSignature,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: true,
     identityAnnounced: session.identityAnnounced,
@@ -1898,6 +1909,33 @@ function settleCompactionDispatchesWhenCodexIsNotRunning(
   }
 }
 
+async function reloadMcpServersIfConfigChanged(args: {
+  session: CodexBridgeSession;
+  connection: CodexAppServerConnection;
+  env: NodeJS.ProcessEnv;
+}): Promise<void> {
+  const signature = await codexMcpConfigSignature({
+    cwd: args.session.construction.cwd,
+    env: args.env,
+    deadlineMs: MCP_CONFIG_HASH_DEADLINE_MS,
+  });
+  if (signature === args.session.mcpConfigSignature) {
+    return;
+  }
+  try {
+    await args.connection.request({
+      method: "config/mcpServer/reload",
+      resultSchema: ignoredChildResultSchema,
+      timeoutMs: MCP_RELOAD_TIMEOUT_MS,
+    });
+    args.session.mcpConfigSignature = signature;
+  } catch (error) {
+    process.stderr.write(
+      `codex MCP config changed but reloading its MCP servers failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
+}
+
 async function handleTurnStart(
   id: string | number,
   params: TurnStartParamsShape,
@@ -1922,6 +1960,11 @@ async function handleTurnStart(
 
   const input: PromptInput[] = params.input;
   const decoded = decodeCodexOptions(params.options);
+  await reloadMcpServersIfConfigChanged({
+    session,
+    connection,
+    env: appServerLaunchEnv(decoded.sessionOptions.envVars),
+  });
 
   const prepared = session.translator.prepareTurnStart({
     clientRequestId: params.clientRequestId,
