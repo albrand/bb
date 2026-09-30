@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCodexInteractiveResponse,
+  buildCodexUserInputResponse,
+  codexUserInputQuestionIds,
   decodeCodexInteractiveRequest,
   extractCodexMacOsPermissionRequest,
 } from "./interactive-requests.js";
@@ -580,5 +582,224 @@ describe("buildCodexInteractiveResponse", () => {
       },
       scope: "session",
     });
+  });
+});
+
+function userInputRequest(questions: unknown[]) {
+  return {
+    id: 21,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "t1",
+      turnId: "turn-1",
+      itemId: "call-1",
+      questions,
+      isBlocking: true,
+      autoResolutionMs: null,
+    },
+  };
+}
+
+const COLOR_QUESTION = {
+  id: "color",
+  header: "Color",
+  question: "Which color should the button use?",
+  isOther: true,
+  isSecret: false,
+  options: [
+    { label: "Blue (Recommended)", description: "Matches the brand." },
+    { label: "Green", description: "" },
+  ],
+};
+
+describe("Codex requestUserInput", () => {
+  it("shows the questions as a bb question card", () => {
+    expect(
+      decodeCodexInteractiveRequest(
+        userInputRequest([
+          COLOR_QUESTION,
+          {
+            id: "name",
+            header: "",
+            question: "What should the component be called?",
+            isOther: false,
+            isSecret: false,
+            options: null,
+          },
+        ]),
+      ),
+    ).toEqual({
+      requestId: 21,
+      method: "item/tool/requestUserInput",
+      providerThreadId: "t1",
+      turnId: "turn-1",
+      payload: {
+        kind: "user_question",
+        questions: [
+          {
+            id: "question-1",
+            prompt: "Which color should the button use?",
+            shortLabel: "Color",
+            multiSelect: false,
+            options: [
+              {
+                value: "question-1:option-1",
+                label: "Blue (Recommended)",
+                description: "Matches the brand.",
+              },
+              { value: "question-1:option-2", label: "Green" },
+            ],
+            allowFreeText: true,
+          },
+          {
+            id: "question-2",
+            prompt: "What should the component be called?",
+            multiSelect: false,
+            allowFreeText: true,
+          },
+        ],
+      },
+    });
+  });
+
+  it("declines a question that asks for a secret", () => {
+    expect(() =>
+      decodeCodexInteractiveRequest(
+        userInputRequest([{ ...COLOR_QUESTION, isSecret: true }]),
+      ),
+    ).toThrow(/does not collect secret answers/);
+  });
+
+  it.each([
+    ["no questions", []],
+    [
+      "five questions",
+      ["a", "b", "c", "d", "e"].map((id) => ({ ...COLOR_QUESTION, id })),
+    ],
+    ["duplicate ids", [COLOR_QUESTION, COLOR_QUESTION]],
+    ["a blank question", [{ ...COLOR_QUESTION, header: "", question: " " }]],
+    [
+      "five options",
+      [
+        {
+          ...COLOR_QUESTION,
+          options: ["a", "b", "c", "d", "e"].map((label) => ({
+            label,
+            description: "",
+          })),
+        },
+      ],
+    ],
+    [
+      "a blank option label",
+      [{ ...COLOR_QUESTION, options: [{ label: "", description: "" }] }],
+    ],
+  ])("declines a request with %s", (_name, questions) => {
+    expect(() =>
+      decodeCodexInteractiveRequest(userInputRequest(questions)),
+    ).toThrow(ProviderRequestDecodeError);
+  });
+
+  it("returns the chosen labels and typed text as Codex answers", () => {
+    const payload = decodeCodexInteractiveRequest(
+      userInputRequest([COLOR_QUESTION]),
+    )?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(
+      buildCodexUserInputResponse({
+        outcome: {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "question-1": {
+                selected: ["question-1:option-2"],
+                freeText: "teal",
+              },
+            },
+          },
+        },
+        codexQuestionIds: ["color"],
+      }),
+    ).toEqual({ answers: { color: { answers: ["Green", "teal"] } } });
+  });
+
+  it("answers Codex under its own question ids, including __proto__", () => {
+    const params = userInputRequest([
+      { ...COLOR_QUESTION, id: "__proto__" },
+      { ...COLOR_QUESTION, id: "constructor" },
+    ]);
+    const payload = decodeCodexInteractiveRequest(params)?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(payload.questions.map((entry) => entry.id)).toEqual([
+      "question-1",
+      "question-2",
+    ]);
+    expect(
+      JSON.stringify(
+        buildCodexUserInputResponse({
+          outcome: {
+            payload,
+            resolution: {
+              kind: "user_answer",
+              answers: {
+                "question-1": { selected: ["question-1:option-1"] },
+                "question-2": { selected: ["question-2:option-2"] },
+              },
+            },
+          },
+          codexQuestionIds: codexUserInputQuestionIds(params.params),
+        }),
+      ),
+    ).toBe(
+      '{"answers":{"__proto__":{"answers":["Blue (Recommended)"]},"constructor":{"answers":["Green"]}}}',
+    );
+  });
+
+  it("refuses to answer when the Codex request has a different number of questions", () => {
+    const payload = decodeCodexInteractiveRequest(
+      userInputRequest([COLOR_QUESTION]),
+    )?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(() =>
+      buildCodexUserInputResponse({
+        outcome: {
+          payload,
+          resolution: { kind: "user_answer", answers: {} },
+        },
+        codexQuestionIds: ["color", "size"],
+      }),
+    ).toThrow(/do not match/);
+  });
+
+  it("refuses an answer that names an option the card never offered", () => {
+    const payload = decodeCodexInteractiveRequest(
+      userInputRequest([COLOR_QUESTION]),
+    )?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(() =>
+      buildCodexUserInputResponse({
+        outcome: {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: { "question-1": { selected: ["question-1:option-9"] } },
+          },
+        },
+        codexQuestionIds: ["color"],
+      }),
+    ).toThrow(/unknown option/);
   });
 });

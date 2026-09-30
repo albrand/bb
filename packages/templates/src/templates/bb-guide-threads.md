@@ -288,6 +288,9 @@ Messaging:
   Code and Codex threads). Plain "/plan ..." text is not recognized; it reaches
   the provider as literal text. Approve or deny the proposed plan with
   `bb thread interactions`; `bb thread cancel-plan` leaves Plan mode early.
+  A Codex thread in Plan mode may stop to ask questions; answer them with
+  `bb thread interactions` too. The next prompt without --plan returns Codex
+  to its default mode.
   SDK callers build the same input with
   `createBuiltinPlanCommandTextInput(text)` from `@bb/sdk` and pass it as
   `input` to `threads.spawn` or `threads.send`.

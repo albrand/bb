@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   isStandaloneBuiltinCompactCommand,
   approvalInteractionOutcomeSchema,
+  userQuestionInteractionOutcomeSchema,
   type DynamicTool,
   type PromptInput,
   type ThreadDelta,
@@ -54,6 +55,8 @@ import {
 } from "../extension-kinds.js";
 import {
   buildCodexInteractiveResponse,
+  buildCodexUserInputResponse,
+  codexUserInputQuestionIds,
   decodeCodexInteractiveRequest,
   extractCodexMacOsPermissionRequest,
   type CodexMacOsPermissionRequest,
@@ -71,6 +74,8 @@ import {
   toCodexPermissionSettings,
   toCodexServiceTier,
   toCodexThreadPermissionSettings,
+  nextCodexCollaborationMode,
+  toCodexTurnInput,
   toCodexUserInput,
   type BbThreadForkParams,
   type BbThreadStartParams,
@@ -466,6 +471,8 @@ interface CodexBridgeSession {
   openCodexTurnIds: Set<string>;
   responseOpenedTurns: Map<string, ResponseOpenedTurn>;
   unopenedCompactionDispatches: PendingCompactionDispatch[];
+  collaborationMode: "plan" | "default" | null;
+  model: string | null;
   turnSettledWaiters: Map<string, Array<() => void>>;
   awaitingReplayedUsage: boolean;
   identityAnnounced: boolean;
@@ -868,6 +875,18 @@ function handleChildRequest(
     providerNativeIds: true,
   })
     .then((result) => {
+      if (request.payload.kind === "user_question") {
+        responder.result(
+          buildCodexUserInputResponse({
+            outcome: userQuestionInteractionOutcomeSchema.parse({
+              payload: request.payload,
+              resolution: result,
+            }),
+            codexQuestionIds: codexUserInputQuestionIds(params),
+          }),
+        );
+        return;
+      }
       const outcome = approvalInteractionOutcomeSchema.parse({
         payload: request.payload,
         resolution: result,
@@ -1106,6 +1125,8 @@ async function constructThreadSession(
     openCodexTurnIds: new Set(),
     responseOpenedTurns: new Map(),
     unopenedCompactionDispatches: [],
+    collaborationMode: args.request.kind === "start" ? "default" : null,
+    model: null,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: args.request.kind !== "start",
     identityAnnounced: false,
@@ -1251,6 +1272,7 @@ async function constructThreadSession(
     announceSessionIdentity(session, codexThreadId);
     const executionDelta = toCodexExecutionDelta(result);
     if (executionDelta !== null) {
+      session.model = executionDelta.execution.model;
       sendThreadDeltas(session, [executionDelta]);
     }
     return { session, codexThreadId };
@@ -1291,6 +1313,8 @@ function registerResumableSession(session: CodexBridgeSession): void {
     openCodexTurnIds: new Set(),
     responseOpenedTurns: new Map(),
     unopenedCompactionDispatches: [],
+    collaborationMode: null,
+    model: session.model,
     turnSettledWaiters: new Map(),
     awaitingReplayedUsage: true,
     identityAnnounced: session.identityAnnounced,
@@ -1856,20 +1880,32 @@ async function handleTurnStart(
         ),
         options: decoded.sessionOptions,
       });
+      const collaborationMode = nextCodexCollaborationMode({
+        options: decoded.sessionOptions,
+        current: session.collaborationMode,
+        threadModel: session.model,
+      });
       result = await connection.request({
         method: "turn/start",
         params: {
           threadId: codexThreadId,
-          input: toCodexUserInput(input),
+          input: toCodexTurnInput(input, decoded.sessionOptions),
           approvalPolicy: permissionSettings.approvalPolicy,
           approvalsReviewer: permissionSettings.approvalsReviewer,
           sandboxPolicy: permissionSettings.sandboxPolicy,
           model: decoded.sessionOptions.model ?? undefined,
           serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
+          ...(collaborationMode === null ? {} : { collaborationMode }),
         },
         resultSchema: ignoredChildResultSchema,
         timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
       });
+      if (collaborationMode !== null) {
+        session.collaborationMode = collaborationMode.mode;
+      }
+      if (decoded.sessionOptions.model !== undefined) {
+        session.model = decoded.sessionOptions.model;
+      }
     }
     sendResult(id, { threadId: params.threadId });
     settleAcceptedDispatch({

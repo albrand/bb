@@ -380,7 +380,13 @@ async function runScriptFileTurn(threadId) {
   for (const entry of turn) {
     const params = withThreadId(entry.params ?? {}, threadId);
     if (entry.kind === "request") {
-      await requestFromClient(entry.method, params);
+      const response = await requestFromClient(entry.method, params);
+      if (requestLogPath !== null) {
+        appendFileSync(
+          requestLogPath,
+          `${JSON.stringify({ method: `response:${entry.method}`, params: response })}\n`,
+        );
+      }
       continue;
     }
     if (entry.method === "turn/started") {
