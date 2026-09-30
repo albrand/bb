@@ -113,7 +113,8 @@ export async function codexMcpConfigSignature(args: {
   if (signaturesInFlight.has(key)) {
     return unhashedSignature();
   }
-  const computation = computeSignature(paths, Date.now() + args.deadlineMs)
+  const deadline = Date.now() + args.deadlineMs;
+  const computation = computeSignature(paths, deadline)
     .catch(unhashedSignature)
     .finally(() => {
       signaturesInFlight.delete(key);
@@ -126,7 +127,8 @@ export async function codexMcpConfigSignature(args: {
     }, args.deadlineMs);
   });
   try {
-    return await Promise.race([computation, timedOut]);
+    const signature = await Promise.race([computation, timedOut]);
+    return Date.now() > deadline ? unhashedSignature() : signature;
   } finally {
     clearTimeout(timer);
   }

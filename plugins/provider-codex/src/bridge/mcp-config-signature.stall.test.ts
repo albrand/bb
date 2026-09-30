@@ -1,5 +1,10 @@
-import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
-import type { FileHandle } from "node:fs/promises";
+import {
+  mkdtempSync,
+  readSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -14,12 +19,21 @@ const io = vi.hoisted(() => ({
   >(),
   opens: new Map<string, number>(),
   closes: new Map<string, number>(),
+  overdue: { path: null as string | null, blockMs: 0 },
 }));
+
+function blockEventLoop(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   const open = async (path: string, flags: number) => {
     io.opens.set(path, (io.opens.get(path) ?? 0) + 1);
+    if (io.overdue.path !== null && path !== io.overdue.path) {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+    }
+    const overdue = path === io.overdue.path;
     const stall = io.stalls.get(path);
     if (stall?.operation === "open") {
       await stall.gate;
@@ -35,10 +49,33 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       };
     return {
       stat: gated("stat", () => handle.stat()),
-      read: (...readArgs: Parameters<FileHandle["read"]>) =>
-        gated("read", () => handle.read(...readArgs))(),
+      read: async (
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) => {
+        if (overdue) {
+          blockEventLoop(io.overdue.blockMs);
+          const bytesRead = readSync(
+            handle.fd,
+            buffer,
+            offset,
+            length,
+            position,
+          );
+          return { bytesRead, buffer };
+        }
+        return gated("read", () =>
+          handle.read(buffer, offset, length, position),
+        )();
+      },
       close: async () => {
-        await gated("close", () => handle.close())();
+        if (overdue) {
+          void handle.close();
+        } else {
+          await gated("close", () => handle.close())();
+        }
         io.closes.set(path, (io.closes.get(path) ?? 0) + 1);
       },
     };
@@ -60,6 +97,7 @@ beforeEach(() => {
   io.stalls.clear();
   io.opens.clear();
   io.closes.clear();
+  io.overdue.path = null;
 });
 
 afterEach(() => {
@@ -144,4 +182,15 @@ it("stops reading an abandoned config soon after the deadline", async () => {
   await waitFor(() => (io.closes.get(configPath) ?? 0) >= 1);
 
   expect(Date.now() - startedAt).toBeLessThan(DEADLINE_MS + 700);
+});
+
+it("treats a digest that completes after the deadline as changed even when the timer has not run yet", async () => {
+  const healthy = await signature();
+  io.overdue.path = configPath;
+  io.overdue.blockMs = DEADLINE_MS + 100;
+
+  const overdue = await signature();
+
+  expect(overdue).toMatch(/^unhashed:/);
+  expect(overdue).not.toBe(healthy);
 });

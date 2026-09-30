@@ -7,12 +7,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -27,20 +27,49 @@ import {
 const io = vi.hoisted(() => ({
   stalledReads: new Map<string, Promise<void>>(),
   closes: new Map<string, number>(),
+  overdue: { path: null as string | null, blockMs: 0 },
 }));
+
+function blockEventLoop(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   const open = async (path: string, flags: number) => {
+    if (io.overdue.path !== null && path !== io.overdue.path) {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+    }
+    const overdue = path === io.overdue.path;
     const handle = await actual.open(path, flags);
     return {
       stat: () => handle.stat(),
-      read: async (...readArgs: Parameters<FileHandle["read"]>) => {
+      read: async (
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) => {
+        if (overdue) {
+          blockEventLoop(io.overdue.blockMs);
+          const bytesRead = readSync(
+            handle.fd,
+            buffer,
+            offset,
+            length,
+            position,
+          );
+          return { bytesRead, buffer };
+        }
         await io.stalledReads.get(path);
-        return handle.read(...readArgs);
+        return handle.read(buffer, offset, length, position);
       },
       close: async () => {
-        await handle.close();
+        if (overdue) {
+          void handle.close();
+        } else {
+          await handle.close();
+        }
         io.closes.set(path, (io.closes.get(path) ?? 0) + 1);
       },
     };
@@ -77,6 +106,7 @@ beforeEach(() => {
   vi.stubEnv("CODEX_HOME", codexHome);
   io.stalledReads.clear();
   io.closes.clear();
+  io.overdue.path = null;
   threadCounter += 1;
   threadId = `thr_mcp_reload_${threadCounter}`;
 });
@@ -328,4 +358,19 @@ it("reloads before the turn when reading a watched config stalls, and stops relo
     "turn/start",
     "turn/start",
   ]);
+}, 30_000);
+
+it("reloads before the turn when the config hash completes after the deadline but before the timer runs", async () => {
+  startHarness({});
+  const providerThreadId = await startThread();
+  io.overdue.path = join(codexHome, "config.toml");
+  io.overdue.blockMs = 2_100;
+
+  try {
+    await runTurn(2, providerThreadId);
+  } finally {
+    io.overdue.path = null;
+  }
+
+  expect(loggedMethods()).toEqual(["config/mcpServer/reload", "turn/start"]);
 }, 30_000);
