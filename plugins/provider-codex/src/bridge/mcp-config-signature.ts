@@ -90,36 +90,52 @@ async function fileSignature(path: string, deadline: number): Promise<string> {
   }
 }
 
+const fileSignaturesInFlight = new Map<string, Promise<string>>();
+
+async function singleFlightFileSignature(
+  path: string,
+  deadline: number,
+): Promise<string> {
+  for (
+    let inFlight = fileSignaturesInFlight.get(path);
+    inFlight !== undefined;
+    inFlight = fileSignaturesInFlight.get(path)
+  ) {
+    await inFlight;
+    if (performance.now() > deadline) {
+      return unhashedSignature();
+    }
+  }
+  const signature = fileSignature(path, deadline)
+    .catch(unhashedSignature)
+    .finally(() => {
+      fileSignaturesInFlight.delete(path);
+    });
+  fileSignaturesInFlight.set(path, signature);
+  return signature;
+}
+
 async function computeSignature(
   paths: string[],
   deadline: number,
 ): Promise<string> {
   const lines: string[] = [];
   for (const path of paths) {
-    lines.push(`${path}=${await fileSignature(path, deadline)}`);
+    lines.push(`${path}=${await singleFlightFileSignature(path, deadline)}`);
   }
   return lines.join("\n");
 }
-
-const signaturesInFlight = new Map<string, Promise<string>>();
 
 export async function codexMcpConfigSignature(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
   deadlineMs: number;
 }): Promise<string> {
-  const paths = codexMcpConfigPaths(args);
-  const key = paths.join("\n");
-  if (signaturesInFlight.has(key)) {
-    return unhashedSignature();
-  }
   const deadline = performance.now() + args.deadlineMs;
-  const computation = computeSignature(paths, deadline)
-    .catch(unhashedSignature)
-    .finally(() => {
-      signaturesInFlight.delete(key);
-    });
-  signaturesInFlight.set(key, computation);
+  const computation = computeSignature(
+    codexMcpConfigPaths(args),
+    deadline,
+  ).catch(unhashedSignature);
   let timer: NodeJS.Timeout | undefined;
   const timedOut = new Promise<string>((resolve) => {
     timer = setTimeout(() => {

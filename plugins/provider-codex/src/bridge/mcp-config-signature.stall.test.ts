@@ -19,6 +19,7 @@ const io = vi.hoisted(() => ({
   >(),
   opens: new Map<string, number>(),
   closes: new Map<string, number>(),
+  stalledAt: new Set<string>(),
   overdue: { path: null as string | null, blockMs: 0, clockSetBackMs: 0 },
   wallClockOffsetMs: 0,
 }));
@@ -44,6 +45,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       <T>(operation: StalledOperation, run: () => Promise<T>) =>
       async (): Promise<T> => {
         if (stall?.operation === operation) {
+          io.stalledAt.add(path);
           await stall.gate;
         }
         return run();
@@ -99,6 +101,7 @@ beforeEach(() => {
   io.stalls.clear();
   io.opens.clear();
   io.closes.clear();
+  io.stalledAt.clear();
   io.overdue.path = null;
   io.overdue.clockSetBackMs = 0;
   io.wallClockOffsetMs = 0;
@@ -168,6 +171,85 @@ it.each<StalledOperation>(["open", "stat", "read", "close"])(
     );
   },
 );
+
+it("keeps one read of a stalled shared config open across workspaces, and recovers in each once it completes", async () => {
+  const workspaces = ["one", "two", "three"].map((name) =>
+    mkdtempSync(join(rootDir, `${name}-`)),
+  );
+  const signatureIn = (cwd: string) =>
+    codexMcpConfigSignature({
+      cwd,
+      env: { CODEX_HOME: rootDir },
+      deadlineMs: DEADLINE_MS,
+    });
+  const healthy = await Promise.all(workspaces.map(signatureIn));
+  const release = stall("read");
+  io.opens.clear();
+  io.closes.clear();
+
+  const startedAt = Date.now();
+  const stalled = await Promise.all(workspaces.map(signatureIn));
+  const again = await Promise.all(workspaces.map(signatureIn));
+  const elapsed = Date.now() - startedAt;
+
+  for (const value of [...stalled, ...again]) {
+    expect(value).toMatch(/^unhashed:/);
+  }
+  expect(elapsed).toBeLessThan(2 * DEADLINE_MS + 1_000);
+  expect(io.opens.get(configPath)).toBe(1);
+  expect(io.closes.get(configPath) ?? 0).toBe(0);
+
+  io.stalls.delete(configPath);
+  release();
+  await waitFor(() => (io.closes.get(configPath) ?? 0) >= 1);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(io.opens.get(configPath)).toBe(1);
+  await vi.waitFor(
+    async () => {
+      expect(await Promise.all(workspaces.map(signatureIn))).toEqual(healthy);
+    },
+    { timeout: 5_000 },
+  );
+  await waitFor(() => io.closes.get(configPath) === io.opens.get(configPath));
+});
+
+it("gives concurrent healthy calls from different workspaces the same signature as a lone call", async () => {
+  const workspaces = ["one", "two", "three"].map((name) =>
+    mkdtempSync(join(rootDir, `${name}-`)),
+  );
+  const signatureIn = (cwd: string) =>
+    codexMcpConfigSignature({
+      cwd,
+      env: { CODEX_HOME: rootDir },
+      deadlineMs: DEADLINE_MS,
+    });
+  const alone: string[] = [];
+  for (const workspace of workspaces) {
+    alone.push(await signatureIn(workspace));
+  }
+
+  const concurrent = await Promise.all(workspaces.map(signatureIn));
+
+  expect(concurrent).toEqual(alone);
+  expect(concurrent.join("\n")).not.toContain("unhashed:");
+});
+
+it("reads a config again for a caller that arrives while an earlier read is in flight", async () => {
+  const release = stall("read");
+  const first = signature();
+  await waitFor(() => io.stalledAt.has(configPath));
+  writeFileSync(configPath, "a = 22\n");
+  const second = signature();
+  io.stalls.delete(configPath);
+  release();
+
+  const [before, after] = await Promise.all([first, second]);
+
+  expect(after).not.toMatch(/unhashed:/);
+  expect(after).not.toBe(before);
+  expect(after).toBe(await signature());
+  expect(io.opens.get(configPath)).toBe(3);
+});
 
 it("ignores a digest that arrives after the deadline", async () => {
   io.stalls.set(configPath, {
