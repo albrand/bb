@@ -32,7 +32,9 @@ export function codexMcpConfigPaths(args: {
 const MAX_HASHED_CONFIG_BYTES = 1024 * 1024;
 
 function errorCode(error: unknown): string {
-  return error instanceof Error && "code" in error ? String(error.code) : "error";
+  return error instanceof Error && "code" in error
+    ? String(error.code)
+    : "error";
 }
 
 function fileSignature(path: string): string {

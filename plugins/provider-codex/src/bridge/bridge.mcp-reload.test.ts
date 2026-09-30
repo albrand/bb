@@ -69,8 +69,7 @@ function loggedMethods(): string[] {
     .trim()
     .split("\n")
     .map(
-      (line) =>
-        z.object({ method: z.string() }).parse(JSON.parse(line)).method,
+      (line) => z.object({ method: z.string() }).parse(JSON.parse(line)).method,
     )
     .filter(
       (method) =>
@@ -86,9 +85,8 @@ async function startThread(): Promise<string> {
     options: { ...FULL_ACCESS_SESSION_OPTIONS },
   });
   const started = await harness.waitForResponse(1);
-  return z
-    .object({ providerThreadId: z.string() })
-    .parse(started.result).providerThreadId;
+  return z.object({ providerThreadId: z.string() }).parse(started.result)
+    .providerThreadId;
 }
 
 async function runTurn(id: number, providerThreadId: string): Promise<void> {
