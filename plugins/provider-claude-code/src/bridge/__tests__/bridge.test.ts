@@ -1009,6 +1009,107 @@ describe("bridge", () => {
     }
   });
 
+  it("keeps a rejected static server disabled when the SDK update fails", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+    const mcpConfig = join(cwd, ".mcp.json");
+    const settingsPath = join(cwd, ".claude", "settings.local.json");
+    const serverConfig = { type: "stdio", command: "fixture-mcp" };
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({ mcpServers: { fixture: serverConfig } }),
+    );
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ enableAllProjectMcpServers: true }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let serverEnabled = true;
+    let updateCount = 0;
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "project",
+        config: serverConfig,
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      serverEnabled = enabled;
+    });
+    query.setMcpServers.mockImplementation(async () => {
+      updateCount += 1;
+      if (updateCount === 2) throw new Error("unrelated update failure");
+      return { added: [], removed: [], errors: {} };
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-revoked-update-failure";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Start approved server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Start approved server");
+      await bridge.waitForResponse(2);
+      expect(serverEnabled).toBe(true);
+
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ enableAllProjectMcpServers: false }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Keep revoked server disabled" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Keep revoked server disabled",
+      );
+      await bridge.waitForResponse(3);
+      expect(serverEnabled).toBe(false);
+      expect(query.toggleMcpServer).not.toHaveBeenCalledWith("fixture", true);
+
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry revoked server removal" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Retry revoked server removal",
+      );
+      await bridge.waitForResponse(4);
+      expect(serverEnabled).toBe(false);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(3);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({});
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("applies the MCP config snapshot whose signature it accepts", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

@@ -243,7 +243,6 @@ export class SdkSession {
         if (configuredServer === undefined) {
           if (status.status !== "disabled") {
             this.bridgeDisabledStaticServers.set(status.name, status.config);
-            restoreAfterFailedUpdate.add(status.name);
             await query.toggleMcpServer(status.name, false);
           }
           continue;
