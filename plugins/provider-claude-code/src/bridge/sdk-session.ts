@@ -236,6 +236,7 @@ export class SdkSession {
   async setMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
     const query = this.query;
     if (!query) return;
+    this.mcpReconciliationPending = true;
     let statuses: McpServerStatus[];
     try {
       statuses = await query.mcpServerStatus();

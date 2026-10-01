@@ -442,6 +442,46 @@ async function invokeBridgeHooks(
   return outputs;
 }
 
+async function expectExternalMcpToolsBlocked(
+  call: ClaudeQueryCall,
+): Promise<void> {
+  const outputs = await invokeBridgeHooks(call.options.hooks?.PreToolUse, {
+    hook_event_name: "PreToolUse",
+    tool_name: "mcp__fixture__search",
+    tool_input: {},
+    tool_use_id: "tool-revoked-mcp",
+    session_id: "session-1",
+    transcript_path: "/tmp/transcript.jsonl",
+    cwd: "/tmp/worktree",
+  });
+  expect(outputs).toContainEqual(
+    expect.objectContaining({
+      hookSpecificOutput: expect.objectContaining({
+        permissionDecision: "deny",
+      }),
+    }),
+  );
+  const allowedOutputs = await invokeBridgeHooks(
+    call.options.hooks?.PreToolUse,
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "Read",
+      tool_input: {},
+      tool_use_id: "tool-allowed-read",
+      session_id: "session-1",
+      transcript_path: "/tmp/transcript.jsonl",
+      cwd: "/tmp/worktree",
+    },
+  );
+  expect(allowedOutputs).not.toContainEqual(
+    expect.objectContaining({
+      hookSpecificOutput: expect.objectContaining({
+        permissionDecision: "deny",
+      }),
+    }),
+  );
+}
+
 function createResultUsage(): SdkResultUsage {
   return {
     cache_creation: {
@@ -1312,6 +1352,7 @@ describe("bridge", () => {
         requestId: 3,
       });
       expect(serverEnabled).toBe(true);
+      await expectExternalMcpToolsBlocked(call);
 
       bridge.sendRequest(
         4,
@@ -1408,6 +1449,7 @@ describe("bridge", () => {
         requestId: 3,
       });
       expect(serverEnabled).toBe(true);
+      await expectExternalMcpToolsBlocked(call);
 
       bridge.sendRequest(
         4,

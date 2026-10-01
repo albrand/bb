@@ -1284,6 +1284,22 @@ function buildSessionTrackingHooks(
       threadIdRef.current,
     )?.residentSession;
     if (threadSession) {
+      const bridgeToolPrefix = `mcp__${BB_BRIDGE_MCP_SERVER_NAME}__`;
+      if (
+        threadSession.session.needsMcpServerReconciliation() &&
+        input.tool_name.startsWith("mcp__") &&
+        !input.tool_name.startsWith(bridgeToolPrefix)
+      ) {
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason:
+              "MCP server access is temporarily unavailable while configuration is reconciled.",
+          },
+        };
+      }
       const permissionEscalation = resolvePermissionEscalationForWork(
         threadSession,
         {

@@ -1447,8 +1447,10 @@ Before a turn, the bridge checks this configuration and applies changes to the
 current SDK query without restarting the conversation. A slow config read,
 invalid or incomplete config, failed status read, or failed server update
 preserves the current server set, logs the failure, leaves reconciliation
-pending, and still sends the turn input. Project `.mcp.json` approval checks
-still apply before those servers can be passed to the SDK.
+pending, and still sends the turn input. While reconciliation is pending, the
+bridge denies external MCP tool calls until a retry succeeds; non-MCP tools and
+the bb bridge's own tools remain available. Project `.mcp.json` approval
+checks still apply before those servers can be passed to the SDK.
 
 After a changed configuration is applied, bb checks server status in the
 background and attempts to reconnect servers reported as `needs-auth` or
