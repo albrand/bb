@@ -2540,6 +2540,7 @@ async function refreshClaudeMcpServers(
       attachment.mcpConfigSignature = signature;
       startMcpAuthReconnect(threadSession);
     } catch (error) {
+      threadSession.session.markMcpServerReconciliationPending();
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );

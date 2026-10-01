@@ -2853,7 +2853,8 @@ describe("bridge", () => {
       expect(await readNextPromptText(call)).toBe("Restore original server");
       await bridge.waitForResponse(4);
       expect(query.toggleMcpServer).not.toHaveBeenCalled();
-      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({});
       expect(queryMock).toHaveBeenCalledTimes(1);
     } finally {
       query.finish();
@@ -3506,6 +3507,129 @@ describe("bridge", () => {
       bridge.restore();
     }
   });
+
+  it("fails closed on external MCP tools when a revoked config read stalls", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const serverConfig = { type: "stdio", command: "fixture-mcp" };
+    const writeUserConfig = (includeServer: boolean) => {
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              ...(includeServer
+                ? { mcpServers: { fixture: serverConfig } }
+                : {}),
+            },
+          },
+        }),
+      );
+    };
+    writeUserConfig(true);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let serverEnabled = true;
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "local",
+        config: serverConfig,
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      serverEnabled = enabled;
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-revoked-config-read-stall";
+    const nativeOpen = nativeOpenRef.current;
+    if (!nativeOpen) throw new Error("Expected native config file reader");
+    let releaseOpen = (): void => {};
+    const openGate = new Promise<void>((resolveOpen) => {
+      releaseOpen = resolveOpen;
+    });
+    let closedDelayedHandle = false;
+    const close = vi.fn(async () => {
+      closedDelayedHandle = true;
+    });
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      const turn = async (requestId: number, input: string) => {
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: input }],
+          }),
+        );
+        expect(await readNextPromptText(call)).toBe(input);
+        await bridge.waitForResponse(requestId);
+      };
+
+      await turn(2, "Start with approved MCP server");
+      expect(serverEnabled).toBe(true);
+      writeUserConfig(false);
+      openMock.mockImplementation(
+        (path: string, flags: number, mode?: number) => {
+          if (String(path) !== userConfig) return nativeOpen(path, flags, mode);
+          return openGate.then(() =>
+            Promise.resolve({
+              close,
+              stat: async () => ({ isFile: () => true, size: 0 }),
+              read: async () => ({ bytesRead: 0 }),
+            } as unknown),
+          );
+        },
+      );
+
+      await turn(3, "Continue while revoked config read times out");
+      expect(serverEnabled).toBe(true);
+      await expectExternalMcpToolsBlocked(call);
+
+      releaseOpen();
+      await vi.waitFor(() => expect(closedDelayedHandle).toBe(true));
+      openMock.mockImplementation(nativeOpen);
+      await turn(4, "Apply revoked config after read recovers");
+      expect(serverEnabled).toBe(false);
+      const recoveredOutputs = await invokeBridgeHooks(
+        call.options.hooks?.PreToolUse,
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "mcp__fixture__search",
+          tool_input: {},
+          tool_use_id: "tool-restored-mcp",
+          session_id: "session-1",
+          transcript_path: "/tmp/transcript.jsonl",
+          cwd: "/tmp/worktree",
+        },
+      );
+      expect(recoveredOutputs).not.toContainEqual(
+        expect.objectContaining({
+          hookSpecificOutput: expect.objectContaining({
+            permissionDecision: "deny",
+          }),
+        }),
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseOpen();
+      openMock.mockImplementation(nativeOpen);
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  }, 10_000);
 
   it("bounds a stalled native config open across turns and recovers on the same Query", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
