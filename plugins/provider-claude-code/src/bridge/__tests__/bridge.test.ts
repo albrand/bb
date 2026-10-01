@@ -1440,71 +1440,74 @@ describe("bridge", () => {
     }
   });
 
-  it("reconnects only an MCP server that reports needs-auth", async () => {
-    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
-    tempDirs.push(home);
-    const cwd = join(home, "project");
-    mkdirSync(cwd, { recursive: true });
-    process.env.HOME = home;
-    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
-    const serverConfig = { type: "http", url: "https://fixture.invalid/mcp" };
-    writeFileSync(
-      join(home, ".claude.json"),
-      JSON.stringify({ mcpServers: { signedIn: serverConfig } }),
-    );
-    const bridge = createBridgeJsonRpcTestHarness(handleLine);
-    const query = createControlledClaudeQuery();
-    const healthyStatus = {
-      name: "signedIn",
-      status: "connected",
-      scope: "user",
-      config: serverConfig,
-    } as const;
-    const authStatus = { ...healthyStatus, status: "needs-auth" } as const;
-    query.mcpServerStatus
-      .mockResolvedValueOnce([healthyStatus])
-      .mockResolvedValueOnce([healthyStatus])
-      .mockResolvedValueOnce([authStatus]);
-    queryMock.mockReturnValue(query);
-    const threadId = "thread-live-mcp-needs-auth";
-
-    try {
-      await startBridgeThread({ bridge, cwd, threadId });
-      const call = queryMock.mock.calls[0]?.[0];
-      if (!isClaudeQueryCall(call))
-        throw new Error("Expected Claude SDK query");
-      bridge.sendRequest(
-        2,
-        "turn/start",
-        canonicalTurnParams({
-          threadId,
-          input: [{ type: "text", text: "Before auth expires" }],
-        }),
+  it.each(["needs-auth", "failed"] as const)(
+    "reconnects only an MCP server that reports %s",
+    async (unhealthyStatus) => {
+      const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+      tempDirs.push(home);
+      const cwd = join(home, "project");
+      mkdirSync(cwd, { recursive: true });
+      process.env.HOME = home;
+      process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+      const serverConfig = { type: "http", url: "https://fixture.invalid/mcp" };
+      writeFileSync(
+        join(home, ".claude.json"),
+        JSON.stringify({ mcpServers: { signedIn: serverConfig } }),
       );
-      expect(await readNextPromptText(call)).toBe("Before auth expires");
-      await bridge.waitForResponse(2);
-      expect(query.reconnectMcpServer).not.toHaveBeenCalled();
+      const bridge = createBridgeJsonRpcTestHarness(handleLine);
+      const query = createControlledClaudeQuery();
+      const healthyStatus = {
+        name: "signedIn",
+        status: "connected",
+        scope: "user",
+        config: serverConfig,
+      } as const;
+      const authStatus = { ...healthyStatus, status: unhealthyStatus } as const;
+      query.mcpServerStatus
+        .mockResolvedValueOnce([healthyStatus])
+        .mockResolvedValueOnce([healthyStatus])
+        .mockResolvedValueOnce([authStatus]);
+      queryMock.mockReturnValue(query);
+      const threadId = "thread-live-mcp-needs-auth";
 
-      bridge.sendRequest(
-        3,
-        "turn/start",
-        canonicalTurnParams({
-          threadId,
-          input: [{ type: "text", text: "After auth expires" }],
-        }),
-      );
-      expect(await readNextPromptText(call)).toBe("After auth expires");
-      await bridge.waitForResponse(3);
-      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
-      expect(query.reconnectMcpServer).toHaveBeenCalledTimes(1);
-      expect(query.reconnectMcpServer).toHaveBeenCalledWith("signedIn");
-      expect(queryMock).toHaveBeenCalledTimes(1);
-    } finally {
-      query.finish();
-      await stopBridgeThread({ bridge, queries: [query], threadId });
-      bridge.restore();
-    }
-  });
+      try {
+        await startBridgeThread({ bridge, cwd, threadId });
+        const call = queryMock.mock.calls[0]?.[0];
+        if (!isClaudeQueryCall(call))
+          throw new Error("Expected Claude SDK query");
+        bridge.sendRequest(
+          2,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: "Before auth expires" }],
+          }),
+        );
+        expect(await readNextPromptText(call)).toBe("Before auth expires");
+        await bridge.waitForResponse(2);
+        expect(query.reconnectMcpServer).not.toHaveBeenCalled();
+
+        bridge.sendRequest(
+          3,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: "After auth expires" }],
+          }),
+        );
+        expect(await readNextPromptText(call)).toBe("After auth expires");
+        await bridge.waitForResponse(3);
+        expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+        expect(query.reconnectMcpServer).toHaveBeenCalledTimes(1);
+        expect(query.reconnectMcpServer).toHaveBeenCalledWith("signedIn");
+        expect(queryMock).toHaveBeenCalledTimes(1);
+      } finally {
+        query.finish();
+        await stopBridgeThread({ bridge, queries: [query], threadId });
+        bridge.restore();
+      }
+    },
+  );
 
   it("preserves current MCP servers when a config file becomes a FIFO", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
