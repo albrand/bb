@@ -108,6 +108,10 @@ import {
 } from "./tool-proxy-mcp.js";
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
 import {
+  claudeMcpConfigSignature,
+  loadClaudeMcpServers,
+} from "./mcp-config-signature.js";
+import {
   type ClaudeInteractiveResponse,
   type ClaudePermissionMode,
   type ClaudePermissionRequestApprovalParams,
@@ -259,6 +263,8 @@ interface ThreadAttachment {
   approvedPlanPermissionMode: ClaudePermissionMode;
   providerThreadId?: string;
   sessionPermissionGrants: ClaudeSessionPermissionGrant[];
+  mcpConfigSignature: string | null;
+  mcpConfigRefresh: { promise: Promise<void>; deadline: number } | null;
   threadIdRef: ThreadIdRef;
 }
 
@@ -1094,6 +1100,8 @@ function createThreadAttachment(
       ? { providerThreadId: args.providerThreadId }
       : {}),
     sessionPermissionGrants: [],
+    mcpConfigSignature: null,
+    mcpConfigRefresh: null,
     threadIdRef: args.threadIdRef,
   };
   attachment.residentSession = createThreadSession(attachment);
@@ -2454,6 +2462,7 @@ async function runTurnInput(
     return;
   }
   try {
+    await refreshClaudeMcpServers(threadSession);
     await applyLiveSessionSettings(
       threadSession,
       params.threadId,
@@ -2481,6 +2490,70 @@ async function runTurnInput(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
+  }
+}
+
+async function refreshClaudeMcpServers(
+  threadSession: ThreadSession,
+): Promise<void> {
+  const attachment = threadSession.attachment;
+  const existingRefresh = attachment.mcpConfigRefresh;
+  if (existingRefresh !== null) {
+    const remainingMs = existingRefresh.deadline - performance.now();
+    if (remainingMs <= 0) return;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      existingRefresh.promise,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remainingMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (attachment.mcpConfigRefresh === existingRefresh) return;
+    return refreshClaudeMcpServers(threadSession);
+  }
+  const options = attachment.sessionOptions;
+  const cwd = options.cwd;
+  const env = options.env ?? process.env;
+  const refresh = (async (): Promise<void> => {
+    const signature = await claudeMcpConfigSignature({ cwd, env });
+    if (
+      signature.startsWith("unhashed:") ||
+      signature === attachment.mcpConfigSignature
+    ) {
+      return;
+    }
+    const servers = await loadClaudeMcpServers({ cwd, env });
+    await threadSession.session.setMcpServers(
+      servers,
+      attachment.mcpConfigSignature !== null,
+    );
+    attachment.mcpConfigSignature = signature;
+  })();
+  const refreshState = {
+    promise: refresh.catch((error: unknown) => {
+      logBridgeError(
+        `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }),
+    deadline: performance.now() + 4_000,
+  };
+  attachment.mcpConfigRefresh = refreshState;
+  void refreshState.promise.finally(() => {
+    if (attachment.mcpConfigRefresh === refreshState) {
+      attachment.mcpConfigRefresh = null;
+    }
+  });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      refreshState.promise,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 4_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

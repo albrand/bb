@@ -38,8 +38,18 @@ Codex MCP servers:
 
   A running Codex thread reloads its MCP servers at the start of the next turn
   after ~/.codex/config.toml ($CODEX_HOME/config.toml) or a .codex/config.toml
-  in the working directory or its parents changes. Claude Code threads read MCP
-  servers only when their session starts.
+  in the working directory or its parents changes.
+
+Claude Code MCP servers:
+
+  A running Claude Code thread applies MCP configuration changes at the start
+  of its next turn without restarting the conversation. It watches ~/.claude.json,
+  $CLAUDE_CONFIG_DIR/settings.json (default ~/.claude/settings.json), and
+  .mcp.json, .claude/settings.json, and .claude/settings.local.json in the
+  working directory and its parents. Changes can add, remove, or update servers;
+  signing in reconnects configured servers on the next turn. A slow config read
+  or failed SDK update does not prevent the turn from starting; bb tries again
+  on a later turn.
 
 Skills (.bb/skills/):
 

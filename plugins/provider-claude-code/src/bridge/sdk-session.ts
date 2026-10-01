@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import {
   query,
   type CanUseTool,
-  type McpSdkServerConfigWithInstance,
+  type McpServerConfig,
+  type McpServerStatus,
   type Options,
   type Query,
   type SDKMessage,
@@ -31,7 +33,7 @@ export interface SdkSessionOptions {
   permissionMode?: ClaudePermissionMode;
   sandbox?: Options["sandbox"];
   hooks?: Options["hooks"];
-  mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
+  mcpServers?: Record<string, McpServerConfig>;
   allowedTools?: string[];
   disallowedTools?: string[];
   canUseTool?: CanUseTool;
@@ -89,6 +91,11 @@ interface BuildSdkDoneErrorMessageArgs {
 }
 
 const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
+const CLAUDE_CONFIG_MCP_SCOPES = new Set(["user", "project", "local"]);
+
+function isClaudeConfigScope(scope: string | undefined): boolean {
+  return scope !== undefined && CLAUDE_CONFIG_MCP_SCOPES.has(scope);
+}
 
 function isCurrentProcessRoot(): boolean {
   return process.getuid?.() === 0;
@@ -165,6 +172,7 @@ export class SdkSession {
   private inputDone = false;
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
+  private readonly baseMcpServers: Record<string, McpServerConfig>;
   private complete: (() => void) | null = null;
   private stderrTail = "";
 
@@ -173,6 +181,7 @@ export class SdkSession {
     private readonly onMessage: SdkSessionMessageHandler,
     private readonly onDone: SdkSessionDoneHandler,
   ) {
+    this.baseMcpServers = { ...options.mcpServers };
     this.completion = new Promise((resolve) => {
       this.complete = resolve;
     });
@@ -198,6 +207,64 @@ export class SdkSession {
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model);
     this.options.model = model;
+  }
+
+  async setMcpServers(
+    servers: Record<string, McpServerConfig>,
+    reconnectConfiguredServers: boolean,
+  ): Promise<void> {
+    if (!this.query) return;
+    const statuses = await this.query.mcpServerStatus();
+    const statusesByName = new Map(
+      statuses.map((status: McpServerStatus) => [status.name, status]),
+    );
+    const dynamicServers = Object.create(null) as Record<
+      string,
+      McpServerConfig
+    >;
+    for (const status of statuses) {
+      const configuredServer = servers[status.name];
+      if (!isClaudeConfigScope(status.scope)) {
+        if (configuredServer !== undefined) {
+          dynamicServers[status.name] = configuredServer;
+          if (
+            reconnectConfiguredServers &&
+            isDeepStrictEqual(status.config, configuredServer) &&
+            status.status !== "disabled"
+          ) {
+            await this.query.reconnectMcpServer(status.name);
+          }
+        }
+        continue;
+      }
+      if (configuredServer === undefined) {
+        await this.query.toggleMcpServer(status.name, false);
+        continue;
+      }
+      if (!isDeepStrictEqual(status.config, configuredServer)) {
+        await this.query.toggleMcpServer(status.name, false);
+        dynamicServers[status.name] = configuredServer;
+        continue;
+      }
+      if (status.status === "disabled") {
+        await this.query.toggleMcpServer(status.name, true);
+      } else if (reconnectConfiguredServers) {
+        await this.query.reconnectMcpServer(status.name);
+      }
+    }
+    for (const [name, config] of Object.entries(servers)) {
+      if (!statusesByName.has(name)) dynamicServers[name] = config;
+    }
+    const nextServers = { ...dynamicServers, ...this.baseMcpServers };
+    const result = await this.query.setMcpServers(nextServers);
+    if (Object.keys(result.errors).length > 0) {
+      throw new Error(
+        `MCP server connection failed: ${Object.entries(result.errors)
+          .map(([name, message]) => `${name}: ${message}`)
+          .join("; ")}`,
+      );
+    }
+    this.options.mcpServers = nextServers;
   }
 
   async applyMutableSettings(args: {

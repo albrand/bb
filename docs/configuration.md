@@ -1429,6 +1429,15 @@ login, such as a CI runner. Mint the token with `claude setup-token`, which is
 long-lived where the credentials from `/login` are not. A logged-in machine
 needs neither.
 
+A running Claude Code thread applies MCP configuration changes before its next
+turn without restarting the conversation. The bridge watches `~/.claude.json`,
+`$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`), and
+`.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` from the
+thread's working directory and its parents. It uses the Agent SDK's live MCP
+server APIs to add or remove servers, apply edits, and reconnect configured
+servers after a sign-in. A slow config read or failed SDK update does not prevent
+the turn from starting; the bridge tries again on a later turn.
+
 ### Codex provider
 
 A running Codex thread reloads its MCP servers when their configuration changes.
@@ -1441,8 +1450,7 @@ files cannot be read within two seconds, for example because one keeps growing
 or the filesystem stops responding, the bridge treats them as changed and
 reloads before that turn. A failed reload is logged, the turn still runs, and
 the next turn tries again. An MCP sign-in that Codex keeps only in the OS
-keychain does not change these files, so it does not trigger a reload. Claude
-Code threads still read MCP servers only when their session starts.
+keychain does not change these files, so it does not trigger a reload.
 
 ### Provider retry plugin
 
