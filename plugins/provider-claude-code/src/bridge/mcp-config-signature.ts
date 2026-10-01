@@ -43,9 +43,48 @@ function errorCode(error: unknown): string {
 const HASH_CHUNK_BYTES = 1024 * 1024;
 const CONFIG_READ_DEADLINE_MS = 2_000;
 const CONFIG_FILE_MAX_BYTES = 4 * 1024 * 1024;
+const CONFIG_READ_DEADLINE_EXCEEDED = new Error(
+  "Claude MCP config read exceeded its deadline",
+);
 
 function unhashedSignature(): string {
   return `unhashed:${randomUUID()}`;
+}
+
+async function withinDeadline<T>(
+  operation: Promise<T>,
+  deadline: number,
+): Promise<T> {
+  const remainingMs = deadline - performance.now();
+  if (remainingMs <= 0) throw CONFIG_READ_DEADLINE_EXCEEDED;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(CONFIG_READ_DEADLINE_EXCEEDED),
+          remainingMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function closeFileHandle(
+  handle: FileHandle,
+  deadline: number,
+): Promise<boolean> {
+  const closing = handle.close();
+  try {
+    await withinDeadline(closing, deadline);
+    return true;
+  } catch {
+    void closing.catch(() => {});
+    return false;
+  }
 }
 
 async function hashFile(
@@ -57,16 +96,21 @@ async function hashFile(
   const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
   let position = 0;
   while (position < size) {
-    const remainingMs = deadline - performance.now();
-    if (remainingMs <= 0) return null;
-    let timer: NodeJS.Timeout | undefined;
-    const readResult = await Promise.race([
-      handle.read(chunk, 0, Math.min(chunk.length, size - position), position),
-      new Promise<null>((resolveRead) => {
-        timer = setTimeout(() => resolveRead(null), remainingMs);
-      }),
-    ]).finally(() => clearTimeout(timer));
-    if (readResult === null) return null;
+    let readResult: { bytesRead: number };
+    try {
+      readResult = await withinDeadline(
+        handle.read(
+          chunk,
+          0,
+          Math.min(chunk.length, size - position),
+          position,
+        ),
+        deadline,
+      );
+    } catch (error) {
+      if (error === CONFIG_READ_DEADLINE_EXCEEDED) return null;
+      throw error;
+    }
     const { bytesRead } = readResult;
     if (bytesRead === 0) break;
     hash.update(chunk.subarray(0, bytesRead));
@@ -76,28 +120,51 @@ async function hashFile(
 }
 
 async function fileSignature(path: string, deadline: number): Promise<string> {
-  let handle: FileHandle;
+  let handle: FileHandle | undefined;
+  const opening = open(
+    path,
+    constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+  ).then((opened) => {
+    handle = opened;
+    return opened;
+  });
   try {
-    handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    handle = await withinDeadline(opening, deadline);
   } catch (error) {
+    if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
+      void opening.then(
+        (opened) => opened.close().catch(() => {}),
+        () => {},
+      );
+      return unhashedSignature();
+    }
     const code = errorCode(error);
     return code === "ENOENT" || code === "ENOTDIR" ? "absent" : code;
   }
+  let signature: string;
   try {
-    const stats = await handle.stat();
-    if (!stats.isFile()) return `not-a-file:${stats.ino}:${stats.mode}`;
-    try {
-      return (
-        (await hashFile(handle, stats.size, deadline)) ?? unhashedSignature()
-      );
-    } catch (error) {
-      return `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+    const stats = await withinDeadline(handle.stat(), deadline);
+    if (!stats.isFile()) {
+      signature = `not-a-file:${stats.ino}:${stats.mode}`;
+    } else {
+      try {
+        signature =
+          (await hashFile(handle, stats.size, deadline)) ?? unhashedSignature();
+      } catch (error) {
+        signature =
+          error === CONFIG_READ_DEADLINE_EXCEEDED
+            ? unhashedSignature()
+            : `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+      }
     }
   } catch (error) {
-    return errorCode(error);
-  } finally {
-    await handle.close();
+    signature =
+      error === CONFIG_READ_DEADLINE_EXCEEDED
+        ? unhashedSignature()
+        : errorCode(error);
   }
+  const closed = await closeFileHandle(handle, deadline);
+  return closed ? signature : unhashedSignature();
 }
 
 const fileSignaturesInFlight = new Map<
@@ -230,25 +297,35 @@ function mcpServersFromConfig(value: unknown): Record<string, unknown> {
 }
 
 async function readConfig(path: string, deadline: number): Promise<unknown> {
-  if (performance.now() >= deadline) {
-    throw new Error("Claude MCP config read exceeded its deadline");
-  }
-  let handle: FileHandle;
+  let handle: FileHandle | undefined;
+  const opening = open(
+    path,
+    constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+  ).then((opened) => {
+    handle = opened;
+    return opened;
+  });
   try {
-    handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    handle = await withinDeadline(opening, deadline);
   } catch (error) {
+    if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
+      void opening.then(
+        (opened) => opened.close().catch(() => {}),
+        () => {},
+      );
+      throw error;
+    }
     if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {
       return {};
     }
     throw error;
   }
   try {
-    const stats = await handle.stat();
+    const stats = await withinDeadline(handle.stat(), deadline);
     if (!stats.isFile()) return {};
     if (stats.size > CONFIG_FILE_MAX_BYTES) {
       throw new Error("Claude MCP config exceeds the supported file size");
     }
-    const remainingMs = deadline - performance.now();
     const read = (async (): Promise<string> => {
       const chunks: Buffer[] = [];
       let position = 0;
@@ -263,33 +340,22 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
       }
       return Buffer.concat(chunks).toString("utf8");
     })();
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      const timedOut = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(new Error("Claude MCP config read exceeded its deadline")),
-          remainingMs,
-        );
-      });
-      const contents = await Promise.race([read, timedOut]);
-      if (performance.now() >= deadline) {
-        throw new Error("Claude MCP config read exceeded its deadline");
-      }
-      return JSON.parse(contents) as unknown;
-    } finally {
-      clearTimeout(timer);
-    }
+    const contents = await withinDeadline(read, deadline);
+    return JSON.parse(contents) as unknown;
   } finally {
-    await handle.close();
+    if (!(await closeFileHandle(handle, deadline))) {
+      throw CONFIG_READ_DEADLINE_EXCEEDED;
+    }
   }
 }
 
 export async function loadClaudeMcpServers(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
+  deadlineMs?: number;
 }): Promise<Record<string, McpServerConfig>> {
-  const deadline = performance.now() + CONFIG_READ_DEADLINE_MS;
+  const deadline =
+    performance.now() + (args.deadlineMs ?? CONFIG_READ_DEADLINE_MS);
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
   for (const path of paths) {
