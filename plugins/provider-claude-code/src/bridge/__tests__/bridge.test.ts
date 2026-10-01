@@ -2573,7 +2573,7 @@ describe("bridge", () => {
     }
   });
 
-  it("denies AskUserQuestion when bb returns an invalid response payload", async () => {
+  it("reports a user decline when bb returns an empty AskUserQuestion answer", async () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     const queries: ControlledClaudeQuery[] = [];
     queryMock.mockImplementation(() => {
@@ -2600,8 +2600,13 @@ describe("bridge", () => {
       );
 
       await expect(resultPromise).resolves.toMatchObject({
-        behavior: "deny",
-        message: "Invalid interactive response payload",
+        behavior: "allow",
+        updatedInput: {
+          answers: {
+            "Which deployment target should I use?":
+              "The user declined to answer this question.",
+          },
+        },
         toolUseID,
       });
 

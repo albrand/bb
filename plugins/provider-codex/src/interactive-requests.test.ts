@@ -727,6 +727,29 @@ describe("Codex requestUserInput", () => {
     ).toEqual({ answers: { color: { answers: ["Green", "teal"] } } });
   });
 
+  it("returns a decline message when the user dismisses the question card", () => {
+    const payload = decodeCodexInteractiveRequest(
+      userInputRequest([COLOR_QUESTION]),
+    )?.payload;
+    if (payload?.kind !== "user_question") {
+      throw new Error("expected a user question");
+    }
+
+    expect(
+      buildCodexUserInputResponse({
+        outcome: {
+          payload,
+          resolution: { kind: "user_answer", answers: {} },
+        },
+        codexQuestionIds: ["color"],
+      }),
+    ).toEqual({
+      answers: {
+        color: { answers: ["The user declined to answer this question."] },
+      },
+    });
+  });
+
   it("answers Codex under its own question ids, including __proto__", () => {
     const params = userInputRequest([
       { ...COLOR_QUESTION, id: "__proto__" },
