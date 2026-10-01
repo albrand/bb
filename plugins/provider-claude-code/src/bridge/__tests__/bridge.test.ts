@@ -389,19 +389,35 @@ async function readNextPromptText(call: ClaudeQueryCall): Promise<string> {
   return content;
 }
 
-async function expectTurnRejectedBeforePrompt(args: {
+async function readNextPromptTextWithin(
+  call: ClaudeQueryCall,
+  timeoutMs: number,
+): Promise<string> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      readNextPromptText(call),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(new Error("Claude prompt did not arrive before deadline")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function expectTurnAcceptedBeforePrompt(args: {
   bridge: BridgeJsonRpcTestHarness;
-  errorMessage: string;
+  call: ClaudeQueryCall;
+  input: string;
   requestId: number;
 }): Promise<void> {
-  const responsePromise = args.bridge.waitForResponse(args.requestId);
-  const response = await Promise.race([
-    responsePromise,
-    new Promise<undefined>((resolve) => setTimeout(resolve, 2_000)),
-  ]);
-  expect(response).toMatchObject({
-    error: { message: expect.stringContaining(args.errorMessage) },
-  });
+  expect(await readNextPromptTextWithin(args.call, 1_000)).toBe(args.input);
+  await args.bridge.waitForResponse(args.requestId);
 }
 
 async function invokeBridgeHooks(
@@ -1187,9 +1203,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Keep revoked server disabled" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "unrelated update failure",
+        call,
+        input: "Keep revoked server disabled",
         requestId: 3,
       });
       expect(serverEnabled).toBe(false);
@@ -1218,7 +1235,7 @@ describe("bridge", () => {
     }
   });
 
-  it("blocks a turn when disabling a revoked static server fails", async () => {
+  it("sends a turn when disabling a revoked static server fails", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
     const cwd = join(home, "project");
@@ -1288,21 +1305,11 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Do not use revoked server" }],
         }),
       );
-      const responsePromise = bridge.waitForResponse(3);
-      const response = await Promise.race([
-        responsePromise,
-        new Promise<undefined>((resolve) => setTimeout(resolve, 100)),
-      ]);
-      if (response === undefined) {
-        expect(await readNextPromptText(call)).toBe(
-          "Do not use revoked server",
-        );
-        await responsePromise;
-      }
-      expect(response).toMatchObject({
-        error: {
-          message: expect.stringContaining("transient disable failure"),
-        },
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Do not use revoked server",
+        requestId: 3,
       });
       expect(serverEnabled).toBe(true);
 
@@ -1327,7 +1334,7 @@ describe("bridge", () => {
     }
   });
 
-  it("blocks a turn when server status cannot be read after revocation", async () => {
+  it("sends a turn when server status cannot be read after revocation", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
     const cwd = join(home, "project");
@@ -1394,19 +1401,11 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Do not use revoked server" }],
         }),
       );
-      const responsePromise = bridge.waitForResponse(3);
-      const response = await Promise.race([
-        responsePromise,
-        new Promise<undefined>((resolve) => setTimeout(resolve, 100)),
-      ]);
-      if (response === undefined) {
-        expect(await readNextPromptText(call)).toBe(
-          "Do not use revoked server",
-        );
-        await responsePromise;
-      }
-      expect(response).toMatchObject({
-        error: { message: expect.stringContaining("transient status failure") },
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Do not use revoked server",
+        requestId: 3,
       });
       expect(serverEnabled).toBe(true);
 
@@ -1431,7 +1430,7 @@ describe("bridge", () => {
     }
   });
 
-  it("blocks a turn when server status cannot be read after adding a server", async () => {
+  it("sends a turn and retries after server status cannot be read", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
     const cwd = join(home, "project");
@@ -1484,9 +1483,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Wait for added server" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "transient status failure",
+        call,
+        input: "Wait for added server",
         requestId: 3,
       });
 
@@ -1511,7 +1511,216 @@ describe("bridge", () => {
     }
   });
 
-  it("blocks a turn when reconnect status fails after adding a server", async () => {
+  it("sends turns while a needs-auth server reconnect fails after an MCP config change", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+    const mcpConfig = join(cwd, ".mcp.json");
+    const settingsPath = join(cwd, ".claude", "settings.local.json");
+    const serverConfig = { type: "stdio", command: "fixture-mcp" };
+    const needsAuth = {
+      name: "authServer",
+      status: "needs-auth",
+      scope: "dynamic",
+      config: { type: "http", url: "https://fixture.invalid/auth" },
+    } as const;
+    writeFileSync(mcpConfig, JSON.stringify({ mcpServers: {} }));
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ enableAllProjectMcpServers: true }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([needsAuth]);
+    query.reconnectMcpServer.mockRejectedValue(
+      new Error("auth server still unavailable"),
+    );
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-auth-reconnect-failure-nonblocking";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      const turn = async (requestId: number, input: string) => {
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: input }],
+          }),
+        );
+        expect(await readNextPromptTextWithin(call, 1_000)).toBe(input);
+        await bridge.waitForResponse(requestId);
+      };
+
+      await turn(2, "Begin before server is added");
+      await vi.waitFor(() =>
+        expect(query.reconnectMcpServer).toHaveBeenCalledTimes(1),
+      );
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({ mcpServers: { fixture: serverConfig } }),
+      );
+      await turn(3, "Apply config with auth server still failing");
+      await vi.waitFor(() =>
+        expect(query.reconnectMcpServer).toHaveBeenCalledTimes(2),
+      );
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: serverConfig,
+      });
+
+      await turn(4, "Continue after first reconnect failure");
+      await turn(5, "Continue after second reconnect failure");
+      await turn(6, "Continue after third reconnect failure");
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.reconnectMcpServer).toHaveBeenCalledTimes(2);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("sends a turn while the MCP reconnect promise remains pending", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const config = { type: "http", url: "https://fixture.invalid/mcp" };
+    const userConfig = join(home, ".claude.json");
+    writeFileSync(userConfig, JSON.stringify({ mcpServers: {} }));
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    const needsAuth = {
+      name: "fixture",
+      status: "needs-auth",
+      scope: "user",
+      config,
+    } as const;
+    query.mcpServerStatus
+      .mockResolvedValueOnce([needsAuth])
+      .mockResolvedValueOnce([needsAuth]);
+    let releaseReconnect = (): void => {};
+    query.reconnectMcpServer.mockImplementation(
+      () =>
+        new Promise<void>((resolveReconnect) => {
+          releaseReconnect = resolveReconnect;
+        }),
+    );
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-reconnect-pending";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Start before MCP config change" }],
+        }),
+      );
+      expect(await readNextPromptTextWithin(call, 1_000)).toBe(
+        "Start before MCP config change",
+      );
+      await bridge.waitForResponse(2);
+      writeFileSync(
+        userConfig,
+        JSON.stringify({ mcpServers: { fixture: config } }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Proceed during pending reconnect" }],
+        }),
+      );
+      expect(await readNextPromptTextWithin(call, 1_000)).toBe(
+        "Proceed during pending reconnect",
+      );
+      await bridge.waitForResponse(3);
+      await vi.waitFor(() =>
+        expect(query.reconnectMcpServer).toHaveBeenCalledWith("fixture"),
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseReconnect();
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("does not reconnect a healthy unchanged MCP server", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const config = { type: "http", url: "https://fixture.invalid/mcp" };
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { fixture: config } }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    const healthy = {
+      name: "fixture",
+      status: "connected",
+      scope: "user",
+      config,
+    } as const;
+    query.mcpServerStatus.mockResolvedValue([healthy]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-healthy-no-reconnect";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      for (const [requestId, input] of [
+        [2, "Initial MCP config"],
+        [3, "Unchanged MCP config"],
+      ] as const) {
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: input }],
+          }),
+        );
+        expect(await readNextPromptTextWithin(call, 1_000)).toBe(input);
+        await bridge.waitForResponse(requestId);
+      }
+      await vi.waitFor(() =>
+        expect(query.mcpServerStatus).toHaveBeenCalledTimes(2),
+      );
+      expect(query.reconnectMcpServer).not.toHaveBeenCalled();
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("sends a turn and retries config after MCP server status cannot be read", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
     const cwd = join(home, "project");
@@ -1570,9 +1779,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Wait for reconnect status" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "transient reconnect status failure",
+        call,
+        input: "Wait for reconnect status",
         requestId: 3,
       });
       expect(query.setMcpServers).toHaveBeenLastCalledWith({
@@ -1597,97 +1807,6 @@ describe("bridge", () => {
       expect(query.setMcpServers).toHaveBeenLastCalledWith({
         fixture: serverConfig,
       });
-      expect(queryMock).toHaveBeenCalledTimes(1);
-    } finally {
-      query.finish();
-      await stopBridgeThread({ bridge, queries: [query], threadId });
-      bridge.restore();
-    }
-  });
-
-  it("blocks a turn when reconnect fails after adding a server", async () => {
-    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
-    tempDirs.push(home);
-    const cwd = join(home, "project");
-    mkdirSync(join(cwd, ".claude"), { recursive: true });
-    process.env.HOME = home;
-    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
-    const mcpConfig = join(cwd, ".mcp.json");
-    const settingsPath = join(cwd, ".claude", "settings.local.json");
-    const serverConfig = { type: "stdio", command: "fixture-mcp" };
-    const needsAuth = {
-      name: "fixture",
-      status: "needs-auth",
-      scope: "dynamic",
-      config: serverConfig,
-    } as const;
-    writeFileSync(mcpConfig, JSON.stringify({ mcpServers: {} }));
-    writeFileSync(
-      settingsPath,
-      JSON.stringify({ enableAllProjectMcpServers: true }),
-    );
-    const bridge = createBridgeJsonRpcTestHarness(handleLine);
-    const query = createControlledClaudeQuery();
-    query.mcpServerStatus.mockResolvedValue([]);
-    queryMock.mockReturnValue(query);
-    const threadId = "thread-live-mcp-reconnect-failure";
-
-    try {
-      await startBridgeThread({ bridge, cwd, threadId });
-      const call = queryMock.mock.calls[0]?.[0];
-      if (!isClaudeQueryCall(call))
-        throw new Error("Expected Claude SDK query");
-
-      bridge.sendRequest(
-        2,
-        "turn/start",
-        canonicalTurnParams({
-          threadId,
-          input: [{ type: "text", text: "Start without MCP servers" }],
-        }),
-      );
-      expect(await readNextPromptText(call)).toBe("Start without MCP servers");
-      await bridge.waitForResponse(2);
-
-      writeFileSync(
-        mcpConfig,
-        JSON.stringify({ mcpServers: { fixture: serverConfig } }),
-      );
-      query.mcpServerStatus
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([needsAuth]);
-      query.reconnectMcpServer.mockRejectedValueOnce(
-        new Error("transient reconnect failure"),
-      );
-      bridge.sendRequest(
-        3,
-        "turn/start",
-        canonicalTurnParams({
-          threadId,
-          input: [{ type: "text", text: "Wait for MCP reconnect" }],
-        }),
-      );
-      await expectTurnRejectedBeforePrompt({
-        bridge,
-        errorMessage: "transient reconnect failure",
-        requestId: 3,
-      });
-
-      query.mcpServerStatus
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([needsAuth]);
-      bridge.sendRequest(
-        4,
-        "turn/start",
-        canonicalTurnParams({
-          threadId,
-          input: [{ type: "text", text: "Retry MCP reconnect" }],
-        }),
-      );
-      expect(await readNextPromptText(call)).toBe("Retry MCP reconnect");
-      await bridge.waitForResponse(4);
-      expect(query.reconnectMcpServer).toHaveBeenCalledTimes(2);
-      expect(query.reconnectMcpServer).toHaveBeenLastCalledWith("fixture");
       expect(queryMock).toHaveBeenCalledTimes(1);
     } finally {
       query.finish();
@@ -2334,75 +2453,6 @@ describe("bridge", () => {
     }
   });
 
-  it.each(["needs-auth", "failed"] as const)(
-    "reconnects only an MCP server that reports %s",
-    async (unhealthyStatus) => {
-      const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
-      tempDirs.push(home);
-      const cwd = join(home, "project");
-      mkdirSync(cwd, { recursive: true });
-      process.env.HOME = home;
-      process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
-      const serverConfig = { type: "http", url: "https://fixture.invalid/mcp" };
-      writeFileSync(
-        join(home, ".claude.json"),
-        JSON.stringify({ mcpServers: { signedIn: serverConfig } }),
-      );
-      const bridge = createBridgeJsonRpcTestHarness(handleLine);
-      const query = createControlledClaudeQuery();
-      const healthyStatus = {
-        name: "signedIn",
-        status: "connected",
-        scope: "user",
-        config: serverConfig,
-      } as const;
-      const authStatus = { ...healthyStatus, status: unhealthyStatus } as const;
-      query.mcpServerStatus
-        .mockResolvedValueOnce([healthyStatus])
-        .mockResolvedValueOnce([healthyStatus])
-        .mockResolvedValueOnce([authStatus]);
-      queryMock.mockReturnValue(query);
-      const threadId = "thread-live-mcp-needs-auth";
-
-      try {
-        await startBridgeThread({ bridge, cwd, threadId });
-        const call = queryMock.mock.calls[0]?.[0];
-        if (!isClaudeQueryCall(call))
-          throw new Error("Expected Claude SDK query");
-        bridge.sendRequest(
-          2,
-          "turn/start",
-          canonicalTurnParams({
-            threadId,
-            input: [{ type: "text", text: "Before auth expires" }],
-          }),
-        );
-        expect(await readNextPromptText(call)).toBe("Before auth expires");
-        await bridge.waitForResponse(2);
-        expect(query.reconnectMcpServer).not.toHaveBeenCalled();
-
-        bridge.sendRequest(
-          3,
-          "turn/start",
-          canonicalTurnParams({
-            threadId,
-            input: [{ type: "text", text: "After auth expires" }],
-          }),
-        );
-        expect(await readNextPromptText(call)).toBe("After auth expires");
-        await bridge.waitForResponse(3);
-        expect(query.setMcpServers).toHaveBeenCalledTimes(1);
-        expect(query.reconnectMcpServer).toHaveBeenCalledTimes(1);
-        expect(query.reconnectMcpServer).toHaveBeenCalledWith("signedIn");
-        expect(queryMock).toHaveBeenCalledTimes(1);
-      } finally {
-        query.finish();
-        await stopBridgeThread({ bridge, queries: [query], threadId });
-        bridge.restore();
-      }
-    },
-  );
-
   it("preserves current MCP servers when a config file becomes a FIFO", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
@@ -2845,9 +2895,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Handle failed replacement" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "fixture connection failed",
+        call,
+        input: "Handle failed replacement",
         requestId: 3,
       });
       expect(query.toggleMcpServer).toHaveBeenCalledTimes(2);
@@ -2959,9 +3010,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Roll back partial refresh" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "server update failed",
+        call,
+        input: "Roll back partial refresh",
         requestId: 3,
       });
       expect(query.toggleMcpServer).toHaveBeenNthCalledWith(1, "first", false);
@@ -3077,9 +3129,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Encounter transient failures" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "fixture connection failed",
+        call,
+        input: "Encounter transient failures",
         requestId: 3,
       });
       expect(serverEnabled).toBe(false);
@@ -3200,9 +3253,10 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Handle partial replacement" }],
         }),
       );
-      await expectTurnRejectedBeforePrompt({
+      await expectTurnAcceptedBeforePrompt({
         bridge,
-        errorMessage: "replacement failed after removal",
+        call,
+        input: "Handle partial replacement",
         requestId: 3,
       });
       expect(dynamicServers).toEqual({});

@@ -57,11 +57,7 @@ import {
   buildClaudeTurnParams,
   type ClaudeCodeSkillRoot,
 } from "../session-params.js";
-import {
-  McpServerConfigChangeError,
-  SdkSession,
-  type SdkSessionOptions,
-} from "./sdk-session.js";
+import { SdkSession, type SdkSessionOptions } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
 import {
   UNSHARED_CLAUDE_CODE_MODEL_CATALOG,
@@ -266,6 +262,7 @@ interface ThreadAttachment {
   sessionPermissionGrants: ClaudeSessionPermissionGrant[];
   mcpConfigSignature: string | null;
   mcpConfigRefresh: Promise<void> | null;
+  mcpReconnectInFlight: Promise<void> | null;
   threadIdRef: ThreadIdRef;
 }
 
@@ -1103,6 +1100,7 @@ function createThreadAttachment(
     sessionPermissionGrants: [],
     mcpConfigSignature: null,
     mcpConfigRefresh: null,
+    mcpReconnectInFlight: null,
     threadIdRef: args.threadIdRef,
   };
   attachment.residentSession = createThreadSession(attachment);
@@ -2504,45 +2502,58 @@ async function refreshClaudeMcpServers(
   const options = attachment.sessionOptions;
   const cwd = options.cwd;
   const env = options.env ?? process.env;
-  let mcpConfigNeedsReconciliation = false;
   const refresh = Promise.resolve().then(async () => {
-    const { signature, servers } = await loadClaudeMcpServersSnapshot({
-      cwd,
-      env,
-    });
-    mcpConfigNeedsReconciliation =
-      signature !== attachment.mcpConfigSignature ||
-      threadSession.session.needsMcpServerReconciliation();
-    if (mcpConfigNeedsReconciliation) {
-      await threadSession.session.setMcpServers(servers);
-    }
-    await threadSession.session.reconnectMcpServersNeedingAuth();
-    if (mcpConfigNeedsReconciliation) {
+    try {
+      const { signature, servers } = await loadClaudeMcpServersSnapshot({
+        cwd,
+        env,
+      });
+      const mcpConfigNeedsReconciliation =
+        signature !== attachment.mcpConfigSignature ||
+        threadSession.session.needsMcpServerReconciliation();
+      if (!mcpConfigNeedsReconciliation) return;
+      try {
+        await threadSession.session.setMcpServers(servers);
+      } catch (error) {
+        threadSession.session.markMcpServerReconciliationPending();
+        logBridgeError(
+          `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
       attachment.mcpConfigSignature = signature;
-    }
-  });
-  const trackedRefresh = refresh
-    .catch((error: unknown) => {
+      startMcpAuthReconnect(threadSession);
+    } catch (error) {
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );
-      if (mcpConfigNeedsReconciliation) {
-        threadSession.session.markMcpServerReconciliationPending();
-      }
-      if (
-        error instanceof McpServerConfigChangeError ||
-        threadSession.session.needsMcpServerReconciliation()
-      ) {
-        throw error;
-      }
-    })
-    .finally(() => {
-      if (attachment.mcpConfigRefresh === trackedRefresh) {
-        attachment.mcpConfigRefresh = null;
-      }
-    });
+    }
+  });
+  const trackedRefresh = refresh.finally(() => {
+    if (attachment.mcpConfigRefresh === trackedRefresh) {
+      attachment.mcpConfigRefresh = null;
+    }
+  });
   attachment.mcpConfigRefresh = trackedRefresh;
   await trackedRefresh;
+}
+
+function startMcpAuthReconnect(threadSession: ThreadSession): void {
+  const attachment = threadSession.attachment;
+  if (attachment.mcpReconnectInFlight !== null) return;
+  const reconnect = threadSession.session
+    .reconnectMcpServersNeedingAuth()
+    .catch((error: unknown) => {
+      logBridgeError(
+        `Failed to reconnect Claude MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    })
+    .finally(() => {
+      if (attachment.mcpReconnectInFlight === reconnect) {
+        attachment.mcpReconnectInFlight = null;
+      }
+    });
+  attachment.mcpReconnectInFlight = reconnect;
 }
 
 async function handleTurnStart(

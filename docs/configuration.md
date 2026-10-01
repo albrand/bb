@@ -1443,16 +1443,18 @@ in `enabledMcpjsonServers` or approved by `enableAllProjectMcpServers: true` in
 user or local project settings. Checked-in project settings cannot approve
 their own commands, and server definitions directly in checked-in settings are
 ignored. Any `disabledMcpjsonServers` entry takes precedence.
-Before each turn, bb reconnects only servers the SDK reports as
-`needs-auth` or `failed`; healthy unchanged servers are left alone. A slow
-config read or invalid or incomplete config preserves the current server set
-and does not prevent the turn from starting. If bb cannot disable a static
-server affected by a config change, or cannot read its status, it rejects that
-turn without sending its input and retries on the next turn. If a changed
-configuration's auth-status check or reconnect fails, bb also rejects the turn
-and retries later. The bridge waits for a live SDK update to settle before
-sending turn input, so an update cannot change tools after that turn has
-started.
+Before a turn, the bridge checks this configuration and applies changes to the
+current SDK query without restarting the conversation. A slow config read,
+invalid or incomplete config, failed status read, or failed server update
+preserves the current server set, logs the failure, leaves reconciliation
+pending, and still sends the turn input. Project `.mcp.json` approval checks
+still apply before those servers can be passed to the SDK.
+
+After a changed configuration is applied, bb checks server status in the
+background and attempts to reconnect servers reported as `needs-auth` or
+`failed`. It does not reconnect healthy unchanged servers, and it does not
+repeat reconnect attempts on turns where the effective MCP configuration is
+unchanged. A failed or still-running reconnect does not delay turn input.
 
 ### Codex provider
 
