@@ -243,56 +243,79 @@ function expandEnvironment(value: string, env: NodeJS.ProcessEnv): string {
   );
 }
 
+function invalidMcpConfig(reason: string): never {
+  throw new Error(`Invalid Claude MCP configuration: ${reason}`);
+}
+
+function stringRecord(value: unknown, field: string): Record<string, string> {
+  if (!isRecord(value)) invalidMcpConfig(`${field} must be an object`);
+  const entries = Object.entries(value);
+  if (entries.some(([, item]) => typeof item !== "string")) {
+    invalidMcpConfig(`${field} values must be strings`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
 function resolveServerConfig(
   value: unknown,
   env: NodeJS.ProcessEnv,
-): McpServerConfig | undefined {
-  if (!isRecord(value)) return undefined;
+): McpServerConfig {
+  if (!isRecord(value)) invalidMcpConfig("server config must be an object");
   if (value.type === "http" || value.type === "sse") {
-    if (typeof value.url !== "string") return undefined;
+    if (typeof value.url !== "string") {
+      invalidMcpConfig(`${value.type} server url must be a string`);
+    }
     const config: Record<string, unknown> = {
       ...value,
       url: expandEnvironment(value.url, env),
     };
-    if (isRecord(value.headers)) {
+    if (value.headers !== undefined) {
       config.headers = Object.fromEntries(
-        Object.entries(value.headers)
-          .filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          )
-          .map(([key, header]) => [key, expandEnvironment(header, env)]),
+        Object.entries(stringRecord(value.headers, "headers")).map(
+          ([key, header]) => [key, expandEnvironment(header, env)],
+        ),
       );
     }
     return config as McpServerConfig;
   }
   if (value.type === undefined || value.type === "stdio") {
-    if (typeof value.command !== "string") return undefined;
+    if (typeof value.command !== "string") {
+      invalidMcpConfig("stdio server command must be a string");
+    }
     const config: Record<string, unknown> = {
       ...value,
       type: "stdio",
       command: expandEnvironment(value.command, env),
     };
-    if (Array.isArray(value.args)) {
-      config.args = value.args
-        .filter((item): item is string => typeof item === "string")
-        .map((item) => expandEnvironment(item, env));
+    if (value.args !== undefined) {
+      if (
+        !Array.isArray(value.args) ||
+        value.args.some((item) => typeof item !== "string")
+      ) {
+        invalidMcpConfig("stdio server args must be an array of strings");
+      }
+      config.args = value.args.map((item: string) =>
+        expandEnvironment(item, env),
+      );
     }
-    if (isRecord(value.env)) {
+    if (value.env !== undefined) {
       config.env = Object.fromEntries(
-        Object.entries(value.env)
-          .filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          )
-          .map(([key, item]) => [key, expandEnvironment(item, env)]),
+        Object.entries(stringRecord(value.env, "stdio server env")).map(
+          ([key, item]) => [key, expandEnvironment(item, env)],
+        ),
       );
     }
     return config as McpServerConfig;
   }
-  return undefined;
+  invalidMcpConfig("server type must be stdio, sse, or http");
 }
 
 function mcpServersFromConfig(value: unknown): Record<string, unknown> {
-  if (!isRecord(value) || !isRecord(value.mcpServers)) return {};
+  if (!isRecord(value)) invalidMcpConfig("config root must be an object");
+  if (value.mcpServers === undefined) return {};
+  if (!isRecord(value.mcpServers)) {
+    invalidMcpConfig("mcpServers must be an object");
+  }
   return value.mcpServers;
 }
 
@@ -378,7 +401,7 @@ export async function loadClaudeMcpServers(args: {
     for (const source of sources) {
       for (const [name, value] of Object.entries(source)) {
         const server = resolveServerConfig(value, args.env);
-        if (server) servers[name] = server;
+        servers[name] = server;
       }
     }
   }
