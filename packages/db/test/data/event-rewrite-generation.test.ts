@@ -194,7 +194,9 @@ describe("thread event rewrite generation", () => {
       seed: (threadId) => [tokenUsage(threadId, 1)],
       noop: (db) => pruneThreadEvents(db, "usage"),
       between: (threadId) =>
-        [2, 3, 4].map((sequence) => tokenUsage(threadId, sequence)),
+        Array.from({ length: 303 }, (_, index) =>
+          tokenUsage(threadId, index + 2),
+        ),
       rewrite: (db) => pruneThreadEvents(db, "usage"),
     },
     {

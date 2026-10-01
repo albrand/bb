@@ -39,6 +39,7 @@ const UNPREFIXED_BUNDLED_PLUGIN_IDS = [
   "provider-claude-code",
   "provider-codex",
   "provider-pi",
+  "provider-reauth",
   "provider-retry",
   "push-notifications",
   "scheduled-send",

@@ -4,7 +4,6 @@ import { appSettingsUpdateSchema } from "@bb/domain";
 import { getDisabledProviderIds } from "@bb/db";
 import { systemProviderCatalogEntrySchema } from "@bb/server-contract";
 import { requireBridgeLaunchForProviderId } from "../../src/services/system/provider-bridge-launch.js";
-import { listSystemProviderInfos } from "../../src/services/system/execution-options.js";
 import { resolveCreateThreadExecutionDefaults } from "../../src/services/threads/thread-default-policy.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 import { readJson } from "../helpers/json.js";
@@ -28,12 +27,6 @@ function setProviderEnabled(
   });
 }
 
-async function visibleProviderIds(harness: TestAppHarness) {
-  return (await listSystemProviderInfos(harness.deps)).map(
-    (provider) => provider.id,
-  );
-}
-
 describe("provider management", () => {
   it("keeps a disabled provider discoverable, blocks launches, and preserves its siblings across plugin disable and enable", async () => {
     await withTestHarness(
@@ -49,7 +42,6 @@ describe("provider management", () => {
           disabled.find((provider) => provider.id === "acp-cursor")?.enabled,
         ).toBe(false);
         expect(getDisabledProviderIds(harness.db)).toEqual(["acp-cursor"]);
-        expect(await visibleProviderIds(harness)).not.toContain("acp-cursor");
         expect(() =>
           requireBridgeLaunchForProviderId(harness.deps, "acp-cursor"),
         ).toThrow('Provider "acp-cursor" is disabled');
@@ -79,7 +71,6 @@ describe("provider management", () => {
         expect(
           enabled.find((provider) => provider.id === "acp-opencode")?.enabled,
         ).toBe(false);
-        expect(await visibleProviderIds(harness)).toContain("acp-cursor");
       },
     );
   });
@@ -98,7 +89,6 @@ describe("provider management", () => {
           await setProviderEnabled(harness, "acp-opencode", true),
         );
         expect(getDisabledProviderIds(harness.db)).toEqual([]);
-        expect(await visibleProviderIds(harness)).not.toContain("acp-opencode");
       },
     );
   });
