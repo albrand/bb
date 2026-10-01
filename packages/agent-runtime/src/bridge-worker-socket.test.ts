@@ -424,7 +424,7 @@ describe("socket bridge workers", () => {
       const unaccepted = await firstFrameReplayedAfterResume(
         registered.socketPath,
         0,
-        { initialConnectDelayMs: 500 },
+        { waitForDisplacement: true },
       );
       expect(unaccepted.retries).toBeGreaterThan(0);
       await waitForRuntimeState({
@@ -846,7 +846,7 @@ async function framesReplayedAfterResume(
 async function firstFrameReplayedAfterResume(
   socketPath: string,
   afterWseq: number,
-  options: { initialConnectDelayMs?: number } = {},
+  options: { waitForDisplacement?: boolean } = {},
 ): Promise<{ wseq: number; line: string; retries: number }> {
   const deadline = Date.now() + 10_000;
   let lastDisconnect: Error | undefined;
@@ -879,17 +879,14 @@ async function firstFrameReplayedAfterResume(
             reject(error);
           };
           socket.once("connect", () => {
+            if (attempt === 0 && options.waitForDisplacement) return;
             const sendResume = (): void => {
               if (settled) return;
               socket.write(
                 `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
               );
             };
-            if (attempt === 0 && options.initialConnectDelayMs !== undefined) {
-              setTimeout(sendResume, options.initialConnectDelayMs);
-            } else {
-              sendResume();
-            }
+            sendResume();
           });
           socket.once("error", fail);
           socket.once("close", () => {
