@@ -992,6 +992,78 @@ describe("bridge", () => {
     }
   });
 
+  it("applies local MCP scope precedence and local edits before the next turn", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const projectConfig = join(cwd, ".mcp.json");
+    const writeUserConfig = (localCommand: string): void => {
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          mcpServers: { shared: { command: "user-mcp" } },
+          projects: {
+            [cwd]: { mcpServers: { shared: { command: localCommand } } },
+          },
+        }),
+      );
+    };
+    writeUserConfig("local-mcp-v1");
+    writeFileSync(
+      projectConfig,
+      JSON.stringify({ mcpServers: { shared: { command: "project-mcp" } } }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-scope-precedence";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Use local server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Use local server");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        shared: { type: "stdio", command: "local-mcp-v1" },
+      });
+
+      writeUserConfig("local-mcp-v2");
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Apply local edit" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Apply local edit");
+      await bridge.waitForResponse(3);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        shared: { type: "stdio", command: "local-mcp-v2" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("does not call the live MCP API when config files are unchanged", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

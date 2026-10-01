@@ -453,11 +453,25 @@ export async function loadClaudeMcpServersSnapshot(args: {
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
   const signatures: string[] = [];
+  const sourcesByPrecedence: Record<string, unknown>[][] = [[], [], []];
+  const home = args.env.HOME?.trim() || homedir();
+  const configDir = args.env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
+  const userSettingsPaths = new Set([
+    join(configDir, "settings.json"),
+    join(configDir, "settings.local.json"),
+  ]);
+  const localProjectSettingsSuffix = join(".claude", "settings.local.json");
   for (const path of paths) {
     const snapshot = await singleFlightConfigSnapshot(path, deadline);
     const { config } = snapshot;
     signatures.push(`${path}=${snapshot.signature}`);
-    const sources = [mcpServersFromConfig(config)];
+    const precedence =
+      path.endsWith(".claude.json") || userSettingsPaths.has(path)
+        ? 0
+        : path.endsWith(localProjectSettingsSuffix)
+          ? 2
+          : 1;
+    sourcesByPrecedence[precedence]?.push(mcpServersFromConfig(config));
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
       if (projects !== undefined) {
@@ -466,11 +480,13 @@ export async function loadClaudeMcpServersSnapshot(args: {
         }
         for (const [projectPath, project] of Object.entries(projects)) {
           if (resolve(projectPath) === resolve(args.cwd)) {
-            sources.push(mcpServersFromConfig(project));
+            sourcesByPrecedence[2]?.push(mcpServersFromConfig(project));
           }
         }
       }
     }
+  }
+  for (const sources of sourcesByPrecedence) {
     for (const source of sources) {
       for (const [name, value] of Object.entries(source)) {
         const server = resolveServerConfig(value, args.env);
