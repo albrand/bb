@@ -47,6 +47,12 @@ it("watches user, local, and project MCP configuration files", () => {
 it("changes the signature when a watched file is created, edited, and removed", async () => {
   const { cwd, env } = createFixture();
   const configPath = join(cwd, ".mcp.json");
+  const settingsPath = join(cwd, ".claude", "settings.local.json");
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ enableAllProjectMcpServers: true }),
+  );
   const signature = () => claudeMcpConfigSignature({ cwd, env });
   const absent = await signature();
 
@@ -71,7 +77,7 @@ it("changes the signature when a watched file is created, edited, and removed", 
 
 it("changes the signature when project MCP enablement changes", async () => {
   const { cwd, env } = createFixture();
-  const settingsPath = join(cwd, ".claude", "settings.json");
+  const settingsPath = join(cwd, ".claude", "settings.local.json");
   mkdirSync(join(cwd, ".claude"), { recursive: true });
   const signature = () => claudeMcpConfigSignature({ cwd, env });
 
@@ -88,7 +94,7 @@ it("changes the signature when project MCP enablement changes", async () => {
 it("omits project JSON servers rejected by MCP settings", async () => {
   const { cwd, env } = createFixture();
   const serverPath = join(cwd, ".mcp.json");
-  const settingsPath = join(cwd, ".claude", "settings.json");
+  const settingsPath = join(cwd, ".claude", "settings.local.json");
   mkdirSync(join(cwd, ".claude"), { recursive: true });
   writeFileSync(
     serverPath,
@@ -103,8 +109,57 @@ it("omits project JSON servers rejected by MCP settings", async () => {
     "fixture",
   );
 
-  writeFileSync(settingsPath, JSON.stringify({}));
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ enableAllProjectMcpServers: true }),
+  );
   expect(await loadClaudeMcpServers({ cwd, env })).toHaveProperty("fixture");
+});
+
+it("includes only project JSON servers explicitly approved when auto-approval is off", async () => {
+  const { cwd, env } = createFixture();
+  const serverPath = join(cwd, ".mcp.json");
+  const settingsPath = join(cwd, ".claude", "settings.local.json");
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  writeFileSync(
+    serverPath,
+    JSON.stringify({
+      mcpServers: {
+        approved: { command: "approved-mcp" },
+        unapproved: { command: "unapproved-mcp" },
+      },
+    }),
+  );
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({
+      enableAllProjectMcpServers: false,
+      enabledMcpjsonServers: ["approved"],
+    }),
+  );
+
+  expect(await loadClaudeMcpServers({ cwd, env })).toEqual({
+    approved: { type: "stdio", command: "approved-mcp" },
+  });
+});
+
+it("does not let checked-in project settings approve their own MCP commands", async () => {
+  const { cwd, env } = createFixture();
+  const serverPath = join(cwd, ".mcp.json");
+  const settingsPath = join(cwd, ".claude", "settings.json");
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  writeFileSync(
+    serverPath,
+    JSON.stringify({ mcpServers: { fixture: { command: "fixture-mcp" } } }),
+  );
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ enableAllProjectMcpServers: true }),
+  );
+
+  expect(await loadClaudeMcpServers({ cwd, env })).not.toHaveProperty(
+    "fixture",
+  );
 });
 
 it("merges MCP servers from user, settings, and project files with environment expansion", async () => {
@@ -113,6 +168,11 @@ it("merges MCP servers from user, settings, and project files with environment e
   if (!configDir) throw new Error("Expected fixture Claude config directory");
   const projectRoot = join(home, "project");
   mkdirSync(join(projectRoot, ".claude"), { recursive: true });
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".claude", "settings.local.json"),
+    JSON.stringify({ enableAllProjectMcpServers: true }),
+  );
   env.FIXTURE_MCP_TOKEN = "fixture-token";
   writeFileSync(
     join(home, ".claude.json"),
@@ -143,6 +203,7 @@ it("merges MCP servers from user, settings, and project files with environment e
   writeFileSync(
     join(cwd, ".claude", "settings.local.json"),
     JSON.stringify({
+      enableAllProjectMcpServers: true,
       mcpServers: { localOverride: { command: "nested-mcp" } },
     }),
   );

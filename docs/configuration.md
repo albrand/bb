@@ -1431,13 +1431,18 @@ needs neither.
 
 A running Claude Code thread applies MCP configuration changes before its next
 turn without restarting the conversation. The bridge reads `~/.claude.json`,
-`$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`), and
+`$CLAUDE_CONFIG_DIR/settings.json` and `settings.local.json` (default under
+`~/.claude/`), and
 `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` from the
 thread's working directory and its parents. Change detection uses the effective
 MCP server set after scope precedence, plus MCP enablement settings; unrelated
 Claude state such as startup counts and usage history does not trigger a reload.
 The Agent SDK's live MCP APIs add, remove, or edit servers in the current
-conversation. Before each turn, bb reconnects only servers the SDK reports as
+conversation. Project `.mcp.json` servers are passed to the SDK only when named
+in `enabledMcpjsonServers` or approved by `enableAllProjectMcpServers: true` in
+user or local project settings. Checked-in project settings cannot approve
+their own commands, and any `disabledMcpjsonServers` entry takes precedence.
+Before each turn, bb reconnects only servers the SDK reports as
 `needs-auth` or `failed`; healthy unchanged servers are left alone. A slow
 config read or failed SDK update does not prevent the turn from starting;
 invalid or incomplete config reads preserve the current server set and bb tries

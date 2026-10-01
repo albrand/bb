@@ -374,8 +374,11 @@ export async function loadClaudeMcpServersSnapshot(args: {
   }[][] = [[], [], []];
   const disabledProjectMcpServers = new Set<string>();
   const disabledProjectMcpJsonServers = new Set<string>();
+  const enabledProjectMcpJsonServers = new Set<string>();
+  let autoApproveProjectMcpJsonServers = false;
   const home = args.env.HOME?.trim() || homedir();
   const configDir = args.env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
+  const userConfigPath = join(home, ".claude.json");
   const userSettingsPaths = new Set([
     join(configDir, "settings.json"),
     join(configDir, "settings.local.json"),
@@ -401,7 +404,19 @@ export async function loadClaudeMcpServersSnapshot(args: {
     for (const name of decisions.disabledMcpjsonServers ?? []) {
       disabledProjectMcpJsonServers.add(name);
     }
-    if (path.endsWith(".claude.json") && isRecord(config)) {
+    if (
+      path === userConfigPath ||
+      userSettingsPaths.has(path) ||
+      path.endsWith(localProjectSettingsSuffix)
+    ) {
+      for (const name of decisions.enabledMcpjsonServers ?? []) {
+        enabledProjectMcpJsonServers.add(name);
+      }
+      if (decisions.enableAllProjectMcpServers !== undefined) {
+        autoApproveProjectMcpJsonServers = decisions.enableAllProjectMcpServers;
+      }
+    }
+    if (path === userConfigPath && isRecord(config)) {
       const projects = config.projects;
       if (projects !== undefined) {
         if (!isRecord(projects)) {
@@ -421,6 +436,13 @@ export async function loadClaudeMcpServersSnapshot(args: {
           for (const name of projectDecisions.disabledMcpjsonServers ?? []) {
             disabledProjectMcpJsonServers.add(name);
           }
+          for (const name of projectDecisions.enabledMcpjsonServers ?? []) {
+            enabledProjectMcpJsonServers.add(name);
+          }
+          if (projectDecisions.enableAllProjectMcpServers !== undefined) {
+            autoApproveProjectMcpJsonServers =
+              projectDecisions.enableAllProjectMcpServers;
+          }
           if (Object.keys(projectDecisions).length > 0) {
             signatureInputs.push({
               path: `${path}#projects.${resolve(args.cwd)}`,
@@ -436,7 +458,9 @@ export async function loadClaudeMcpServersSnapshot(args: {
       for (const [name, value] of Object.entries(source.servers)) {
         if (
           source.isProjectMcpJson &&
-          disabledProjectMcpJsonServers.has(name)
+          (disabledProjectMcpJsonServers.has(name) ||
+            (!autoApproveProjectMcpJsonServers &&
+              !enabledProjectMcpJsonServers.has(name)))
         ) {
           continue;
         }

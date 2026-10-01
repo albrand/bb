@@ -541,6 +541,15 @@ function createTempClaudeExecutable(): TempClaudeExecutable {
   return { binDir, executablePath };
 }
 
+function approveProjectMcpJson(cwd: string): void {
+  const settingsDirectory = join(cwd, ".claude");
+  mkdirSync(settingsDirectory, { recursive: true });
+  writeFileSync(
+    join(settingsDirectory, "settings.local.json"),
+    JSON.stringify({ enableAllProjectMcpServers: true }),
+  );
+}
+
 function createBridgeUserQuestionInput(): ClaudeUserQuestionInput {
   return {
     questions: [
@@ -787,6 +796,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -888,11 +898,70 @@ describe("bridge", () => {
     }
   });
 
+  it("passes only approved project MCP servers to the SDK", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+    writeFileSync(
+      join(cwd, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          approved: { command: "approved-mcp" },
+          unapproved: { command: "unapproved-mcp" },
+        },
+      }),
+    );
+    writeFileSync(
+      join(cwd, ".claude", "settings.local.json"),
+      JSON.stringify({
+        enableAllProjectMcpServers: false,
+        enabledMcpjsonServers: ["approved"],
+      }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-approved-only";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Use approved server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Use approved server");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenCalledWith({
+        approved: { type: "stdio", command: "approved-mcp" },
+      });
+      expect(query.setMcpServers).not.toHaveBeenCalledWith(
+        expect.objectContaining({ unapproved: expect.anything() }),
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("applies the MCP config snapshot whose signature it accepts", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -1142,6 +1211,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -1226,6 +1296,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -1385,6 +1456,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -1596,6 +1668,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -1680,6 +1753,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -2308,6 +2382,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");
@@ -2427,6 +2502,7 @@ describe("bridge", () => {
     tempDirs.push(home);
     const cwd = join(home, "project");
     mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
     process.env.HOME = home;
     process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
     const mcpConfig = join(cwd, ".mcp.json");

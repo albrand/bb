@@ -44,11 +44,15 @@ Claude Code MCP servers:
 
   A running Claude Code thread applies MCP configuration changes at the start
   of its next turn without restarting the conversation. It watches ~/.claude.json,
-  $CLAUDE_CONFIG_DIR/settings.json (default ~/.claude/settings.json), and
+  $CLAUDE_CONFIG_DIR/settings.json and settings.local.json (default under ~/.claude/), and
   .mcp.json, .claude/settings.json, and .claude/settings.local.json in the
   working directory and its parents. Changes can add, remove, or update servers;
   MCP changes are detected from the effective server set and MCP enablement
   settings, so unrelated ~/.claude.json state does not trigger a reload. Before
+  passing project .mcp.json servers to the SDK, bb requires their names in
+  enabledMcpjsonServers or enableAllProjectMcpServers: true in user or local
+  project settings. Checked-in project settings cannot approve their own
+  commands; disabledMcpjsonServers always takes precedence. Before
   each turn, bb reconnects only servers the SDK reports as needs-auth or failed;
   healthy unchanged servers are left alone. A slow config read or failed SDK
   update does not prevent the turn from starting; invalid or incomplete reads

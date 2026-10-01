@@ -31,7 +31,7 @@ it("bounds stalled config reads and does not keep later calls waiting on them", 
   tempDirs.push(home);
   const cwd = join(home, "project");
   const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
-  const watchedPath = join(cwd, ".mcp.json");
+  const watchedPath = join(home, ".claude.json");
   let releaseRead = (): void => {};
   const readGate = new Promise<void>((resolveRead) => {
     releaseRead = resolveRead;
@@ -79,7 +79,7 @@ it.each(["open", "stat", "close"] as const)(
     tempDirs.push(home);
     const cwd = join(home, "project");
     const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
-    const watchedPath = join(cwd, ".mcp.json");
+    const watchedPath = join(home, ".claude.json");
     let releaseOperation = (): void => {};
     const operationGate = new Promise<void>((resolveOperation) => {
       releaseOperation = resolveOperation;
@@ -148,7 +148,7 @@ it("rejects premature EOF instead of returning a partial MCP server set", async 
   tempDirs.push(home);
   const cwd = join(home, "project");
   const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
-  const watchedPath = join(cwd, ".mcp.json");
+  const watchedPath = join(home, ".claude.json");
   const contents = JSON.stringify({
     mcpServers: { fixture: { command: "fixture-mcp" } },
   });
@@ -252,7 +252,7 @@ it.each(["open", "stat", "close"] as const)(
     tempDirs.push(home);
     const cwd = join(home, "project");
     const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
-    const watchedPath = join(cwd, ".mcp.json");
+    const watchedPath = join(home, ".claude.json");
     const contents = JSON.stringify({
       mcpServers: { fixture: { command: "fixture-mcp" } },
     });
