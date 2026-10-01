@@ -447,12 +447,13 @@ export async function acquireLock(
     lockPath: string,
     staleMs: number,
     ageCanExpireLiveOwner = true,
+    acquireSignal = signal,
   ): Promise<() => Promise<void>> => {
     const token = randomBytes(8).toString("hex");
     const claim = `${lockPath}.claim-${process.pid}-${token}`;
     const content = `${process.pid} ${token}`;
     while (true) {
-      signal.throwIfAborted();
+      acquireSignal.throwIfAborted();
       await writeFile(claim, content);
       try {
         await link(claim, lockPath);
@@ -511,6 +512,7 @@ export async function acquireLock(
             `${lockPath}.reap`,
             reapLockStaleMs,
             false,
+            acquireSignal,
           );
           const current = await stat(lockPath, { bigint: true });
           if (
@@ -520,14 +522,112 @@ export async function acquireLock(
           )
             await unlink(lockPath);
         } catch (error) {
-          if (signal.aborted) throw error;
+          if (acquireSignal.aborted) throw error;
         } finally {
           await unlockReaper?.();
         }
-      } else await delay(250, undefined, { signal });
+      } else await delay(250, undefined, { signal: acquireSignal });
     }
   };
-  return acquireAt(path, lockStaleMs);
+  const mutationPath = `${path}.reap`;
+  const releaseSignal = new AbortController().signal;
+  const acquirePrimary = async (): Promise<() => Promise<void>> => {
+    const token = randomBytes(8).toString("hex");
+    const claim = `${path}.claim-${process.pid}-${token}`;
+    const content = `${process.pid} ${token}`;
+    while (true) {
+      signal.throwIfAborted();
+      const unlockMutation = await acquireAt(
+        mutationPath,
+        reapLockStaleMs,
+        false,
+      );
+      try {
+        while (true) {
+          signal.throwIfAborted();
+          await writeFile(claim, content);
+          try {
+            await link(claim, path);
+            const acquired = (await stat(claim, { bigint: true })).ino;
+            await unlink(claim);
+            return async () => {
+              const unlockRelease = await acquireAt(
+                mutationPath,
+                reapLockStaleMs,
+                false,
+                releaseSignal,
+              );
+              try {
+                if (
+                  (await stat(path, { bigint: true })).ino === acquired &&
+                  (await readFile(path, "utf8")) === content
+                )
+                  await unlink(path);
+              } catch {
+              } finally {
+                await unlockRelease();
+              }
+            };
+          } catch (error) {
+            await unlink(claim).catch(() => {});
+            if (
+              !(
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "EEXIST"
+              )
+            )
+              throw error;
+          }
+
+          let stale = false;
+          let holder: number | null = null;
+          let seen: { ino: bigint; mtimeMs: number } | null = null;
+          try {
+            const info = await stat(path, { bigint: true });
+            seen = { ino: info.ino, mtimeMs: Number(info.mtimeMs) };
+            const age = Date.now() - seen.mtimeMs;
+            holder = await lockOwner(path);
+            if (age > lockStaleMs) stale = true;
+            else if (holder === null) stale = age > lockInitGraceMs;
+            else if (holder !== process.pid) {
+              try {
+                process.kill(holder, 0);
+              } catch (probe) {
+                if (
+                  probe instanceof Error &&
+                  "code" in probe &&
+                  probe.code === "ESRCH"
+                )
+                  stale = true;
+              }
+            }
+          } catch {
+            continue;
+          }
+          if (!stale || !seen) break;
+          try {
+            const current = await stat(path, { bigint: true });
+            if (
+              current.ino === seen.ino &&
+              Number(current.mtimeMs) === seen.mtimeMs &&
+              (await lockOwner(path)) === holder
+            ) {
+              await unlink(path);
+              continue;
+            }
+          } catch {
+            continue;
+          }
+          break;
+        }
+      } finally {
+        await unlockMutation();
+      }
+      await delay(250, undefined, { signal });
+    }
+  };
+  return acquirePrimary();
 }
 
 function stagingPrefix(release: RuntimeRelease): string {

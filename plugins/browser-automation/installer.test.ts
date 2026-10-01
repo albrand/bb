@@ -464,6 +464,95 @@ describe("runtime installer", () => {
       await unlink(`${path}.reap`).catch(() => {});
     }
   }, 30_000);
+  it("fences stale reaping against release and a fresh lock acquisition", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "release-reap-race.lock");
+    const signal = new AbortController().signal;
+    const unlockA = await acquireLock(path, signal);
+    const old = new Date(Date.now() - 25 * 60_000);
+    await utimes(path, old, old);
+
+    let unblockReap!: () => void;
+    const reapGate = new Promise<void>((resolve) => {
+      unblockReap = resolve;
+    });
+    let markReap!: () => void;
+    const reapStarted = new Promise<void>((resolve) => {
+      markReap = resolve;
+    });
+    let markReleaseUnlink!: () => void;
+    const releaseUnlink = new Promise<void>((resolve) => {
+      markReleaseUnlink = resolve;
+    });
+    let markGuardAttempt!: () => void;
+    const guardAttempt = new Promise<void>((resolve) => {
+      markGuardAttempt = resolve;
+    });
+    let unlinkCount = 0;
+    let guardLinkCount = 0;
+    let cAcquired = false;
+    let bHeld: (() => Promise<void>) | undefined;
+    let cHeld: (() => Promise<void>) | undefined;
+    lockRace.path = path;
+    lockRace.onUnlink = async () => {
+      unlinkCount += 1;
+      if (unlinkCount === 1) {
+        markReap();
+        await reapGate;
+      } else if (unlinkCount === 2) markReleaseUnlink();
+    };
+    lockRace.onReapLink = () => {
+      guardLinkCount += 1;
+      if (guardLinkCount >= 3) markGuardAttempt();
+    };
+
+    let reapReleased = false;
+    try {
+      const b = acquireLock(path, signal).then((unlock) => {
+        bHeld = unlock;
+        return unlock;
+      });
+      await reapStarted;
+      const release = unlockA();
+      const c = acquireLock(path, signal).then((unlock) => {
+        cAcquired = true;
+        cHeld = unlock;
+        return unlock;
+      });
+      const interleaving = await Promise.race([
+        releaseUnlink.then(() => "unprotected" as const),
+        guardAttempt.then(() => "guarded" as const),
+      ]);
+
+      if (interleaving === "unprotected") {
+        await releaseUnlink;
+        await c;
+        unblockReap();
+        reapReleased = true;
+        await b;
+        expect(cAcquired).toBe(true);
+        expect([bHeld, cHeld].filter(Boolean)).toHaveLength(1);
+      } else {
+        unblockReap();
+        reapReleased = true;
+        await b;
+        await release;
+        expect(cAcquired).toBe(false);
+        await bHeld!();
+        await c;
+      }
+    } finally {
+      if (!reapReleased) unblockReap();
+      await Promise.all([bHeld?.(), cHeld?.()].filter(Boolean));
+      lockRace.path = null;
+      lockRace.onUnlink = null;
+      lockRace.onReapLink = null;
+      await unlink(path).catch(() => {});
+      await unlink(`${path}.reap`).catch(() => {});
+      await unlink(`${path}.reap.reap`).catch(() => {});
+    }
+  }, 30_000);
   it("recovers a stale reap lock left by a dead reaper", async () => {
     const dir = await dataDir();
     await mkdir(installRoot(dir), { recursive: true });
