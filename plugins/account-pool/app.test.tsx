@@ -136,13 +136,16 @@ function render(
 describe("Account Pool parent banner", () => {
   const PARENT_URL = "http://127.0.0.1:25231/api/v1/plugins/account-pool/http";
 
-  function renderWithParent(parent: PoolStatus["parent"]) {
+  function renderWithParent(
+    parent: PoolStatus["parent"],
+    accounts = [account()],
+  ) {
     return renderSlot(
       app.settingsSections[0]!,
       {},
       {
         rpc: {
-          "status.get": () => ({ ...status(), parent }),
+          "status.get": () => ({ ...status(accounts), parent }),
           "config.get": () => config(),
         },
         openUrl: () => true,
@@ -151,8 +154,8 @@ describe("Account Pool parent banner", () => {
   }
 
   it("says nothing about a parent when this server has none", async () => {
-    const slot = renderWithParent(null);
-    expect(await slot.findByText("person@example.com")).toBeTruthy();
+    const slot = renderWithParent(null, []);
+    expect(await slot.findByText("No accounts in the pool")).toBeTruthy();
     expect(slot.queryByText(/Account Pooler available/i)).toBeNull();
   });
 
