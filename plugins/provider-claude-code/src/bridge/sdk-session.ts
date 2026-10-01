@@ -173,6 +173,10 @@ export class SdkSession {
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
   private readonly baseMcpServers: Record<string, McpServerConfig>;
+  private readonly removedConfiguredServers = new Map<
+    string,
+    McpServerStatus["config"]
+  >();
   private complete: (() => void) | null = null;
   private stderrTail = "";
 
@@ -238,15 +242,33 @@ export class SdkSession {
         continue;
       }
       if (configuredServer === undefined) {
-        await this.query.toggleMcpServer(status.name, false);
+        if (status.status !== "disabled") {
+          await this.query.toggleMcpServer(status.name, false);
+          this.removedConfiguredServers.set(status.name, status.config);
+        }
         continue;
       }
       if (!isDeepStrictEqual(status.config, configuredServer)) {
-        await this.query.toggleMcpServer(status.name, false);
+        if (status.status !== "disabled") {
+          await this.query.toggleMcpServer(status.name, false);
+        }
+        this.removedConfiguredServers.delete(status.name);
         dynamicServers[status.name] = configuredServer;
         continue;
       }
-      if (status.status !== "disabled" && reconnectConfiguredServers) {
+      if (status.status === "disabled") {
+        if (
+          this.removedConfiguredServers.has(status.name) &&
+          (this.removedConfiguredServers.get(status.name) === undefined ||
+            isDeepStrictEqual(
+              this.removedConfiguredServers.get(status.name),
+              configuredServer,
+            ))
+        ) {
+          await this.query.toggleMcpServer(status.name, true);
+          this.removedConfiguredServers.delete(status.name);
+        }
+      } else if (reconnectConfiguredServers) {
         await this.query.reconnectMcpServer(status.name);
       }
     }

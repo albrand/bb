@@ -1013,6 +1013,83 @@ describe("bridge", () => {
     }
   });
 
+  it("re-enables a removed static server when its identical config returns", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({ mcpServers: { fixture: { command: "fixture-mcp" } } }),
+    );
+    const serverConfig = { type: "stdio", command: "fixture-mcp" };
+    let serverEnabled = true;
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "project",
+        config: serverConfig,
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      serverEnabled = enabled;
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-restore-static";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      for (const [requestId, text] of [
+        [2, "Server connected"],
+        [3, "Remove server"],
+        [4, "Restore server"],
+      ] as const) {
+        if (requestId === 3) {
+          writeFileSync(mcpConfig, JSON.stringify({ mcpServers: {} }));
+        }
+        if (requestId === 4) {
+          writeFileSync(
+            mcpConfig,
+            JSON.stringify({
+              mcpServers: { fixture: { command: "fixture-mcp" } },
+            }),
+          );
+        }
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text }],
+          }),
+        );
+        expect(await readNextPromptText(call)).toBe(text);
+        await bridge.waitForResponse(requestId);
+        if (requestId === 2) expect(serverEnabled).toBe(true);
+        if (requestId === 3) expect(serverEnabled).toBe(false);
+        if (requestId === 4) expect(serverEnabled).toBe(true);
+      }
+      expect(query.toggleMcpServer.mock.calls).toEqual([
+        ["fixture", false],
+        ["fixture", true],
+      ]);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("coalesces concurrent turns that detect the same MCP config change", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
