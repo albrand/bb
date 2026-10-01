@@ -275,6 +275,62 @@ it("asks Codex's plan-mode questions in a bb question card and returns the answe
   });
 }, 30_000);
 
+it("returns an explicit decline after the user dismisses the question card", async () => {
+  harness.sendRequest(1, "thread/start", {
+    threadId,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: OPTIONS,
+  });
+  await settle(1);
+  const { providerThreadId } = z
+    .object({ providerThreadId: z.string() })
+    .parse((await harness.waitForResponse(1)).result);
+
+  harness.sendRequest(2, "turn/start", {
+    threadId,
+    providerThreadId,
+    clientRequestId: "creq_234567892d",
+    input: PLAN_INPUT,
+    options: { ...OPTIONS, promptMode: "plan" },
+  });
+
+  let questionRequest: (typeof harness.messages)[number] | undefined;
+  while (questionRequest === undefined) {
+    questionRequest = harness.messages
+      .slice(answered)
+      .find(
+        (message) =>
+          message.method === BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
+      );
+    if (questionRequest === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  if (questionRequest.id === undefined) {
+    throw new Error("Expected an interaction request id");
+  }
+  asked.push(questionRequest.params);
+  handleLine(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: questionRequest.id,
+      result: { kind: "user_answer", answers: {} },
+    }),
+  );
+  answered = harness.messages.length;
+  await answerUntil(() => userInputResponses().length > 0);
+
+  expect(asked).toHaveLength(1);
+  expect(userInputResponses()[0]).toMatchObject({
+    result: {
+      answers: {
+        color: { answers: ["The user declined to answer this question."] },
+      },
+    },
+  });
+}, 30_000);
+
 it.each([
   ["start", undefined],
   ["resume", { mode: "default" }],
