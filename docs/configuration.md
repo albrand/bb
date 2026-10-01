@@ -1436,9 +1436,10 @@ turn without restarting the conversation. The bridge watches `~/.claude.json`,
 thread's working directory and its parents. It uses the Agent SDK's live MCP
 server APIs to add or remove servers, apply edits, and reconnect configured
 servers after a sign-in. A slow config read or failed SDK update does not prevent
-the turn from starting; the bridge tries again on a later turn. The bridge waits
-for a live SDK update to settle before sending turn input, so an update cannot
-change tools after that turn has started.
+the turn from starting; invalid or incomplete config reads preserve the current
+server set and the bridge tries again on a later turn. The bridge waits for a
+live SDK update to settle before sending turn input, so an update cannot change
+tools after that turn has started.
 
 ### Codex provider
 

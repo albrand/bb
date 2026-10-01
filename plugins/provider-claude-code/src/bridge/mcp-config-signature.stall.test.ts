@@ -145,6 +145,108 @@ it.each(["open", "stat", "close"] as const)(
   2_000,
 );
 
+it("rejects premature EOF instead of returning a partial MCP server set", async () => {
+  const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-truncated-"));
+  tempDirs.push(home);
+  const cwd = join(home, "project");
+  const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
+  const watchedPath = join(cwd, ".mcp.json");
+  const contents = JSON.stringify({
+    mcpServers: { fixture: { command: "fixture-mcp" } },
+  });
+  let shortRead = true;
+  let position = 0;
+  let targetOpenCount = 0;
+  const close = vi.fn(async () => {});
+  openMock.mockImplementation(async (path: string) => {
+    if (path !== watchedPath) {
+      const error = new Error("not found") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    }
+    targetOpenCount += 1;
+    position = 0;
+    return {
+      close,
+      read: async (buffer: Buffer, offset: number, length: number) => {
+        if (shortRead) {
+          if (position > 0) return { bytesRead: 0 };
+          position += buffer.write("{}", offset);
+          return { bytesRead: position };
+        }
+        const bytesRead = buffer.write(contents, offset, length);
+        position += bytesRead;
+        return { bytesRead };
+      },
+      stat: async () => ({
+        isFile: () => true,
+        size: Buffer.byteLength(contents),
+      }),
+    };
+  });
+
+  await expect(
+    loadClaudeMcpServers({ cwd, env, deadlineMs: 250 }),
+  ).rejects.toThrow("Claude MCP config changed while it was being read");
+  expect(close).toHaveBeenCalledTimes(1);
+
+  shortRead = false;
+  expect(
+    await loadClaudeMcpServers({ cwd, env, deadlineMs: 250 }),
+  ).toMatchObject({ fixture: { type: "stdio", command: "fixture-mcp" } });
+  expect(targetOpenCount).toBe(2);
+  expect(close).toHaveBeenCalledTimes(2);
+});
+
+it("marks a signature unhashed when a file ends before its stat size", async () => {
+  const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-hash-truncated-"));
+  tempDirs.push(home);
+  const cwd = join(home, "project");
+  const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") };
+  const watchedPath = join(cwd, ".mcp.json");
+  const contents = JSON.stringify({ mcpServers: {} });
+  let shortRead = true;
+  let position = 0;
+  let targetOpenCount = 0;
+  const close = vi.fn(async () => {});
+  openMock.mockImplementation(async (path: string) => {
+    if (path !== watchedPath) {
+      const error = new Error("not found") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    }
+    targetOpenCount += 1;
+    position = 0;
+    return {
+      close,
+      read: async (buffer: Buffer, offset: number, length: number) => {
+        if (shortRead) {
+          if (position > 0) return { bytesRead: 0 };
+          position += buffer.write("{}", offset);
+          return { bytesRead: position };
+        }
+        const bytesRead = buffer.write(contents, offset, length);
+        position += bytesRead;
+        return { bytesRead };
+      },
+      stat: async () => ({
+        isFile: () => true,
+        size: Buffer.byteLength(contents),
+      }),
+    };
+  });
+
+  expect(await claudeMcpConfigSignature({ cwd, env, deadlineMs: 250 })).toMatch(
+    /^unhashed:/,
+  );
+  shortRead = false;
+  expect(
+    await claudeMcpConfigSignature({ cwd, env, deadlineMs: 250 }),
+  ).not.toMatch(/^unhashed:/);
+  expect(targetOpenCount).toBe(2);
+  expect(close).toHaveBeenCalledTimes(2);
+});
+
 it.each(["open", "stat", "close"] as const)(
   "does not return servers when config %s stalls and succeeds on retry",
   async (stalledOperation) => {

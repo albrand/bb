@@ -112,7 +112,7 @@ async function hashFile(
       throw error;
     }
     const { bytesRead } = readResult;
-    if (bytesRead === 0) break;
+    if (bytesRead === 0) return null;
     hash.update(chunk.subarray(0, bytesRead));
     position += bytesRead;
   }
@@ -336,7 +336,9 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
           Math.min(64 * 1024, stats.size - position),
         );
         const result = await handle.read(chunk, 0, chunk.length, position);
-        if (result.bytesRead === 0) break;
+        if (result.bytesRead === 0) {
+          throw new Error("Claude MCP config changed while it was being read");
+        }
         chunks.push(chunk.subarray(0, result.bytesRead));
         position += result.bytesRead;
       }

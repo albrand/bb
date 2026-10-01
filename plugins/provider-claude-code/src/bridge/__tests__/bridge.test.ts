@@ -24,10 +24,16 @@ import {
   type RuntimePermissionPolicy,
 } from "@get-bb/plugin-sdk/provider-bridge";
 
-const { forkSessionMock, queryMock } = vi.hoisted(() => ({
-  forkSessionMock: vi.fn(),
-  queryMock: vi.fn(),
-}));
+const { forkSessionMock, queryMock, openMock, nativeOpenRef } = vi.hoisted(
+  () => ({
+    forkSessionMock: vi.fn(),
+    queryMock: vi.fn(),
+    openMock: vi.fn(),
+    nativeOpenRef: {
+      current: null as null | typeof import("node:fs/promises").open,
+    },
+  }),
+);
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: queryMock,
@@ -35,6 +41,16 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   createSdkMcpServer: vi.fn(() => ({})),
   tool: vi.fn((_name, _desc, _schema, handler) => handler),
 }));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  nativeOpenRef.current = actual.open;
+  openMock.mockImplementation(actual.open);
+  return {
+    ...actual,
+    open: (...args: Parameters<typeof actual.open>) => openMock(...args),
+  };
+});
 
 import { handleLine } from "../bridge.js";
 import {
@@ -701,6 +717,9 @@ describe("bridge", () => {
     previousHome = process.env.HOME;
     previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
     vi.clearAllMocks();
+    if (nativeOpenRef.current) {
+      openMock.mockImplementation(nativeOpenRef.current);
+    }
     forkSessionMock.mockResolvedValue({ sessionId: "forked-session-1" });
     queryMock.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({
@@ -1209,6 +1228,118 @@ describe("bridge", () => {
           },
         }),
       );
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry restored config" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Retry restored config");
+      await bridge.waitForResponse(4);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "restored-fixture-mcp" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("preserves current MCP servers when a config read hits premature EOF", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({
+        mcpServers: { fixture: { command: "fixture-mcp" } },
+      }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-premature-eof";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load configured server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load configured server");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      const updatedConfig = JSON.stringify({
+        mcpServers: { fixture: { command: "restored-fixture-mcp" } },
+      });
+      writeFileSync(mcpConfig, updatedConfig);
+      const nativeOpen = nativeOpenRef.current;
+      if (!nativeOpen) throw new Error("Expected native config file reader");
+      let targetOpenCount = 0;
+      let readCount = 0;
+      openMock.mockImplementation(
+        (path: string, flags: number, mode?: number) => {
+          if (String(path) !== mcpConfig) {
+            return nativeOpen(path, flags, mode);
+          }
+          targetOpenCount += 1;
+          if (targetOpenCount !== 2) {
+            return nativeOpen(path, flags, mode);
+          }
+          return Promise.resolve({
+            close: async () => {},
+            read: async (buffer: Buffer, offset: number) => {
+              readCount += 1;
+              if (readCount === 1) {
+                return { bytesRead: buffer.write("{}", offset) };
+              }
+              return { bytesRead: 0 };
+            },
+            stat: async () => ({
+              isFile: () => true,
+              mode: 0,
+              ino: 1,
+              mtimeMs: 1,
+              size: Buffer.byteLength(updatedConfig),
+            }),
+          } as unknown);
+        },
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Preserve server on truncation" }],
+        }),
+      );
+      try {
+        expect(await readNextPromptText(call)).toBe(
+          "Preserve server on truncation",
+        );
+        await bridge.waitForResponse(3);
+        expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+      } finally {
+        openMock.mockImplementation(nativeOpen);
+      }
+
       bridge.sendRequest(
         4,
         "turn/start",
