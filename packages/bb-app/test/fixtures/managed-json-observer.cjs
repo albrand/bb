@@ -5,6 +5,7 @@ const target = process.env.BB_TEST_TARGET;
 const mutationRead = target.endsWith("client.json") ? 1 : 2;
 let reads = 0;
 let blocked = false;
+let firstLockAttemptAt = null;
 
 function notify(event) {
   process.send?.(event);
@@ -63,6 +64,7 @@ fs.rename = async function (from, to) {
 
 const tryLock = nativeLocks.tryLock;
 nativeLocks.tryLock = function (...args) {
+  firstLockAttemptAt ??= performance.now();
   const acquired = tryLock.call(this, ...args);
   if (!acquired && !blocked) {
     blocked = true;
@@ -71,3 +73,13 @@ nativeLocks.tryLock = function (...args) {
   return acquired;
 };
 syncBuiltinESMExports();
+
+if (process.env.BB_TEST_REPORT_LOCK_WAIT === "1") {
+  process.on("exit", () => {
+    if (!blocked) return;
+    require("node:fs").writeSync(
+      2,
+      `\nlock-wait-ms=${Math.round(performance.now() - firstLockAttemptAt)}\n`,
+    );
+  });
+}

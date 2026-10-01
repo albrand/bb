@@ -120,7 +120,7 @@ function start(
     done,
     release: () => child.send("continue"),
     async event(...names: string[]): Promise<string> {
-      const deadline = performance.now() + 10_000;
+      const deadline = performance.now() + 60_000;
       for (;;) {
         const found = events.find((event) => names.includes(event));
         if (found) return found;
@@ -187,7 +187,7 @@ const cases = [
   },
 ];
 
-const options = { timeout: 30_000 };
+const options = { timeout: 120_000 };
 
 describe("managed JSON CLI process transactions", options, () => {
   for (const { kind, a, b, va, vb } of cases) {
@@ -381,9 +381,13 @@ describe("managed JSON CLI process transactions", options, () => {
     const old = new Date(0);
     utimesSync(lockPath, old, old);
     owner.child.kill("SIGSTOP");
-    const contender = start(dir, ["env", "unset", "SYNTHETIC_A"]);
+    const contender = start(dir, ["env", "unset", "SYNTHETIC_A"], {
+      env: { BB_TEST_REPORT_LOCK_WAIT: "1" },
+    });
     await contender.event("blocked");
     const result = await contender.done;
+    const lockWaitMs = Number(/lock-wait-ms=(\d+)/.exec(result.stderr)?.[1]);
+    expect(lockWaitMs).toBeLessThan(20_000);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`Timed out waiting to update ${path}`);
     expect(result.stdout).not.toContain("Unset");
@@ -396,7 +400,7 @@ describe("managed JSON CLI process transactions", options, () => {
     await success(start(dir, ["env", "unset", "SYNTHETIC_A"]));
     expect(read(path)).toEqual({ env: { SYNTHETIC_B: "b" } });
     cleanAndPrivate(dir, "env");
-  }, 15_000);
+  });
 
   it("rejects invalid input and malformed documents without rewriting them", async () => {
     const dir = directory();

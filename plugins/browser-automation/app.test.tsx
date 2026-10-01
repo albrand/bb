@@ -78,6 +78,10 @@ describe("inline browser preview", () => {
     const firstRequested = new Promise<void>((resolve) => {
       deliverFirst = resolve;
     });
+    let deliverSecond!: () => void;
+    const secondRequested = new Promise<void>((resolve) => {
+      deliverSecond = resolve;
+    });
     const slot = renderSlot(directive, props(), {
       rpc: {
         preview: async () => {
@@ -86,7 +90,10 @@ describe("inline browser preview", () => {
             await firstRequested;
             return { session, frame: frame(4) };
           }
-          if (polls === 2) return { session, frame: frame(5, "Checkout") };
+          if (polls === 2) {
+            await secondRequested;
+            return { session, frame: frame(5, "Checkout") };
+          }
           return hang();
         },
       },
@@ -100,6 +107,7 @@ describe("inline browser preview", () => {
     );
     expect(slot.getByText("shop.test/cart")).toBeTruthy();
     expect(slot.getByText("Live")).toBeTruthy();
+    deliverSecond();
     const second = await slot.findByAltText(
       "Live view of Checkout",
       {},
