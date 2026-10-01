@@ -2932,11 +2932,9 @@ describe("bridge", () => {
       expect(await readNextPromptText(call)).toBe("Load static server");
       await bridge.waitForResponse(2);
 
-      query.setMcpServers.mockResolvedValueOnce({
-        added: [],
-        removed: [],
-        errors: { fixture: "fixture connection failed" },
-      });
+      query.setMcpServers.mockRejectedValueOnce(
+        new Error("fixture connection failed"),
+      );
       writeFileSync(
         userConfig,
         JSON.stringify({
@@ -3197,11 +3195,9 @@ describe("bridge", () => {
       expect(await readNextPromptText(call)).toBe("Load both static servers");
       await bridge.waitForResponse(2);
 
-      query.setMcpServers.mockResolvedValueOnce({
-        added: [],
-        removed: [],
-        errors: { first: "server update failed" },
-      });
+      query.setMcpServers.mockRejectedValueOnce(
+        new Error("server update failed"),
+      );
       writeFileSync(
         userConfig,
         JSON.stringify({
@@ -3314,11 +3310,9 @@ describe("bridge", () => {
       );
       await bridge.waitForResponse(2);
 
-      query.setMcpServers.mockResolvedValueOnce({
-        added: [],
-        removed: [],
-        errors: { fixture: "fixture connection failed" },
-      });
+      query.setMcpServers.mockRejectedValueOnce(
+        new Error("fixture connection failed"),
+      );
       writeFileSync(
         userConfig,
         JSON.stringify({

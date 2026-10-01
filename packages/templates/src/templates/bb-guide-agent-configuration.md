@@ -56,12 +56,14 @@ Claude Code MCP servers:
   takes precedence. At the start of a turn, bb checks configuration and starts
   changes on the current SDK query without restarting the conversation. Turn
   input waits at most 50 ms for SDK status, disable, or update calls; slower
-  calls continue in the background. A slow config read, invalid or
-  incomplete config, failed status read, or failed server update preserves the
-  current server set, logs the failure, leaves reconciliation pending, and
-  still sends the turn input. While reconciliation is pending, the bridge
-  denies external MCP tool calls until the in-flight operation settles and a
-  retry succeeds; non-MCP tools and the bb bridge's own tools remain available.
+  calls continue in the background. A slow config read, invalid or incomplete
+  config, or failed status read preserves the current server set, logs the
+  failure, leaves reconciliation pending, and still sends the turn input.
+  Per-server connection errors are logged without marking the whole server set
+  pending, so other servers remain available. If a whole-set update cannot be
+  applied, the bridge temporarily denies external MCP tool calls while
+  reconciliation retries; non-MCP tools and the bb bridge's own tools remain
+  available.
   The project .mcp.json approval checks still apply before those servers can be
   passed to the SDK.
 
