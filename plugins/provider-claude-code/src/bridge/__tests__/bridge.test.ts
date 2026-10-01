@@ -1057,8 +1057,15 @@ describe("bridge", () => {
       await vi.waitFor(() => {
         expect(query.setMcpServers).toHaveBeenCalledTimes(2);
       });
+      let firstPromptDelivered = false;
+      const firstPrompt = readNextPromptText(call).then((text) => {
+        firstPromptDelivered = true;
+        return text;
+      });
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 4_100));
+      expect(firstPromptDelivered).toBe(false);
       releaseMcpUpdate();
-      expect(await readNextPromptText(call)).toBe("Concurrent turn one");
+      expect(await firstPrompt).toBe("Concurrent turn one");
       await bridge.waitForResponse(3);
       expect(await readNextPromptText(call)).toBe("Concurrent turn two");
       await bridge.waitForResponse(4);
@@ -1069,7 +1076,7 @@ describe("bridge", () => {
       await stopBridgeThread({ bridge, queries: [query], threadId });
       bridge.restore();
     }
-  });
+  }, 10_000);
 
   it("reconnects a configured MCP server when the user config records a sign-in", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));

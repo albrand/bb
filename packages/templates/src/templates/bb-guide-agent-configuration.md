@@ -49,7 +49,8 @@ Claude Code MCP servers:
   working directory and its parents. Changes can add, remove, or update servers;
   signing in reconnects configured servers on the next turn. A slow config read
   or failed SDK update does not prevent the turn from starting; bb tries again
-  on a later turn.
+  on a later turn. bb waits for a live SDK update to settle before sending turn
+  input, so an update cannot change tools after that turn has started.
 
 Skills (.bb/skills/):
 

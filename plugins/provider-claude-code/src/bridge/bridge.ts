@@ -264,7 +264,7 @@ interface ThreadAttachment {
   providerThreadId?: string;
   sessionPermissionGrants: ClaudeSessionPermissionGrant[];
   mcpConfigSignature: string | null;
-  mcpConfigRefresh: { promise: Promise<void>; deadline: number } | null;
+  mcpConfigRefresh: Promise<void> | null;
   threadIdRef: ThreadIdRef;
 }
 
@@ -2497,25 +2497,13 @@ async function refreshClaudeMcpServers(
   threadSession: ThreadSession,
 ): Promise<void> {
   const attachment = threadSession.attachment;
-  const existingRefresh = attachment.mcpConfigRefresh;
-  if (existingRefresh !== null) {
-    const remainingMs = existingRefresh.deadline - performance.now();
-    if (remainingMs <= 0) return;
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      existingRefresh.promise,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, remainingMs);
-      }),
-    ]);
-    clearTimeout(timer);
-    if (attachment.mcpConfigRefresh === existingRefresh) return;
-    return refreshClaudeMcpServers(threadSession);
+  while (attachment.mcpConfigRefresh !== null) {
+    await attachment.mcpConfigRefresh;
   }
   const options = attachment.sessionOptions;
   const cwd = options.cwd;
   const env = options.env ?? process.env;
-  const refresh = (async (): Promise<void> => {
+  const refresh = Promise.resolve().then(async () => {
     const signature = await claudeMcpConfigSignature({ cwd, env });
     if (
       signature.startsWith("unhashed:") ||
@@ -2529,32 +2517,20 @@ async function refreshClaudeMcpServers(
       attachment.mcpConfigSignature !== null,
     );
     attachment.mcpConfigSignature = signature;
-  })();
-  const refreshState = {
-    promise: refresh.catch((error: unknown) => {
+  });
+  const trackedRefresh = refresh
+    .catch((error: unknown) => {
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );
-    }),
-    deadline: performance.now() + 4_000,
-  };
-  attachment.mcpConfigRefresh = refreshState;
-  void refreshState.promise.finally(() => {
-    if (attachment.mcpConfigRefresh === refreshState) {
-      attachment.mcpConfigRefresh = null;
-    }
-  });
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      refreshState.promise,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, 4_000);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+    })
+    .finally(() => {
+      if (attachment.mcpConfigRefresh === trackedRefresh) {
+        attachment.mcpConfigRefresh = null;
+      }
+    });
+  attachment.mcpConfigRefresh = trackedRefresh;
+  await trackedRefresh;
 }
 
 async function handleTurnStart(

@@ -229,7 +229,10 @@ function mcpServersFromConfig(value: unknown): Record<string, unknown> {
   return value.mcpServers;
 }
 
-async function readConfig(path: string): Promise<unknown> {
+async function readConfig(path: string, deadline: number): Promise<unknown> {
+  if (performance.now() >= deadline) {
+    throw new Error("Claude MCP config read exceeded its deadline");
+  }
   let handle: FileHandle;
   try {
     handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
@@ -245,7 +248,7 @@ async function readConfig(path: string): Promise<unknown> {
     if (stats.size > CONFIG_FILE_MAX_BYTES) {
       throw new Error("Claude MCP config exceeds the supported file size");
     }
-    const startedAt = performance.now();
+    const remainingMs = deadline - performance.now();
     const read = (async (): Promise<string> => {
       const chunks: Buffer[] = [];
       let position = 0;
@@ -266,11 +269,11 @@ async function readConfig(path: string): Promise<unknown> {
         timer = setTimeout(
           () =>
             reject(new Error("Claude MCP config read exceeded its deadline")),
-          CONFIG_READ_DEADLINE_MS,
+          remainingMs,
         );
       });
       const contents = await Promise.race([read, timedOut]);
-      if (performance.now() - startedAt > CONFIG_READ_DEADLINE_MS) {
+      if (performance.now() >= deadline) {
         throw new Error("Claude MCP config read exceeded its deadline");
       }
       return JSON.parse(contents) as unknown;
@@ -286,10 +289,11 @@ export async function loadClaudeMcpServers(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
 }): Promise<Record<string, McpServerConfig>> {
+  const deadline = performance.now() + CONFIG_READ_DEADLINE_MS;
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
   for (const path of paths) {
-    const config = await readConfig(path);
+    const config = await readConfig(path, deadline);
     const sources = [mcpServersFromConfig(config)];
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
