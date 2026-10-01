@@ -1822,6 +1822,138 @@ describe("bridge", () => {
     }
   });
 
+  it("retries static server restoration after a transient toggle failure", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const originalUrl = "https://fixture.invalid/mcp";
+    const originalConfig = JSON.stringify({
+      projects: {
+        [cwd]: {
+          mcpServers: { fixture: { type: "http", url: originalUrl } },
+        },
+      },
+    });
+    writeFileSync(userConfig, originalConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let serverEnabled = true;
+    let toggleCount = 0;
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "local",
+        config: { type: "http", url: originalUrl },
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      toggleCount += 1;
+      if (toggleCount === 2 && enabled) {
+        throw new Error("transient restore failure");
+      }
+      serverEnabled = enabled;
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-retry-static-restore";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load original static server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Load original static server",
+      );
+      await bridge.waitForResponse(2);
+
+      query.setMcpServers.mockResolvedValueOnce({
+        added: [],
+        removed: [],
+        errors: { fixture: "fixture connection failed" },
+      });
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: {
+                fixture: {
+                  type: "http",
+                  url: "https://fixture.invalid/unavailable",
+                },
+              },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Encounter transient failures" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Encounter transient failures",
+      );
+      await bridge.waitForResponse(3);
+      expect(serverEnabled).toBe(false);
+      expect(toggleCount).toBe(2);
+
+      writeFileSync(userConfig, originalConfig);
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry unchanged config recovery" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Retry unchanged config recovery",
+      );
+      await bridge.waitForResponse(4);
+      expect(serverEnabled).toBe(true);
+      expect(toggleCount).toBe(3);
+      expect(query.toggleMcpServer).toHaveBeenLastCalledWith("fixture", true);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(3);
+
+      bridge.sendRequest(
+        5,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Unchanged after restoration" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Unchanged after restoration",
+      );
+      await bridge.waitForResponse(5);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(3);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("preserves current MCP servers when a config read hits premature EOF", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

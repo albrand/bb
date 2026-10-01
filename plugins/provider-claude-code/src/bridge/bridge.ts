@@ -2507,7 +2507,8 @@ async function refreshClaudeMcpServers(
     const signature = await claudeMcpConfigSignature({ cwd, env });
     if (
       signature.startsWith("unhashed:") ||
-      signature === attachment.mcpConfigSignature
+      (signature === attachment.mcpConfigSignature &&
+        !threadSession.session.hasPendingStaticServerRestoration())
     ) {
       return;
     }

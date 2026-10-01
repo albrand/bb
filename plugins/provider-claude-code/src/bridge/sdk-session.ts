@@ -177,6 +177,7 @@ export class SdkSession {
     string,
     McpServerStatus["config"]
   >();
+  private readonly pendingStaticServerRestorations = new Set<string>();
   private complete: (() => void) | null = null;
   private stderrTail = "";
 
@@ -211,6 +212,10 @@ export class SdkSession {
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model);
     this.options.model = model;
+  }
+
+  hasPendingStaticServerRestoration(): boolean {
+    return this.pendingStaticServerRestorations.size > 0;
   }
 
   async setMcpServers(
@@ -276,6 +281,7 @@ export class SdkSession {
           ) {
             await query.toggleMcpServer(status.name, true);
             this.bridgeDisabledStaticServers.delete(status.name);
+            this.pendingStaticServerRestorations.delete(status.name);
           }
         } else if (reconnectConfiguredServers) {
           await query.reconnectMcpServer(status.name);
@@ -298,10 +304,14 @@ export class SdkSession {
         try {
           await query.toggleMcpServer(name, true);
           this.bridgeDisabledStaticServers.delete(name);
-        } catch {}
+          this.pendingStaticServerRestorations.delete(name);
+        } catch {
+          this.pendingStaticServerRestorations.add(name);
+        }
       }
       throw error;
     }
+    this.pendingStaticServerRestorations.clear();
     this.options.mcpServers = nextServers;
   }
 
