@@ -2523,7 +2523,12 @@ async function refreshClaudeMcpServers(
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );
-      if (error instanceof McpServerConfigChangeError) throw error;
+      if (
+        error instanceof McpServerConfigChangeError ||
+        threadSession.session.needsMcpServerReconciliation()
+      ) {
+        throw error;
+      }
     })
     .finally(() => {
       if (attachment.mcpConfigRefresh === trackedRefresh) {

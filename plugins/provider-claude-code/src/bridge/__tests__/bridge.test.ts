@@ -389,6 +389,27 @@ async function readNextPromptText(call: ClaudeQueryCall): Promise<string> {
   return content;
 }
 
+async function expectTurnRejectedBeforePrompt(args: {
+  bridge: BridgeJsonRpcTestHarness;
+  call: ClaudeQueryCall;
+  errorMessage: string;
+  promptText: string;
+  requestId: number;
+}): Promise<void> {
+  const responsePromise = args.bridge.waitForResponse(args.requestId);
+  const response = await Promise.race([
+    responsePromise,
+    new Promise<undefined>((resolve) => setTimeout(resolve, 100)),
+  ]);
+  if (response === undefined) {
+    expect(await readNextPromptText(args.call)).toBe(args.promptText);
+    await responsePromise;
+  }
+  expect(response).toMatchObject({
+    error: { message: expect.stringContaining(args.errorMessage) },
+  });
+}
+
 async function invokeBridgeHooks(
   matchers:
     | readonly {
@@ -1080,10 +1101,13 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Keep revoked server disabled" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe(
-        "Keep revoked server disabled",
-      );
-      await bridge.waitForResponse(3);
+      await expectTurnRejectedBeforePrompt({
+        bridge,
+        call,
+        errorMessage: "unrelated update failure",
+        promptText: "Keep revoked server disabled",
+        requestId: 3,
+      });
       expect(serverEnabled).toBe(false);
       expect(query.toggleMcpServer).not.toHaveBeenCalledWith("fixture", true);
 
@@ -2472,8 +2496,13 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Handle failed replacement" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe("Handle failed replacement");
-      await bridge.waitForResponse(3);
+      await expectTurnRejectedBeforePrompt({
+        bridge,
+        call,
+        errorMessage: "fixture connection failed",
+        promptText: "Handle failed replacement",
+        requestId: 3,
+      });
       expect(query.toggleMcpServer).toHaveBeenCalledTimes(2);
       expect(query.toggleMcpServer).toHaveBeenNthCalledWith(
         1,
@@ -2583,8 +2612,13 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Roll back partial refresh" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe("Roll back partial refresh");
-      await bridge.waitForResponse(3);
+      await expectTurnRejectedBeforePrompt({
+        bridge,
+        call,
+        errorMessage: "server update failed",
+        promptText: "Roll back partial refresh",
+        requestId: 3,
+      });
       expect(query.toggleMcpServer).toHaveBeenNthCalledWith(1, "first", false);
       expect(query.toggleMcpServer).toHaveBeenNthCalledWith(2, "first", true);
       expect(query.setMcpServers).toHaveBeenCalledTimes(2);
@@ -2698,10 +2732,13 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Encounter transient failures" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe(
-        "Encounter transient failures",
-      );
-      await bridge.waitForResponse(3);
+      await expectTurnRejectedBeforePrompt({
+        bridge,
+        call,
+        errorMessage: "fixture connection failed",
+        promptText: "Encounter transient failures",
+        requestId: 3,
+      });
       expect(serverEnabled).toBe(false);
       expect(toggleCount).toBe(2);
 
@@ -2820,8 +2857,13 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Handle partial replacement" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe("Handle partial replacement");
-      await bridge.waitForResponse(3);
+      await expectTurnRejectedBeforePrompt({
+        bridge,
+        call,
+        errorMessage: "replacement failed after removal",
+        promptText: "Handle partial replacement",
+        requestId: 3,
+      });
       expect(dynamicServers).toEqual({});
       expect(query.setMcpServers).toHaveBeenCalledTimes(2);
 
