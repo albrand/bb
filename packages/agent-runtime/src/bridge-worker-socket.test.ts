@@ -424,7 +424,9 @@ describe("socket bridge workers", () => {
       const unaccepted = await firstFrameReplayedAfterResume(
         registered.socketPath,
         0,
+        { initialConnectDelayMs: 500 },
       );
+      expect(unaccepted.retries).toBeGreaterThan(0);
       await waitForRuntimeState({
         label: "streamed output after the reconnect",
         predicate: () => JSON.stringify(events).includes("chunk2"),
@@ -844,13 +846,18 @@ async function framesReplayedAfterResume(
 async function firstFrameReplayedAfterResume(
   socketPath: string,
   afterWseq: number,
-): Promise<{ wseq: number; line: string }> {
+  options: { initialConnectDelayMs?: number } = {},
+): Promise<{ wseq: number; line: string; retries: number }> {
   const deadline = Date.now() + 10_000;
   let lastDisconnect: Error | undefined;
+  let attempts = 0;
+  let retries = 0;
   while (Date.now() < deadline) {
     const remainingMs = deadline - Date.now();
+    const attempt = attempts;
+    attempts += 1;
     try {
-      return await new Promise<{ wseq: number; line: string }>(
+      const frame = await new Promise<{ wseq: number; line: string }>(
         (resolve, reject) => {
           const socket = connect(socketPath);
           let settled = false;
@@ -872,9 +879,17 @@ async function firstFrameReplayedAfterResume(
             reject(error);
           };
           socket.once("connect", () => {
-            socket.write(
-              `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
-            );
+            const sendResume = (): void => {
+              if (settled) return;
+              socket.write(
+                `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
+              );
+            };
+            if (attempt === 0 && options.initialConnectDelayMs !== undefined) {
+              setTimeout(sendResume, options.initialConnectDelayMs);
+            } else {
+              sendResume();
+            }
           });
           socket.once("error", fail);
           socket.once("close", () => {
@@ -898,6 +913,7 @@ async function firstFrameReplayedAfterResume(
           });
         },
       );
+      return { ...frame, retries };
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       const code = Reflect.get(error, "code");
@@ -905,6 +921,7 @@ async function firstFrameReplayedAfterResume(
         throw error;
       }
       lastDisconnect = error;
+      retries += 1;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
