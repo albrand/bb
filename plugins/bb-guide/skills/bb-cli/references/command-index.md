@@ -95,6 +95,14 @@ use `--environment-provider modal-sandbox` alone. `--machine-inputs <json>`
 configures the machine with optional configured `preset` and `image` names;
 `--environment-inputs <json>` configures the workspace. Neither carries secrets.
 
+## manager
+
+- `bb manager`
+- `bb manager hire`
+- `bb manager list`
+- `bb manager status`
+- `bb manager delete`
+
 ## server
 
 - `bb server`
