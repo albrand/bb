@@ -4,7 +4,10 @@ import { appSettingsUpdateSchema } from "@bb/domain";
 import { getDisabledProviderIds } from "@bb/db";
 import { systemProviderCatalogEntrySchema } from "@bb/server-contract";
 import { requireBridgeLaunchForProviderId } from "../../src/services/system/provider-bridge-launch.js";
+import { listSystemProviderInfos } from "../../src/services/system/execution-options.js";
 import { resolveCreateThreadExecutionDefaults } from "../../src/services/threads/thread-default-policy.js";
+import { registerHostRpcResponder } from "../helpers/host-rpc.js";
+import { seedHostSession } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 import { readJson } from "../helpers/json.js";
 
@@ -35,6 +38,35 @@ describe("provider management", () => {
         await harness.pluginService.install("builtin:provider-acp", {
           kind: "root",
         });
+        const { host, session } = seedHostSession(harness.deps, {
+          id: "provider-management-host",
+        });
+        registerHostRpcResponder(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+          handle: (request) => {
+            if (request.command.type !== "provider.health") {
+              throw new Error(`Unexpected host RPC ${request.command.type}`);
+            }
+            return {
+              ok: true,
+              result: {
+                supported: true,
+                health: {
+                  status: "ready",
+                  statusMessage: null,
+                  accountEmail: null,
+                  planLabel: null,
+                  installedVersion: null,
+                  minimumSupportedVersion: null,
+                  canInstall: false,
+                  canUpdate: false,
+                  loginCommand: null,
+                },
+              },
+            };
+          },
+        });
         const disabled = await readCatalog(
           await setProviderEnabled(harness, "acp-cursor", false),
         );
@@ -42,6 +74,12 @@ describe("provider management", () => {
           disabled.find((provider) => provider.id === "acp-cursor")?.enabled,
         ).toBe(false);
         expect(getDisabledProviderIds(harness.db)).toEqual(["acp-cursor"]);
+        const hiddenProviders = await listSystemProviderInfos(harness.deps, {
+          hostId: host.id,
+        });
+        expect(hiddenProviders.map((provider) => provider.id)).not.toContain(
+          "acp-cursor",
+        );
         expect(() =>
           requireBridgeLaunchForProviderId(harness.deps, "acp-cursor"),
         ).toThrow('Provider "acp-cursor" is disabled');
@@ -71,6 +109,15 @@ describe("provider management", () => {
         expect(
           enabled.find((provider) => provider.id === "acp-opencode")?.enabled,
         ).toBe(false);
+        const visibleProviders = await listSystemProviderInfos(harness.deps, {
+          hostId: host.id,
+        });
+        expect(visibleProviders.map((provider) => provider.id)).toContain(
+          "acp-cursor",
+        );
+        expect(visibleProviders.map((provider) => provider.id)).not.toContain(
+          "acp-opencode",
+        );
       },
     );
   });
