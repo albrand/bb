@@ -3393,7 +3393,108 @@ describe("bridge", () => {
         "Continue despite stalled config",
       );
       await bridge.waitForResponse(2);
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry the stalled config" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Retry the stalled config");
+      await bridge.waitForResponse(3);
+      expect(queryMock).toHaveBeenCalledTimes(1);
     } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("bounds a stalled native config open across turns and recovers on the same Query", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    const config = (command: string) =>
+      JSON.stringify({ mcpServers: { fixture: { command } } });
+    writeFileSync(mcpConfig, config("initial-fixture-mcp"));
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-stalled-open-recovery";
+    const nativeOpen = nativeOpenRef.current;
+    if (!nativeOpen) throw new Error("Expected native config file reader");
+    let releaseOpen = (): void => {};
+    const openGate = new Promise<void>((resolveOpen) => {
+      releaseOpen = resolveOpen;
+    });
+    let targetOpenCount = 0;
+    let closedDelayedHandle = false;
+    const close = vi.fn(async () => {
+      closedDelayedHandle = true;
+    });
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      const turn = async (requestId: number, input: string) => {
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: input }],
+          }),
+        );
+        expect(await readNextPromptText(call)).toBe(input);
+        await bridge.waitForResponse(requestId);
+      };
+
+      await turn(2, "Load initial server");
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "initial-fixture-mcp" },
+      });
+      writeFileSync(mcpConfig, config("updated-fixture-mcp"));
+      openMock.mockImplementation(
+        (path: string, flags: number, mode?: number) => {
+          if (String(path) !== mcpConfig) return nativeOpen(path, flags, mode);
+          targetOpenCount += 1;
+          if (targetOpenCount > 1) return nativeOpen(path, flags, mode);
+          return openGate.then(() =>
+            Promise.resolve({
+              close,
+              stat: async () => ({ isFile: () => true, size: 0 }),
+              read: async () => ({ bytesRead: 0 }),
+            } as unknown),
+          );
+        },
+      );
+
+      await turn(3, "Continue while config open is stalled");
+      await turn(4, "Retry while config open is stalled");
+      expect(targetOpenCount).toBe(1);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      releaseOpen();
+      await vi.waitFor(() => expect(closedDelayedHandle).toBe(true));
+      openMock.mockImplementation(nativeOpen);
+      await turn(5, "Apply recovered MCP config");
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "updated-fixture-mcp" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseOpen();
+      openMock.mockImplementation(nativeOpen);
       query.finish();
       await stopBridgeThread({ bridge, queries: [query], threadId });
       bridge.restore();

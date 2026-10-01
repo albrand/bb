@@ -26,7 +26,7 @@ afterEach(() => {
   }
 });
 
-it("bounds stalled config reads and does not keep later calls waiting on them", async () => {
+it("bounds retries while a native config read remains stalled", async () => {
   const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-stall-"));
   tempDirs.push(home);
   const cwd = join(home, "project");
@@ -65,11 +65,14 @@ it("bounds stalled config reads and does not keep later calls waiting on them", 
   const first = await signature();
   expect(first).toMatch(/^unhashed:/);
   await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
-  const second = await signature();
-  expect(second).not.toMatch(/^unhashed:/);
-  expect(targetOpenCount).toBe(2);
+  await signature();
+  await signature();
+  expect(targetOpenCount).toBe(1);
 
   releaseRead();
+  await vi.waitFor(() => expect(targetOpenCount).toBe(1));
+  expect(await signature()).not.toMatch(/^unhashed:/);
+  expect(targetOpenCount).toBe(2);
 });
 
 it.each(["open", "stat", "close"] as const)(

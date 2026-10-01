@@ -75,21 +75,29 @@ async function withinDeadline<T>(
 async function closeFileHandle(
   handle: FileHandle,
   deadline: number,
+  trackPending: (operation: Promise<void>) => void,
 ): Promise<boolean> {
   const closing = handle.close();
   try {
     await withinDeadline(closing, deadline);
     return true;
   } catch {
-    void closing.catch(() => {});
+    trackPending(
+      closing.then(
+        () => {},
+        () => {},
+      ),
+    );
     return false;
   }
 }
 
-const configSnapshotsInFlight = new Map<
-  string,
-  { snapshot: Promise<ConfigFileSnapshot>; deadline: number }
->();
+interface ConfigSnapshotFlight {
+  snapshot: Promise<ConfigFileSnapshot>;
+  settled: Promise<void>;
+}
+
+const configSnapshotsInFlight = new Map<string, ConfigSnapshotFlight>();
 
 interface ConfigFileSnapshot {
   config: unknown;
@@ -272,6 +280,7 @@ function mcpServerNameList(value: unknown, field: string): string[] {
 async function readConfig(
   path: string,
   deadline: number,
+  trackPending: (operation: Promise<void>) => void,
 ): Promise<ConfigFileSnapshot> {
   let handle: FileHandle | undefined;
   const opening = open(
@@ -285,9 +294,15 @@ async function readConfig(
     handle = await withinDeadline(opening, deadline);
   } catch (error) {
     if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
-      void opening.then(
-        (opened) => opened.close().catch(() => {}),
-        () => {},
+      trackPending(
+        opening.then(
+          (opened) =>
+            opened.close().then(
+              () => {},
+              () => {},
+            ),
+          () => {},
+        ),
       );
       throw error;
     }
@@ -297,7 +312,21 @@ async function readConfig(
     throw error;
   }
   try {
-    const stats = await withinDeadline(handle.stat(), deadline);
+    const stat = handle.stat();
+    let stats: Awaited<typeof stat>;
+    try {
+      stats = await withinDeadline(stat, deadline);
+    } catch (error) {
+      if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
+        trackPending(
+          stat.then(
+            () => {},
+            () => {},
+          ),
+        );
+      }
+      throw error;
+    }
     if (!stats.isFile()) {
       throw new Error("Claude MCP config is not a regular file");
     }
@@ -320,10 +349,23 @@ async function readConfig(
       }
       return Buffer.concat(chunks);
     })();
-    const contents = await withinDeadline(read, deadline);
+    let contents: Buffer;
+    try {
+      contents = await withinDeadline(read, deadline);
+    } catch (error) {
+      if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
+        trackPending(
+          read.then(
+            () => {},
+            () => {},
+          ),
+        );
+      }
+      throw error;
+    }
     return { config: JSON.parse(contents.toString("utf8")) as unknown };
   } finally {
-    if (!(await closeFileHandle(handle, deadline))) {
+    if (!(await closeFileHandle(handle, deadline, trackPending))) {
       throw CONFIG_READ_DEADLINE_EXCEEDED;
     }
   }
@@ -333,16 +375,11 @@ async function singleFlightConfigSnapshot(
   path: string,
   deadline: number,
 ): Promise<ConfigFileSnapshot> {
-  for (
-    let inFlight = configSnapshotsInFlight.get(path);
-    inFlight !== undefined;
-    inFlight = configSnapshotsInFlight.get(path)
-  ) {
-    if (performance.now() > inFlight.deadline) {
-      throw CONFIG_READ_DEADLINE_EXCEEDED;
-    }
+  for (;;) {
+    const inFlight = configSnapshotsInFlight.get(path);
+    if (inFlight === undefined) break;
     try {
-      await withinDeadline(inFlight.snapshot, deadline);
+      await withinDeadline(inFlight.settled, deadline);
     } catch (error) {
       if (error === CONFIG_READ_DEADLINE_EXCEEDED) throw error;
     }
@@ -350,12 +387,23 @@ async function singleFlightConfigSnapshot(
       throw CONFIG_READ_DEADLINE_EXCEEDED;
     }
   }
-  const snapshot = readConfig(path, deadline).finally(() => {
-    if (configSnapshotsInFlight.get(path)?.snapshot === snapshot) {
+  const pending = new Set<Promise<void>>();
+  const snapshot = readConfig(path, deadline, (operation) => {
+    pending.add(operation);
+  });
+  const settled = snapshot
+    .then(
+      async () => Promise.all([...pending]),
+      async () => Promise.all([...pending]),
+    )
+    .then(() => {});
+  const flight = { snapshot, settled };
+  configSnapshotsInFlight.set(path, flight);
+  void settled.finally(() => {
+    if (configSnapshotsInFlight.get(path) === flight) {
       configSnapshotsInFlight.delete(path);
     }
   });
-  configSnapshotsInFlight.set(path, { snapshot, deadline });
   return snapshot;
 }
 
