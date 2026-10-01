@@ -1219,6 +1219,110 @@ describe("bridge", () => {
     }
   });
 
+  it("blocks a turn when server status cannot be read after revocation", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+    const mcpConfig = join(cwd, ".mcp.json");
+    const settingsPath = join(cwd, ".claude", "settings.local.json");
+    const serverConfig = { type: "stdio", command: "fixture-mcp" };
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({ mcpServers: { fixture: serverConfig } }),
+    );
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ enableAllProjectMcpServers: true }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let serverEnabled = true;
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "project",
+        config: serverConfig,
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      serverEnabled = enabled;
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-revoked-status-failure";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Start approved server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Start approved server");
+      await bridge.waitForResponse(2);
+
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ enableAllProjectMcpServers: false }),
+      );
+      query.mcpServerStatus.mockRejectedValueOnce(
+        new Error("transient status failure"),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Do not use revoked server" }],
+        }),
+      );
+      const responsePromise = bridge.waitForResponse(3);
+      const response = await Promise.race([
+        responsePromise,
+        new Promise<undefined>((resolve) => setTimeout(resolve, 100)),
+      ]);
+      if (response === undefined) {
+        expect(await readNextPromptText(call)).toBe(
+          "Do not use revoked server",
+        );
+        await responsePromise;
+      }
+      expect(response).toMatchObject({
+        error: { message: expect.stringContaining("transient status failure") },
+      });
+      expect(serverEnabled).toBe(true);
+
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry revoked server removal" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Retry revoked server removal",
+      );
+      await bridge.waitForResponse(4);
+      expect(serverEnabled).toBe(false);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("applies the MCP config snapshot whose signature it accepts", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

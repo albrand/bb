@@ -93,11 +93,14 @@ interface BuildSdkDoneErrorMessageArgs {
 const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
 const CLAUDE_CONFIG_MCP_SCOPES = new Set(["user", "project", "local"]);
 
-export class McpServerDisableError extends Error {
+export class McpServerConfigChangeError extends Error {
   constructor(name: string, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
-    super(`Could not disable MCP server ${name}: ${reason}`, { cause });
-    this.name = "McpServerDisableError";
+    super(
+      `Could not safely apply MCP configuration for server ${name}: ${reason}`,
+      { cause },
+    );
+    this.name = "McpServerConfigChangeError";
   }
 }
 
@@ -181,6 +184,7 @@ export class SdkSession {
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
   private readonly baseMcpServers: Record<string, McpServerConfig>;
+  private lastRequestedMcpServers: Record<string, McpServerConfig> = {};
   private readonly bridgeDisabledStaticServers = new Map<
     string,
     McpServerStatus["config"]
@@ -229,7 +233,18 @@ export class SdkSession {
   async setMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
     const query = this.query;
     if (!query) return;
-    const statuses = await query.mcpServerStatus();
+    let statuses: McpServerStatus[];
+    try {
+      statuses = await query.mcpServerStatus();
+    } catch (error) {
+      const changedServer = Object.entries(this.lastRequestedMcpServers).find(
+        ([name, config]) => !isDeepStrictEqual(servers[name], config),
+      );
+      if (changedServer) {
+        throw new McpServerConfigChangeError(changedServer[0], error);
+      }
+      throw error;
+    }
     const statusesByName = new Map(
       statuses.map((status: McpServerStatus) => [status.name, status]),
     );
@@ -254,7 +269,7 @@ export class SdkSession {
             try {
               await query.toggleMcpServer(status.name, false);
             } catch (error) {
-              throw new McpServerDisableError(status.name, error);
+              throw new McpServerConfigChangeError(status.name, error);
             }
           }
           continue;
@@ -266,7 +281,7 @@ export class SdkSession {
             try {
               await query.toggleMcpServer(status.name, false);
             } catch (error) {
-              throw new McpServerDisableError(status.name, error);
+              throw new McpServerConfigChangeError(status.name, error);
             }
           }
           if (this.bridgeDisabledStaticServers.has(status.name)) {
@@ -312,6 +327,7 @@ export class SdkSession {
       throw error;
     }
     this.mcpReconciliationPending = false;
+    this.lastRequestedMcpServers = { ...servers };
     this.options.mcpServers = nextServers;
   }
 
