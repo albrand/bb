@@ -60,14 +60,6 @@ interface InvalidClaudeUserQuestionAnswerCase {
 const invalidClaudeUserQuestionAnswerCases: InvalidClaudeUserQuestionAnswerCase[] =
   [
     {
-      name: "missing answer",
-      resolution: {
-        kind: "user_answer",
-        answers: {},
-      },
-      expectedMessage: "Missing answer for user question",
-    },
-    {
       name: "unknown selected option",
       resolution: {
         kind: "user_answer",
@@ -78,18 +70,6 @@ const invalidClaudeUserQuestionAnswerCases: InvalidClaudeUserQuestionAnswerCase[
         },
       },
       expectedMessage: "Unknown selected option",
-    },
-    {
-      name: "empty answer",
-      resolution: {
-        kind: "user_answer",
-        answers: {
-          "toolu_question:question-1": {
-            selected: [],
-          },
-        },
-      },
-      expectedMessage: "Answer for user question",
     },
   ];
 
@@ -447,6 +427,30 @@ describe("claude-code interactive requests", () => {
           "Which deployment target should I use?": {
             notes: "Use staging until QA signs off.",
           },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["dismissed", {}],
+    [
+      "submitted without an answer",
+      { "toolu_question:question-1": { selected: [] } },
+    ],
+  ])("reports when the user %s", (_reason, answers) => {
+    expect(
+      buildClaudeInteractiveResponse({
+        payload: createClaudeUserQuestionPayload(),
+        resolution: { kind: "user_answer", answers },
+      }),
+    ).toMatchObject({
+      kind: "user_question",
+      behavior: "allow",
+      updatedInput: {
+        answers: {
+          "Which deployment target should I use?":
+            "The user declined to answer this question.",
         },
       },
     });

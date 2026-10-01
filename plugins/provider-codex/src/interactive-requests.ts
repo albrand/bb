@@ -42,6 +42,8 @@ export interface CodexUserInputResponse {
   answers: Record<string, { answers: string[] }>;
 }
 
+const USER_DECLINED_ANSWER = "The user declined to answer this question.";
+
 function nonBlank(value: string): string | undefined {
   return value.trim().length > 0 ? value : undefined;
 }
@@ -151,7 +153,11 @@ export function buildCodexUserInputResponse(args: {
   for (const [questionIndex, question] of outcome.payload.questions.entries()) {
     const answer = resolved.get(question.id);
     const codexQuestionId = args.codexQuestionIds[questionIndex];
-    if (answer === undefined || codexQuestionId === undefined) {
+    if (codexQuestionId === undefined) {
+      continue;
+    }
+    if (answer === undefined) {
+      answers.push([codexQuestionId, { answers: [USER_DECLINED_ANSWER] }]);
       continue;
     }
     const labels = answer.selected.map((value) => {
@@ -163,11 +169,15 @@ export function buildCodexUserInputResponse(args: {
       }
       return option.label;
     });
+    const freeText =
+      answer.freeText?.trim().length === 0 ? undefined : answer.freeText;
+    const answerTexts = freeText === undefined ? labels : [...labels, freeText];
     answers.push([
       codexQuestionId,
       {
-        answers:
-          answer.freeText === undefined ? labels : [...labels, answer.freeText],
+        answers: answerTexts.some((value) => value.trim().length > 0)
+          ? answerTexts
+          : [USER_DECLINED_ANSWER],
       },
     ]);
   }
