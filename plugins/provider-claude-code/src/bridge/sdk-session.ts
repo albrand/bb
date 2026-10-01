@@ -94,12 +94,12 @@ const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
 const CLAUDE_CONFIG_MCP_SCOPES = new Set(["user", "project", "local"]);
 
 export class McpServerConfigChangeError extends Error {
-  constructor(name: string, cause: unknown) {
+  constructor(name: string | undefined, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
-    super(
-      `Could not safely apply MCP configuration for server ${name}: ${reason}`,
-      { cause },
-    );
+    const server = name ? ` for server ${name}` : "";
+    super(`Could not safely apply MCP configuration${server}: ${reason}`, {
+      cause,
+    });
     this.name = "McpServerConfigChangeError";
   }
 }
@@ -184,7 +184,6 @@ export class SdkSession {
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
   private readonly baseMcpServers: Record<string, McpServerConfig>;
-  private lastRequestedMcpServers: Record<string, McpServerConfig> = {};
   private readonly bridgeDisabledStaticServers = new Map<
     string,
     McpServerStatus["config"]
@@ -237,13 +236,7 @@ export class SdkSession {
     try {
       statuses = await query.mcpServerStatus();
     } catch (error) {
-      const changedServer = Object.entries(this.lastRequestedMcpServers).find(
-        ([name, config]) => !isDeepStrictEqual(servers[name], config),
-      );
-      if (changedServer) {
-        throw new McpServerConfigChangeError(changedServer[0], error);
-      }
-      throw error;
+      throw new McpServerConfigChangeError(undefined, error);
     }
     const statusesByName = new Map(
       statuses.map((status: McpServerStatus) => [status.name, status]),
@@ -327,7 +320,6 @@ export class SdkSession {
       throw error;
     }
     this.mcpReconciliationPending = false;
-    this.lastRequestedMcpServers = { ...servers };
     this.options.mcpServers = nextServers;
   }
 
