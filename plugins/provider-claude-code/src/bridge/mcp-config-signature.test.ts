@@ -85,6 +85,28 @@ it("changes the signature when project MCP enablement changes", async () => {
   expect(await signature()).not.toBe(disabled);
 });
 
+it("omits project JSON servers rejected by MCP settings", async () => {
+  const { cwd, env } = createFixture();
+  const serverPath = join(cwd, ".mcp.json");
+  const settingsPath = join(cwd, ".claude", "settings.json");
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  writeFileSync(
+    serverPath,
+    JSON.stringify({ mcpServers: { fixture: { command: "fixture-mcp" } } }),
+  );
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ disabledMcpjsonServers: ["fixture"] }),
+  );
+
+  expect(await loadClaudeMcpServers({ cwd, env })).not.toHaveProperty(
+    "fixture",
+  );
+
+  writeFileSync(settingsPath, JSON.stringify({}));
+  expect(await loadClaudeMcpServers({ cwd, env })).toHaveProperty("fixture");
+});
+
 it("merges MCP servers from user, settings, and project files with environment expansion", async () => {
   const { cwd, env, home } = createFixture();
   const configDir = env.CLAUDE_CONFIG_DIR;

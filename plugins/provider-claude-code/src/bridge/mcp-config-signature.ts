@@ -208,23 +208,40 @@ function mcpServersFromConfig(value: unknown): Record<string, unknown> {
   return value.mcpServers;
 }
 
-function mcpDecisionSettings(value: unknown): Record<string, unknown> {
+interface McpDecisionSettings {
+  enabledMcpjsonServers?: string[];
+  disabledMcpjsonServers?: string[];
+  disabledMcpServers?: string[];
+  enabledMcpServers?: string[];
+  enableAllProjectMcpServers?: boolean;
+}
+
+function mcpDecisionSettings(value: unknown): McpDecisionSettings {
   if (!isRecord(value)) return {};
-  const decisions: Record<string, unknown> = {};
-  for (const key of [
-    "enabledMcpjsonServers",
-    "disabledMcpjsonServers",
-    "disabledMcpServers",
-  ]) {
-    if (!Object.hasOwn(value, key)) continue;
-    const setting = value[key];
-    if (
-      !Array.isArray(setting) ||
-      setting.some((item) => typeof item !== "string")
-    ) {
-      invalidMcpConfig(`${key} must be an array of strings`);
-    }
-    decisions[key] = [...new Set(setting)].sort();
+  const decisions: McpDecisionSettings = {};
+  if (Object.hasOwn(value, "enabledMcpjsonServers")) {
+    decisions.enabledMcpjsonServers = mcpServerNameList(
+      value.enabledMcpjsonServers,
+      "enabledMcpjsonServers",
+    );
+  }
+  if (Object.hasOwn(value, "disabledMcpjsonServers")) {
+    decisions.disabledMcpjsonServers = mcpServerNameList(
+      value.disabledMcpjsonServers,
+      "disabledMcpjsonServers",
+    );
+  }
+  if (Object.hasOwn(value, "disabledMcpServers")) {
+    decisions.disabledMcpServers = mcpServerNameList(
+      value.disabledMcpServers,
+      "disabledMcpServers",
+    );
+  }
+  if (Object.hasOwn(value, "enabledMcpServers")) {
+    decisions.enabledMcpServers = mcpServerNameList(
+      value.enabledMcpServers,
+      "enabledMcpServers",
+    );
   }
   if (Object.hasOwn(value, "enableAllProjectMcpServers")) {
     const setting = value.enableAllProjectMcpServers;
@@ -234,6 +251,13 @@ function mcpDecisionSettings(value: unknown): Record<string, unknown> {
     decisions.enableAllProjectMcpServers = setting;
   }
   return decisions;
+}
+
+function mcpServerNameList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    invalidMcpConfig(`${field} must be an array of strings`);
+  }
+  return [...new Set(value)].sort();
 }
 
 async function readConfig(
@@ -344,7 +368,12 @@ export async function loadClaudeMcpServersSnapshot(args: {
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
   const signatureInputs: unknown[] = [];
-  const sourcesByPrecedence: Record<string, unknown>[][] = [[], [], []];
+  const sourcesByPrecedence: {
+    servers: Record<string, unknown>;
+    isProjectMcpJson: boolean;
+  }[][] = [[], [], []];
+  const disabledProjectMcpServers = new Set<string>();
+  const disabledProjectMcpJsonServers = new Set<string>();
   const home = args.env.HOME?.trim() || homedir();
   const configDir = args.env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
   const userSettingsPaths = new Set([
@@ -361,10 +390,16 @@ export async function loadClaudeMcpServersSnapshot(args: {
         : path.endsWith(localProjectSettingsSuffix)
           ? 2
           : 1;
-    sourcesByPrecedence[precedence]?.push(mcpServersFromConfig(config));
+    sourcesByPrecedence[precedence]?.push({
+      servers: mcpServersFromConfig(config),
+      isProjectMcpJson: path.endsWith(".mcp.json"),
+    });
     const decisions = mcpDecisionSettings(config);
     if (Object.keys(decisions).length > 0) {
       signatureInputs.push({ path, decisions });
+    }
+    for (const name of decisions.disabledMcpjsonServers ?? []) {
+      disabledProjectMcpJsonServers.add(name);
     }
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
@@ -375,8 +410,17 @@ export async function loadClaudeMcpServersSnapshot(args: {
         const project = projects[resolve(args.cwd)];
         if (project !== undefined) {
           const projectServers = mcpServersFromConfig(project);
-          sourcesByPrecedence[2]?.push(projectServers);
           const projectDecisions = mcpDecisionSettings(project);
+          sourcesByPrecedence[2]?.push({
+            servers: projectServers,
+            isProjectMcpJson: false,
+          });
+          for (const name of projectDecisions.disabledMcpServers ?? []) {
+            disabledProjectMcpServers.add(name);
+          }
+          for (const name of projectDecisions.disabledMcpjsonServers ?? []) {
+            disabledProjectMcpJsonServers.add(name);
+          }
           if (Object.keys(projectDecisions).length > 0) {
             signatureInputs.push({
               path: `${path}#projects.${resolve(args.cwd)}`,
@@ -389,12 +433,19 @@ export async function loadClaudeMcpServersSnapshot(args: {
   }
   for (const sources of sourcesByPrecedence) {
     for (const source of sources) {
-      for (const [name, value] of Object.entries(source)) {
+      for (const [name, value] of Object.entries(source.servers)) {
+        if (
+          source.isProjectMcpJson &&
+          disabledProjectMcpJsonServers.has(name)
+        ) {
+          continue;
+        }
         const server = resolveServerConfig(value, args.env);
         servers[name] = server;
       }
     }
   }
+  for (const name of disabledProjectMcpServers) delete servers[name];
   const canonicalServers = canonicalize(servers);
   const canonicalInputs = canonicalize(signatureInputs);
   const signature = createHash("sha256")
