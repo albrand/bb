@@ -2995,6 +2995,154 @@ describe("bridge", () => {
     }
   });
 
+  it("keeps healthy MCP tools available when one added server fails to connect", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    writeFileSync(
+      userConfig,
+      JSON.stringify({
+        projects: {
+          [cwd]: {
+            mcpServers: { healthy: { command: "healthy-mcp" } },
+          },
+        },
+      }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "healthy",
+        status: "connected",
+        scope: "local",
+        config: { type: "stdio", command: "healthy-mcp" },
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const stderrWrite = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const threadId = "thread-live-mcp-isolated-server-failure";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Start with healthy MCP" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Start with healthy MCP");
+      await bridge.waitForResponse(2);
+
+      query.setMcpServers.mockResolvedValueOnce({
+        added: [],
+        removed: [],
+        errors: { broken: "invalid command" },
+      });
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: {
+                healthy: { command: "healthy-mcp" },
+                broken: { command: "missing-mcp" },
+              },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Continue with one failed MCP" }],
+        }),
+      );
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Continue with one failed MCP",
+        requestId: 3,
+      });
+      const healthyToolOutputs = await invokeBridgeHooks(
+        call.options.hooks?.PreToolUse,
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "mcp__healthy__search",
+          tool_input: {},
+          tool_use_id: "tool-healthy-mcp-after-add",
+          session_id: "session-1",
+          transcript_path: "/tmp/transcript.jsonl",
+          cwd,
+        },
+      );
+      expect(healthyToolOutputs).not.toContainEqual(
+        expect.objectContaining({
+          hookSpecificOutput: expect.objectContaining({
+            permissionDecision: "deny",
+          }),
+        }),
+      );
+
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Continue on the next turn" }],
+        }),
+      );
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Continue on the next turn",
+        requestId: 4,
+      });
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      const nextHealthyToolOutputs = await invokeBridgeHooks(
+        call.options.hooks?.PreToolUse,
+        {
+          hook_event_name: "PreToolUse",
+          tool_name: "mcp__healthy__search",
+          tool_input: {},
+          tool_use_id: "tool-healthy-mcp-next-turn",
+          session_id: "session-1",
+          transcript_path: "/tmp/transcript.jsonl",
+          cwd,
+        },
+      );
+      expect(nextHealthyToolOutputs).not.toContainEqual(
+        expect.objectContaining({
+          hookSpecificOutput: expect.objectContaining({
+            permissionDecision: "deny",
+          }),
+        }),
+      );
+      expect(stderrWrite.mock.calls.flat().join(" ")).toContain(
+        "MCP server broken failed to connect: invalid command",
+      );
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+      stderrWrite.mockRestore();
+    }
+  });
+
   it("restores earlier static servers when an MCP update fails", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

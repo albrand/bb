@@ -307,11 +307,9 @@ export class SdkSession {
       }
       nextServers = { ...dynamicServers, ...this.baseMcpServers };
       const result = await query.setMcpServers(nextServers);
-      if (Object.keys(result.errors).length > 0) {
-        throw new Error(
-          `MCP server connection failed: ${Object.entries(result.errors)
-            .map(([name, message]) => `${name}: ${message}`)
-            .join("; ")}`,
+      for (const [name, message] of Object.entries(result.errors)) {
+        process.stderr.write(
+          `claude-code bridge: MCP server ${name} failed to connect: ${message}\n`,
         );
       }
     } catch (error) {
