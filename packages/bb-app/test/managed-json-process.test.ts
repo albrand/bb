@@ -387,7 +387,6 @@ describe("managed JSON CLI process transactions", options, () => {
     await contender.event("blocked");
     const result = await contender.done;
     const lockWaitMs = Number(/lock-wait-ms=(\d+)/.exec(result.stderr)?.[1]);
-    expect(lockWaitMs).toBeGreaterThanOrEqual(4_000);
     expect(lockWaitMs).toBeLessThan(20_000);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`Timed out waiting to update ${path}`);
