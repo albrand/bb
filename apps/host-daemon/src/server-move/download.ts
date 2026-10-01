@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -101,6 +101,14 @@ function resolveDownloadSize(args: {
   return size;
 }
 
+function whenClosed(stream: WriteStream): Promise<void> {
+  return stream.closed
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        stream.once("close", () => resolve());
+      });
+}
+
 export async function downloadVerifiedFile(
   args: DownloadVerifiedFileArgs,
 ): Promise<void> {
@@ -160,11 +168,9 @@ export async function downloadVerifiedFile(
       await reader.cancel().catch(() => undefined);
     }
   }
+  const destination = createWriteStream(partialPath, { mode: 0o600 });
   try {
-    await pipeline(
-      verifiedChunks,
-      createWriteStream(partialPath, { mode: 0o600 }),
-    );
+    await pipeline(verifiedChunks, destination);
     if (receivedBytes !== sizeBytes) {
       throw new CommandDispatchError(
         SERVER_MOVE_DIGEST_MISMATCH,
@@ -180,6 +186,7 @@ export async function downloadVerifiedFile(
     }
     await rename(partialPath, args.destinationPath);
   } catch (error) {
+    await whenClosed(destination);
     await rm(partialPath, { force: true });
     throw error;
   }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { downloadVerifiedFile } from "./download.js";
 import {
   createRoot,
@@ -9,6 +9,42 @@ import {
   listen,
   registerServerMoveFixtureCleanup,
 } from "./test-fixture.js";
+
+const writeStreamOpen = vi.hoisted(() => ({ delayMs: 0 }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const open = (
+    path: import("node:fs").PathLike,
+    flags: import("node:fs").OpenMode,
+    mode: import("node:fs").Mode,
+    callback: (error: NodeJS.ErrnoException | null, fd: number) => void,
+  ) => {
+    setTimeout(
+      () => actual.open(path, flags, mode, callback),
+      writeStreamOpen.delayMs,
+    );
+  };
+  return {
+    ...actual,
+    createWriteStream: (
+      path: import("node:fs").PathLike,
+      options: Exclude<
+        Parameters<typeof actual.createWriteStream>[1],
+        string | undefined
+      >,
+    ) =>
+      actual.createWriteStream(path, {
+        ...options,
+        fs: {
+          open,
+          write: actual.write,
+          writev: actual.writev,
+          close: actual.close,
+        },
+      }),
+  };
+});
 
 registerServerMoveFixtureCleanup();
 
@@ -59,6 +95,39 @@ describe("downloadVerifiedFile", () => {
     });
 
     expect(await readFile(path)).toEqual(PAYLOAD);
+  });
+
+  it("leaves no partial file when the download breaks before the file is open", async () => {
+    const root = await createRoot();
+    writeStreamOpen.delayMs = 100;
+    try {
+      await expect(
+        downloadVerifiedFile({
+          fetchFn: async () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                pull(controller) {
+                  controller.error(new Error("connection reset"));
+                },
+              }),
+              { headers: { "content-length": String(PAYLOAD.byteLength) } },
+            ),
+          url: "http://server.test/internal/server-move/move-1/bb-app.tgz",
+          headers: {},
+          destinationPath: join(root, "bb-app.tgz"),
+          expectedSha256: PAYLOAD_SHA256,
+          expectedSizeBytes: PAYLOAD.byteLength,
+          maxSizeBytes: 1024,
+          signal: new AbortController().signal,
+          onProgress: () => undefined,
+        }),
+      ).rejects.toThrow("connection reset");
+    } finally {
+      writeStreamOpen.delayMs = 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(await readdir(root)).toEqual([]);
   });
 
   it("refuses a download that does not report its size", async () => {
