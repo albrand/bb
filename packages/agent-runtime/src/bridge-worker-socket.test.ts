@@ -427,6 +427,9 @@ describe("socket bridge workers", () => {
         { waitForDisplacement: true },
       );
       expect(unaccepted.retries).toBeGreaterThan(0);
+      process.stdout.write(
+        `bridge replay probe retries: ${unaccepted.retries}\n`,
+      );
       await waitForRuntimeState({
         label: "streamed output after the reconnect",
         predicate: () => JSON.stringify(events).includes("chunk2"),
