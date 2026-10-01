@@ -887,6 +887,111 @@ describe("bridge", () => {
     }
   });
 
+  it("applies the MCP config snapshot whose signature it accepts", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({ mcpServers: { fixture: { command: "initial-mcp" } } }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-snapshot-consistency";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load initial server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load initial server");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "initial-mcp" },
+      });
+
+      const snapshotB = JSON.stringify({
+        mcpServers: { fixture: { command: "snapshot-b" } },
+      });
+      const interveningSnapshotA = JSON.stringify({
+        mcpServers: { fixture: { command: "snapshot-a" } },
+      });
+      writeFileSync(mcpConfig, snapshotB);
+      const nativeOpen = nativeOpenRef.current;
+      if (!nativeOpen) throw new Error("Expected native config file reader");
+      let targetOpenCount = 0;
+      openMock.mockImplementation(
+        (path: string, flags: number, mode?: number) => {
+          if (String(path) !== mcpConfig) {
+            return nativeOpen(path, flags, mode);
+          }
+          targetOpenCount += 1;
+          if (targetOpenCount !== 2) {
+            return nativeOpen(path, flags, mode);
+          }
+          return Promise.resolve({
+            close: async () => {},
+            read: async (buffer: Buffer, offset: number) => ({
+              bytesRead: buffer.write(interveningSnapshotA, offset),
+            }),
+            stat: async () => ({
+              isFile: () => true,
+              mode: 0,
+              ino: 1,
+              mtimeMs: 1,
+              size: Buffer.byteLength(interveningSnapshotA),
+            }),
+          } as unknown);
+        },
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Apply snapshot B" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Apply snapshot B");
+      await bridge.waitForResponse(3);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "snapshot-b" },
+      });
+
+      openMock.mockImplementation(nativeOpen);
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Keep snapshot B" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Keep snapshot B");
+      await bridge.waitForResponse(4);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("does not call the live MCP API when config files are unchanged", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
@@ -2123,7 +2228,7 @@ describe("bridge", () => {
             return nativeOpen(path, flags, mode);
           }
           targetOpenCount += 1;
-          if (targetOpenCount !== 2) {
+          if (targetOpenCount !== 1) {
             return nativeOpen(path, flags, mode);
           }
           return Promise.resolve({

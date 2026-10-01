@@ -171,6 +171,15 @@ const fileSignaturesInFlight = new Map<
   string,
   { signature: Promise<string>; deadline: number }
 >();
+const configSnapshotsInFlight = new Map<
+  string,
+  { snapshot: Promise<ConfigFileSnapshot>; deadline: number }
+>();
+
+interface ConfigFileSnapshot {
+  config: unknown;
+  signature: string;
+}
 
 async function singleFlightFileSignature(
   path: string,
@@ -333,7 +342,10 @@ function mcpServersFromConfig(value: unknown): Record<string, unknown> {
   return value.mcpServers;
 }
 
-async function readConfig(path: string, deadline: number): Promise<unknown> {
+async function readConfig(
+  path: string,
+  deadline: number,
+): Promise<ConfigFileSnapshot> {
   let handle: FileHandle | undefined;
   const opening = open(
     path,
@@ -353,7 +365,7 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
       throw error;
     }
     if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {
-      return {};
+      return { config: {}, signature: "absent" };
     }
     throw error;
   }
@@ -365,7 +377,7 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
     if (stats.size > CONFIG_FILE_MAX_BYTES) {
       throw new Error("Claude MCP config exceeds the supported file size");
     }
-    const read = (async (): Promise<string> => {
+    const read = (async (): Promise<Buffer> => {
       const chunks: Buffer[] = [];
       let position = 0;
       while (position < stats.size) {
@@ -379,10 +391,13 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
         chunks.push(chunk.subarray(0, result.bytesRead));
         position += result.bytesRead;
       }
-      return Buffer.concat(chunks).toString("utf8");
+      return Buffer.concat(chunks);
     })();
     const contents = await withinDeadline(read, deadline);
-    return JSON.parse(contents) as unknown;
+    return {
+      config: JSON.parse(contents.toString("utf8")) as unknown,
+      signature: `${contents.byteLength}:${createHash("sha256").update(contents).digest("hex")}`,
+    };
   } finally {
     if (!(await closeFileHandle(handle, deadline))) {
       throw CONFIG_READ_DEADLINE_EXCEEDED;
@@ -390,17 +405,58 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
   }
 }
 
+async function singleFlightConfigSnapshot(
+  path: string,
+  deadline: number,
+): Promise<ConfigFileSnapshot> {
+  for (
+    let inFlight = configSnapshotsInFlight.get(path);
+    inFlight !== undefined;
+    inFlight = configSnapshotsInFlight.get(path)
+  ) {
+    if (performance.now() > inFlight.deadline) {
+      throw CONFIG_READ_DEADLINE_EXCEEDED;
+    }
+    try {
+      await withinDeadline(inFlight.snapshot, deadline);
+    } catch (error) {
+      if (error === CONFIG_READ_DEADLINE_EXCEEDED) throw error;
+    }
+    if (performance.now() > deadline) {
+      throw CONFIG_READ_DEADLINE_EXCEEDED;
+    }
+  }
+  const snapshot = readConfig(path, deadline).finally(() => {
+    if (configSnapshotsInFlight.get(path)?.snapshot === snapshot) {
+      configSnapshotsInFlight.delete(path);
+    }
+  });
+  configSnapshotsInFlight.set(path, { snapshot, deadline });
+  return snapshot;
+}
+
 export async function loadClaudeMcpServers(args: {
   cwd: string;
   env: NodeJS.ProcessEnv;
   deadlineMs?: number;
 }): Promise<Record<string, McpServerConfig>> {
+  return (await loadClaudeMcpServersSnapshot(args)).servers;
+}
+
+export async function loadClaudeMcpServersSnapshot(args: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  deadlineMs?: number;
+}): Promise<{ servers: Record<string, McpServerConfig>; signature: string }> {
   const deadline =
     performance.now() + (args.deadlineMs ?? CONFIG_READ_DEADLINE_MS);
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
+  const signatures: string[] = [];
   for (const path of paths) {
-    const config = await readConfig(path, deadline);
+    const snapshot = await singleFlightConfigSnapshot(path, deadline);
+    const { config } = snapshot;
+    signatures.push(`${path}=${snapshot.signature}`);
     const sources = [mcpServersFromConfig(config)];
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
@@ -422,5 +478,5 @@ export async function loadClaudeMcpServers(args: {
       }
     }
   }
-  return servers;
+  return { servers, signature: signatures.join("\n") };
 }

@@ -107,10 +107,7 @@ import {
   type ToolCallForwarder,
 } from "./tool-proxy-mcp.js";
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
-import {
-  claudeMcpConfigSignature,
-  loadClaudeMcpServers,
-} from "./mcp-config-signature.js";
+import { loadClaudeMcpServersSnapshot } from "./mcp-config-signature.js";
 import {
   type ClaudeInteractiveResponse,
   type ClaudePermissionMode,
@@ -2504,15 +2501,16 @@ async function refreshClaudeMcpServers(
   const cwd = options.cwd;
   const env = options.env ?? process.env;
   const refresh = Promise.resolve().then(async () => {
-    const signature = await claudeMcpConfigSignature({ cwd, env });
+    const { signature, servers } = await loadClaudeMcpServersSnapshot({
+      cwd,
+      env,
+    });
     if (
-      signature.startsWith("unhashed:") ||
-      (signature === attachment.mcpConfigSignature &&
-        !threadSession.session.needsMcpServerReconciliation())
+      signature === attachment.mcpConfigSignature &&
+      !threadSession.session.needsMcpServerReconciliation()
     ) {
       return;
     }
-    const servers = await loadClaudeMcpServers({ cwd, env });
     await threadSession.session.setMcpServers(
       servers,
       attachment.mcpConfigSignature !== null,
