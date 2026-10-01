@@ -381,11 +381,12 @@ describe("managed JSON CLI process transactions", options, () => {
     const old = new Date(0);
     utimesSync(lockPath, old, old);
     owner.child.kill("SIGSTOP");
-    const contender = start(dir, ["env", "unset", "SYNTHETIC_A"]);
+    const contender = start(dir, ["env", "unset", "SYNTHETIC_A"], {
+      env: { BB_TEST_REPORT_LOCK_WAIT: "1" },
+    });
     await contender.event("blocked");
-    const blockedAt = performance.now();
     const result = await contender.done;
-    const lockWaitMs = performance.now() - blockedAt;
+    const lockWaitMs = Number(/lock-wait-ms=(\d+)/.exec(result.stderr)?.[1]);
     expect(lockWaitMs).toBeGreaterThanOrEqual(4_000);
     expect(lockWaitMs).toBeLessThan(20_000);
     expect(result.code).toBe(1);
