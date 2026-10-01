@@ -1147,6 +1147,90 @@ describe("bridge", () => {
     }
   });
 
+  it("preserves current MCP servers when a config file becomes a FIFO", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({
+        mcpServers: { fixture: { command: "fixture-mcp" } },
+      }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-fifo-replacement";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load configured server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load configured server");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "fixture-mcp" },
+      });
+
+      rmSync(mcpConfig);
+      execFileSync("mkfifo", [mcpConfig]);
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Preserve server after FIFO" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Preserve server after FIFO");
+      await bridge.waitForResponse(3);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      rmSync(mcpConfig);
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({
+          mcpServers: {
+            fixture: { command: "restored-fixture-mcp" },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry restored config" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Retry restored config");
+      await bridge.waitForResponse(4);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "restored-fixture-mcp" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("does not block a turn when a watched MCP config is a stalled FIFO", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

@@ -322,7 +322,9 @@ async function readConfig(path: string, deadline: number): Promise<unknown> {
   }
   try {
     const stats = await withinDeadline(handle.stat(), deadline);
-    if (!stats.isFile()) return {};
+    if (!stats.isFile()) {
+      throw new Error("Claude MCP config is not a regular file");
+    }
     if (stats.size > CONFIG_FILE_MAX_BYTES) {
       throw new Error("Claude MCP config exceeds the supported file size");
     }
