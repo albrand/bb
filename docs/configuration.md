@@ -1445,10 +1445,12 @@ their own commands, and server definitions directly in checked-in settings are
 ignored. Any `disabledMcpjsonServers` entry takes precedence.
 Before each turn, bb reconnects only servers the SDK reports as
 `needs-auth` or `failed`; healthy unchanged servers are left alone. A slow
-config read or failed SDK update does not prevent the turn from starting;
-invalid or incomplete config reads preserve the current server set and bb tries
-again on a later turn. The bridge waits for a live SDK update to settle before
-sending turn input, so an update cannot change tools after that turn has started.
+config read or invalid or incomplete config preserves the current server set
+and does not prevent the turn from starting. If bb cannot disable a static
+server after its approval is removed, it rejects that turn without sending its
+input and retries on the next turn. Failed SDK updates are retried on a later
+turn. The bridge waits for a live SDK update to settle before sending turn
+input, so an update cannot change tools after that turn has started.
 
 ### Codex provider
 

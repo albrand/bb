@@ -56,8 +56,10 @@ Claude Code MCP servers:
   takes precedence. Before
   each turn, bb reconnects only servers the SDK reports as needs-auth or failed;
   healthy unchanged servers are left alone. A slow config read or failed SDK
-  update does not prevent the turn from starting; invalid or incomplete reads
-  preserve the current servers, and bb retries on a later turn.
+  read, or invalid or incomplete config preserves the current servers and does
+  not prevent the turn from starting. If bb cannot disable a static server after
+  approval is removed, it rejects that turn without sending its input and
+  retries on the next turn. Failed SDK updates are retried on a later turn.
   bb waits for a live SDK update to settle before sending turn input, so an
   update cannot change tools after that turn has started.
 

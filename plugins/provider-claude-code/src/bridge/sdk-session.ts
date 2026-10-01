@@ -93,6 +93,14 @@ interface BuildSdkDoneErrorMessageArgs {
 const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
 const CLAUDE_CONFIG_MCP_SCOPES = new Set(["user", "project", "local"]);
 
+export class McpServerDisableError extends Error {
+  constructor(name: string, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(`Could not disable MCP server ${name}: ${reason}`, { cause });
+    this.name = "McpServerDisableError";
+  }
+}
+
 function isClaudeConfigScope(scope: string | undefined): boolean {
   return scope !== undefined && CLAUDE_CONFIG_MCP_SCOPES.has(scope);
 }
@@ -243,7 +251,11 @@ export class SdkSession {
         if (configuredServer === undefined) {
           if (status.status !== "disabled") {
             this.bridgeDisabledStaticServers.set(status.name, status.config);
-            await query.toggleMcpServer(status.name, false);
+            try {
+              await query.toggleMcpServer(status.name, false);
+            } catch (error) {
+              throw new McpServerDisableError(status.name, error);
+            }
           }
           continue;
         }
@@ -251,7 +263,11 @@ export class SdkSession {
           if (status.status !== "disabled") {
             this.bridgeDisabledStaticServers.set(status.name, status.config);
             restoreAfterFailedUpdate.add(status.name);
-            await query.toggleMcpServer(status.name, false);
+            try {
+              await query.toggleMcpServer(status.name, false);
+            } catch (error) {
+              throw new McpServerDisableError(status.name, error);
+            }
           }
           if (this.bridgeDisabledStaticServers.has(status.name)) {
             restoreAfterFailedUpdate.add(status.name);

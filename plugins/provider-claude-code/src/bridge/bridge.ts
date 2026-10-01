@@ -57,7 +57,11 @@ import {
   buildClaudeTurnParams,
   type ClaudeCodeSkillRoot,
 } from "../session-params.js";
-import { SdkSession, type SdkSessionOptions } from "./sdk-session.js";
+import {
+  McpServerDisableError,
+  SdkSession,
+  type SdkSessionOptions,
+} from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
 import {
   UNSHARED_CLAUDE_CODE_MODEL_CATALOG,
@@ -2519,6 +2523,7 @@ async function refreshClaudeMcpServers(
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );
+      if (error instanceof McpServerDisableError) throw error;
     })
     .finally(() => {
       if (attachment.mcpConfigRefresh === trackedRefresh) {
