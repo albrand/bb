@@ -2506,16 +2506,13 @@ async function refreshClaudeMcpServers(
       env,
     });
     if (
-      signature === attachment.mcpConfigSignature &&
-      !threadSession.session.needsMcpServerReconciliation()
+      signature !== attachment.mcpConfigSignature ||
+      threadSession.session.needsMcpServerReconciliation()
     ) {
-      return;
+      await threadSession.session.setMcpServers(servers);
+      attachment.mcpConfigSignature = signature;
     }
-    await threadSession.session.setMcpServers(
-      servers,
-      attachment.mcpConfigSignature !== null,
-    );
-    attachment.mcpConfigSignature = signature;
+    await threadSession.session.reconnectMcpServersNeedingAuth();
   });
   const trackedRefresh = refresh
     .catch((error: unknown) => {

@@ -53,10 +53,9 @@ it("bounds stalled config reads and does not keep later calls waiting on them", 
         offset: number,
       ): Promise<{ bytesRead: number }> => {
         if (isStalledRead) await readGate;
-        buffer[offset] = 123;
-        return { bytesRead: 1 };
+        return { bytesRead: buffer.write("{}", offset) };
       },
-      stat: async () => ({ isFile: () => true, size: 1 }),
+      stat: async () => ({ isFile: () => true, size: 2 }),
     };
   });
   const signature = () =>
@@ -108,15 +107,14 @@ it.each(["open", "stat", "close"] as const)(
       return {
         close,
         read: async (buffer: Buffer, offset: number) => {
-          buffer[offset] = 123;
-          return { bytesRead: 1 };
+          return { bytesRead: buffer.write("{}", offset) };
         },
         stat: async () => {
           if (stalledOperation === "stat" && isFirstOpen) {
             await operationGate;
             firstDelayedOperationSettled = true;
           }
-          return { isFile: () => true, size: 1 };
+          return { isFile: () => true, size: 2 };
         },
       };
     });

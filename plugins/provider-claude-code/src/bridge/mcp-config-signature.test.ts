@@ -50,17 +50,39 @@ it("changes the signature when a watched file is created, edited, and removed", 
   const signature = () => claudeMcpConfigSignature({ cwd, env });
   const absent = await signature();
 
-  writeFileSync(configPath, JSON.stringify({ mcpServers: {} }));
+  writeFileSync(
+    configPath,
+    JSON.stringify({ mcpServers: { alpha: { command: "alpha-mcp" } } }),
+  );
   const created = await signature();
   expect(created).not.toBe(absent);
   expect(await signature()).toBe(created);
 
-  writeFileSync(configPath, JSON.stringify({ mcpServers: { alpha: {} } }));
+  writeFileSync(
+    configPath,
+    JSON.stringify({ mcpServers: { alpha: { command: "alpha-mcp-updated" } } }),
+  );
   const edited = await signature();
   expect(edited).not.toBe(created);
 
   rmSync(configPath);
   expect(await signature()).toBe(absent);
+});
+
+it("changes the signature when project MCP enablement changes", async () => {
+  const { cwd, env } = createFixture();
+  const settingsPath = join(cwd, ".claude", "settings.json");
+  mkdirSync(join(cwd, ".claude"), { recursive: true });
+  const signature = () => claudeMcpConfigSignature({ cwd, env });
+
+  writeFileSync(settingsPath, JSON.stringify({ enabledMcpjsonServers: [] }));
+  const disabled = await signature();
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ enabledMcpjsonServers: ["fixture"] }),
+  );
+
+  expect(await signature()).not.toBe(disabled);
 });
 
 it("merges MCP servers from user, settings, and project files with environment expansion", async () => {

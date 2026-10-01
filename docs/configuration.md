@@ -1430,16 +1430,19 @@ long-lived where the credentials from `/login` are not. A logged-in machine
 needs neither.
 
 A running Claude Code thread applies MCP configuration changes before its next
-turn without restarting the conversation. The bridge watches `~/.claude.json`,
+turn without restarting the conversation. The bridge reads `~/.claude.json`,
 `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`), and
 `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` from the
-thread's working directory and its parents. It uses the Agent SDK's live MCP
-server APIs to add or remove servers, apply edits, and reconnect configured
-servers after a sign-in. A slow config read or failed SDK update does not prevent
-the turn from starting; invalid or incomplete config reads preserve the current
-server set and the bridge tries again on a later turn. The bridge waits for a
-live SDK update to settle before sending turn input, so an update cannot change
-tools after that turn has started.
+thread's working directory and its parents. Change detection uses the effective
+MCP server set after scope precedence, plus MCP enablement settings; unrelated
+Claude state such as startup counts and usage history does not trigger a reload.
+The Agent SDK's live MCP APIs add, remove, or edit servers in the current
+conversation. Before each turn, bb reconnects only servers the SDK reports as
+`needs-auth` or `failed`; healthy unchanged servers are left alone. A slow
+config read or failed SDK update does not prevent the turn from starting;
+invalid or incomplete config reads preserve the current server set and bb tries
+again on a later turn. The bridge waits for a live SDK update to settle before
+sending turn input, so an update cannot change tools after that turn has started.
 
 ### Codex provider
 

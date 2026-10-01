@@ -218,10 +218,7 @@ export class SdkSession {
     return this.mcpReconciliationPending;
   }
 
-  async setMcpServers(
-    servers: Record<string, McpServerConfig>,
-    reconnectConfiguredServers: boolean,
-  ): Promise<void> {
+  async setMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
     const query = this.query;
     if (!query) return;
     const statuses = await query.mcpServerStatus();
@@ -240,13 +237,6 @@ export class SdkSession {
         if (!isClaudeConfigScope(status.scope)) {
           if (configuredServer !== undefined) {
             dynamicServers[status.name] = configuredServer;
-            if (
-              reconnectConfiguredServers &&
-              isDeepStrictEqual(status.config, configuredServer) &&
-              status.status !== "disabled"
-            ) {
-              await query.reconnectMcpServer(status.name);
-            }
           }
           continue;
         }
@@ -282,8 +272,6 @@ export class SdkSession {
             await query.toggleMcpServer(status.name, true);
             this.bridgeDisabledStaticServers.delete(status.name);
           }
-        } else if (reconnectConfiguredServers) {
-          await query.reconnectMcpServer(status.name);
         }
       }
       for (const [name, config] of Object.entries(servers)) {
@@ -310,6 +298,17 @@ export class SdkSession {
     }
     this.mcpReconciliationPending = false;
     this.options.mcpServers = nextServers;
+  }
+
+  async reconnectMcpServersNeedingAuth(): Promise<void> {
+    const query = this.query;
+    if (!query) return;
+    const statuses = await query.mcpServerStatus();
+    for (const status of statuses) {
+      if (status.status === "needs-auth" || status.status === "failed") {
+        await query.reconnectMcpServer(status.name);
+      }
+    }
   }
 
   async applyMutableSettings(args: {

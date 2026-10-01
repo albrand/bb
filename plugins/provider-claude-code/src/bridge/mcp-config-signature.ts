@@ -40,7 +40,6 @@ function errorCode(error: unknown): string {
     : "error";
 }
 
-const HASH_CHUNK_BYTES = 1024 * 1024;
 const CONFIG_READ_DEADLINE_MS = 2_000;
 const CONFIG_FILE_MAX_BYTES = 4 * 1024 * 1024;
 const CONFIG_READ_DEADLINE_EXCEEDED = new Error(
@@ -87,90 +86,6 @@ async function closeFileHandle(
   }
 }
 
-async function hashFile(
-  handle: FileHandle,
-  size: number,
-  deadline: number,
-): Promise<string | null> {
-  const hash = createHash("sha256");
-  const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
-  let position = 0;
-  while (position < size) {
-    let readResult: { bytesRead: number };
-    try {
-      readResult = await withinDeadline(
-        handle.read(
-          chunk,
-          0,
-          Math.min(chunk.length, size - position),
-          position,
-        ),
-        deadline,
-      );
-    } catch (error) {
-      if (error === CONFIG_READ_DEADLINE_EXCEEDED) return null;
-      throw error;
-    }
-    const { bytesRead } = readResult;
-    if (bytesRead === 0) return null;
-    hash.update(chunk.subarray(0, bytesRead));
-    position += bytesRead;
-  }
-  return `${position}:${hash.digest("hex")}`;
-}
-
-async function fileSignature(path: string, deadline: number): Promise<string> {
-  let handle: FileHandle | undefined;
-  const opening = open(
-    path,
-    constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
-  ).then((opened) => {
-    handle = opened;
-    return opened;
-  });
-  try {
-    handle = await withinDeadline(opening, deadline);
-  } catch (error) {
-    if (error === CONFIG_READ_DEADLINE_EXCEEDED) {
-      void opening.then(
-        (opened) => opened.close().catch(() => {}),
-        () => {},
-      );
-      return unhashedSignature();
-    }
-    const code = errorCode(error);
-    return code === "ENOENT" || code === "ENOTDIR" ? "absent" : code;
-  }
-  let signature: string;
-  try {
-    const stats = await withinDeadline(handle.stat(), deadline);
-    if (!stats.isFile()) {
-      signature = `not-a-file:${stats.ino}:${stats.mode}`;
-    } else {
-      try {
-        signature =
-          (await hashFile(handle, stats.size, deadline)) ?? unhashedSignature();
-      } catch (error) {
-        signature =
-          error === CONFIG_READ_DEADLINE_EXCEEDED
-            ? unhashedSignature()
-            : `${errorCode(error)}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
-      }
-    }
-  } catch (error) {
-    signature =
-      error === CONFIG_READ_DEADLINE_EXCEEDED
-        ? unhashedSignature()
-        : errorCode(error);
-  }
-  const closed = await closeFileHandle(handle, deadline);
-  return closed ? signature : unhashedSignature();
-}
-
-const fileSignaturesInFlight = new Map<
-  string,
-  { signature: Promise<string>; deadline: number }
->();
 const configSnapshotsInFlight = new Map<
   string,
   { snapshot: Promise<ConfigFileSnapshot>; deadline: number }
@@ -178,44 +93,6 @@ const configSnapshotsInFlight = new Map<
 
 interface ConfigFileSnapshot {
   config: unknown;
-  signature: string;
-}
-
-async function singleFlightFileSignature(
-  path: string,
-  deadline: number,
-): Promise<string> {
-  for (
-    let inFlight = fileSignaturesInFlight.get(path);
-    inFlight !== undefined;
-    inFlight = fileSignaturesInFlight.get(path)
-  ) {
-    if (performance.now() > inFlight.deadline) return unhashedSignature();
-    await inFlight.signature;
-    if (performance.now() > deadline) return unhashedSignature();
-  }
-  const signature = fileSignature(path, deadline)
-    .catch(unhashedSignature)
-    .finally(() => {
-      if (fileSignaturesInFlight.get(path)?.signature === signature) {
-        fileSignaturesInFlight.delete(path);
-      }
-    });
-  fileSignaturesInFlight.set(path, { signature, deadline });
-  return signature;
-}
-
-async function computeSignature(
-  paths: string[],
-  deadline: number,
-): Promise<string> {
-  const lines: string[] = [];
-  for (const path of paths) {
-    const signature = await singleFlightFileSignature(path, deadline);
-    if (signature.startsWith("unhashed:")) return unhashedSignature();
-    lines.push(`${path}=${signature}`);
-  }
-  return lines.join("\n");
 }
 
 export async function claudeMcpConfigSignature(args: {
@@ -223,21 +100,10 @@ export async function claudeMcpConfigSignature(args: {
   env: NodeJS.ProcessEnv;
   deadlineMs?: number;
 }): Promise<string> {
-  const deadlineMs = args.deadlineMs ?? CONFIG_READ_DEADLINE_MS;
-  const deadline = performance.now() + deadlineMs;
-  const computation = computeSignature(
-    claudeMcpConfigPaths(args),
-    deadline,
-  ).catch(unhashedSignature);
-  let timer: NodeJS.Timeout | undefined;
-  const timedOut = new Promise<string>((resolveSignature) => {
-    timer = setTimeout(() => resolveSignature(unhashedSignature()), deadlineMs);
-  });
   try {
-    const signature = await Promise.race([computation, timedOut]);
-    return performance.now() > deadline ? unhashedSignature() : signature;
-  } finally {
-    clearTimeout(timer);
+    return (await loadClaudeMcpServersSnapshot(args)).signature;
+  } catch {
+    return unhashedSignature();
   }
 }
 
@@ -342,6 +208,34 @@ function mcpServersFromConfig(value: unknown): Record<string, unknown> {
   return value.mcpServers;
 }
 
+function mcpDecisionSettings(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const decisions: Record<string, unknown> = {};
+  for (const key of [
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+    "disabledMcpServers",
+  ]) {
+    if (!Object.hasOwn(value, key)) continue;
+    const setting = value[key];
+    if (
+      !Array.isArray(setting) ||
+      setting.some((item) => typeof item !== "string")
+    ) {
+      invalidMcpConfig(`${key} must be an array of strings`);
+    }
+    decisions[key] = [...new Set(setting)].sort();
+  }
+  if (Object.hasOwn(value, "enableAllProjectMcpServers")) {
+    const setting = value.enableAllProjectMcpServers;
+    if (typeof setting !== "boolean") {
+      invalidMcpConfig("enableAllProjectMcpServers must be a boolean");
+    }
+    decisions.enableAllProjectMcpServers = setting;
+  }
+  return decisions;
+}
+
 async function readConfig(
   path: string,
   deadline: number,
@@ -365,7 +259,7 @@ async function readConfig(
       throw error;
     }
     if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") {
-      return { config: {}, signature: "absent" };
+      return { config: {} };
     }
     throw error;
   }
@@ -394,10 +288,7 @@ async function readConfig(
       return Buffer.concat(chunks);
     })();
     const contents = await withinDeadline(read, deadline);
-    return {
-      config: JSON.parse(contents.toString("utf8")) as unknown,
-      signature: `${contents.byteLength}:${createHash("sha256").update(contents).digest("hex")}`,
-    };
+    return { config: JSON.parse(contents.toString("utf8")) as unknown };
   } finally {
     if (!(await closeFileHandle(handle, deadline))) {
       throw CONFIG_READ_DEADLINE_EXCEEDED;
@@ -452,7 +343,7 @@ export async function loadClaudeMcpServersSnapshot(args: {
     performance.now() + (args.deadlineMs ?? CONFIG_READ_DEADLINE_MS);
   const paths = claudeMcpConfigPaths(args);
   const servers = Object.create(null) as Record<string, McpServerConfig>;
-  const signatures: string[] = [];
+  const signatureInputs: unknown[] = [];
   const sourcesByPrecedence: Record<string, unknown>[][] = [[], [], []];
   const home = args.env.HOME?.trim() || homedir();
   const configDir = args.env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
@@ -464,7 +355,6 @@ export async function loadClaudeMcpServersSnapshot(args: {
   for (const path of paths) {
     const snapshot = await singleFlightConfigSnapshot(path, deadline);
     const { config } = snapshot;
-    signatures.push(`${path}=${snapshot.signature}`);
     const precedence =
       path.endsWith(".claude.json") || userSettingsPaths.has(path)
         ? 0
@@ -472,15 +362,26 @@ export async function loadClaudeMcpServersSnapshot(args: {
           ? 2
           : 1;
     sourcesByPrecedence[precedence]?.push(mcpServersFromConfig(config));
+    const decisions = mcpDecisionSettings(config);
+    if (Object.keys(decisions).length > 0) {
+      signatureInputs.push({ path, decisions });
+    }
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
       if (projects !== undefined) {
         if (!isRecord(projects)) {
           invalidMcpConfig("projects must be an object");
         }
-        for (const [projectPath, project] of Object.entries(projects)) {
-          if (resolve(projectPath) === resolve(args.cwd)) {
-            sourcesByPrecedence[2]?.push(mcpServersFromConfig(project));
+        const project = projects[resolve(args.cwd)];
+        if (project !== undefined) {
+          const projectServers = mcpServersFromConfig(project);
+          sourcesByPrecedence[2]?.push(projectServers);
+          const projectDecisions = mcpDecisionSettings(project);
+          if (Object.keys(projectDecisions).length > 0) {
+            signatureInputs.push({
+              path: `${path}#projects.${resolve(args.cwd)}`,
+              decisions: projectDecisions,
+            });
           }
         }
       }
@@ -494,5 +395,24 @@ export async function loadClaudeMcpServersSnapshot(args: {
       }
     }
   }
-  return { servers, signature: signatures.join("\n") };
+  const canonicalServers = canonicalize(servers);
+  const canonicalInputs = canonicalize(signatureInputs);
+  const signature = createHash("sha256")
+    .update(
+      JSON.stringify({ servers: canonicalServers, inputs: canonicalInputs }),
+    )
+    .digest("hex");
+  return { servers, signature };
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .flatMap((key) =>
+        value[key] === undefined ? [] : [[key, canonicalize(value[key])]],
+      ),
+  );
 }
