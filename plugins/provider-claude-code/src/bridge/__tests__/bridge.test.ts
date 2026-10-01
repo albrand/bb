@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CanUseTool,
+  McpServerConfig,
   OnElicitation,
   SDKMessage,
   SDKUserMessage,
@@ -1020,6 +1021,15 @@ describe("bridge", () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     const query = createControlledClaudeQuery();
     queryMock.mockReturnValue(query);
+    let resolveLocalUpdateStarted = (): void => {};
+    let releaseLocalUpdate = (): void => {};
+    let localUpdateSettled = false;
+    const localUpdateStarted = new Promise<void>((resolveStarted) => {
+      resolveLocalUpdateStarted = resolveStarted;
+    });
+    const localUpdateGate = new Promise<void>((resolveUpdate) => {
+      releaseLocalUpdate = resolveUpdate;
+    });
     const threadId = "thread-live-mcp-scope-precedence";
 
     try {
@@ -1042,6 +1052,17 @@ describe("bridge", () => {
         shared: { type: "stdio", command: "local-mcp-v1" },
       });
 
+      query.setMcpServers.mockImplementation(
+        async (servers: Record<string, McpServerConfig>) => {
+          const server = servers.shared;
+          if (server?.type === "stdio" && server.command === "local-mcp-v2") {
+            resolveLocalUpdateStarted();
+            await localUpdateGate;
+            localUpdateSettled = true;
+          }
+          return { added: [], removed: [], errors: {} };
+        },
+      );
       writeUserConfig("local-mcp-v2");
       bridge.sendRequest(
         3,
@@ -1051,13 +1072,23 @@ describe("bridge", () => {
           input: [{ type: "text", text: "Apply local edit" }],
         }),
       );
-      expect(await readNextPromptText(call)).toBe("Apply local edit");
+      let promptBeforeUpdateSettled = false;
+      const localEditPrompt = readNextPromptText(call).then((text) => {
+        if (!localUpdateSettled) promptBeforeUpdateSettled = true;
+        return text;
+      });
+      await localUpdateStarted;
+      await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 0));
+      expect(promptBeforeUpdateSettled).toBe(false);
+      releaseLocalUpdate();
+      expect(await localEditPrompt).toBe("Apply local edit");
       await bridge.waitForResponse(3);
       expect(query.setMcpServers).toHaveBeenLastCalledWith({
         shared: { type: "stdio", command: "local-mcp-v2" },
       });
       expect(queryMock).toHaveBeenCalledTimes(1);
     } finally {
+      releaseLocalUpdate();
       query.finish();
       await stopBridgeThread({ bridge, queries: [query], threadId });
       bridge.restore();
