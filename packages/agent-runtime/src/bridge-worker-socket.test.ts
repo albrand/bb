@@ -845,43 +845,75 @@ async function firstFrameReplayedAfterResume(
   socketPath: string,
   afterWseq: number,
 ): Promise<{ wseq: number; line: string }> {
-  const socket = connect(socketPath);
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const frame = new Promise<{ wseq: number; line: string }>(
-    (resolve, reject) => {
-      timeout = setTimeout(() => {
-        reject(
-          new Error(
-            `timed out waiting for bridge replay frame after wseq ${afterWseq}`,
-          ),
-        );
-      }, 10_000);
-      socket.once("error", (error) => {
-        if (timeout !== undefined) clearTimeout(timeout);
-        reject(error);
-      });
-      readBoundedLines({
-        input: socket,
-        onLine: (raw) => {
-          const decoded = decodeBridgeFrame(raw);
-          if (decoded !== null) {
+  const deadline = Date.now() + 10_000;
+  let lastDisconnect: Error | undefined;
+  while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    try {
+      return await new Promise<{ wseq: number; line: string }>(
+        (resolve, reject) => {
+          const socket = connect(socketPath);
+          let settled = false;
+          const timeout = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            reject(
+              new Error(
+                `timed out waiting for bridge replay frame after wseq ${afterWseq}`,
+              ),
+            );
+          }, remainingMs);
+          const fail = (error: Error): void => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timeout);
-            resolve(decoded);
-          }
+            socket.destroy();
+            reject(error);
+          };
+          socket.once("connect", () => {
+            socket.write(
+              `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
+            );
+          });
+          socket.once("error", fail);
+          socket.once("close", () => {
+            fail(
+              Object.assign(new Error("bridge replay probe disconnected"), {
+                code: "BRIDGE_PROBE_DISCONNECTED",
+              }),
+            );
+          });
+          readBoundedLines({
+            input: socket,
+            onLine: (raw) => {
+              const decoded = decodeBridgeFrame(raw);
+              if (decoded === null || settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              socket.destroy();
+              resolve(decoded);
+            },
+            onOverflow: () => undefined,
+          });
         },
-        onOverflow: () => undefined,
-      });
-      socket.write(
-        `${JSON.stringify({ jsonrpc: "2.0", method: "bridge/resume", params: { afterWseq } })}\n`,
       );
-    },
-  );
-  try {
-    return await frame;
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-    socket.destroy();
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      const code = Reflect.get(error, "code");
+      if (code !== "ECONNRESET" && code !== "BRIDGE_PROBE_DISCONNECTED") {
+        throw error;
+      }
+      lastDisconnect = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
+  throw (
+    lastDisconnect ??
+    new Error(
+      `timed out waiting for bridge replay frame after wseq ${afterWseq}`,
+    )
+  );
 }
 
 function adoptedWorker(args: {
