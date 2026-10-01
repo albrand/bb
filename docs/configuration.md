@@ -1443,14 +1443,17 @@ in `enabledMcpjsonServers` or approved by `enableAllProjectMcpServers: true` in
 user or local project settings. Checked-in project settings cannot approve
 their own commands, and server definitions directly in checked-in settings are
 ignored. Any `disabledMcpjsonServers` entry takes precedence.
-Before a turn, the bridge checks this configuration and applies changes to the
-current SDK query without restarting the conversation. A slow config read,
-invalid or incomplete config, failed status read, or failed server update
+At the start of a turn, the bridge checks this configuration and starts any
+needed update on the current SDK query without restarting the conversation.
+Turn input waits at most 50 ms for SDK status, disable, or update calls; slower
+calls continue in the background. A slow config read, invalid or incomplete
+config, failed status read, or failed server update
 preserves the current server set, logs the failure, leaves reconciliation
 pending, and still sends the turn input. While reconciliation is pending, the
-bridge denies external MCP tool calls until a retry succeeds; non-MCP tools and
-the bb bridge's own tools remain available. Project `.mcp.json` approval
-checks still apply before those servers can be passed to the SDK.
+bridge denies external MCP tool calls until the in-flight operation settles and
+a retry succeeds; non-MCP tools and the bb bridge's own tools remain available.
+Project `.mcp.json` approval checks still apply before those servers can be
+passed to the SDK.
 
 After a changed configuration is applied, bb checks server status in the
 background and attempts to reconnect servers reported as `needs-auth` or

@@ -2416,18 +2416,41 @@ describe("bridge", () => {
       await vi.waitFor(() => {
         expect(query.setMcpServers).toHaveBeenCalledTimes(2);
       });
-      let firstPromptDelivered = false;
-      const firstPrompt = readNextPromptText(call).then((text) => {
-        firstPromptDelivered = true;
-        return text;
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Concurrent turn one",
+        requestId: 3,
       });
-      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 4_100));
-      expect(firstPromptDelivered).toBe(false);
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Concurrent turn two",
+        requestId: 4,
+      });
+      await expectExternalMcpToolsBlocked(call);
       releaseMcpUpdate();
-      expect(await firstPrompt).toBe("Concurrent turn one");
-      await bridge.waitForResponse(3);
-      expect(await readNextPromptText(call)).toBe("Concurrent turn two");
-      await bridge.waitForResponse(4);
+      await vi.waitFor(async () => {
+        const outputs = await invokeBridgeHooks(
+          call.options.hooks?.PreToolUse,
+          {
+            hook_event_name: "PreToolUse",
+            tool_name: "mcp__fixture__search",
+            tool_input: {},
+            tool_use_id: "tool-restored-mcp",
+            session_id: "session-1",
+            transcript_path: "/tmp/transcript.jsonl",
+            cwd: "/tmp/worktree",
+          },
+        );
+        expect(outputs).not.toContainEqual(
+          expect.objectContaining({
+            hookSpecificOutput: expect.objectContaining({
+              permissionDecision: "deny",
+            }),
+          }),
+        );
+      });
       expect(query.setMcpServers).toHaveBeenCalledTimes(2);
       expect(queryMock).toHaveBeenCalledTimes(1);
     } finally {
@@ -3715,6 +3738,221 @@ describe("bridge", () => {
     } finally {
       releaseOpen();
       openMock.mockImplementation(nativeOpen);
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("delivers turns while SDK MCP status and update calls are pending", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    approveProjectMcpJson(cwd);
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(mcpConfig, JSON.stringify({ mcpServers: {} }));
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-sdk-operations-pending";
+    let releaseStatus = (): void => {};
+    let releaseUpdate = (): void => {};
+    let pendingStatus = false;
+    let pendingUpdate = false;
+    query.mcpServerStatus.mockImplementation(async () => {
+      if (pendingStatus) {
+        await new Promise<void>((resolve) => {
+          releaseStatus = resolve;
+        });
+        pendingStatus = false;
+      }
+      return [];
+    });
+    query.setMcpServers.mockImplementation(async () => {
+      if (pendingUpdate) {
+        await new Promise<void>((resolve) => {
+          releaseUpdate = resolve;
+        });
+        pendingUpdate = false;
+      }
+      return { added: [], removed: [], errors: {} };
+    });
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      const turn = async (requestId: number, input: string) => {
+        bridge.sendRequest(
+          requestId,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            input: [{ type: "text", text: input }],
+          }),
+        );
+        await expectTurnAcceptedBeforePrompt({
+          bridge,
+          call,
+          input,
+          requestId,
+        });
+      };
+
+      pendingStatus = true;
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({ mcpServers: { fixture: { command: "fixture-mcp" } } }),
+      );
+      await turn(2, "Continue while MCP status is pending");
+      await expectExternalMcpToolsBlocked(call);
+      await vi.waitFor(() => expect(query.mcpServerStatus).toHaveBeenCalled());
+      releaseStatus();
+      await vi.waitFor(() =>
+        expect(query.setMcpServers).toHaveBeenCalledTimes(1),
+      );
+
+      pendingUpdate = true;
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({
+          mcpServers: { fixture: { command: "replacement-mcp" } },
+        }),
+      );
+      await turn(3, "Continue while MCP update is pending");
+      await expectExternalMcpToolsBlocked(call);
+      await vi.waitFor(() =>
+        expect(query.setMcpServers).toHaveBeenCalledTimes(2),
+      );
+      releaseUpdate();
+      await vi.waitFor(() =>
+        expect(query.setMcpServers).toHaveBeenCalledTimes(2),
+      );
+
+      await turn(4, "Continue after MCP update settles");
+      await vi.waitFor(async () => {
+        const outputs = await invokeBridgeHooks(
+          call.options.hooks?.PreToolUse,
+          {
+            hook_event_name: "PreToolUse",
+            tool_name: "mcp__fixture__search",
+            tool_input: {},
+            tool_use_id: "tool-restored-mcp",
+            session_id: "session-1",
+            transcript_path: "/tmp/transcript.jsonl",
+            cwd: "/tmp/worktree",
+          },
+        );
+        expect(outputs).not.toContainEqual(
+          expect.objectContaining({
+            hookSpecificOutput: expect.objectContaining({
+              permissionDecision: "deny",
+            }),
+          }),
+        );
+      });
+    } finally {
+      releaseStatus();
+      releaseUpdate();
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("delivers turns while disabling a revoked static MCP server is pending", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const serverConfig = { command: "fixture-mcp" };
+    writeFileSync(
+      userConfig,
+      JSON.stringify({ mcpServers: { fixture: serverConfig } }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let releaseDisable = (): void => {};
+    let serverEnabled = true;
+    query.mcpServerStatus.mockImplementation(async () => [
+      {
+        name: "fixture",
+        status: serverEnabled ? "connected" : "disabled",
+        scope: "user",
+        config: serverConfig,
+      },
+    ]);
+    query.toggleMcpServer.mockImplementation(async (_name, enabled) => {
+      if (!enabled) {
+        await new Promise<void>((resolve) => {
+          releaseDisable = resolve;
+        });
+      }
+      serverEnabled = enabled;
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-static-disable-pending";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+      writeFileSync(userConfig, JSON.stringify({ mcpServers: {} }));
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [
+            {
+              type: "text",
+              text: "Continue while static server disable is pending",
+            },
+          ],
+        }),
+      );
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Continue while static server disable is pending",
+        requestId: 2,
+      });
+      await expectExternalMcpToolsBlocked(call);
+      await vi.waitFor(() =>
+        expect(query.toggleMcpServer).toHaveBeenCalledWith("fixture", false),
+      );
+      releaseDisable();
+      await vi.waitFor(() => expect(serverEnabled).toBe(false));
+
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [
+            {
+              type: "text",
+              text: "Continue after static server disable settles",
+            },
+          ],
+        }),
+      );
+      await expectTurnAcceptedBeforePrompt({
+        bridge,
+        call,
+        input: "Continue after static server disable settles",
+        requestId: 3,
+      });
+    } finally {
+      releaseDisable();
       query.finish();
       await stopBridgeThread({ bridge, queries: [query], threadId });
       bridge.restore();
