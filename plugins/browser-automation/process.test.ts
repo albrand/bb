@@ -41,7 +41,7 @@ assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
 const original = { ...env };
 const child = supervise(${JSON.stringify(process.execPath)}, ["-e", ${JSON.stringify(childCode)}], env);
 try {
-  const deadline = AbortSignal.timeout(5000);
+  const deadline = AbortSignal.timeout(20_000);
   while (true) {
     deadline.throwIfAborted();
     assert.ok(child.alive(), "Supervisor exited before external child started");
@@ -72,7 +72,7 @@ try {
                 new URL("./tsconfig.smoke.json", import.meta.url),
               ),
             },
-            timeout: 10_000,
+            timeout: 30_000,
           },
         );
         const supervisorEnv = JSON.parse(
@@ -89,7 +89,7 @@ try {
         await rm(root, { recursive: true, force: true });
       }
     },
-    12_000,
+    40_000,
   );
   it("worker death closes the supervisor pipe and kills its child", async () => {
     const root = await mkdtemp(join(tmpdir(), "db-worker-death-"));

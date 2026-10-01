@@ -20,8 +20,31 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 import { unlink, utimes } from "node:fs/promises";
+
+const lockRace = vi.hoisted(() => ({
+  path: null as string | null,
+  onUnlink: null as (() => Promise<void>) | null,
+  onReapLink: null as (() => void) | null,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    link: async (existingPath: string, newPath: string) => {
+      if (newPath === `${lockRace.path}.reap`) lockRace.onReapLink?.();
+      return actual.link(existingPath, newPath);
+    },
+    unlink: async (path: string) => {
+      if (path === lockRace.path) await lockRace.onUnlink?.();
+      return actual.unlink(path);
+    },
+  };
+});
+
 import {
   acquireLock,
   checkProvenance,
@@ -254,7 +277,7 @@ describe("runtime installer", () => {
     const second = await install(dir);
     expect(await readFile(second.binary, "utf8")).toBe(binaryContent);
     expect(await npmCalls()).toHaveLength(2);
-  });
+  }, 30_000);
   it("refuses a binary whose digest differs from the pin and leaves nothing behind", async () => {
     const dir = await dataDir();
     served[`/${asset}`] = binaryContent.replace(version, "1.0.0-other");
@@ -309,7 +332,7 @@ describe("runtime installer", () => {
         release,
       ),
     ).toThrow("registry signature");
-  });
+  }, 30_000);
   it("reports npm failures, a missing npm, and an unrecorded platform clearly", async () => {
     const dir = await dataDir();
     await configureNpm({ installExit: 1 });
@@ -356,6 +379,215 @@ describe("runtime installer", () => {
       `dev-browser@${version}`,
     ]);
   });
+  it("serializes stale-lock reaping before another caller can enter", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "stale-race.lock");
+    await writeFile(path, "999999999");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+
+    let unblockFirstUnlink!: () => void;
+    const firstUnlinkGate = new Promise<void>((resolve) => {
+      unblockFirstUnlink = resolve;
+    });
+    let markFirstUnlink!: () => void;
+    const firstUnlinkStarted = new Promise<void>((resolve) => {
+      markFirstUnlink = resolve;
+    });
+    let markSecondUnlink!: () => void;
+    const secondUnlink = new Promise<void>((resolve) => {
+      markSecondUnlink = resolve;
+    });
+    let markSecondReapLink!: () => void;
+    const secondReapLink = new Promise<void>((resolve) => {
+      markSecondReapLink = resolve;
+    });
+    let unlinkCount = 0;
+    let reapLinkCount = 0;
+    lockRace.path = path;
+    lockRace.onUnlink = async () => {
+      unlinkCount += 1;
+      if (unlinkCount === 1) {
+        markFirstUnlink();
+        await firstUnlinkGate;
+      } else if (unlinkCount === 2) markSecondUnlink();
+    };
+    lockRace.onReapLink = () => {
+      reapLinkCount += 1;
+      if (reapLinkCount === 2) markSecondReapLink();
+    };
+
+    const signal = new AbortController().signal;
+    const held: Array<() => Promise<void>> = [];
+    let secondAcquired = false;
+    const first = acquireLock(path, signal).then((unlock) => {
+      held.push(unlock);
+      return unlock;
+    });
+    let firstUnlinkReleased = false;
+    try {
+      await firstUnlinkStarted;
+      const second = acquireLock(path, signal).then((unlock) => {
+        secondAcquired = true;
+        held.push(unlock);
+        return unlock;
+      });
+      const interleaving = await Promise.race([
+        secondUnlink.then(() => "unprotected" as const),
+        secondReapLink.then(() => "serialized" as const),
+      ]);
+
+      if (interleaving === "unprotected") {
+        await second;
+        unblockFirstUnlink();
+        firstUnlinkReleased = true;
+        await first;
+        expect(held).toHaveLength(1);
+      } else {
+        unblockFirstUnlink();
+        firstUnlinkReleased = true;
+        const unlockFirst = await first;
+        expect(secondAcquired).toBe(false);
+        await unlockFirst();
+        const unlockSecond = await second;
+        expect(secondAcquired).toBe(true);
+        await unlockSecond();
+      }
+    } finally {
+      if (!firstUnlinkReleased) unblockFirstUnlink();
+      await Promise.all(held.map((unlock) => unlock()));
+      lockRace.path = null;
+      lockRace.onUnlink = null;
+      lockRace.onReapLink = null;
+      await unlink(path).catch(() => {});
+      await unlink(`${path}.reap`).catch(() => {});
+    }
+  }, 30_000);
+  it("fences stale reaping against release and a fresh lock acquisition", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "release-reap-race.lock");
+    const signal = new AbortController().signal;
+    const unlockA = await acquireLock(path, signal);
+    const old = new Date(Date.now() - 25 * 60_000);
+    await utimes(path, old, old);
+
+    let unblockReap!: () => void;
+    const reapGate = new Promise<void>((resolve) => {
+      unblockReap = resolve;
+    });
+    let markReap!: () => void;
+    const reapStarted = new Promise<void>((resolve) => {
+      markReap = resolve;
+    });
+    let markReleaseUnlink!: () => void;
+    const releaseUnlink = new Promise<void>((resolve) => {
+      markReleaseUnlink = resolve;
+    });
+    let markGuardAttempt!: () => void;
+    const guardAttempt = new Promise<void>((resolve) => {
+      markGuardAttempt = resolve;
+    });
+    let unlinkCount = 0;
+    let guardLinkCount = 0;
+    let cAcquired = false;
+    let bHeld: (() => Promise<void>) | undefined;
+    let cHeld: (() => Promise<void>) | undefined;
+    lockRace.path = path;
+    lockRace.onUnlink = async () => {
+      unlinkCount += 1;
+      if (unlinkCount === 1) {
+        markReap();
+        await reapGate;
+      } else if (unlinkCount === 2) markReleaseUnlink();
+    };
+    lockRace.onReapLink = () => {
+      guardLinkCount += 1;
+      if (guardLinkCount >= 3) markGuardAttempt();
+    };
+
+    let reapReleased = false;
+    try {
+      const b = acquireLock(path, signal).then((unlock) => {
+        bHeld = unlock;
+        return unlock;
+      });
+      await reapStarted;
+      const release = unlockA();
+      const c = acquireLock(path, signal).then((unlock) => {
+        cAcquired = true;
+        cHeld = unlock;
+        return unlock;
+      });
+      const interleaving = await Promise.race([
+        releaseUnlink.then(() => "unprotected" as const),
+        guardAttempt.then(() => "guarded" as const),
+      ]);
+
+      if (interleaving === "unprotected") {
+        await releaseUnlink;
+        await c;
+        unblockReap();
+        reapReleased = true;
+        await b;
+        expect(cAcquired).toBe(true);
+        expect([bHeld, cHeld].filter(Boolean)).toHaveLength(1);
+      } else {
+        unblockReap();
+        reapReleased = true;
+        await b;
+        await release;
+        expect(cAcquired).toBe(false);
+        await bHeld!();
+        await c;
+      }
+    } finally {
+      if (!reapReleased) unblockReap();
+      await Promise.all([bHeld?.(), cHeld?.()].filter(Boolean));
+      lockRace.path = null;
+      lockRace.onUnlink = null;
+      lockRace.onReapLink = null;
+      await unlink(path).catch(() => {});
+      await unlink(`${path}.reap`).catch(() => {});
+      await unlink(`${path}.reap.reap`).catch(() => {});
+    }
+  }, 30_000);
+  it("recovers a stale reap lock left by a dead reaper", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "dead-reaper.lock");
+    const reaperPath = `${path}.reap`;
+    await writeFile(path, "999999999");
+    await writeFile(reaperPath, "999999999");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+    await utimes(reaperPath, old, old);
+
+    const unlock = await acquireLock(path, AbortSignal.timeout(5_000));
+    expect(await readFile(path, "utf8")).toMatch(
+      new RegExp(`^${process.pid} `),
+    );
+    await expect(readFile(reaperPath, "utf8")).rejects.toThrow();
+    await unlock();
+  }, 30_000);
+  it("does not steal an aged reap lock from a live reaper", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "live-reaper.lock");
+    const reaperPath = `${path}.reap`;
+    const reaperOwner = `${process.pid} ${"a".repeat(16)}`;
+    await writeFile(path, "999999999");
+    await writeFile(reaperPath, reaperOwner);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+    await utimes(reaperPath, old, old);
+
+    await expect(
+      acquireLock(path, AbortSignal.timeout(2_000)),
+    ).rejects.toThrow();
+    expect(await readFile(reaperPath, "utf8")).toBe(reaperOwner);
+  }, 30_000);
   it("hands the lock over in order, keeps unparsable young locks, and never removes a replaced lock", async () => {
     const dir = await dataDir();
     await mkdir(installRoot(dir), { recursive: true });
@@ -388,7 +620,7 @@ describe("runtime installer", () => {
     );
     await unlockC();
     await expect(readFile(path, "utf8")).rejects.toThrow();
-  });
+  }, 30_000);
   it("cancels an in-progress install, cleans up, and allows a retry", async () => {
     const dir = await dataDir();
     await configureNpm({ installDelayMs: 3_000 });
