@@ -177,7 +177,7 @@ export class SdkSession {
     string,
     McpServerStatus["config"]
   >();
-  private readonly pendingStaticServerRestorations = new Set<string>();
+  private mcpReconciliationPending = false;
   private complete: (() => void) | null = null;
   private stderrTail = "";
 
@@ -214,8 +214,8 @@ export class SdkSession {
     this.options.model = model;
   }
 
-  hasPendingStaticServerRestoration(): boolean {
-    return this.pendingStaticServerRestorations.size > 0;
+  needsMcpServerReconciliation(): boolean {
+    return this.mcpReconciliationPending;
   }
 
   async setMcpServers(
@@ -281,7 +281,6 @@ export class SdkSession {
           ) {
             await query.toggleMcpServer(status.name, true);
             this.bridgeDisabledStaticServers.delete(status.name);
-            this.pendingStaticServerRestorations.delete(status.name);
           }
         } else if (reconnectConfiguredServers) {
           await query.reconnectMcpServer(status.name);
@@ -300,18 +299,16 @@ export class SdkSession {
         );
       }
     } catch (error) {
+      this.mcpReconciliationPending = true;
       for (const name of restoreAfterFailedUpdate) {
         try {
           await query.toggleMcpServer(name, true);
           this.bridgeDisabledStaticServers.delete(name);
-          this.pendingStaticServerRestorations.delete(name);
-        } catch {
-          this.pendingStaticServerRestorations.add(name);
-        }
+        } catch {}
       }
       throw error;
     }
-    this.pendingStaticServerRestorations.clear();
+    this.mcpReconciliationPending = false;
     this.options.mcpServers = nextServers;
   }
 

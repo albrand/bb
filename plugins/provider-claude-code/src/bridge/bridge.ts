@@ -2508,7 +2508,7 @@ async function refreshClaudeMcpServers(
     if (
       signature.startsWith("unhashed:") ||
       (signature === attachment.mcpConfigSignature &&
-        !threadSession.session.hasPendingStaticServerRestoration())
+        !threadSession.session.needsMcpServerReconciliation())
     ) {
       return;
     }

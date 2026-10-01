@@ -1954,6 +1954,125 @@ describe("bridge", () => {
     }
   });
 
+  it("reconciles dynamic servers after a failed partial replacement", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    const originalConfig = JSON.stringify({
+      mcpServers: { fixture: { command: "fixture-mcp" } },
+    });
+    writeFileSync(mcpConfig, originalConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let dynamicServers: Record<string, { type: "stdio"; command: string }> = {};
+    let failNextUpdate = false;
+    query.mcpServerStatus.mockImplementation(async () =>
+      Object.entries(dynamicServers).map(([name, config]) => ({
+        name,
+        status: "connected",
+        scope: "dynamic",
+        config,
+      })),
+    );
+    query.setMcpServers.mockImplementation(async (servers) => {
+      if (failNextUpdate) {
+        failNextUpdate = false;
+        dynamicServers = {};
+        return {
+          added: [],
+          removed: ["fixture"],
+          errors: { fixture: "replacement failed after removal" },
+        };
+      }
+      dynamicServers = servers as typeof dynamicServers;
+      return { added: Object.keys(servers), removed: [], errors: {} };
+    });
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-dynamic-reconciliation";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load dynamic server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load dynamic server");
+      await bridge.waitForResponse(2);
+      expect(dynamicServers).toEqual({
+        fixture: { type: "stdio", command: "fixture-mcp" },
+      });
+
+      failNextUpdate = true;
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({
+          mcpServers: { fixture: { command: "replacement-mcp" } },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Handle partial replacement" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Handle partial replacement");
+      await bridge.waitForResponse(3);
+      expect(dynamicServers).toEqual({});
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+
+      writeFileSync(mcpConfig, originalConfig);
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Restore original dynamic server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Restore original dynamic server",
+      );
+      await bridge.waitForResponse(4);
+      expect(dynamicServers).toEqual({
+        fixture: { type: "stdio", command: "fixture-mcp" },
+      });
+      expect(query.setMcpServers).toHaveBeenCalledTimes(3);
+
+      bridge.sendRequest(
+        5,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Unchanged after dynamic recovery" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe(
+        "Unchanged after dynamic recovery",
+      );
+      await bridge.waitForResponse(5);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(3);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("preserves current MCP servers when a config read hits premature EOF", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
