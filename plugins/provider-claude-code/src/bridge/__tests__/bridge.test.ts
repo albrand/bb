@@ -910,6 +910,90 @@ describe("bridge", () => {
     }
   });
 
+  it("preserves a disabled server until its project config is explicitly edited", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const mcpConfig = join(cwd, ".mcp.json");
+    writeFileSync(
+      mcpConfig,
+      JSON.stringify({
+        mcpServers: { deliberatelyDisabled: { command: "fixture-mcp" } },
+      }),
+    );
+    const initialServerConfig = {
+      type: "stdio",
+      command: "fixture-mcp",
+    };
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "deliberatelyDisabled",
+        status: "disabled",
+        scope: "project",
+        config: initialServerConfig,
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-disabled";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Keep disabled" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Keep disabled");
+      await bridge.waitForResponse(2);
+      expect(query.toggleMcpServer).not.toHaveBeenCalledWith(
+        "deliberatelyDisabled",
+        true,
+      );
+
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify({
+          mcpServers: {
+            deliberatelyDisabled: { command: "explicitly-edited-mcp" },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Apply explicit edit" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Apply explicit edit");
+      await bridge.waitForResponse(3);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        deliberatelyDisabled: {
+          type: "stdio",
+          command: "explicitly-edited-mcp",
+        },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("coalesces concurrent turns that detect the same MCP config change", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

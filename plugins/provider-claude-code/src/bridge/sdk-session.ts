@@ -246,9 +246,7 @@ export class SdkSession {
         dynamicServers[status.name] = configuredServer;
         continue;
       }
-      if (status.status === "disabled") {
-        await this.query.toggleMcpServer(status.name, true);
-      } else if (reconnectConfiguredServers) {
+      if (status.status !== "disabled" && reconnectConfiguredServers) {
         await this.query.reconnectMcpServer(status.name);
       }
     }
