@@ -1713,6 +1713,115 @@ describe("bridge", () => {
     }
   });
 
+  it("restores earlier static servers when a later MCP reconnect fails", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const validConfig = JSON.stringify({
+      projects: {
+        [cwd]: {
+          mcpServers: {
+            first: { command: "first-mcp" },
+            second: { command: "second-mcp" },
+          },
+        },
+      },
+    });
+    writeFileSync(userConfig, validConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "first",
+        status: "connected",
+        scope: "local",
+        config: { type: "stdio", command: "first-mcp" },
+      },
+      {
+        name: "second",
+        status: "connected",
+        scope: "local",
+        config: { type: "stdio", command: "second-mcp" },
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-reconnect-error";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load both static servers" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load both static servers");
+      await bridge.waitForResponse(2);
+
+      query.reconnectMcpServer.mockRejectedValueOnce(
+        new Error("second server reconnect failed"),
+      );
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: {
+                first: { command: "first-mcp-updated" },
+                second: { command: "second-mcp" },
+              },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Roll back partial refresh" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Roll back partial refresh");
+      await bridge.waitForResponse(3);
+      expect(query.toggleMcpServer).toHaveBeenNthCalledWith(1, "first", false);
+      expect(query.toggleMcpServer).toHaveBeenNthCalledWith(2, "first", true);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry partial refresh" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Retry partial refresh");
+      await bridge.waitForResponse(4);
+      expect(query.toggleMcpServer).toHaveBeenNthCalledWith(3, "first", false);
+      expect(query.reconnectMcpServer).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        first: { type: "stdio", command: "first-mcp-updated" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("preserves current MCP servers when a config read hits premature EOF", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);
