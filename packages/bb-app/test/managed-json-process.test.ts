@@ -383,7 +383,11 @@ describe("managed JSON CLI process transactions", options, () => {
     owner.child.kill("SIGSTOP");
     const contender = start(dir, ["env", "unset", "SYNTHETIC_A"]);
     await contender.event("blocked");
+    const blockedAt = performance.now();
     const result = await contender.done;
+    const lockWaitMs = performance.now() - blockedAt;
+    expect(lockWaitMs).toBeGreaterThanOrEqual(4_000);
+    expect(lockWaitMs).toBeLessThan(20_000);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`Timed out waiting to update ${path}`);
     expect(result.stdout).not.toContain("Unset");
