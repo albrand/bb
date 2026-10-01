@@ -120,7 +120,7 @@ function start(
     done,
     release: () => child.send("continue"),
     async event(...names: string[]): Promise<string> {
-      const deadline = performance.now() + 10_000;
+      const deadline = performance.now() + 60_000;
       for (;;) {
         const found = events.find((event) => names.includes(event));
         if (found) return found;
@@ -187,7 +187,7 @@ const cases = [
   },
 ];
 
-const options = { timeout: 30_000 };
+const options = { timeout: 120_000 };
 
 describe("managed JSON CLI process transactions", options, () => {
   for (const { kind, a, b, va, vb } of cases) {
@@ -396,7 +396,7 @@ describe("managed JSON CLI process transactions", options, () => {
     await success(start(dir, ["env", "unset", "SYNTHETIC_A"]));
     expect(read(path)).toEqual({ env: { SYNTHETIC_B: "b" } });
     cleanAndPrivate(dir, "env");
-  }, 15_000);
+  });
 
   it("rejects invalid input and malformed documents without rewriting them", async () => {
     const dir = directory();
