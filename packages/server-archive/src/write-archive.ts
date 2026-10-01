@@ -1,4 +1,4 @@
-import { constants, createWriteStream } from "node:fs";
+import { constants, createWriteStream, type WriteStream } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { type FileHandle, mkdir, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -185,6 +185,14 @@ function assertArchivePaths(files: readonly ServerArchiveSourceFile[]): void {
   }
 }
 
+function whenClosed(stream: WriteStream): Promise<void> {
+  return stream.closed
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        stream.once("close", () => resolve());
+      });
+}
+
 export async function writeServerArchive(
   args: WriteServerArchiveArgs,
 ): Promise<WriteServerArchiveResult> {
@@ -207,6 +215,10 @@ export async function writeServerArchive(
   );
   const archiveHash = createHash("sha256");
   let sizeBytes = 0;
+  const destination = createWriteStream(tempPath, {
+    flags: "wx",
+    mode: 0o600,
+  });
   try {
     await pipeline(
       Readable.from(generateTarChunks(manifest, plannedFiles)),
@@ -218,10 +230,11 @@ export async function writeServerArchive(
           yield chunk;
         }
       },
-      createWriteStream(tempPath, { flags: "wx", mode: 0o600 }),
+      destination,
     );
     await rename(tempPath, args.outPath);
   } catch (error) {
+    await whenClosed(destination);
     await rm(tempPath, { force: true });
     throw error;
   }

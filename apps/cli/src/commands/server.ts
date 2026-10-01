@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, type WriteStream } from "node:fs";
 import { rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -113,6 +113,14 @@ async function assertWritableOutPath(outPath: string): Promise<void> {
   }
 }
 
+function whenClosed(stream: WriteStream): Promise<void> {
+  return stream.closed
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        stream.once("close", () => resolve());
+      });
+}
+
 async function writeExportFile(args: {
   body: ReadableStream<Uint8Array>;
   outPath: string;
@@ -137,11 +145,12 @@ async function writeExportFile(args: {
       await reader.cancel().catch(() => undefined);
     }
   }
+  const destination = createWriteStream(tempPath, {
+    flags: "wx",
+    mode: 0o600,
+  });
   try {
-    await pipeline(
-      chunks,
-      createWriteStream(tempPath, { flags: "wx", mode: 0o600 }),
-    );
+    await pipeline(chunks, destination);
     if (hash.digest("hex") !== args.expectedSha256) {
       throw new Error(
         `The downloaded export does not match the SHA-256 digest the server sent, so ${outPath} was not written. Try the export again.`,
@@ -149,6 +158,7 @@ async function writeExportFile(args: {
     }
     await rename(tempPath, outPath);
   } catch (error) {
+    await whenClosed(destination);
     await rm(tempPath, { force: true });
     throw error;
   }
