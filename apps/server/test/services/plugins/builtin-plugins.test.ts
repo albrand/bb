@@ -577,20 +577,24 @@ describe("builtin plugin reconciliation", () => {
     });
   });
 
-  it.each(["provider-usage", "provider-retry"])(
+  it.each([
+    ["provider-usage", "bb--provider-usage"],
+    ["provider-retry", "provider-retry"],
+  ])(
     "runs the real %s builtin on a fresh database",
-    async (builtinName) => {
+    async (builtinName, pluginId) => {
       service = createService({
         db,
         dataDir: join(workDir, "data"),
         builtinName,
+        pluginId,
         rootDir: resolveBuiltinPluginRootPath(builtinName),
       });
       await service.start();
 
       expect(service.list()).toMatchObject([
         {
-          id: builtinName,
+          id: pluginId,
           source: `builtin:${builtinName}`,
           enabled: true,
           status: "running",
@@ -598,26 +602,6 @@ describe("builtin plugin reconciliation", () => {
       ]);
     },
   );
-
-  it("loads the builtin connect plugin like other builtins", async () => {
-    service = createService({
-      db,
-      dataDir: join(workDir, "data"),
-      builtinName: "connect",
-    });
-
-    await service.start();
-
-    expect(service.list()).toMatchObject([
-      {
-        id: "builtin-fixture",
-        source: "builtin:connect",
-        enabled: true,
-        status: "running",
-      },
-    ]);
-    expect(loadCount()).toBe(1);
-  });
 
   it("loads the real side-chat builtin source", async () => {
     service = createService({
@@ -698,7 +682,7 @@ describe("builtin plugin reconciliation", () => {
     expect(loadCount()).toBe(2);
   });
 
-  it("keeps builtin CLI and UI contributions available", async () => {
+  it("lists and runs a builtin plugin's CLI contribution", async () => {
     service = createService({
       db,
       dataDir: join(workDir, "data"),

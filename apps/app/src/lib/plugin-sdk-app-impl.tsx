@@ -25,7 +25,6 @@ import { useThreadTimelineNavigation } from "@/components/thread/timeline/Thread
 import { usePluginId } from "@/components/plugin/plugin-context";
 import { useQuestionFormHost } from "@bb/shared-ui/question-form-host";
 import { definePluginApp } from "./plugin-app-definition";
-import { installDeprecatedAliases } from "./plugin-sdk-deprecated-aliases";
 import {
   useBbContext,
   useBbNavigate,
@@ -65,8 +64,7 @@ import { SidebarNavigationIcon } from "@/components/sidebar/SidebarNavigationMod
 import { useAppNavigationHost } from "./app-navigation-host";
 import { useCodeTheme } from "./plugin-code-theme";
 
-export const pluginSdkAppImplementation = installDeprecatedAliases(
-  {
+export const pluginSdkAppImplementation = {
     definePluginApp,
     experimental_Icon: Icon,
     experimental_ProviderIcon: ProviderIcon,
@@ -114,9 +112,7 @@ export const pluginSdkAppImplementation = installDeprecatedAliases(
     useSdk,
     experimental_useProviders: useProviders,
     experimental_useCodeTheme: useCodeTheme,
-  } satisfies PluginSdkApp,
-  { experimental_UrlLink: "UrlLink" },
-);
+} satisfies PluginSdkApp;
 
 function PluginMarkdown({
   content,

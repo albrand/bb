@@ -154,10 +154,6 @@ vi.mock(
   }),
 );
 
-vi.mock("@/components/plugin/PluginPendingInteractionComposer", () => ({
-  PluginPendingInteractionComposer: () => null,
-}));
-
 vi.mock("@/components/ui/app-toast", () => ({
   appToast: { error: vi.fn() },
 }));

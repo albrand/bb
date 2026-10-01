@@ -10,8 +10,7 @@ This index lists every command path that the core CLI registers, including alias
 
 - `bb settings`
 - `bb settings show`
-- `bb settings android-app`
-- `bb settings android-app-prepare`
+- `bb settings mobile-app`
 - `bb settings ai-services`
 - `bb settings ai-services show`
 - `bb settings ai-services set`
@@ -62,15 +61,9 @@ This index lists every command path that the core CLI registers, including alias
 
 - `bb provider`
 - `bb provider list`
+- `bb provider enable`
+- `bb provider disable`
 - `bb provider models`
-
-## manager
-
-- `bb manager`
-- `bb manager hire`
-- `bb manager list`
-- `bb manager status`
-- `bb manager delete`
 
 ## machine
 
@@ -101,6 +94,14 @@ environment and requires `--environment-provider <id>`. For a composed option,
 use `--environment-provider modal-sandbox` alone. `--machine-inputs <json>`
 configures the machine with optional configured `preset` and `image` names;
 `--environment-inputs <json>` configures the workspace. Neither carries secrets.
+
+## manager
+
+- `bb manager`
+- `bb manager hire`
+- `bb manager list`
+- `bb manager status`
+- `bb manager delete`
 
 ## server
 

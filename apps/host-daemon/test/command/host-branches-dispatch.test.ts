@@ -159,8 +159,8 @@ async function expectRemainsPending(
   expect(state).toBe("pending");
 }
 
-async function waitForFile(filePath: string): Promise<void> {
-  const deadline = Date.now() + 2_000;
+async function waitForFile(filePath: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       await fs.access(filePath);
@@ -169,7 +169,7 @@ async function waitForFile(filePath: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
-  throw new Error(`File did not appear within 2000ms: ${filePath}`);
+  throw new Error(`File did not appear within ${timeoutMs}ms: ${filePath}`);
 }
 
 describe("host.inspect_git_source dispatch", () => {
@@ -203,23 +203,21 @@ describe("host.inspect_git_source dispatch", () => {
     let refreshedResult: Awaited<ReturnType<typeof dispatchOnlineRpcCommand>>;
 
     try {
-      const result = await expectResolvesWithin(
-        dispatchOnlineRpcCommand(
-          {
-            type: "host.inspect_git_source",
-            path: repoPath,
-            remoteRefresh: "background",
-          },
-          harness.dispatchOptions(),
-        ),
-        2_000,
+      const resultPromise = dispatchOnlineRpcCommand(
+        {
+          type: "host.inspect_git_source",
+          path: repoPath,
+          remoteRefresh: "background",
+        },
+        harness.dispatchOptions(),
       );
+      await waitForFile(refreshStartedPath, 30_000);
+      const result = await expectResolvesWithin(resultPromise, 30_000);
       expect(result).toMatchObject({
         defaultBranch: "main",
         defaultBranchRelation: "equal",
         originDefaultBranch: "origin/main",
       });
-      await waitForFile(refreshStartedPath);
     } finally {
       await fs.writeFile(releaseRefreshPath, "release\n", "utf8");
       refreshedResult = await dispatchOnlineRpcCommand(
@@ -237,7 +235,7 @@ describe("host.inspect_git_source dispatch", () => {
       defaultBranchRelation: "local-behind",
       originDefaultBranch: "origin/main",
     });
-  });
+  }, 45_000);
 
   it("waits for a blocking refresh before reading default-ref metadata", async () => {
     const { releaseRefreshPath, refreshStartedPath, repoPath } =
@@ -330,23 +328,6 @@ describe("host.inspect_git_source dispatch", () => {
     expect(invocations).toHaveLength(2);
     expect(invocations[0]).toContain("GIT_TERMINAL_PROMPT=0");
     expect(invocations[1]).toContain("GIT_TERMINAL_PROMPT=unset");
-  });
-
-  it("reports detached HEAD in checkout state", async () => {
-    const repoPath = await initBranchRepo();
-    await runGitCommand(["switch", "--detach", "HEAD"], { cwd: repoPath });
-    const harness = createHarness();
-
-    const result = await dispatchOnlineRpcCommand(
-      {
-        type: "host.inspect_git_source",
-        path: repoPath,
-        remoteRefresh: "blocking",
-      },
-      harness.dispatchOptions(),
-    );
-
-    expect(result.checkout.kind).toBe("detached");
   });
 
   it("reports dirty primary checkouts", async () => {

@@ -7,6 +7,7 @@ import {
 } from "@bb/connect-db";
 
 export const RESERVE_MICROS = 5_000;
+export const TRANSCRIBE_RESERVE_MICROS = 20_000;
 export const RETENTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -32,7 +33,7 @@ export async function reserveBudget(
   db: ConnectDb,
   key: BudgetKey,
   limitMicros: number,
-  reserveMicros: number = RESERVE_MICROS,
+  reserveMicros: number,
 ): Promise<boolean> {
   await db
     .insert(aiUsageDay)
@@ -60,7 +61,7 @@ export async function settleBudget(
   db: ConnectDb,
   key: BudgetKey,
   costMicros: number,
-  reserveMicros: number = RESERVE_MICROS,
+  reserveMicros: number,
 ): Promise<{ spentTodayMicros: number }> {
   const charged = Math.max(0, Math.round(costMicros));
   const settled = await db

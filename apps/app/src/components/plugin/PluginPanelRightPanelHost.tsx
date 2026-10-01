@@ -1185,7 +1185,6 @@ export function PluginPanelRightPanelHost({
         }
         main={children}
         composerHost={null}
-        compactPresentation="full"
         renderPanel={renderPanel}
       />
     </div>

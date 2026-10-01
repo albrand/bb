@@ -224,9 +224,8 @@ identified by its plugin and its id, so two plugins may register the same id;
 pass `--plugin <plugin-id>` to `set` when they do. Automatic tries
 the services bb ships in order: Codex (`codex`, using the Codex CLI login on the
 primary machine), then bb cloud (`bb`, the `bb-ai` plugin, for a signed-in bb
-account). bb cloud is off until you turn it on with `bb ai on` or in Settings →
-bb cloud AI; while off it sends nothing to getbb.app, and `bb ai off` turns it
-off again. Automatic never sends text to a third-party plugin. A service you pick
+account). bb cloud is on by default once you sign in; `bb ai off` turns it off
+(it then sends nothing to getbb.app) and `bb ai on` turns it back on. Automatic never sends text to a third-party plugin. A service you pick
 is used alone; if it fails, titles fall back to the start of the prompt and
 commits to `bb: automated commit`. Each plugin picks its own model.
 
@@ -241,7 +240,7 @@ happens often, run `codex login --with-api-key` on the primary machine, or pick
 another voice service.
 
 bb accepts voice recordings up to 25 MB. A service may set a lower limit;
-Codex transcribes recordings up to 20 MB.
+Codex transcribes recordings up to 20 MB and bb cloud up to 10 MB.
 
 The microphone picker in Settings → Voice Input is client-local. It stores the
 selected browser `MediaDevices` device id in localStorage as
@@ -313,6 +312,14 @@ keeps "Queue" because a one-time migration stamps the old default onto it. Set
 it with
 `bb settings general steerActiveThreadOnEnter <true|false>`, where `true` is
 "Steer".
+
+The "Thread archive confirmation" switch in Settings → General defaults to on.
+Turn it off to archive a thread and its child threads immediately without a
+confirmation popup. The archive toast still offers Undo. This server-wide
+preference applies to all connected app clients. Set it with
+`bb settings general confirmThreadArchive false` or
+`bb.sdk.system.updateGeneralSettings` using `confirmThreadArchive`.
+CLI and SDK archive operations remain non-interactive.
 
 The "Streamer mode" toggle in Settings → General hides every `customModels`
 entry from `~/.bb/config.json` in all model lists: the web and mobile pickers,
@@ -561,6 +568,43 @@ uses this mapping to launch remote-capable editors and terminals over SSH.
 Browsers or devices without a helper can still use bb; local editor actions are
 simply unavailable.
 
+## Provider availability
+
+Settings → Providers lists disabled providers below enabled providers in the same
+list. Only enabled providers can be reordered. Each row’s three-dot menu enables
+or disables the provider, or makes an enabled provider the default. Enable
+restores a provider and, if needed, its supplying plugin.
+Disabling an individual provider leaves its plugin, sibling providers, installed
+CLI, and existing threads intact. In-flight turns can finish; new turns and
+sessions are rejected until the provider is enabled again. Queued messages and
+automations are subject to the same server-side check.
+
+```bash
+bb provider list --all
+bb provider disable acp-opencode
+bb provider enable claude-code
+```
+
+`bb provider list` and thread pickers omit disabled providers. `list --all`
+shows the global management catalog, including providers whose plugins are off;
+it cannot be combined with machine or environment selectors. Enabling a shared
+plugin preserves individual provider opt-outs. Disabling the selected default
+clears that choice, allowing the next enabled provider in saved order to be used.
+A project whose last-used provider is disabled also falls back to that order;
+explicitly requesting a disabled provider is still rejected.
+
+The core `disabledProviderIds` value lists disabled providers by ID. It is stored
+apart from Settings → General, so only the provider enable/disable route, CLI and
+SDK change it; a general-settings save, even from a stale client, cannot. Enable
+removes the ID, so the provider returns to its automatic discovery behavior:
+agents such as `acp-opencode` again appear only where their CLI is installed.
+Uninstalling a plugin forgets the disabled state of its providers.
+
+The SDK exposes `sdk.providers.catalog()` and
+`sdk.providers.setEnabled({ providerId: "acp-opencode", enabled: false })`.
+Install provider plugins in Settings → Plugins. Configure custom ACP agents in
+the ACP providers plugin settings.
+
 ## Custom ACP Agents
 
 Known ACP agents appear when their CLI is installed on the host. bb exposes
@@ -604,18 +648,6 @@ setting changes, with no restart and no `config refresh`.
 
 A configured agent's command is local code execution and only works with a
 co-located daemon.
-
-### The deprecated `customAcpAgents` config array
-
-Before ACP agents were plugin-owned, custom agents lived in `customAcpAgents`
-in `~/.bb/config.json`. bb still **reads** that array so an existing agent keeps
-working, logs a deprecation warning for each one, and never writes to it.
-Support ends in 0.41 — move each entry into the `customAgents` setting above.
-The two shapes are identical except that the setting has no `logo` field: a
-plugin-registered provider's icon is a host glyph or an asset the plugin ships,
-so a configured agent shows the generic tool glyph, and bb drops the field when
-it reads the old array. A setting entry wins over a config entry with the same
-`id`.
 
 ## OpenCode Go Usage
 
@@ -1212,7 +1244,7 @@ override. Their JSON rows include `hostId`, `hostName`, `port`, and `url`;
 Connect enrollment fails fast with instructions to remove and re-add it in
 Settings → Machines.
 
-The CLI commands are proxied to the plugins, and Settings → Remote access
+The CLI commands are proxied to the plugins, and Settings → bb connect
 drives connect's rpc (including shared ports).
 
 ### Pairing the bb mobile app
@@ -1227,13 +1259,9 @@ variable. Android build, signing, and Play submission instructions are in
 The bb mobile app reaches a paired bb through the same connect route. It
 enrolls as a connect **machine** — its own credential on the getbb.app account,
 separate from the server's pairing secret and individually revocable — so
-pairing starts from the bb, not from the phone. Both pairing surfaces sit
-behind the `mobileApp` experiment (Settings → Experiments → **Mobile app**, or
-`bb settings experiment mobileApp true`) until the app is generally available;
-the connect plugin reads the experiment from `/system/config` on every call,
-so a toggle applies without a plugin reload:
+pairing starts from the bb, not from the phone. No experiment is required.
 
-- Settings → Remote access → **Add mobile device** mints a one-time code and
+- Settings → Mobile → **Add mobile device** mints a one-time code and
   shows it as a QR code plus copyable text with a countdown.
 - `bb connect machine-code` prints the same code, server URL, connect apex,
   and expiry; `bb connect machine-code --json` returns
@@ -1268,21 +1296,10 @@ plugin server loader. Toggling it leaves running plugin instances unchanged;
 the selected loader applies on the next install, reload, enable, update, or
 server restart. Set it with `bb settings experiment legacyJitiPluginLoader
 <true|false>`.
-The `mobileApp` experiment turns on pairing for the bb mobile app: the
-**Add mobile device** card under Settings → Remote access and the
-`bb connect machine-code` command (see "Pairing the bb mobile app" above). It
-is off by default while the app is in early access.
 
 BB releases restorable provider sessions after 30 idle minutes. The daemon
 checks for these sessions every five minutes. Active turns, commands, agents,
 workflows, and monitors keep their sessions loaded.
-
-The `sidebarProgressiveDisclosure` experiment is off by default. In **By
-project** and **By machine**, it shows the first five groups in the current sort
-order, keeps attention groups visible, and reveals ten more per **Show more**
-click. Revealed groups stay visible through activity and sort-order changes.
-**Manually** is unchanged. Toggle it with `bb settings experiment
-sidebarProgressiveDisclosure <true|false>`.
 
 Long timelines and large expanded timeline details retain stable
 height-preserving wrappers while mounting only rows near their active
@@ -1700,7 +1717,7 @@ The Browser Automation plugin supports desktop attachment and headless Chrome on
 
 On each selected browser host, the plugin's host worker installs that release automatically on first use under `<plugin host dataDir>/runtime/npm/`, using the host's `npm` with scripts disabled, verifying the registry signature and SLSA provenance, downloading the matching GitHub release binary, and checking its digest before launch. Later sessions reuse the verified install without network access. Headless mode discovers installed Chrome/Chromium or uses `<plugin host dataDir>/runtime/chrome`. These files belong to the plugin host storage directory; they are not paths on the server or invoking agent host, and the user's global npm installation is never modified. No runtime sandbox-disabling setting is provided.
 
-For isolated development smoke tests only, `DEV_BROWSER_SMOKE_BINARY` selects the absolute binary path for the runtime smoke, `DEV_BROWSER_SMOKE_CHROME` selects the absolute Chrome path, and `DEV_BROWSER_SMOKE_NO_SANDBOX=1` enables the fixture's no-sandbox wrapper where the test host requires it. The `smoke:install` task performs a real install of the pinned release into a disposable directory. These variables do not change normal plugin runtime behavior.
+For isolated development smoke tests only, `DEV_BROWSER_SMOKE_BINARY` selects the absolute binary path for the runtime smoke and `DEV_BROWSER_SMOKE_CHROME` selects the absolute Chrome path. The `smoke:install` task performs a real install of the pinned release into a disposable directory. These variables do not change normal plugin runtime behavior.
 
 ## Agent guidance plugin settings
 
@@ -1905,57 +1922,22 @@ The desktop app's own profile is excluded. See `bb guide browser` for search
 bounds, encryption limitations, and the `import-sources` / `import-cookies`
 commands. No additional BB setting is required to enable discovery.
 
-### Android App experiment
+### Mobile app downloads
 
-Enable **Android App** in Settings → Experiments, or run
-`bb settings experiment androidTesting true`. The Android App section appears
-below the flags. **Download APK** fetches the build from the public
-`get-bb/bb` GitHub release tagged `android-testing`, verifies its SHA256 and size,
-and downloads it. Users and their servers need no Android tools for this path.
-The server caches completed APKs, checks the release manifest on each request,
-and reuses the cache when unchanged or GitHub is unavailable. Failed integrity
-checks never replace a cached APK. Concurrent requests share the in-flight work.
+Mobile app downloads are always available in Settings → Mobile (`/settings/mobile`).
+**Join iOS TestFlight** opens https://testflight.apple.com/join/T9MayTMb.
+**Download Android APK** downloads directly from the public `get-bb/bb` GitHub
+`android-testing` release's `bb-android.apk` asset. The APK does not pass through
+the bb server or bb connect. No experiment or Android developer tools are needed.
+Pair either app through Settings → Mobile → **Add mobile device**.
 
-If there is no release or usable cache, the page offers **Build on this server**.
-Local builds never start automatically. Configure `BB_ANDROID_SOURCE_DIR` with
-an absolute path to a dedicated bb source checkout on the server host. Install
-its dependencies with pnpm, install JDK 17 or newer, and set `ANDROID_HOME` or
-`ANDROID_SDK_ROOT` to an Android SDK with build-tools. These tools must be on the
-server process's PATH; restart the server after changing its environment.
-The fallback supports macOS/Linux and builds an arm64 APK using the checkout's
-local build script and debug signing key. Builds modify generated files in that
-checkout and can take several minutes. Local and release signing keys can differ;
-Android cannot update an installed app with an APK signed by a different key.
-Failures point to missing tools or `android-testing/build.log` in the server data
-directory. Local builds time out after 30 minutes. In-flight status is held in
-memory; completed APKs survive restarts.
+Use `bb settings mobile-app --json` or SDK `system.mobileAppDownloads()` to get
+both public links. Add `--details --json` or call `system.mobileAppReleases()`
+(GET `/api/v1/system/mobile-app-releases`) for Android version/build, size, and
+upload date. The server fetches only public metadata, caches it for five minutes,
+and returns `android: null` if unavailable or inconsistent. Download links remain
+usable during metadata failures. iOS version and release date are shown in TestFlight.
+Publish updates with **Mobile Android (EAS)**, profile `preview`, **publish** on.
 
-CLI equivalents (wait for completion, and exit nonzero on failure):
-
-```sh
-bb settings android-app-prepare github --json
-bb settings android-app-prepare local --json
-bb settings android-app --json
-```
-
-SDK: `system.prepareAndroidApp({ source: "github" | "local" })` starts work,
-`system.androidAppPreparation()` reads status, and `system.androidApp()` reads
-the cached build metadata. The HTTP routes are POST `/api/v1/system/android-app/prepare`,
-GET `/api/v1/system/android-app/preparation`, and GET `/api/v1/system/android-app`.
-The preparation routes and `/install/bb-android.apk` are disabled when the
-experiment is off. Through bb connect, they require the normal account session.
-
-To publish centrally, run the **Mobile Android (EAS)** workflow with profile
-`preview` and **publish** enabled. EAS builds the signed APK; the workflow verifies
-it and uploads its checksum-named APK before `latest.json` to the `android-testing`
-GitHub prerelease. It requires configured EAS credentials/`EXPO_TOKEN`; it does not
-submit to Play. Preview builds increment the remote Android version code.
-The first release must be published before release downloads are available.
-
-For manual publication, run
-`node apps/mobile/scripts/publish-android-apk.mjs APK OUTPUT_DIR` from a source
-checkout with Android SDK build-tools. Upload `OUTPUT_DIR/android-testing/*.apk`
-to the release, then upload `OUTPUT_DIR/android-testing/latest.json` last.
-Alternatively use a server data directory as OUTPUT_DIR to seed that server's cache.
-Keep signing keys consistent for updates. Old cached artifacts are retained so
-active downloads can finish.
+The publishing workflow verifies the signed APK and publishes both the checksum-named
+asset and the stable `bb-android.apk` alias, then `latest.json`.

@@ -441,7 +441,7 @@ function AccountRow({
           onClick={onOpen}
         >
           <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="truncate text-sm font-medium text-foreground">
                 {account.label}
               </span>
@@ -451,6 +451,9 @@ function AccountRow({
                 </span>
               )}
               <SettingsBadge>{tier(account)}</SettingsBadge>
+              {account.extraUsage?.status === "allowed" ? (
+                <SettingsBadge>Extra usage available</SettingsBadge>
+              ) : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground/75">
               <span className="inline-flex shrink-0 items-center gap-1.5">
@@ -1423,7 +1426,6 @@ function AccountPoolSettings() {
           <AccountDialog
             account={selectedAccount}
             threshold={threshold}
-            close={closeDialog}
             act={(action) => void accountAction(selectedAccount, action)}
           />
         ) : null}
@@ -1594,12 +1596,10 @@ function AccountPoolSettings() {
 function AccountDialog({
   account,
   threshold,
-  close,
   act,
 }: {
   account: AccountSummary;
   threshold: number;
-  close: () => void;
   act: (action: "toggle" | "refresh" | "remove") => void;
 }) {
   const shared = (

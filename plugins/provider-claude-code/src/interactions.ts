@@ -15,6 +15,8 @@ import {
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
+const USER_DECLINED_ANSWER = "The user declined to answer this question.";
+
 export const claudeInteractionOutcomeSchema = z.union([
   approvalInteractionOutcomeSchema,
   userQuestionInteractionOutcomeSchema,
@@ -189,9 +191,7 @@ function buildClaudeUserQuestionAnswerText(
 ): string {
   const answer = resolution.answers[question.id];
   if (!answer) {
-    throw new ProviderResponseEncodeError(
-      `Missing answer for user question '${question.id}'`,
-    );
+    return USER_DECLINED_ANSWER;
   }
   const options = question.options ?? [];
   const selectedLabels = answer.selected.map((selectedValue) => {
@@ -205,18 +205,16 @@ function buildClaudeUserQuestionAnswerText(
     }
     return option.label;
   });
+  const freeText =
+    answer.freeText?.trim().length === 0 ? undefined : answer.freeText;
   if (selectedLabels.length > 0) {
     const selectedText = selectedLabels.join(", ");
-    return answer.freeText
-      ? `${selectedText}; ${answer.freeText}`
-      : selectedText;
+    return freeText ? `${selectedText}; ${freeText}` : selectedText;
   }
-  if (answer.freeText) {
-    return answer.freeText;
+  if (freeText) {
+    return freeText;
   }
-  throw new ProviderResponseEncodeError(
-    `Answer for user question '${question.id}' is empty`,
-  );
+  return USER_DECLINED_ANSWER;
 }
 
 function buildClaudeUserQuestionAnnotations(

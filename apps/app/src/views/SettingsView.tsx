@@ -1,4 +1,4 @@
-import { AndroidTestingSection } from "@/components/settings/AndroidTestingSection";
+import { MobileAppSection } from "@/components/settings/MobileAppSection";
 import { MachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
 import { MachineAccessSettings } from "@/components/settings/MachineAccessSettings";
 import { useMemo, useRef, useState, type ReactNode } from "react";
@@ -169,6 +169,8 @@ interface AppearanceSettingsSectionProps {
 }
 
 interface GeneralSettingsSectionProps {
+  confirmThreadArchive: boolean;
+  onConfirmThreadArchiveChange: (enabled: boolean) => void;
   desktopBrowserAvailable: boolean;
   generalSettingsDisabled: boolean;
   managedBranchPrefix: string;
@@ -852,6 +854,8 @@ export function AppearanceSettingsSection({
 }
 
 export function GeneralSettingsSection({
+  confirmThreadArchive,
+  onConfirmThreadArchiveChange,
   desktopBrowserAvailable,
   generalSettingsDisabled,
   managedBranchPrefix,
@@ -943,6 +947,18 @@ export function GeneralSettingsSection({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+          </SettingsWithControl>
+
+          <SettingsWithControl
+            label="Thread archive confirmation"
+            description="Ask before archiving a thread with unarchived children."
+          >
+            <Switch
+              checked={confirmThreadArchive}
+              disabled={generalSettingsDisabled}
+              onCheckedChange={onConfirmThreadArchiveChange}
+              aria-label="Thread archive confirmation"
+            />
           </SettingsWithControl>
         </div>
       </SettingsSection>
@@ -1060,25 +1076,10 @@ const EXPERIMENT_DEFINITIONS: Record<
     description:
       "Load plugin server code with the legacy JITI runtime. Takes effect the next time a plugin loads.",
   },
-  androidTesting: {
-    label: "Android App",
-    description:
-      "Download a test build of the Android app below the experiment flags.",
-  },
-  mobileApp: {
-    label: "Mobile app",
-    description:
-      "Pair the bb mobile app over bb connect: shows Add mobile device under Remote access and enables bb connect machine-code.",
-  },
   serverMove: {
     label: "Server move",
     description:
       "Move the bb server to another machine from Settings → Machines, and export or import server data with bb server.",
-  },
-  sidebarProgressiveDisclosure: {
-    label: "Sidebar progressive disclosure",
-    description:
-      "In By project and By machine, show the first five groups in the current sort order, keep attention groups visible, and reveal ten more per click. Manually is unchanged.",
   },
 };
 export function ExperimentsSettingsSection({
@@ -1114,7 +1115,6 @@ export function ExperimentsSettingsSection({
           })}
         </div>
       </SettingsSection>
-      {experiments.androidTesting ? <AndroidTestingSection /> : null}
     </>
   );
 }
@@ -1266,6 +1266,8 @@ export function SettingsView() {
         showChangelogPreview={experiments.changelogPreview}
       />
     );
+  } else if (activeSection === "mobile") {
+    content = <MobileAppSection />;
   } else if (activeSection === "experiments") {
     content = (
       <ExperimentsSettingsSection
@@ -1289,6 +1291,13 @@ export function SettingsView() {
     content = (
       <>
         <GeneralSettingsSection
+          confirmThreadArchive={generalSettings.confirmThreadArchive}
+          onConfirmThreadArchiveChange={(enabled) =>
+            updateGeneralSettingsMutation.mutate({
+              ...generalSettings,
+              confirmThreadArchive: enabled,
+            })
+          }
           desktopBrowserAvailable={desktopBrowserAvailable}
           generalSettingsDisabled={
             systemConfigQuery.data === undefined ||

@@ -1,5 +1,4 @@
-import { createAndroidAppPreparationService } from "../services/install/android-app-preparation.js";
-import { readAndroidAppArtifact } from "../services/install/android-app-artifact.js";
+import { createMobileAppReleaseService } from "../services/install/mobile-app-releases.js";
 import {
   setMachineEnvironmentVariable,
   deleteMachineEnvironmentVariable,
@@ -69,6 +68,10 @@ import {
   listSystemProviderInfos,
   resolveSystemExecutionOptions,
 } from "../services/system/execution-options.js";
+import {
+  providerManagementCatalog,
+  setProviderEnabled,
+} from "../services/system/provider-management.js";
 import { getProviderStates } from "../services/system/provider-states.js";
 import { getProviderUsageLimits } from "../services/system/usage-limits.js";
 import {
@@ -154,34 +157,10 @@ export function registerSystemRoutes(
 
   const themeRoot = resolveThemeRootPath(deps.config.dataDir);
 
-  const androidAppPreparation = createAndroidAppPreparationService({
-    dataDir: deps.config.dataDir,
-  });
-  const requireAndroidApp = () => {
-    if (!getExperiments(deps.db).androidTesting)
-      throw new ApiError(
-        404,
-        "not_found",
-        "Enable Android App in Settings → Experiments first.",
-      );
-  };
-  get(routes.androidAppPreparation, async (context) => {
-    requireAndroidApp();
+  const mobileAppReleases = createMobileAppReleaseService();
+  get(routes.mobileAppReleases, async (context) => {
     context.header("cache-control", "no-store");
-    return context.json(await androidAppPreparation.status());
-  });
-  post(routes.prepareAndroidApp, (context, input) => {
-    requireAndroidApp();
-    context.header("cache-control", "no-store");
-    return context.json(androidAppPreparation.start(input.source));
-  });
-
-  get(routes.androidApp, async (context) => {
-    context.header("cache-control", "no-store");
-    const artifact = getExperiments(deps.db).androidTesting
-      ? await readAndroidAppArtifact(deps.config.dataDir)
-      : null;
-    return context.json(artifact?.manifest ?? null);
+    return context.json(await mobileAppReleases());
   });
 
   get(routes.attention, (context) =>
@@ -285,9 +264,7 @@ export function registerSystemRoutes(
     );
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
-    return context.json(
-      await machineEnvironmentView(deps.db, deps.config.dataDir),
-    );
+    return context.json(await machineEnvironmentView(deps.db));
   });
 
   del(routes.deleteMachineEnvironmentVariable, async (context, payload) => {
@@ -300,13 +277,11 @@ export function registerSystemRoutes(
     await deleteMachineEnvironmentVariable(deps.db, payload.name, null);
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
-    return context.json(
-      await machineEnvironmentView(deps.db, deps.config.dataDir),
-    );
+    return context.json(await machineEnvironmentView(deps.db));
   });
 
   get(routes.machineEnvironment, async (context) =>
-    context.json(await machineEnvironmentView(deps.db, deps.config.dataDir)),
+    context.json(await machineEnvironmentView(deps.db)),
   );
   put(routes.replaceMachineEnvironment, async (context, payload) => {
     if (getGateAuthKind(context) === "machine")
@@ -318,9 +293,7 @@ export function registerSystemRoutes(
     await replaceMachineEnvironment(deps.db, deps.config.dataDir, payload);
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
-    return context.json(
-      await machineEnvironmentView(deps.db, deps.config.dataDir),
-    );
+    return context.json(await machineEnvironmentView(deps.db));
   });
 
   put(routes.generalSettings, (context, payload) => {
@@ -335,6 +308,8 @@ export function registerSystemRoutes(
       allowFastServiceTier:
         settings.allowFastServiceTier ?? current.allowFastServiceTier,
       telemetryEnabled: settings.telemetryEnabled ?? current.telemetryEnabled,
+      confirmThreadArchive:
+        settings.confirmThreadArchive ?? current.confirmThreadArchive,
       showDiagnosticEvents:
         diagnosticValue === undefined ||
         (showUnhandledProviderEvents !== undefined &&
@@ -608,6 +583,21 @@ export function registerSystemRoutes(
 
   get(routes.providers, async (context, query) =>
     context.json(await listSystemProviderInfos(deps, query)),
+  );
+
+  get(routes.providerCatalog, async (context) => {
+    await deps.providerRegistry.whenRegistrationsSettled();
+    return context.json(providerManagementCatalog(deps, pluginService));
+  });
+  put(routes.providerEnabled, async (context, payload) =>
+    context.json(
+      await setProviderEnabled(
+        deps,
+        pluginService,
+        context.req.param("id"),
+        payload.enabled,
+      ),
+    ),
   );
 
   get(routes.providerLogo, async (context) => {

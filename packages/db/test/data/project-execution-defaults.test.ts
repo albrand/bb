@@ -133,7 +133,6 @@ describe("project-execution-defaults", () => {
       reasoningLevel: "high",
       permissionMode: "full",
       serviceTier: "default",
-      updatedAt: 1,
     });
     upsertProjectExecutionDefaults(db, {
       projectId: project.id,
@@ -142,7 +141,6 @@ describe("project-execution-defaults", () => {
       reasoningLevel: "medium",
       permissionMode: "auto",
       serviceTier: "fast",
-      updatedAt: 2,
     });
 
     expect(

@@ -54,6 +54,23 @@
         "$TURBO_ROOT$/vitest.shared.ts"
       ]
     },
+    "@bb/demo-server#test": {
+      "dependsOn": ["@bb/demo-server#build", "topo"]
+    },
+    "@bb/demo-server#build": {
+      "dependsOn": [
+        "@bb/app#build",
+        "bb-plugin-navigation#prepare:bundled",
+        "bb-plugin-thread-list#prepare:bundled"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/provider-codex/icons/codex.svg",
+        "$TURBO_ROOT$/plugins/provider-claude-code/icons/claude-code.svg",
+        "$TURBO_ROOT$/plugins/provider-pi/icons/pi.svg"
+      ],
+      "outputs": ["dist/**"]
+    },
     "@bb/app#build": {
       "env": [
         "NODE_OPTIONS",
@@ -291,10 +308,6 @@
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "bundle": {
-      "cache": false,
-      "outputs": []
-    },
     "@bb/app#dev": {
       "dependsOn": ["@bb/templates#generate:templates"],
       "cache": false,
@@ -357,18 +370,6 @@
         "@bb/plugin-build#generate",
         "@get-bb/plugin-sdk#build:runtime"
       ],
-      "cache": false,
-      "persistent": true,
-      "passThroughEnv": ["*"]
-    },
-    "@bb/host-daemon#start:prod": {
-      "dependsOn": ["build"],
-      "cache": false,
-      "persistent": true,
-      "passThroughEnv": ["*"]
-    },
-    "@bb/server#start:prod": {
-      "dependsOn": ["build"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
@@ -761,10 +762,6 @@
         "$TURBO_ROOT$/vitest.shared.ts"
       ]
     },
-    "test:smoke": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.shared.ts"]
-    },
     "@bb/integration-tests#e2e:mobile-backend": {
       "cache": false,
       "persistent": true,
@@ -779,25 +776,6 @@
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
-    },
-    "@bb/integration-tests#test:smoke": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/apps/server/package.json",
-        "$TURBO_ROOT$/apps/server/tsconfig.json",
-        "$TURBO_ROOT$/apps/server/src/**",
-        "$TURBO_ROOT$/packages/templates/package.json",
-        "$TURBO_ROOT$/packages/templates/scripts/**",
-        "$TURBO_ROOT$/packages/templates/src/**",
-        "$TURBO_ROOT$/tests/scripted-echo-provider/host.ts",
-        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
-        "$TURBO_ROOT$/vitest.shared.ts"
-      ]
     },
     "test:integration": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
@@ -1255,14 +1233,14 @@
     "bb-plugin-provider-reauth#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-provider-usage#typecheck": {
+    "bb-plugin-bb--provider-usage#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-provider-usage#test": {
+    "bb-plugin-bb--provider-usage#test": {
       "dependsOn": [
         "//#ensure-native-modules",
         "@get-bb/plugin-sdk#build",
@@ -1272,6 +1250,9 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
+    },
+    "bb-plugin-provider-usage#typecheck": {
+      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
     },
     "bb-plugin-provider-retry#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]

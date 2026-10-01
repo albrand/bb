@@ -356,78 +356,6 @@ describe("connect settings section", () => {
     expect(slot.queryByRole("button", { name: "Open" })).toBeNull();
   });
 
-  it("revokes a shared port", async () => {
-    const slot = renderSlot(
-      app.settingsSections[0]!,
-      {},
-      {
-        rpc: {
-          status: () =>
-            connected({
-              shares: [
-                {
-                  hostId: "host-server",
-                  hostName: "Workstation",
-                  port: 3000,
-                  createdAt: 1,
-                  url: "https://workstation--3000.getbb.app",
-                },
-              ],
-            }),
-          unexpose: () => ({ removed: true, port: 3000 }),
-        },
-      },
-    );
-
-    await slot.findByText(":3000");
-    fireEvent.click(slot.getByRole("button", { name: "Revoke" }));
-
-    await waitFor(() =>
-      expect(slot.rpcCalls).toContainEqual({
-        method: "unexpose",
-        input: { hostId: "host-server", port: 3000 },
-      }),
-    );
-  });
-
-  it("renders an unavailable share reason and keeps it revocable", async () => {
-    const reason = "This host is not connected right now.";
-    const slot = renderSlot(
-      app.settingsSections[0]!,
-      {},
-      {
-        rpc: {
-          status: () =>
-            connected({
-              shares: [
-                {
-                  hostId: "host-air",
-                  hostName: "Sawyer Air",
-                  port: 3000,
-                  createdAt: 1,
-                  url: "",
-                  unavailableReason: reason,
-                },
-              ],
-            }),
-          unexpose: () => ({ removed: true, port: 3000 }),
-        },
-      },
-    );
-
-    await slot.findByText(`Unavailable — ${reason}`);
-    expect(
-      slot.queryByRole("button", { name: "Copy share URL for port 3000" }),
-    ).toBeNull();
-    fireEvent.click(slot.getByRole("button", { name: "Revoke" }));
-    await waitFor(() =>
-      expect(slot.rpcCalls).toContainEqual({
-        method: "unexpose",
-        input: { hostId: "host-air", port: 3000 },
-      }),
-    );
-  });
-
   it("groups shares by host and degrades an unreachable host's group", async () => {
     const reason = "sawyer-air is not connected right now.";
     const currentStatus = connected({
@@ -502,6 +430,17 @@ describe("connect settings section", () => {
         input: { hostId: "host-air", port: 5173 },
       }),
     );
+
+    const reachableRevoke = revokeButtons[1] as HTMLButtonElement;
+    await waitFor(() => expect(reachableRevoke.disabled).toBe(false));
+    fireEvent.click(reachableRevoke);
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "unexpose",
+        input: { hostId: "host-server", port: 3000 },
+      }),
+    );
+    await waitFor(() => expect(reachableRevoke.disabled).toBe(false));
 
     fireEvent.click(machine);
     await slot.emitRealtime(CONNECT_REALTIME_CHANNEL, {
@@ -614,41 +553,46 @@ describe("connect settings section", () => {
     await slot.findByText(/this bb is not connected to getbb.app/);
   });
 
-  it("hides mobile pairing unless the mobileApp experiment is on", async () => {
+  it("only offers phone pairing while bb connect is connected", async () => {
     const slot = renderSlot(
-      app.settingsSections[0]!,
+      app.settingsSections[1]!,
       {},
       {
-        rpc: {
-          status: () => connected(),
-          mobilePairing: () => ({ enabled: false }),
-        },
+        rpc: { status: () => status() },
       },
     );
-
-    await slot.findByText("Connected");
     await waitFor(() =>
-      expect(slot.rpcCalls).toContainEqual({
-        method: "mobilePairing",
-        input: null,
-      }),
+      expect(slot.rpcCalls).toContainEqual({ method: "status", input: null }),
     );
-    expect(slot.queryByText("Mobile app")).toBeNull();
     expect(
       slot.queryByRole("button", { name: "Add mobile device" }),
     ).toBeNull();
-    expect(slot.queryByRole("button", { name: "Re-pair" })).toBeNull();
+    await slot.emitRealtime(CONNECT_REALTIME_CHANNEL, connected());
+    await slot.findByRole("button", { name: "Add mobile device" });
+    await slot.emitRealtime(CONNECT_REALTIME_CHANNEL, {
+      ...connected(),
+      enabled: false,
+    });
+    expect(
+      slot.queryByRole("button", { name: "Add mobile device" }),
+    ).toBeNull();
+    await slot.emitRealtime(CONNECT_REALTIME_CHANNEL, {
+      ...connected(),
+      state: "reconnecting",
+    });
+    expect(
+      slot.queryByRole("button", { name: "Add mobile device" }),
+    ).toBeNull();
   });
 
   it("add mobile device mints a machine code and shows the QR payload, the code, and a countdown", async () => {
     const expiresAt = Date.now() + 600_000;
     const slot = renderSlot(
-      app.settingsSections[0]!,
+      app.settingsSections[1]!,
       {},
       {
         rpc: {
           status: () => connected(),
-          mobilePairing: () => ({ enabled: true }),
           createMachineCode: () => ({
             code: "K7QP-2M4X",
             expiresAt,
@@ -658,7 +602,7 @@ describe("connect settings section", () => {
       },
     );
 
-    await slot.findByText("Connected");
+    await slot.findByRole("button", { name: "Add mobile device" });
     expect(slot.queryByText("K7QP-2M4X")).toBeNull();
     fireEvent.click(
       await slot.findByRole("button", { name: "Add mobile device" }),
@@ -677,18 +621,16 @@ describe("connect settings section", () => {
       name: "QR code to pair the bb mobile app",
     })) as HTMLImageElement;
     expect(qr.src.startsWith("data:image/png")).toBe(true);
-    slot.getByText(/bb connect machine-code/);
   });
 
   it("an expired mobile pairing code offers a fresh one", async () => {
     let minted = 0;
     const slot = renderSlot(
-      app.settingsSections[0]!,
+      app.settingsSections[1]!,
       {},
       {
         rpc: {
           status: () => connected(),
-          mobilePairing: () => ({ enabled: true }),
           createMachineCode: () => {
             minted += 1;
             return {
@@ -701,7 +643,7 @@ describe("connect settings section", () => {
       },
     );
 
-    await slot.findByText("Connected");
+    await slot.findByRole("button", { name: "Add mobile device" });
     fireEvent.click(
       await slot.findByRole("button", { name: "Add mobile device" }),
     );
@@ -720,12 +662,11 @@ describe("connect settings section", () => {
 
   it("explains the account machine limit with a dashboard link", async () => {
     const slot = renderSlot(
-      app.settingsSections[0]!,
+      app.settingsSections[1]!,
       {},
       {
         rpc: {
           status: () => connected(),
-          mobilePairing: () => ({ enabled: true }),
           createMachineCode: () => {
             throw new Error("machine_limit");
           },
@@ -733,7 +674,7 @@ describe("connect settings section", () => {
       },
     );
 
-    await slot.findByText("Connected");
+    await slot.findByRole("button", { name: "Add mobile device" });
     fireEvent.click(
       await slot.findByRole("button", { name: "Add mobile device" }),
     );

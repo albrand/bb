@@ -471,10 +471,10 @@ export function forwardTerminalData({
     return;
   }
 
-  onUserInput?.();
   for (const dataBase64 of encodeTerminalInputChunks(data)) {
     onInput(dataBase64);
   }
+  onUserInput?.();
 }
 
 function hasVisibleTerminalSize({

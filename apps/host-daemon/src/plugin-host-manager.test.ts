@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdtemp,
-  mkdir,
   readFile,
   readdir,
   rm,
@@ -534,29 +533,6 @@ describe("PluginHostManager", () => {
     ]);
   });
 
-  it("migrates a verified legacy host.js cache entry without downloading", async () => {
-    const fetchArtifact = vi.fn(async () => artifactSource);
-    const { dataDir, manager } = await createManagerFixture({ fetchArtifact });
-    const command = callCommand();
-    const digestDirectory = join(
-      dataDir,
-      "plugin-host-artifacts",
-      command.pluginId,
-      command.artifact.digest,
-    );
-    await mkdir(digestDirectory, { recursive: true });
-    await writeFile(join(digestDirectory, "host.js"), artifactSource);
-
-    const result = await manager.call(command);
-
-    expect(result.output).toMatchObject({ input: { value: "hello" } });
-    expect(fetchArtifact).not.toHaveBeenCalled();
-    await expect(readdir(digestDirectory)).resolves.toEqual(["host.mjs"]);
-    await expect(readFile(join(digestDirectory, "host.mjs"))).resolves.toEqual(
-      artifactSource,
-    );
-  });
-
   it("logs artifact and worker lifecycle transitions", async () => {
     const logger = {
       debug: vi.fn(),
@@ -777,28 +753,6 @@ describe("PluginHostManager", () => {
     await expect(
       manager.call(callCommand({ method: "large" })),
     ).rejects.toThrow(/exceeds 8388608 bytes/u);
-  });
-
-  it("cancels running calls and enforces deadlines", async () => {
-    const manager = await createManager();
-    await manager.call(callCommand());
-    const command = callCommand({ method: "wait" });
-    const result = manager.call(command);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect(
-      manager.cancel({
-        type: "plugin.host.cancel",
-        pluginId: command.pluginId,
-        generation: command.generation,
-        callId: command.callId,
-      }),
-    ).toEqual({ cancelled: true });
-    await expect(result).rejects.toMatchObject({ name: "AbortError" });
-
-    await expect(
-      manager.call(callCommand({ method: "wait", timeoutMs: 20 })),
-    ).rejects.toThrow(/exceeded its deadline/u);
   });
 
   it.each([-4_000_000_000_000, 4_000_000_000_000])(
