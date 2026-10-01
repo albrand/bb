@@ -1417,6 +1417,104 @@ describe("bridge", () => {
     }
   });
 
+  it("preserves local MCP servers when the project config map is malformed", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const validConfig = JSON.stringify({
+      projects: {
+        [cwd]: { mcpServers: { fixture: { command: "fixture-mcp" } } },
+      },
+    });
+    writeFileSync(userConfig, validConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "fixture",
+        status: "connected",
+        scope: "local",
+        config: { type: "stdio", command: "fixture-mcp" },
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-malformed-project-map";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load local server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load local server");
+      await bridge.waitForResponse(2);
+      expect(query.toggleMcpServer).not.toHaveBeenCalled();
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      writeFileSync(userConfig, JSON.stringify({ projects: [] }));
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Preserve local server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Preserve local server");
+      await bridge.waitForResponse(3);
+      expect(query.toggleMcpServer).not.toHaveBeenCalled();
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: {
+                fixture: { command: "restored-fixture-mcp" },
+              },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Retry local config" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Retry local config");
+      await bridge.waitForResponse(4);
+      expect(query.toggleMcpServer).toHaveBeenCalledExactlyOnceWith(
+        "fixture",
+        false,
+      );
+      expect(query.setMcpServers).toHaveBeenCalledTimes(2);
+      expect(query.setMcpServers).toHaveBeenLastCalledWith({
+        fixture: { type: "stdio", command: "restored-fixture-mcp" },
+      });
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("preserves current MCP servers when a config read hits premature EOF", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

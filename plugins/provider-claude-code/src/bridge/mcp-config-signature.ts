@@ -390,7 +390,10 @@ export async function loadClaudeMcpServers(args: {
     const sources = [mcpServersFromConfig(config)];
     if (path.endsWith(".claude.json") && isRecord(config)) {
       const projects = config.projects;
-      if (isRecord(projects)) {
+      if (projects !== undefined) {
+        if (!isRecord(projects)) {
+          invalidMcpConfig("projects must be an object");
+        }
         for (const [projectPath, project] of Object.entries(projects)) {
           if (resolve(projectPath) === resolve(args.cwd)) {
             sources.push(mcpServersFromConfig(project));
