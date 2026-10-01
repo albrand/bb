@@ -138,30 +138,6 @@ export function codexUserInputQuestionIds(params: unknown): string[] {
   return parsed.data.questions.map((question) => question.id);
 }
 
-export function codexUserInputIsBlocking(params: unknown): boolean {
-  const parsed = codexToolRequestUserInputParamsSchema.safeParse(params);
-  if (!parsed.success) {
-    throw new ProviderResponseEncodeError(
-      "Codex user-input request params no longer parse",
-    );
-  }
-  return parsed.data.isBlocking !== false;
-}
-
-export function buildCodexUserInputNoAnswerResponse(args: {
-  codexQuestionIds: readonly string[];
-  message: string;
-}): CodexUserInputResponse {
-  return {
-    answers: Object.fromEntries(
-      args.codexQuestionIds.map((questionId) => [
-        questionId,
-        { answers: [args.message] },
-      ]),
-    ),
-  };
-}
-
 export function buildCodexUserInputResponse(args: {
   outcome: UserQuestionInteractionOutcome;
   codexQuestionIds: readonly string[];

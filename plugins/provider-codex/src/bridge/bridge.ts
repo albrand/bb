@@ -56,9 +56,7 @@ import {
 } from "../extension-kinds.js";
 import {
   buildCodexInteractiveResponse,
-  buildCodexUserInputNoAnswerResponse,
   buildCodexUserInputResponse,
-  codexUserInputIsBlocking,
   codexUserInputQuestionIds,
   decodeCodexInteractiveRequest,
   extractCodexMacOsPermissionRequest,
@@ -878,19 +876,6 @@ function handleChildRequest(
     return;
   }
   const request = decoded;
-
-  if (
-    request.payload.kind === "user_question" &&
-    !codexUserInputIsBlocking(params)
-  ) {
-    responder.result(
-      buildCodexUserInputNoAnswerResponse({
-        codexQuestionIds: codexUserInputQuestionIds(params),
-        message: "This question was non-blocking, so no answer was collected.",
-      }),
-    );
-    return;
-  }
 
   void sendRuntimeRequest(BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest, {
     providerThreadId: session.codexThreadId ?? request.providerThreadId,

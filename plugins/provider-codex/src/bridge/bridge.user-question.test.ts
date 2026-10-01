@@ -275,62 +275,6 @@ it("asks Codex's plan-mode questions in a bb question card and returns the answe
   });
 }, 30_000);
 
-it("answers a non-blocking Codex question without waiting for a question card", async () => {
-  writeFileSync(
-    join(workspaceDir, "script.json"),
-    JSON.stringify({
-      requestLogPath,
-      turns: [askingTurn("turn-nonblocking", question({}), false)],
-    }),
-  );
-  harness.sendRequest(1, "thread/start", {
-    threadId,
-    cwd: workspaceDir,
-    instructionMode: "append",
-    options: OPTIONS,
-  });
-  await settle(1);
-  const { providerThreadId } = z
-    .object({ providerThreadId: z.string() })
-    .parse((await harness.waitForResponse(1)).result);
-
-  harness.sendRequest(2, "turn/start", {
-    threadId,
-    providerThreadId,
-    clientRequestId: "creq_234567892d",
-    input: [{ type: "text", text: "Continue without waiting", mentions: [] }],
-    options: OPTIONS,
-  });
-  await answerUntil(
-    () =>
-      harness.hasResponse(2) ||
-      harness.messages.some(
-        (message) =>
-          message.method === BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
-      ),
-  );
-  expect(
-    harness.messages.some(
-      (message) =>
-        message.method === BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
-    ),
-  ).toBe(false);
-  await harness.waitForResponse(2);
-
-  expect(asked).toHaveLength(0);
-  expect(userInputResponses()[0]).toMatchObject({
-    result: {
-      answers: {
-        color: {
-          answers: [
-            "This question was non-blocking, so no answer was collected.",
-          ],
-        },
-      },
-    },
-  });
-}, 30_000);
-
 it.each([
   ["start", undefined],
   ["resume", { mode: "default" }],
