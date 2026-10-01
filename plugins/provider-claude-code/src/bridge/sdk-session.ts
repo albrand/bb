@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import {
   query,
   type CanUseTool,
-  type McpSdkServerConfigWithInstance,
+  type McpServerConfig,
+  type McpServerStatus,
   type Options,
   type Query,
   type SDKMessage,
@@ -31,7 +33,7 @@ export interface SdkSessionOptions {
   permissionMode?: ClaudePermissionMode;
   sandbox?: Options["sandbox"];
   hooks?: Options["hooks"];
-  mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
+  mcpServers?: Record<string, McpServerConfig>;
   allowedTools?: string[];
   canUseTool?: CanUseTool;
   onElicitation?: Options["onElicitation"];
@@ -88,6 +90,22 @@ interface BuildSdkDoneErrorMessageArgs {
 }
 
 const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
+const CLAUDE_CONFIG_MCP_SCOPES = new Set(["user", "project", "local"]);
+
+export class McpServerConfigChangeError extends Error {
+  constructor(name: string | undefined, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const server = name ? ` for server ${name}` : "";
+    super(`Could not safely apply MCP configuration${server}: ${reason}`, {
+      cause,
+    });
+    this.name = "McpServerConfigChangeError";
+  }
+}
+
+function isClaudeConfigScope(scope: string | undefined): boolean {
+  return scope !== undefined && CLAUDE_CONFIG_MCP_SCOPES.has(scope);
+}
 
 function isCurrentProcessRoot(): boolean {
   return process.getuid?.() === 0;
@@ -164,6 +182,12 @@ export class SdkSession {
   private inputDone = false;
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
+  private readonly baseMcpServers: Record<string, McpServerConfig>;
+  private readonly bridgeDisabledStaticServers = new Map<
+    string,
+    McpServerStatus["config"]
+  >();
+  private mcpReconciliationPending = false;
   private complete: (() => void) | null = null;
   private stderrTail = "";
 
@@ -172,6 +196,7 @@ export class SdkSession {
     private readonly onMessage: SdkSessionMessageHandler,
     private readonly onDone: SdkSessionDoneHandler,
   ) {
+    this.baseMcpServers = { ...options.mcpServers };
     this.completion = new Promise((resolve) => {
       this.complete = resolve;
     });
@@ -197,6 +222,118 @@ export class SdkSession {
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model);
     this.options.model = model;
+  }
+
+  needsMcpServerReconciliation(): boolean {
+    return this.mcpReconciliationPending;
+  }
+
+  markMcpServerReconciliationPending(): void {
+    this.mcpReconciliationPending = true;
+  }
+
+  async setMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
+    const query = this.query;
+    if (!query) return;
+    this.mcpReconciliationPending = true;
+    let statuses: McpServerStatus[];
+    try {
+      statuses = await query.mcpServerStatus();
+    } catch (error) {
+      throw new McpServerConfigChangeError(undefined, error);
+    }
+    const statusesByName = new Map(
+      statuses.map((status: McpServerStatus) => [status.name, status]),
+    );
+    const dynamicServers = Object.create(null) as Record<
+      string,
+      McpServerConfig
+    >;
+    const restoreAfterFailedUpdate = new Set<string>();
+    let nextServers: Record<string, McpServerConfig>;
+    try {
+      for (const status of statuses) {
+        const configuredServer = servers[status.name];
+        if (!isClaudeConfigScope(status.scope)) {
+          if (configuredServer !== undefined) {
+            dynamicServers[status.name] = configuredServer;
+          }
+          continue;
+        }
+        if (configuredServer === undefined) {
+          if (status.status !== "disabled") {
+            this.bridgeDisabledStaticServers.set(status.name, status.config);
+            try {
+              await query.toggleMcpServer(status.name, false);
+            } catch (error) {
+              throw new McpServerConfigChangeError(status.name, error);
+            }
+          }
+          continue;
+        }
+        if (!isDeepStrictEqual(status.config, configuredServer)) {
+          if (status.status !== "disabled") {
+            this.bridgeDisabledStaticServers.set(status.name, status.config);
+            restoreAfterFailedUpdate.add(status.name);
+            try {
+              await query.toggleMcpServer(status.name, false);
+            } catch (error) {
+              throw new McpServerConfigChangeError(status.name, error);
+            }
+          }
+          if (this.bridgeDisabledStaticServers.has(status.name)) {
+            restoreAfterFailedUpdate.add(status.name);
+          }
+          dynamicServers[status.name] = configuredServer;
+          continue;
+        }
+        if (status.status === "disabled") {
+          if (
+            this.bridgeDisabledStaticServers.has(status.name) &&
+            (this.bridgeDisabledStaticServers.get(status.name) === undefined ||
+              isDeepStrictEqual(
+                this.bridgeDisabledStaticServers.get(status.name),
+                configuredServer,
+              ))
+          ) {
+            await query.toggleMcpServer(status.name, true);
+            this.bridgeDisabledStaticServers.delete(status.name);
+          }
+        }
+      }
+      for (const [name, config] of Object.entries(servers)) {
+        if (!statusesByName.has(name)) dynamicServers[name] = config;
+      }
+      nextServers = { ...dynamicServers, ...this.baseMcpServers };
+      const result = await query.setMcpServers(nextServers);
+      for (const [name, message] of Object.entries(result.errors)) {
+        process.stderr.write(
+          `claude-code bridge: MCP server ${name} failed to connect: ${message}\n`,
+        );
+      }
+    } catch (error) {
+      this.mcpReconciliationPending = true;
+      for (const name of restoreAfterFailedUpdate) {
+        try {
+          await query.toggleMcpServer(name, true);
+          this.bridgeDisabledStaticServers.delete(name);
+        } catch {}
+      }
+      throw error;
+    }
+    this.mcpReconciliationPending = false;
+    this.options.mcpServers = nextServers;
+  }
+
+  async reconnectMcpServersNeedingAuth(): Promise<void> {
+    const query = this.query;
+    if (!query) return;
+    const statuses = await query.mcpServerStatus();
+    for (const status of statuses) {
+      if (status.status === "needs-auth" || status.status === "failed") {
+        await query.reconnectMcpServer(status.name);
+      }
+    }
   }
 
   async applyMutableSettings(args: {

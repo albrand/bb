@@ -1446,6 +1446,40 @@ login, such as a CI runner. Mint the token with `claude setup-token`, which is
 long-lived where the credentials from `/login` are not. A logged-in machine
 needs neither.
 
+A running Claude Code thread applies MCP configuration changes before its next
+turn without restarting the conversation. The bridge reads `~/.claude.json`,
+`$CLAUDE_CONFIG_DIR/settings.json` and `settings.local.json` (default under
+`~/.claude/`), and
+`.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` from the
+thread's working directory and its parents. Change detection uses the effective
+MCP server set after scope precedence, plus MCP enablement settings; unrelated
+Claude state such as startup counts and usage history does not trigger a reload.
+The Agent SDK's live MCP APIs add, remove, or edit servers in the current
+conversation. Project `.mcp.json` servers are passed to the SDK only when named
+in `enabledMcpjsonServers` or approved by `enableAllProjectMcpServers: true` in
+user or local project settings. Checked-in project settings cannot approve
+their own commands, and server definitions directly in checked-in settings are
+ignored. Any `disabledMcpjsonServers` entry takes precedence.
+At the start of a turn, the bridge checks this configuration and starts any
+needed update on the current SDK query without restarting the conversation.
+Turn input waits at most 50 ms for SDK status, disable, or update calls; slower
+calls continue in the background. A slow config read, invalid or incomplete
+config, or failed status read preserves the current server set, logs the
+failure, leaves reconciliation pending, and still sends the turn input.
+Per-server connection errors are logged without marking the whole server set
+pending, so other servers remain available. If a whole-set update cannot be
+applied, or status/disable/restore state is uncertain, the bridge temporarily
+denies external MCP tool calls while reconciliation retries on later turns;
+turn input, non-MCP tools, and the bb bridge's own tools remain available.
+Project `.mcp.json` approval checks still apply before those servers can be
+passed to the SDK.
+
+After a changed configuration is applied, bb checks server status in the
+background and attempts to reconnect servers reported as `needs-auth` or
+`failed`. It does not reconnect healthy unchanged servers, and it does not
+repeat reconnect attempts on turns where the effective MCP configuration is
+unchanged. A failed or still-running reconnect does not delay turn input.
+
 ### Codex provider
 
 A running Codex thread reloads its MCP servers when their configuration changes.
@@ -1458,8 +1492,7 @@ files cannot be read within two seconds, for example because one keeps growing
 or the filesystem stops responding, the bridge treats them as changed and
 reloads before that turn. A failed reload is logged, the turn still runs, and
 the next turn tries again. An MCP sign-in that Codex keeps only in the OS
-keychain does not change these files, so it does not trigger a reload. Claude
-Code threads still read MCP servers only when their session starts.
+keychain does not change these files, so it does not trigger a reload.
 
 ### Provider retry plugin
 

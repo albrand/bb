@@ -107,6 +107,7 @@ import {
   type ToolCallForwarder,
 } from "./tool-proxy-mcp.js";
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
+import { loadClaudeMcpServersSnapshot } from "./mcp-config-signature.js";
 import {
   type ClaudeInteractiveResponse,
   type ClaudePermissionMode,
@@ -259,6 +260,10 @@ interface ThreadAttachment {
   approvedPlanPermissionMode: ClaudePermissionMode;
   providerThreadId?: string;
   sessionPermissionGrants: ClaudeSessionPermissionGrant[];
+  mcpConfigSignature: string | null;
+  mcpConfigRefresh: Promise<void> | null;
+  mcpConfigTurnReady: Promise<void> | null;
+  mcpReconnectInFlight: Promise<void> | null;
   threadIdRef: ThreadIdRef;
 }
 
@@ -530,6 +535,7 @@ function requireSkillPluginsRoot(): string {
 }
 
 const THREAD_STOP_CLOSE_TIMEOUT_MS = 4_000;
+const CLAUDE_MCP_SDK_UPDATE_WAIT_MS = 50;
 const CLAUDE_CHROME_SETTING_RESTART_REASON = "Claude in Chrome setting changed";
 
 const { send, sendResult, sendError } = createBridgeIo<
@@ -1093,6 +1099,10 @@ function createThreadAttachment(
       ? { providerThreadId: args.providerThreadId }
       : {}),
     sessionPermissionGrants: [],
+    mcpConfigSignature: null,
+    mcpConfigRefresh: null,
+    mcpConfigTurnReady: null,
+    mcpReconnectInFlight: null,
     threadIdRef: args.threadIdRef,
   };
   attachment.residentSession = createThreadSession(attachment);
@@ -1276,6 +1286,23 @@ function buildSessionTrackingHooks(
       threadIdRef.current,
     )?.residentSession;
     if (threadSession) {
+      const bridgeToolPrefix = `mcp__${BB_BRIDGE_MCP_SERVER_NAME}__`;
+      if (
+        (threadSession.session.needsMcpServerReconciliation() ||
+          threadSession.attachment.mcpConfigRefresh !== null) &&
+        input.tool_name.startsWith("mcp__") &&
+        !input.tool_name.startsWith(bridgeToolPrefix)
+      ) {
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason:
+              "MCP server access is temporarily unavailable while configuration is reconciled.",
+          },
+        };
+      }
       const permissionEscalation = resolvePermissionEscalationForWork(
         threadSession,
         {
@@ -2455,6 +2482,7 @@ async function runTurnInput(
     return;
   }
   try {
+    await refreshClaudeMcpServers(threadSession);
     await applyLiveSessionSettings(
       threadSession,
       params.threadId,
@@ -2483,6 +2511,85 @@ async function runTurnInput(
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
   }
+}
+
+async function refreshClaudeMcpServers(
+  threadSession: ThreadSession,
+): Promise<void> {
+  const attachment = threadSession.attachment;
+  if (attachment.mcpConfigRefresh !== null) {
+    await attachment.mcpConfigTurnReady;
+    return;
+  }
+  const options = attachment.sessionOptions;
+  const cwd = options.cwd;
+  const env = options.env ?? process.env;
+  let snapshotReadyResolve: (() => void) | undefined;
+  const snapshotReady = new Promise<void>((resolve) => {
+    snapshotReadyResolve = resolve;
+  });
+  const refresh = Promise.resolve().then(async () => {
+    try {
+      const { signature, servers } = await loadClaudeMcpServersSnapshot({
+        cwd,
+        env,
+      });
+      const mcpConfigNeedsReconciliation =
+        signature !== attachment.mcpConfigSignature ||
+        threadSession.session.needsMcpServerReconciliation();
+      if (!mcpConfigNeedsReconciliation) {
+        snapshotReadyResolve?.();
+        return;
+      }
+      const update = threadSession.session.setMcpServers(servers);
+      snapshotReadyResolve?.();
+      await update;
+      attachment.mcpConfigSignature = signature;
+      startMcpAuthReconnect(threadSession);
+    } catch (error) {
+      threadSession.session.markMcpServerReconciliationPending();
+      logBridgeError(
+        `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      snapshotReadyResolve?.();
+    }
+  });
+  const trackedRefresh = refresh.finally(() => {
+    if (attachment.mcpConfigRefresh === trackedRefresh) {
+      attachment.mcpConfigRefresh = null;
+      attachment.mcpConfigTurnReady = null;
+    }
+  });
+  attachment.mcpConfigRefresh = trackedRefresh;
+  attachment.mcpConfigTurnReady = snapshotReady.then(async () => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      trackedRefresh,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, CLAUDE_MCP_SDK_UPDATE_WAIT_MS);
+      }),
+    ]);
+    if (timeout !== undefined) clearTimeout(timeout);
+  });
+  await attachment.mcpConfigTurnReady;
+}
+
+function startMcpAuthReconnect(threadSession: ThreadSession): void {
+  const attachment = threadSession.attachment;
+  if (attachment.mcpReconnectInFlight !== null) return;
+  const reconnect = threadSession.session
+    .reconnectMcpServersNeedingAuth()
+    .catch((error: unknown) => {
+      logBridgeError(
+        `Failed to reconnect Claude MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    })
+    .finally(() => {
+      if (attachment.mcpReconnectInFlight === reconnect) {
+        attachment.mcpReconnectInFlight = null;
+      }
+    });
+  attachment.mcpReconnectInFlight = reconnect;
 }
 
 async function handleTurnStart(
