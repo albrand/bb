@@ -913,6 +913,98 @@ describe("bridge", () => {
     }
   });
 
+  it.each([
+    {
+      name: "when absent",
+      envValue: undefined,
+      expectedUrl: "https://fixture.invalid/fallback",
+    },
+    {
+      name: "when present",
+      envValue: "https://fixture.invalid/from-env",
+      expectedUrl: "https://fixture.invalid/from-env",
+    },
+  ])(
+    "expands MCP URL fallback variables $name",
+    async ({ envValue, expectedUrl, name }) => {
+      const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+      tempDirs.push(home);
+      const cwd = join(home, "project");
+      mkdirSync(join(cwd, ".claude"), { recursive: true });
+      process.env.HOME = home;
+      process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+      const previousMcpUrl = process.env.CLAUDE_MCP_FALLBACK_URL;
+      if (envValue === undefined) delete process.env.CLAUDE_MCP_FALLBACK_URL;
+      else process.env.CLAUDE_MCP_FALLBACK_URL = envValue;
+      const mcpConfig = join(cwd, ".mcp.json");
+      const settingsPath = join(cwd, ".claude", "settings.local.json");
+      const mcpUrl = (url: string) => ({
+        mcpServers: { fixture: { type: "http", url } },
+      });
+      writeFileSync(
+        mcpConfig,
+        JSON.stringify(mcpUrl("https://fixture.invalid/initial")),
+      );
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ enableAllProjectMcpServers: true }),
+      );
+      const bridge = createBridgeJsonRpcTestHarness(handleLine);
+      const query = createControlledClaudeQuery();
+      query.mcpServerStatus.mockResolvedValue([]);
+      queryMock.mockReturnValue(query);
+      const threadId = `thread-live-mcp-url-fallback-${name.replaceAll(" ", "-")}`;
+
+      try {
+        await startBridgeThread({ bridge, cwd, threadId });
+        const call = queryMock.mock.calls[0]?.[0];
+        if (!isClaudeQueryCall(call))
+          throw new Error("Expected Claude SDK query");
+
+        const turn = async (requestId: number, input: string) => {
+          bridge.sendRequest(
+            requestId,
+            "turn/start",
+            canonicalTurnParams({
+              threadId,
+              input: [{ type: "text", text: input }],
+            }),
+          );
+          expect(await readNextPromptText(call)).toBe(input);
+          await bridge.waitForResponse(requestId);
+        };
+
+        await turn(2, "Start initial MCP server");
+        expect(query.setMcpServers).toHaveBeenLastCalledWith({
+          fixture: { type: "http", url: "https://fixture.invalid/initial" },
+        });
+
+        writeFileSync(
+          mcpConfig,
+          JSON.stringify(
+            mcpUrl(
+              "${CLAUDE_MCP_FALLBACK_URL:-https://fixture.invalid/fallback}",
+            ),
+          ),
+        );
+        await turn(3, "Use fallback MCP URL");
+        expect(query.setMcpServers).toHaveBeenLastCalledWith({
+          fixture: { type: "http", url: expectedUrl },
+        });
+        expect(queryMock).toHaveBeenCalledTimes(1);
+      } finally {
+        if (previousMcpUrl === undefined) {
+          delete process.env.CLAUDE_MCP_FALLBACK_URL;
+        } else {
+          process.env.CLAUDE_MCP_FALLBACK_URL = previousMcpUrl;
+        }
+        query.finish();
+        await stopBridgeThread({ bridge, queries: [query], threadId });
+        bridge.restore();
+      }
+    },
+  );
+
   it("passes only approved project MCP servers to the SDK", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

@@ -113,8 +113,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function expandEnvironment(value: string, env: NodeJS.ProcessEnv): string {
   return value.replace(
-    /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
-    (_, key: string) => env[key] ?? "",
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
+    (_, key: string, fallback: string | undefined) => {
+      const variable = env[key];
+      if (
+        fallback !== undefined &&
+        (variable === undefined || variable === "")
+      ) {
+        return fallback;
+      }
+      return variable ?? "";
+    },
   );
 }
 
