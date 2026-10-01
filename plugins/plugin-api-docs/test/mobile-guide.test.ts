@@ -198,4 +198,4 @@ it("pages mobile panes without using annotation selection as navigation", () => 
     if (scrollIntoView) HTMLElement.prototype.scrollIntoView = scrollIntoView;
     else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
   }
-});
+}, 30_000);

@@ -4219,6 +4219,7 @@ describe("Account Pool plugin", () => {
         "keeps a fork on its short-held parent account over %s",
         async (wire) => {
           const provider = wire === "claude" ? "claude" : "codex";
+          let now = Date.now();
           const attempts: Array<string | null> = [];
           const fixture = await affinityFixture(
             provider,
@@ -4236,7 +4237,7 @@ describe("Account Pool plugin", () => {
                   )
                 : Response.json({});
             },
-            Date.now,
+            () => now,
           );
           const send = (own: string, parent: string | null) => {
             const request = forkRequest(wire, own, parent);
@@ -4282,6 +4283,15 @@ describe("Account Pool plugin", () => {
               "sk-first",
               "sk-first",
             ]);
+            now += 251;
+            const status = statusSchema.parse(
+              await fixture.host.harness.behavior.callRpc("status.get", null),
+            );
+            expect(
+              status.accounts.find(
+                (account) => account.id === fixture.account.id,
+              )?.status,
+            ).toBe("ready");
           } finally {
             const response = await paced;
             if (!response.bodyUsed) await response.text();

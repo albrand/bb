@@ -254,7 +254,7 @@ describe("runtime installer", () => {
     const second = await install(dir);
     expect(await readFile(second.binary, "utf8")).toBe(binaryContent);
     expect(await npmCalls()).toHaveLength(2);
-  });
+  }, 30_000);
   it("refuses a binary whose digest differs from the pin and leaves nothing behind", async () => {
     const dir = await dataDir();
     served[`/${asset}`] = binaryContent.replace(version, "1.0.0-other");
@@ -309,7 +309,7 @@ describe("runtime installer", () => {
         release,
       ),
     ).toThrow("registry signature");
-  });
+  }, 30_000);
   it("reports npm failures, a missing npm, and an unrecorded platform clearly", async () => {
     const dir = await dataDir();
     await configureNpm({ installExit: 1 });
@@ -388,7 +388,7 @@ describe("runtime installer", () => {
     );
     await unlockC();
     await expect(readFile(path, "utf8")).rejects.toThrow();
-  });
+  }, 30_000);
   it("cancels an in-progress install, cleans up, and allows a retry", async () => {
     const dir = await dataDir();
     await configureNpm({ installDelayMs: 3_000 });

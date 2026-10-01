@@ -438,7 +438,7 @@ async function lockOwner(path: string): Promise<number | null> {
   return match ? Number(match[1]) : null;
 }
 
-export async function acquireLock(
+async function acquireFileLock(
   path: string,
   signal: AbortSignal,
 ): Promise<() => Promise<void>> {
@@ -507,6 +507,73 @@ export async function acquireLock(
   }
 }
 
+const processLockQueues = new Map<string, Promise<void>>();
+
+async function acquireProcessLock(
+  path: string,
+  signal: AbortSignal,
+): Promise<() => void> {
+  const previous = processLockQueues.get(path) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => gate);
+  processLockQueues.set(path, queued);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        resolve();
+      };
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        reject(signal.reason ?? new Error("Lock acquisition was cancelled."));
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      previous.then(finish, (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      });
+    });
+    return () => {
+      release();
+      if (processLockQueues.get(path) === queued)
+        processLockQueues.delete(path);
+    };
+  } catch (error) {
+    release();
+    void queued.then(
+      () => {
+        if (processLockQueues.get(path) === queued)
+          processLockQueues.delete(path);
+      },
+      () => {
+        if (processLockQueues.get(path) === queued)
+          processLockQueues.delete(path);
+      },
+    );
+    throw error;
+  }
+}
+
+export async function acquireLock(
+  path: string,
+  signal: AbortSignal,
+): Promise<() => Promise<void>> {
+  return acquireFileLock(path, signal);
+}
+
 function stagingPrefix(release: RuntimeRelease): string {
   return `.staging-${release.package}@${release.version}-`;
 }
@@ -548,7 +615,15 @@ export async function installRuntime(
   const root = installRoot(dataDir);
   await mkdir(root, { recursive: true, mode: 0o700 });
   const finalDir = installDir(dataDir, release);
-  const unlock = await acquireLock(`${finalDir}.lock`, signal);
+  const lockPath = `${finalDir}.lock`;
+  const releaseProcessLock = await acquireProcessLock(lockPath, signal);
+  let unlock: (() => Promise<void>) | undefined;
+  try {
+    unlock = await acquireLock(lockPath, signal);
+  } catch (error) {
+    releaseProcessLock();
+    throw error;
+  }
   try {
     const raced = await verifyInstalled(release, dataDir, platform);
     if (raced) return raced;
@@ -726,6 +801,10 @@ export async function installRuntime(
       throw new Error("DevBrowser runtime failed verification after install");
     return installed;
   } finally {
-    await unlock();
+    try {
+      await unlock();
+    } finally {
+      releaseProcessLock();
+    }
   }
 }
