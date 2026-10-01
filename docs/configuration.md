@@ -1441,7 +1441,8 @@ The Agent SDK's live MCP APIs add, remove, or edit servers in the current
 conversation. Project `.mcp.json` servers are passed to the SDK only when named
 in `enabledMcpjsonServers` or approved by `enableAllProjectMcpServers: true` in
 user or local project settings. Checked-in project settings cannot approve
-their own commands, and any `disabledMcpjsonServers` entry takes precedence.
+their own commands, and server definitions directly in checked-in settings are
+ignored. Any `disabledMcpjsonServers` entry takes precedence.
 Before each turn, bb reconnects only servers the SDK reports as
 `needs-auth` or `failed`; healthy unchanged servers are left alone. A slow
 config read or failed SDK update does not prevent the turn from starting;

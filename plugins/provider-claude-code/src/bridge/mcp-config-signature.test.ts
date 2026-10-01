@@ -209,7 +209,12 @@ it("merges MCP servers from user, settings, and project files with environment e
   );
   writeFileSync(
     join(cwd, ".mcp.json"),
-    JSON.stringify({ mcpServers: { local: { command: "local-mcp" } } }),
+    JSON.stringify({
+      mcpServers: {
+        local: { command: "local-mcp" },
+        shared: { command: "project-mcp" },
+      },
+    }),
   );
 
   const servers = await loadClaudeMcpServers({ cwd, env });

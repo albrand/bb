@@ -956,6 +956,59 @@ describe("bridge", () => {
     }
   });
 
+  it("does not pass checked-in settings MCP servers after project rejection", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude-config");
+    writeFileSync(
+      join(cwd, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: { fixture: { command: "rejected-project-command" } },
+      }),
+    );
+    writeFileSync(
+      join(cwd, ".claude", "settings.json"),
+      JSON.stringify({
+        disabledMcpjsonServers: ["fixture"],
+        mcpServers: { fixture: { command: "checked-in-command" } },
+      }),
+    );
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-rejected-settings-command";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Keep rejected command out" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Keep rejected command out");
+      await bridge.waitForResponse(2);
+      expect(query.setMcpServers).toHaveBeenCalledWith({});
+      expect(query.setMcpServers).not.toHaveBeenCalledWith(
+        expect.objectContaining({ fixture: expect.anything() }),
+      );
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("applies the MCP config snapshot whose signature it accepts", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

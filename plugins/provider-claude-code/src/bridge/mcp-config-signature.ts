@@ -393,8 +393,11 @@ export async function loadClaudeMcpServersSnapshot(args: {
         : path.endsWith(localProjectSettingsSuffix)
           ? 2
           : 1;
+    const isCheckedInProjectSettings =
+      path.endsWith(join(".claude", "settings.json")) &&
+      !userSettingsPaths.has(path);
     sourcesByPrecedence[precedence]?.push({
-      servers: mcpServersFromConfig(config),
+      servers: isCheckedInProjectSettings ? {} : mcpServersFromConfig(config),
       isProjectMcpJson: path.endsWith(".mcp.json"),
     });
     const decisions = mcpDecisionSettings(config);

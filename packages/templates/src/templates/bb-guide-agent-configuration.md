@@ -52,7 +52,8 @@ Claude Code MCP servers:
   passing project .mcp.json servers to the SDK, bb requires their names in
   enabledMcpjsonServers or enableAllProjectMcpServers: true in user or local
   project settings. Checked-in project settings cannot approve their own
-  commands; disabledMcpjsonServers always takes precedence. Before
+  commands or provide MCP server definitions; disabledMcpjsonServers always
+  takes precedence. Before
   each turn, bb reconnects only servers the SDK reports as needs-auth or failed;
   healthy unchanged servers are left alone. A slow config read or failed SDK
   update does not prevent the turn from starting; invalid or incomplete reads
