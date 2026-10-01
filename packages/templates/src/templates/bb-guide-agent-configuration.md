@@ -59,8 +59,8 @@ Claude Code MCP servers:
   invalid or incomplete config preserves the current servers and does not
   prevent the turn from starting. If bb cannot disable a server after a config
   change or cannot read its status, it rejects that turn without sending its
-  input and retries on the next turn. Failed SDK updates also reject the turn
-  and retry later.
+  input and retries on the next turn. If a changed configuration's auth-status
+  check or reconnect fails, bb also rejects the turn and retries later.
   bb waits for a live SDK update to settle before sending turn input, so an
   update cannot change tools after that turn has started.
 

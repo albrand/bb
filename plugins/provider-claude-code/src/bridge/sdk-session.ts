@@ -229,6 +229,10 @@ export class SdkSession {
     return this.mcpReconciliationPending;
   }
 
+  markMcpServerReconciliationPending(): void {
+    this.mcpReconciliationPending = true;
+  }
+
   async setMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
     const query = this.query;
     if (!query) return;

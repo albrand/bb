@@ -1448,10 +1448,11 @@ Before each turn, bb reconnects only servers the SDK reports as
 config read or invalid or incomplete config preserves the current server set
 and does not prevent the turn from starting. If bb cannot disable a static
 server affected by a config change, or cannot read its status, it rejects that
-turn without sending its input and retries on the next turn. Failed SDK updates
-also reject the turn and retry later. The bridge waits for a live SDK update to
-settle before sending turn input, so an update cannot change tools after that
-turn has started.
+turn without sending its input and retries on the next turn. If a changed
+configuration's auth-status check or reconnect fails, bb also rejects the turn
+and retries later. The bridge waits for a live SDK update to settle before
+sending turn input, so an update cannot change tools after that turn has
+started.
 
 ### Codex provider
 

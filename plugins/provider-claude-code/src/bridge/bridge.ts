@@ -2504,25 +2504,31 @@ async function refreshClaudeMcpServers(
   const options = attachment.sessionOptions;
   const cwd = options.cwd;
   const env = options.env ?? process.env;
+  let mcpConfigNeedsReconciliation = false;
   const refresh = Promise.resolve().then(async () => {
     const { signature, servers } = await loadClaudeMcpServersSnapshot({
       cwd,
       env,
     });
-    if (
+    mcpConfigNeedsReconciliation =
       signature !== attachment.mcpConfigSignature ||
-      threadSession.session.needsMcpServerReconciliation()
-    ) {
+      threadSession.session.needsMcpServerReconciliation();
+    if (mcpConfigNeedsReconciliation) {
       await threadSession.session.setMcpServers(servers);
-      attachment.mcpConfigSignature = signature;
     }
     await threadSession.session.reconnectMcpServersNeedingAuth();
+    if (mcpConfigNeedsReconciliation) {
+      attachment.mcpConfigSignature = signature;
+    }
   });
   const trackedRefresh = refresh
     .catch((error: unknown) => {
       logBridgeError(
         `Failed to reload MCP servers: ${error instanceof Error ? error.message : String(error)}`,
       );
+      if (mcpConfigNeedsReconciliation) {
+        threadSession.session.markMcpServerReconciliationPending();
+      }
       if (
         error instanceof McpServerConfigChangeError ||
         threadSession.session.needsMcpServerReconciliation()
