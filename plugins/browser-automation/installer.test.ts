@@ -464,6 +464,24 @@ describe("runtime installer", () => {
       await unlink(`${path}.reap`).catch(() => {});
     }
   }, 30_000);
+  it("recovers a stale reap lock left by a dead reaper", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "dead-reaper.lock");
+    const reaperPath = `${path}.reap`;
+    await writeFile(path, "999999999");
+    await writeFile(reaperPath, "999999999");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+    await utimes(reaperPath, old, old);
+
+    const unlock = await acquireLock(path, AbortSignal.timeout(5_000));
+    expect(await readFile(path, "utf8")).toMatch(
+      new RegExp(`^${process.pid} `),
+    );
+    await expect(readFile(reaperPath, "utf8")).rejects.toThrow();
+    await unlock();
+  }, 30_000);
   it("hands the lock over in order, keeps unparsable young locks, and never removes a replaced lock", async () => {
     const dir = await dataDir();
     await mkdir(installRoot(dir), { recursive: true });
