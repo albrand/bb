@@ -1260,6 +1260,7 @@ function repairBranchLocalQueuedGroupingBeforeInitialThreadSections(
   markMigrationApplied(db, initialThreadSectionsMigration);
 }
 
+
 const STAGED_CONNECT_MACHINE_ID_COLUMN = "_bb_connect_machine_id_pending";
 const STAGED_THREAD_STORAGE_DELETED_AT_COLUMN =
   "_bb_thread_storage_deleted_at_pending";
@@ -1439,6 +1440,7 @@ function repairBranchLocalThreadTabsBeforePendingInteractionsMigration(
 
   applyMigrationStatements(db, pendingInteractionsMigration);
 }
+
 
 function warnAboutFutureAppliedMigrations(
   db: DbConnection,

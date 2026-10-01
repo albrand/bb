@@ -2,10 +2,6 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type { FileContents } from "@pierre/diffs";
 import type { DiffPresentation } from "@/components/code/code-rendering";
 import { GitDiffCard } from "../git-diff/GitDiffCard";
-import type {
-  DiffFileContentsResult,
-  RequestDiffFileContents,
-} from "@/components/git-diff/GitDiffCardBody";
 import {
   DEFAULT_CODE_OVERFLOW_MODE,
   type CodeOverflowMode,
@@ -22,7 +18,6 @@ import {
   type ParsedGitDiffFile,
 } from "../git-diff/git-diff-parsing";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
-import { appToast } from "@/components/ui/app-toast";
 
 export default {
   title: "right-panel/Diff",
@@ -616,53 +611,6 @@ interface InteractiveDiffPanelDiff {
   fixture: DiffPanelFixture;
 }
 
-interface FixtureSideContents {
-  paths: readonly string[];
-  old: DiffFileContentsResult | null;
-  new: DiffFileContentsResult | null;
-}
-
-function isImageDiffResult(
-  fixture: DiffPanelFixture,
-): fixture is ImageDiffResult {
-  return "filename" in fixture;
-}
-
-function getFixtureSideContents(
-  fixture: DiffPanelFixture,
-): FixtureSideContents {
-  if (isImageDiffResult(fixture)) {
-    return {
-      paths: [fixture.filename],
-      old:
-        fixture.oldImageUrl === null || fixture.oldSizeBytes === null
-          ? null
-          : {
-              kind: "image",
-              dataUrl: fixture.oldImageUrl,
-              sizeBytes: fixture.oldSizeBytes,
-            },
-      new:
-        fixture.newImageUrl === null || fixture.newSizeBytes === null
-          ? null
-          : {
-              kind: "image",
-              dataUrl: fixture.newImageUrl,
-              sizeBytes: fixture.newSizeBytes,
-            },
-    };
-  }
-  const paths =
-    fixture.oldFile.name === fixture.newFile.name
-      ? [fixture.newFile.name]
-      : [fixture.oldFile.name, fixture.newFile.name];
-  return {
-    paths,
-    old: { kind: "text", file: fixture.oldFile },
-    new: { kind: "text", file: fixture.newFile },
-  };
-}
-
 interface InteractiveDiffPanelArgs {
   diffs: readonly InteractiveDiffPanelDiff[];
   initialCollapsed?: ReadonlySet<string>;
@@ -679,7 +627,6 @@ function InteractiveDiffPanel({
           fileKey,
           fileDiff: parseGitDiffFiles(fixture.unifiedDiff)[0],
           fullDiff: fixture.unifiedDiff,
-          fixture,
         }))
         .filter(
           (
@@ -688,7 +635,6 @@ function InteractiveDiffPanel({
             fileKey: string;
             fileDiff: ParsedGitDiffFile;
             fullDiff: string;
-            fixture: DiffPanelFixture;
           } => entry.fileDiff !== undefined,
         ),
     [diffs],
@@ -735,17 +681,6 @@ function InteractiveDiffPanel({
       return new Set(parsed.map(({ fileKey }) => fileKey));
     });
   }, [parsed]);
-  const toggleFileCollapsed = useCallback((fileKey: string) => {
-    setCollapsedFileKeys((current) => {
-      const next = new Set(current);
-      if (next.has(fileKey)) {
-        next.delete(fileKey);
-      } else {
-        next.add(fileKey);
-      }
-      return next;
-    });
-  }, []);
   const presentation = useMemo<DiffPresentation>(
     () => ({
       view: displayMode,
@@ -754,32 +689,6 @@ function InteractiveDiffPanel({
     }),
     [displayMode, lineOverflowMode],
   );
-  const onOpenFileInEditor = useCallback((path: string) => {
-    appToast.message("Opening in editor", { description: path });
-  }, []);
-
-  const contentsByPath = useMemo(() => {
-    const map = new Map<
-      string,
-      { old: DiffFileContentsResult | null; new: DiffFileContentsResult | null }
-    >();
-    for (const { fixture } of parsed) {
-      const sides = getFixtureSideContents(fixture);
-      for (const path of sides.paths) {
-        map.set(path, { old: sides.old, new: sides.new });
-      }
-    }
-    return map;
-  }, [parsed]);
-  const onRequestFileContents = useCallback<RequestDiffFileContents>(
-    (path, side) => {
-      const entry = contentsByPath.get(path);
-      if (!entry) return Promise.resolve(null);
-      return Promise.resolve(side === "old" ? entry.old : entry.new);
-    },
-    [contentsByPath],
-  );
-
   return (
     <PanelStage>
       <GitDiffToolbar
@@ -802,17 +711,15 @@ function InteractiveDiffPanel({
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-3">
         <div className="space-y-2">
-          {visibleFiles.map(({ fileKey, fileDiff }) => (
-            <GitDiffCard
-              key={fileKey}
-              fileDiff={fileDiff}
-              presentation={presentation}
-              onOpenFileInEditor={onOpenFileInEditor}
-              isCollapsed={collapsedFileKeys.has(fileKey)}
-              onToggleCollapsed={() => toggleFileCollapsed(fileKey)}
-              stickyHeader
-              onRequestFileContents={onRequestFileContents}
-            />
+          {visibleFiles
+            .filter(({ fileKey }) => !collapsedFileKeys.has(fileKey))
+            .map(({ fileKey, fileDiff }) => (
+              <GitDiffCard
+                key={fileKey}
+                fileDiff={fileDiff}
+                presentation={presentation}
+                stickyHeader
+              />
           ))}
         </div>
       </div>

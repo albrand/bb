@@ -23,7 +23,6 @@ export interface UpsertProjectExecutionDefaultsArgs extends GetProjectExecutionD
   reasoningLevel: ReasoningLevel;
   permissionMode: PermissionMode;
   serviceTier: ServiceTier;
-  updatedAt?: number;
 }
 
 const PER_PROVIDER_TABLE = "fork_project_provider_execution_defaults";
@@ -173,7 +172,7 @@ export function upsertProjectExecutionDefaults(
   db: DbConnection,
   args: UpsertProjectExecutionDefaultsArgs,
 ): ProjectExecutionDefaults {
-  const updatedAt = args.updatedAt ?? Date.now();
+  const updatedAt = Date.now();
   const row = db
     .insert(projectExecutionDefaults)
     .values({

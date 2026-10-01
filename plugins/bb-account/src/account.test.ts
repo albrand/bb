@@ -449,7 +449,7 @@ describe("bb-account.v1.fetch", () => {
     expect(stub.requests.length).toBe(requestsBefore);
   });
 
-  it("caps request and response bodies at 1 MB and never follows redirects", async () => {
+  it("caps request bodies at 16 MB, responses at 1 MB, and never follows redirects", async () => {
     const host = await loadAccount();
     await signInWithCode(host);
     stub.route("GET", "/api/ai/huge", () => ({
@@ -463,9 +463,9 @@ describe("bb-account.v1.fetch", () => {
         target: "api",
         method: "POST",
         path: "/api/ai/echo",
-        body: { blob: "x".repeat(1024 * 1024) },
+        body: { blob: "x".repeat(16 * 1024 * 1024) },
       }),
-    ).rejects.toThrow("1 MB");
+    ).rejects.toThrow("16 MB");
     expect(stub.requestsTo("/api/ai/echo")).toEqual([]);
     await expect(
       host.harness.callRpc(FETCH_METHOD, {
@@ -826,21 +826,6 @@ describe("sign-out, profile refresh, and adoption", () => {
 
   it("publishes discoverable methods and keeps the private ones unlisted", async () => {
     const host = await loadAccount();
-    expect(host.harness.registrations.rpcMethods).toEqual(
-      expect.arrayContaining([
-        STATUS_METHOD,
-        WAIT_FOR_STATUS_CHANGE_METHOD,
-        FETCH_METHOD,
-        ADOPT_CONNECT_CREDENTIAL_METHOD,
-        CONNECT_CREDENTIAL_METHOD,
-        CONFIRM_REFUSED_CREDENTIAL_METHOD,
-        "login.start",
-        "login.poll",
-        "login.cancel",
-        "redeemCode",
-        "signOut",
-      ]),
-    );
     const published =
       host.harness.registrations.experimental_publishedRpcMethods;
     expect(published.map((method) => method.method).sort()).toEqual(

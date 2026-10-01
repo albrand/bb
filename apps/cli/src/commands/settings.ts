@@ -1,4 +1,3 @@
-import { androidAppPrepareRequestSchema } from "@bb/server-contract";
 import { Command } from "commander";
 import {
   AI_TASKS,
@@ -618,52 +617,31 @@ export function registerSettingsCommands(
     );
 
   settings
-    .command("android-app-prepare <source>")
-    .description(
-      "Prepare an Android APK from github or explicitly build locally",
-    )
+    .command("mobile-app")
+    .description("Show iOS TestFlight and Android APK download links")
+    .option("--details", "Include available public release metadata")
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(async (source: string, opts: JsonOptions) => {
-        const sdk = createCliBbSdk(getUrl());
-        let result = await sdk.system.prepareAndroidApp(
-          androidAppPrepareRequestSchema.parse({ source }),
-        );
-        let message = "";
-        while (result.status === "preparing") {
-          if (!opts.json && result.message !== message)
-            console.error(result.message);
-          message = result.message;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          result = await sdk.system.androidAppPreparation();
+      action(async (opts: JsonOptions & { details?: boolean }) => {
+        const system = createCliBbSdk(getUrl()).system;
+        const links = system.mobileAppDownloads();
+        if (opts.details) {
+          const releases = await system.mobileAppReleases();
+          if (outputJson(opts, { downloads: links, releases })) return;
+          console.log(
+            `iOS TestFlight: ${links.ios}\nAndroid APK: ${links.android}`,
+          );
+          console.log(
+            releases.android
+              ? `Android ${releases.android.version} (build ${releases.android.versionCode}) · Updated ${releases.android.updatedAt} · ${Math.ceil(releases.android.size / 1024 / 1024)} MB`
+              : "Android release details are unavailable.",
+          );
+          console.log("iOS version and release date are shown in TestFlight.");
+          return;
         }
-        if (result.status === "failed") process.exitCode = 1;
-        if (outputJson(opts, result)) return;
-        console.log(result.message);
-        if (result.status === "ready")
-          console.log(new URL("/install/bb-android.apk", getUrl()).href);
-      }),
-    );
-
-  settings
-    .command("android-app")
-    .description("Show the available Android test APK and download URL")
-    .option("--json", "Print machine-readable JSON output")
-    .action(
-      action(async (opts: JsonOptions) => {
-        const artifact = await createCliBbSdk(getUrl()).system.androidApp();
-        const result =
-          artifact === null
-            ? null
-            : {
-                ...artifact,
-                downloadUrl: new URL("/install/bb-android.apk", getUrl()).href,
-              };
-        if (outputJson(opts, result)) return;
+        if (outputJson(opts, links)) return;
         console.log(
-          result === null
-            ? "No Android build is available. Enable the Android testing experiment and publish an APK."
-            : `${result.version} (build ${result.versionCode})\n${result.downloadUrl}`,
+          `iOS TestFlight: ${links.ios}\nAndroid APK: ${links.android}`,
         );
       }),
     );

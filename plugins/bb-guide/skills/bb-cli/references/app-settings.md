@@ -111,6 +111,15 @@ so they carry over between navigation plugins.
   software-keyboard Return path stays a newline; iPadOS WebKit preserves the
   Enter shortcuts for a connected Magic Keyboard.
 
+## Archive confirmation
+
+- `confirmThreadArchive` defaults to true. Set it with
+  `bb settings general confirmThreadArchive <true|false|on|off>`.
+- Turn it off to archive a parent and child threads without the confirmation
+  popup. Undo remains available in the archive toast. This server-wide setting
+  applies to all connected app clients. CLI and SDK archive calls remain
+  non-interactive.
+
 ## Streamer mode
 
 - `streamerMode` defaults to false. Set it with
@@ -186,10 +195,8 @@ so they carry over between navigation plugins.
 
 ## Mobile app
 
-- The `mobileApp` experiment defaults to false while the bb mobile app is in
-  early access.
-- Enable it with `bb settings experiment mobileApp true`. It shows the
-  **Add mobile device** card under Settings → Remote access.
+- Downloads are available in Settings → Mobile without opting in.
+- Pair your phone under Settings → Mobile → **Add mobile device**.
 
 ## Changelog preview
 
@@ -204,15 +211,6 @@ so they carry over between navigation plugins.
 - Running plugins are unchanged when it is toggled. The selected loader applies
   the next time a plugin is installed, reloaded, enabled, updated, or loaded
   after a server restart.
-
-## Sidebar progressive disclosure
-
-- The `sidebarProgressiveDisclosure` experiment defaults to false.
-- Enable it with `bb settings experiment sidebarProgressiveDisclosure true`.
-- In **By project** and **By machine**, it shows the first five groups in the
-  current sort order, keeps attention groups visible, and reveals ten more per
-  **Show more** click. Revealed groups stay visible through activity and
-  sort-order changes. **Manually** is unchanged.
 
 ## Timeline windowing
 
@@ -256,27 +254,24 @@ adds a More item while the footer has room, and drag reorders within a zone. Mor
 hides every action, and Show footer shows them again.
 Right-click an action for Hide from footer or Customize footer.
 Settings → Appearance → Sidebar footer edits the same preferences. CLI example:
-`bb settings ui set sidebar.hiddenFooterItems '["plugin:provider-usage/usage"]'`.
+`bb settings ui set sidebar.hiddenFooterItems '["plugin:bb--provider-usage/usage"]'`.
 Use `bb settings ui reset sidebar.hiddenFooterItems` to restore the default footer.
 
 Disable anonymous usage telemetry with `bb settings general telemetryEnabled false`
 or Settings → General → Privacy & diagnostics → Share anonymous usage data. This server-wide preference
 applies immediately and persists across restarts. `BB_TELEMETRY=false` overrides it.
 
-The default-off `androidTesting` experiment adds **Android App** below the flags
-in Settings → Experiments. **Download APK** fetches and caches a checksum-verified
-APK from the public `get-bb/bb` release tagged `android-testing`. No Android tools
-are required. If no release/cache is available, **Build on this server** explicitly
-runs a local arm64 build; it requires `BB_ANDROID_SOURCE_DIR` pointing to a dedicated
-source checkout with dependencies, pnpm, Java 17+, and `ANDROID_HOME` or
-`ANDROID_SDK_ROOT`. Missing tools and build failures are reported in the page.
+Mobile app downloads are always available in Settings → Mobile (`/settings/mobile`).
+**Join iOS TestFlight** opens https://testflight.apple.com/join/T9MayTMb.
+**Download Android APK** downloads directly from the public `get-bb/bb` GitHub
+`android-testing` release's `bb-android.apk` asset. The APK does not pass through
+the bb server or its remote-access tunnel. No experiment or Android developer tools are needed.
+Pair either app through Settings → Mobile → **Add mobile device**.
 
-Use `bb settings experiment androidTesting true`, then
-`bb settings android-app-prepare github --json` (or `local`) to wait for a download
-or build. `bb settings android-app --json` reads cached version/download metadata.
-SDK equivalents: `system.prepareAndroidApp({ source })`,
-`system.androidAppPreparation()`, and `system.androidApp()`.
-Downloads use `/install/bb-android.apk`; remote access requires an account session.
-Publish the first release using **Mobile Android (EAS)** with profile `preview`
-and **publish** enabled. Local fallback APKs use the debug signing key, which may
-differ from the release key. See `docs/configuration.md` for setup and publishing.
+Use `bb settings mobile-app --json` or SDK `system.mobileAppDownloads()` to get
+both public links. Add `--details --json` or call `system.mobileAppReleases()`
+(GET `/api/v1/system/mobile-app-releases`) for Android version/build, size, and
+upload date. The server fetches only public metadata, caches it for five minutes,
+and returns `android: null` if unavailable or inconsistent. Download links remain
+usable during metadata failures. iOS version and release date are shown in TestFlight.
+Publish updates with **Mobile Android (EAS)**, profile `preview`, **publish** on.

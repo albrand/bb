@@ -47,6 +47,7 @@ import {
   type ClientMessage,
 } from "@bb/server-contract";
 import { z } from "zod";
+import { registerDesktopWindowFocusIpc } from "./desktop-window-focus.js";
 import {
   assertPathExists,
   resolveDesktopBridgePath,
@@ -220,6 +221,7 @@ import {
   createDesktopBrowserViewManager,
   type DesktopBrowserViewManager,
 } from "./desktop-browser-view.js";
+import { removeLegacyAutomationPartitions } from "./desktop-browser-legacy-partitions.js";
 import { resolveDesktopBrowserAppCommand } from "./desktop-browser-shortcuts.js";
 import { registerDesktopBrowserIpc } from "./desktop-browser-main-ipc.js";
 import {
@@ -2244,6 +2246,7 @@ async function finishQuit(): Promise<void> {
 }
 
 function registerDesktopUpdateIpc(): void {
+  registerDesktopWindowFocusIpc(applicationWindowWebContentsIds);
   ipcMain.on(BB_DESKTOP_ZOOM_COMMAND_CHANNEL, (event, payload: unknown) => {
     const parsed = bbDesktopZoomCommandSchema.safeParse(payload);
     if (parsed.success) {
@@ -2989,6 +2992,7 @@ async function runDesktopApp(): Promise<void> {
     }
     desktopFindViewManager?.open(browserWindow, parsed.data);
   });
+  void removeLegacyAutomationPartitions(userDataPath).catch(() => {});
   desktopBrowserViewManager = createDesktopBrowserViewManager({
     pagePreloadPath: browserPagePreloadPath,
     dispatchAppCommand({ command, hostWebContentsId }) {
@@ -3068,7 +3072,7 @@ async function runDesktopApp(): Promise<void> {
           sourceId: parsed.data.sourceId,
           sourceProfileDirectory: parsed.data.sourceProfileDirectory,
         },
-        manager.profileSession(parsed.data.profile),
+        manager.session(),
       );
     },
   );

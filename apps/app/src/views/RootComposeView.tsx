@@ -194,7 +194,10 @@ import {
   useAppCommandHandler,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
-import { useOptionalPaneContext } from "./thread-detail/PaneContext";
+import {
+  useOptionalPaneContext,
+  usePaneContext,
+} from "./thread-detail/PaneContext";
 import {
   PluginDetailPanelContext,
   usePluginDetailPanelState,
@@ -216,7 +219,7 @@ interface LegacyProjectComposeRedirectProps {
   projectId: string;
 }
 
-export function readSectionIdFromLocationState(state: unknown): string | null {
+function readSectionIdFromLocationState(state: unknown): string | null {
   if (typeof state !== "object" || state === null) {
     return null;
   }
@@ -538,10 +541,10 @@ export function LegacyProjectComposeRedirect({
 }
 
 export function RootComposeView() {
+  const { navigateInPane } = usePaneContext();
   const [rootComposeProjectId, setRootComposeProjectId] =
     useRootComposeProjectId();
   const location = useLocation();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const createThread = useCreateThread();
   const [placement, setPlacement] = useRootComposePlacement();
@@ -594,19 +597,14 @@ export function RootComposeView() {
       setForkSeed(null);
       setPlacement(DEFAULT_THREAD_CREATION_PLACEMENT);
       if (shouldNavigateToCreatedThread) {
-        navigate(
-          getThreadRoutePath({
-            projectId: thread.projectId,
-            threadId: thread.id,
-          }),
-        );
+        navigateInPane({ projectId: thread.projectId, threadId: thread.id });
       }
     },
     [
       createThread,
       forkSeed,
       queryClient,
-      navigate,
+      navigateInPane,
       navigateToThreadAfterCreate,
       placement,
       setForkSeed,
@@ -1039,12 +1037,12 @@ function RootComposeSurface({
     checkThreadStorageFileExists: checkRootThreadStorageFileExists,
     threadStorageFiles: rootThreadStorageFiles,
   } = useThreadStorageViewer({
-    fileListEnabled: shouldLoadThreadStorageFileList({
-      hasThread: rootPanelThreadId !== null,
-      isSecondaryPanelOpen,
-      secondaryTabs: fixedPanelTabsState.secondary.tabs,
-    }),
-    threadId: rootPanelThreadId ?? undefined,
+      fileListEnabled: shouldLoadThreadStorageFileList({
+        hasThread: rootPanelThreadId !== null,
+        isSecondaryPanelOpen,
+        secondaryTabs: fixedPanelTabsState.secondary.tabs,
+      }),
+      threadId: rootPanelThreadId ?? undefined,
   });
   const environmentTerminalsListQuery = useEnvironmentTerminals(
     rootPanelEnvironmentId ?? "",

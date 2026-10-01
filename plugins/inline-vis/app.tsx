@@ -24,11 +24,6 @@ type PreviewTarget = NonNullable<
   MarkdownProps["experimental_document"]
 >["target"];
 
-const PREVIEW_ROUTE = {
-  workspace: "worktree/files",
-  "thread-storage": "thread-storage/files",
-} as const satisfies Record<PreviewSource, string>;
-
 type LoadState =
   | { status: "missing-file" }
   | { status: "invalid-height"; message: string }
@@ -39,6 +34,7 @@ type LoadState =
       file: string;
       source: PreviewSource;
       target: PreviewTarget;
+      url: string;
     }
   | {
       status: "ready";
@@ -73,18 +69,6 @@ function writeCollapsedPreference(collapsed: boolean): void {
   } catch {
     return;
   }
-}
-
-function encodePathSegments(file: string): string {
-  return file.split("/").map(encodeURIComponent).join("/");
-}
-
-function buildPreviewUrl(
-  threadId: string,
-  file: string,
-  source: PreviewSource,
-): string {
-  return `/api/v1/threads/${encodeURIComponent(threadId)}/${PREVIEW_ROUTE[source]}/${encodePathSegments(file)}`;
 }
 
 function parsePreviewHeight(value: string | undefined): number | null {
@@ -321,7 +305,7 @@ function InlineVisDirective({
       ) : (
         <iframe
           title={`inline-vis: ${state.file}`}
-          src={buildPreviewUrl(message.threadId, state.file, state.source)}
+          src={state.url}
           sandbox="allow-scripts"
           style={{ height: previewHeight ?? DEFAULT_HEIGHT_PX }}
           className="block w-full border-0 bg-background"

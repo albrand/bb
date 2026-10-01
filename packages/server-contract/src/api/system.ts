@@ -315,9 +315,6 @@ export const systemAppUpdateBlockedSchema = z.object({
     "fetch-failed",
   ]),
 });
-export type SystemAppUpdateBlocked = z.infer<
-  typeof systemAppUpdateBlockedSchema
->;
 
 export const systemAppUpdateActivitySchema = z.discriminatedUnion("phase", [
   z.object({ phase: z.literal("idle") }),
@@ -547,17 +544,28 @@ export const androidAppArtifactSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type AndroidAppArtifact = z.infer<typeof androidAppArtifactSchema>;
-export type SystemAndroidAppResponse = AndroidAppArtifact | null;
 
-export const androidAppPrepareRequestSchema = z.object({
-  source: z.enum(["github", "local"]),
-});
-export type AndroidAppPrepareRequest = z.infer<
-  typeof androidAppPrepareRequestSchema
->;
-export interface AndroidAppPreparation {
-  status: "idle" | "preparing" | "ready" | "failed";
-  source: "github" | "local" | null;
-  message: string;
-  artifact: AndroidAppArtifact | null;
+export interface SystemMobileAppReleasesResponse {
+  android: (AndroidAppArtifact & { updatedAt: string }) | null;
 }
+
+export const systemProviderCatalogEntrySchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  pluginId: z.string(),
+  pluginName: z.string(),
+  pluginEnabled: z.boolean(),
+  enabled: z.boolean(),
+  available: z.boolean(),
+  logoUrl: z.string().nullable(),
+  info: providerInfoSchema.nullable(),
+});
+export type SystemProviderCatalogEntry = z.infer<
+  typeof systemProviderCatalogEntrySchema
+>;
+export const systemProviderEnabledRequestSchema = z
+  .object({ enabled: z.boolean() })
+  .strict();
+export type SystemProviderEnabledRequest = z.infer<
+  typeof systemProviderEnabledRequestSchema
+>;

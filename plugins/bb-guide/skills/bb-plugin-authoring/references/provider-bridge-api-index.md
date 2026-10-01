@@ -339,7 +339,6 @@ Context breakdowns are optional snapshots on `contextWindow` deltas:
 - `experimental_rerecordCurrentBridgeLane`
 - `experimental_resolveProviderBridgeLaunch`
 - `experimental_runBridgeConformance`
-- `experimental_toConformanceMessages`
 - `experimental_withCurrentBridgeLane`
 - `AssembleDeltasArgs`
 - `BridgeConformanceTransport`

@@ -1,8 +1,4 @@
-export {
-  AgentRuntimeRecoveryError,
-  CompetingTurnError,
-  createAgentRuntime,
-} from "./runtime.js";
+export { CompetingTurnError, createAgentRuntime } from "./runtime.js";
 export { bridgeLaunchProcessKey } from "./bridge-launch-process-key.js";
 export type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 export {
@@ -19,18 +15,9 @@ export type {
   AdoptedBridgeThread,
   AgentRuntime,
   AgentRuntimeBridgeLaunch,
-  AgentRuntimeExecutionOptions,
   AgentRuntimeOptions,
   AgentRuntimeProcessExitInfo,
   AgentRuntimeProviderSession,
   AgentRuntimeSkillRoot,
-  EnsureProviderArgs,
-  ListModelsArgs,
   ReapedIdleProviderSession,
-  RenameThreadArgs,
-  ResumeThreadArgs,
-  RunTurnArgs,
-  StartThreadArgs,
-  SteerTurnArgs,
-  StopThreadArgs,
 } from "./types.js";

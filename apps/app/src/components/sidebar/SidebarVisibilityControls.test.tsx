@@ -17,8 +17,9 @@ describe("shared sidebar visibility controls", () => {
           visibleIds={[]}
           title="Customize list"
           listLabel="Sections"
-          testIdPrefix="sidebar-thread-list"
           variant="card"
+          onActivate={() => {}}
+          onExit={() => {}}
           onVisibleChange={onVisibleChange}
           onReorder={() => {}}
           onDone={onDone}
@@ -26,7 +27,7 @@ describe("shared sidebar visibility controls", () => {
       </CompactViewportOverrideProvider>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show Review in sidebar" }));
     expect(onVisibleChange).toHaveBeenCalledWith("section:review", true);
     expect(onDone).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole("button", { name: "Review" }), {

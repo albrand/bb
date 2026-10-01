@@ -780,8 +780,16 @@ export function useThreadFileTabs({
         const result = takeClosedPanelTab(
           contextKey,
           new Set(state.secondary.tabs.map((tab) => tab.id)),
-          (entry) =>
-            recentlyClosedPanelTabAvailability(entry.tab, storageInventory),
+          (entry) => {
+            const availability = recentlyClosedPanelTabAvailability(
+              entry.tab,
+              storageInventory,
+            );
+            return availability === "unresolved" &&
+              storageFileExists === undefined
+              ? "available"
+              : availability;
+          },
         );
         if (result.kind === "empty") return state;
         if (result.kind === "unresolved") {

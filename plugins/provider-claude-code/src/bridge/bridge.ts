@@ -1023,7 +1023,6 @@ function toSessionConstructionConfig(
       chromeEnabled: params.chromeEnabled,
       disable1MContext: params.disable1MContext,
       cwd: params.cwd,
-      disallowedTools: params.disallowedTools,
       instructionMode: params.instructionMode,
       permissionMode: params.permissionMode,
       permissionScope: params.permissionScope,
@@ -2195,7 +2194,10 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       sendResult(request.id, await getClaudeProviderUsage());
       break;
     case "provider/installation/status":
-      sendResult(request.id, await getClaudeProviderInstallationStatus());
+      sendResult(
+        request.id,
+        await getClaudeProviderInstallationStatus(request.params.checkUpdates),
+      );
       break;
     case "provider/installation/run":
       sendResult(
@@ -2417,7 +2419,6 @@ function toClaudeSessionParams(
     options: params.options,
     instructionMode: params.instructionMode,
     dynamicTools: params.dynamicTools,
-    disallowedTools: params.disallowedTools,
     skillRoots: configuredSkillRoots ?? undefined,
   });
 }

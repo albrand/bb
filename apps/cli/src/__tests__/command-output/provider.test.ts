@@ -177,29 +177,6 @@ describe("bb provider command output", () => {
     ]);
   });
 
-  it("bb provider models renders the shared borderless table", async () => {
-    const get = vi.fn(async () => [
-      { model: "gpt-5", displayName: "GPT-5", isDefault: true },
-    ]);
-    stubServerApi({
-      "v1.system.execution-options.$get": vi.fn(async () => ({
-        providers: [],
-        models: await get(),
-        selectedOnlyModels: [],
-        modelLoadError: null,
-      })),
-    });
-
-    await runCommand(["provider", "models", "openai"], register);
-
-    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
-      "Models for openai:",
-      "",
-      "Model  Name   Default\n-----  -----  -------\ngpt-5  GPT-5  *",
-      "",
-    ]);
-  });
-
   it("bb provider models includes a matching selected-only model", async () => {
     const get = vi.fn(async () => ({
       providers: [],

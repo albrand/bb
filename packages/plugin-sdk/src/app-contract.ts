@@ -494,8 +494,6 @@ export interface PluginFileOpenerProps {
    * @experimental Audit before relying on this as a stable contract.
    */
   Original: ComponentType;
-  /** @deprecated Renamed to `Original` in SDK 0.4.16; removed in bb 0.42. */
-  experimental_Original?: ComponentType;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,8 +598,6 @@ export interface PluginSourceCodeRendererProps {
    * @experimental Audit before relying on this as a stable contract.
    */
   Original: ComponentType;
-  /** @deprecated Renamed to `Original` in SDK 0.4.16; removed in bb 0.42. */
-  experimental_Original?: ComponentType;
 }
 
 /**
@@ -630,8 +626,6 @@ export interface PluginDiffRendererProps {
    * @experimental Audit before relying on this as a stable contract.
    */
   Original: ComponentType;
-  /** @deprecated Renamed to `Original` in SDK 0.4.16; removed in bb 0.42. */
-  experimental_Original?: ComponentType;
 }
 
 /**
@@ -681,6 +675,8 @@ export interface PluginHomepageSectionRegistration {
 }
 
 export interface PluginSettingsSectionRegistration {
+  /** Render on Mobile settings instead of the plugin configuration page. */
+  experimental_page?: "mobile";
   /** Unique within the plugin; letters, digits, `-`, `_`. */
   id: string;
   /** Optional host-rendered section heading. */
@@ -1191,6 +1187,24 @@ export interface PluginSidebarThread {
  * can colour a badge without reading checks, review, and mergeability itself.
  */
 export interface PluginSidebarPullRequest {
+  /** Whether GitHub auto-merge is enabled. */
+  experimental_autoMerge: boolean;
+  /** Null when the GitHub merge queue lookup is unavailable. */
+  experimental_inMergeQueue: boolean | null;
+  experimental_checks: {
+    state: "passing" | "failing" | "pending" | "no_checks" | "unknown";
+  };
+  experimental_review: {
+    state:
+      | "approved"
+      | "changes_requested"
+      | "review_required"
+      | "review_requested"
+      | "none";
+  };
+  experimental_mergeability: {
+    state: "mergeable" | "conflicts" | "blocked" | "draft" | "unknown";
+  };
   number: number;
   title: string;
   url: string;
@@ -1203,6 +1217,7 @@ export interface PluginSidebarPullRequest {
     | "conflicts"
     | "blocked"
     | "draft"
+    | "queued"
     | "ready_to_merge"
     | "merged"
     | "closed"
@@ -1473,7 +1488,7 @@ export interface PluginSidebarThreadActions {
   setRead(threadId: string, read: boolean): Promise<void>;
   /** Silent rename — no dialog. For inline editing in your own row. */
   rename(threadId: string, title: string): Promise<void>;
-  /** Archives immediately, or confirms first if child threads will also be archived. */
+  /** Confirms before including child threads unless archive confirmation is disabled in Settings → General. */
   archive(threadId: string): void;
   /**
    * Opens bb's delete confirmation, which counts child threads first. Deletion

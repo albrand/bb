@@ -86,14 +86,6 @@ function requirePluginPanelTab(
   return tab;
 }
 
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
-
 afterEach(() => {
   cleanup();
   queryClient.clear();
@@ -198,7 +190,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
     expect(result.current.reopenClosedTab()).toBe(false);
   });
 
-  it("skips storage history with a deleted path or different owner", () => {
+  it("restores storage history immediately and skips a different owner", () => {
     let storageFiles = {
       files: [
         { name: "available.md", path: "available.md" },
@@ -268,16 +260,13 @@ describe("useThreadFileTabs recently closed tabs", () => {
     expect(didReopen).toBe(false);
   });
 
-  it("does not consume or transiently restore storage history before exact validation", async () => {
-    const validation = createDeferred<boolean>();
-    const storageFileExists = vi.fn(() => validation.promise);
+  it("restores storage history before the storage inventory loads", () => {
     const { result } = renderThreadHook(() =>
       useThreadFileTabs({
         panelStateId: "recently-closed-storage-loading",
         syncThreadId: "thr_current",
         retainedTerminalIds: new Set<string>(),
         environmentId: "env_1",
-        storageFileExists,
         storageFiles: undefined,
         terminalSessions: undefined,
       }),
@@ -293,19 +282,11 @@ describe("useThreadFileTabs recently closed tabs", () => {
     });
     act(() => result.current.closeTab(storageTabId));
 
-    let didHandle = false;
+    let didReopen = false;
     act(() => {
-      didHandle = result.current.reopenClosedTab();
+      didReopen = result.current.reopenClosedTab();
     });
-    expect(didHandle).toBe(true);
-    expect(result.current.orderedSecondaryFileTabs).toHaveLength(0);
-    expect(storageFileExists).toHaveBeenCalledWith("still-here.md");
-
-    await act(async () => {
-      validation.resolve(true);
-      await validation.promise;
-      await Promise.resolve();
-    });
+    expect(didReopen).toBe(true);
     expect(result.current.activeStorageFilePath).toBe("still-here.md");
   });
 

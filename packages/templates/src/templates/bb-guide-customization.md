@@ -123,6 +123,12 @@ reversed. Shift+Enter inserts a newline. On coarse-pointer touch devices, the
 software-keyboard Return path inserts a newline. iPadOS WebKit preserves these
 Enter shortcuts for a connected Magic Keyboard.
 
+Settings → General includes `confirmThreadArchive`, which defaults to true.
+Set `bb settings general confirmThreadArchive false` to archive parent and
+child threads without the confirmation popup. The toast still offers Undo.
+The setting applies to all connected app clients; CLI and SDK archive calls
+remain non-interactive.
+
 Settings → General also includes `streamerMode`, which defaults to false. Turn
 it on to hide every `customModels` entry from `~/.bb/config.json` in all model
 lists (pickers, `bb provider models`, and the SDK) during a screen share. The
@@ -191,13 +197,6 @@ effects. Grouped multi-message requests are not yet editable.
 BB releases restorable provider sessions after 30 idle minutes. The daemon
 checks for these sessions every five minutes. Active turns, commands, agents,
 workflows, and monitors keep their sessions loaded.
-
-The default-off `sidebarProgressiveDisclosure` experiment shows the first five
-groups in the current sort order in **By project** and **By machine**, keeps
-attention groups visible, and reveals ten more per **Show more** click. Revealed
-groups stay visible through activity and sort-order changes.
-**Manually** is unchanged. Enable it with `bb settings experiment
-sidebarProgressiveDisclosure true`.
 
 The default-off `serverMove` experiment enables Move server here in Settings →
 Machines and the server-backed `bb server move` and `bb server export`
@@ -417,7 +416,7 @@ appears only when hidden actions are available and links back to customization.
 Preferences survive plugin reloads and temporarily unavailable plugins; new items
 are visible by default. Example:
 
-  bb settings ui set sidebar.hiddenFooterItems '["plugin:provider-usage/usage"]'
+  bb settings ui set sidebar.hiddenFooterItems '["plugin:bb--provider-usage/usage"]'
   bb settings ui reset sidebar.hiddenFooterItems
 
 Client-local UI preferences
@@ -438,20 +437,17 @@ takes effect immediately and persists across restarts. SDK callers can use
 always disables telemetry, even when the saved preference is enabled.
 
 
-The default-off `androidTesting` experiment adds **Android App** below the flags
-in Settings → Experiments. **Download APK** fetches and caches a checksum-verified
-APK from the public `get-bb/bb` release tagged `android-testing`. No Android tools
-are required. If no release/cache is available, **Build on this server** explicitly
-runs a local arm64 build; it requires `BB_ANDROID_SOURCE_DIR` pointing to a dedicated
-source checkout with dependencies, pnpm, Java 17+, and `ANDROID_HOME` or
-`ANDROID_SDK_ROOT`. Missing tools and build failures are reported in the page.
+Mobile app downloads are always available in Settings → Mobile (`/settings/mobile`).
+**Join iOS TestFlight** opens https://testflight.apple.com/join/T9MayTMb.
+**Download Android APK** downloads directly from the public `get-bb/bb` GitHub
+`android-testing` release's `bb-android.apk` asset. The APK does not pass through
+the bb server or bb connect. No experiment or Android developer tools are needed.
+Pair either app through Settings → Mobile → **Add mobile device**.
 
-Use `bb settings experiment androidTesting true`, then
-`bb settings android-app-prepare github --json` (or `local`) to wait for a download
-or build. `bb settings android-app --json` reads cached version/download metadata.
-SDK equivalents: `system.prepareAndroidApp({ source })`,
-`system.androidAppPreparation()`, and `system.androidApp()`.
-Downloads use `/install/bb-android.apk`; bb connect requires an account session.
-Publish the first release using **Mobile Android (EAS)** with profile `preview`
-and **publish** enabled. Local fallback APKs use the debug signing key, which may
-differ from the release key. See `docs/configuration.md` for setup and publishing.
+Use `bb settings mobile-app --json` or SDK `system.mobileAppDownloads()` to get
+both public links. Add `--details --json` or call `system.mobileAppReleases()`
+(GET `/api/v1/system/mobile-app-releases`) for Android version/build, size, and
+upload date. The server fetches only public metadata, caches it for five minutes,
+and returns `android: null` if unavailable or inconsistent. Download links remain
+usable during metadata failures. iOS version and release date are shown in TestFlight.
+Publish updates with **Mobile Android (EAS)**, profile `preview`, **publish** on.

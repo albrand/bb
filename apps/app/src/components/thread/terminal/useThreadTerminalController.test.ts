@@ -10,7 +10,7 @@ import {
 } from "@/lib/terminal-session-visibility";
 import { makeTerminalSession as terminalSession } from "@/test/fixtures/terminal-sessions";
 
-describe("terminal visibility", () => {
+describe("pickActiveTerminalId", () => {
   it("does not replace an exact plugin tab with a sibling session", () => {
     const sibling = terminalSession({ id: "term_sibling" });
 

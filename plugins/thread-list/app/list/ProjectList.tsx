@@ -139,8 +139,6 @@ interface ProjectListNavigationLoadingRowProps {
   textWidthClassName: string;
 }
 
-export { PROJECT_LIST_ACTION_BUTTON_CLASS } from "../rows/sidebarRowClasses.js";
-
 type ThreadListStatus = "loading" | "ready" | "unavailable";
 
 interface ProjectThreadListStateArgs {
@@ -714,7 +712,6 @@ function ProjectModeSections({
           collapsedThreadIds={collapsedThreadIds}
           collapsedEnvironmentIds={collapsedEnvironmentIds}
           compareThreads={compareThreads}
-          variant="section"
           onProjectSelect={onProjectSelect}
           onToggleThreadCollapsed={onToggleThreadCollapsed}
           onToggleEnvironmentCollapsed={onToggleEnvironmentCollapsed}
@@ -744,7 +741,6 @@ function ProjectModeSections({
           collapsedThreadIds={collapsedThreadIds}
           collapsedEnvironmentIds={collapsedEnvironmentIds}
           compareThreads={compareThreads}
-          variant="section"
           onProjectSelect={() => {
             close();
             onProjectSelect?.();
@@ -771,7 +767,6 @@ function ProjectModeSections({
             collapsedThreadIds={collapsedThreadIds}
             collapsedEnvironmentIds={collapsedEnvironmentIds}
             compareThreads={compareThreads}
-            variant="section"
             onProjectSelect={() => {
               close();
               onProjectSelect?.();
@@ -1191,7 +1186,6 @@ export function MachineModeSections({
           rootItems={allThreadItems}
           threadListState={allThreadsListState}
           compareThreads={compareThreads}
-          variant="section"
           selectedThreadId={selectedThreadId}
           collapsedThreadIds={collapsedThreadIds}
           collapsedEnvironmentIds={collapsedEnvironmentIds}
@@ -1215,7 +1209,6 @@ export function MachineModeSections({
           rootItems={allThreadItems}
           threadListState={allThreadsListState}
           compareThreads={compareThreads}
-          variant="section"
           selectedThreadId={selectedThreadId}
           collapsedThreadIds={collapsedThreadIds}
           collapsedEnvironmentIds={collapsedEnvironmentIds}
@@ -1243,7 +1236,6 @@ export function MachineModeSections({
             collapsedThreadIds={collapsedThreadIds}
             collapsedEnvironmentIds={collapsedEnvironmentIds}
             compareThreads={compareThreads}
-            variant="section"
             onProjectSelect={() => {
               close();
               onProjectSelect?.();
@@ -1317,7 +1309,6 @@ export function MachineModeSections({
                   rootItems={machineItemsBySectionId.get(sectionId)}
                   threadListState={section.threadListState}
                   compareThreads={compareThreads}
-                  variant="section"
                   selectedThreadId={selectedThreadId}
                   collapsedThreadIds={collapsedThreadIds}
                   collapsedEnvironmentIds={collapsedEnvironmentIds}

@@ -1,5 +1,9 @@
 # APIs To Audit
 
+## `settingsSection.experimental_page`
+
+`experimental_page: "mobile"` mounts a plugin settings section exclusively on Settings → Mobile when that plugin owns the selected access provider, retaining plugin context, lifecycle, and error boundaries. Omission keeps the section on its plugin configuration page. Stabilization requires verifying placement isolation, plugin disable/uninstall, loading and failure states, and pairing lifecycle on Mobile.
+
 ## `app.commands.register`
 
 `app.commands.register` requires SDK 0.4.91; `defaultShortcut` and keyboard
@@ -157,21 +161,20 @@ the wire are unchanged); on `@get-bb/plugin-sdk` the tool type
 `PluginAgentToolExperimentalStatusLabels` became `PluginAgentToolLabels`,
 then `PluginRowLabels` in SDK 0.4.102, the type of `presentation.label`.
 
-## One-release compatibility windows (removal target: bb 0.42)
+## Compatibility windows
 
-- The app runtime keeps deprecated aliases for plugin bundles compiled
-  against an SDK before 0.4.16: `experimental_UrlLink` (a wrapper component
-  that warns on its first render, then renders `UrlLink`),
-  `BbNavigate.experimental_openUrl` (warns on its first call, then calls
-  `openUrl`), and the delegation prop `experimental_Original` passed beside
-  `Original` on the file-opener, source-code renderer and diff
-  renderer props (the timeline renderer never carried the old name; the
-  alias warns on its first render). A bundle that never uses an alias never
-  warns. All go in bb 0.42. The two 0.4.14 `app` exports
-  (`experimental_ProviderModelPicker`, `experimental_PermissionModePicker`)
-  are present and stay experimental; neither carries an alias.
-- The deleted `bb.agents.experimental_registerProvider` throws with the
-  removal named on first read (use `bb.providers.register`).
+- The one-release aliases and throwing stubs for names renamed or deleted in
+  SDK 0.4.16 are gone: the app runtime's `experimental_UrlLink`,
+  `BbNavigate.experimental_openUrl` and the `experimental_Original`
+  delegation prop on the file-opener, source-code renderer and diff renderer
+  props (use `UrlLink`, `openUrl` and `Original`), the throwing
+  `bb.agents.experimental_registerProvider` getter (use
+  `bb.providers.register`), and the throwing
+  `experimental_toConformanceMessages` export of
+  `@get-bb/plugin-sdk/provider-bridge/testing`
+  (`experimental_runBridgeConformance` assembles `thread/delta` itself from
+  the raw messages a transport's `takeMessages` returns and takes the
+  bridge's `providerId`).
 - Removed outright from a published subpath, with no alias and no throwing
   stub (an import fails to resolve): `ProviderInfo.experimental_providerHealth`
   / `experimental_providerUsage` / `experimental_providerInstallation`
@@ -202,12 +205,6 @@ then `PluginRowLabels` in SDK 0.4.102, the type of `presentation.label`.
 - Renamed declaration, tool and navPanel fields (`experimental_strings`,
   `experimental_presentation`, `experimental_fixedTabs`, …) are rejected at
   registration with a message naming the new field, from SDK 0.4.16 on.
-- `experimental_toConformanceMessages` (`@get-bb/plugin-sdk/provider-bridge/testing`)
-  throws on call, naming its replacement: `experimental_runBridgeConformance`
-  assembles `thread/delta` itself from the raw messages a transport's
-  `takeMessages` returns and takes the bridge's `providerId`. A conformance
-  suite written against the pre-0.4.16 transport shape fails with that message
-  instead of a missing export. Goes in bb 0.42.
 - Presentation-less `toolCall` rows pass through the legacy-data adapter
   (`upgradeLegacyToolItem` in `@bb/domain`, applied when a stored row is
   parsed): keyed on the absence of `presentation`, it reshapes
@@ -274,6 +271,14 @@ stays until the next major version.
 is retired the same way: the conformance kit assembles `thread/delta` itself
 and reads nothing under that method, so the constant names a lane that no
 longer exists. Kept because 0.4.x published it; remove at the next major
+version.
+
+The `disallowedTools` field of the session-construction params
+(`threadStartParamsSchema`, `threadResumeParamsSchema` and
+`threadForkParamsSchema` on `@get-bb/plugin-sdk/provider-bridge`) is retired
+the same way: the runtime never populates it, because the server stopped
+producing tool removals when the subagent and workflow toggles moved to
+`providerOptions`. Kept because 0.4.x published it; remove at the next major
 version.
 
 ## Settings schemas and server writes
@@ -1076,22 +1081,23 @@ the server, so no client older than this field is served.
 
 ## `bb.server.experimental_dataDir`
 
-**Kept experimental (2026-08-22).** a sunset member: its only consumer is the ACP plugin's reader of the deprecated `customAcpAgents` array, and it is deleted with that window (`LEGACY_CUSTOM_AGENTS_REMOVED_IN`). A bare data-directory path does not stabilize.
+**Kept experimental (2026-08-22).** A bare data-directory path does not
+stabilize.
 
 **What it does.** The server's data directory — the one holding `config.json`,
-`bb.db` and `plugins/<id>/`. Added because a plugin cannot compute it: a dev
-server derives its data dir from its repo root and instance id
-(`~/.bb-dev/<instance>`), so the ACP plugin's own `~/.bb` fallback made a dev
-server read the production `config.json` while the server read another one.
-Its only consumer is that plugin's read of the deprecated `customAcpAgents`
-array.
+`bb.db` and `plugins/<id>/`. A plugin cannot compute it: a dev server derives
+its data dir from its repo root and instance id (`~/.bb-dev/<instance>`). Its
+only consumer is the Account Pool plugin, which keeps its account and
+hub-token secret files under `plugins/<pluginId>/secrets/accounts` in that
+directory.
 
-**Audit before stabilizing.** Its one caller dies with the `customAcpAgents`
-deprecation window, so decide then whether anything else needs it. If it
-stays, decide whether a bare path is the right shape or whether a plugin
-should get named, read-only accessors for the bb-managed files it may read —
-a path invites writes into bb's directory, which `bb.storage` exists to
-prevent.
+**Audit before stabilizing.** The member was added for the ACP plugin's read
+of the `customAcpAgents` array in `config.json`, which is removed. Decide
+whether the Account Pool plugin's secret files can move to a plugin-scoped
+primitive so the member can go. If it stays, decide whether a bare path is the
+right shape or whether a plugin should get named accessors for the bb-managed
+locations it may use — a path invites writes into bb's directory, which
+`bb.storage` exists to prevent.
 
 ## `bb.server.experimental_appUrl`
 
@@ -1803,15 +1809,15 @@ protocol`'s `assembler`, `conformance`, and `testing` subpaths.
    (`turnId`, `itemId`, `id`, `parentToolCallId`) and drops
    `providerCheckpointId`. Confirm the defaults against a third-party
    bridge's goldens before fixing them.
-2. **Surface size.** 25 value exports plus 57 types (the eight no consumer
+2. **Surface size.** 24 value exports plus 57 types (the eight no consumer
    used — the conformance client and opens-before-delta check, the cumulative
    text differ, the parity value/event/row normalizers, the cell replayer and
    the bootstrap path resolver — came off in the stabilization audit; the
    three of those that 0.4.15 had published are named in the "Removed
    outright" bullet of the compatibility windows above, the other five never
    shipped. The assembled-event lane the transport once fed went when the
-   kit took over the assembly: `experimental_toConformanceMessages` throws
-   naming its replacement for one release (compatibility windows above) and
+   kit took over the assembly: `experimental_toConformanceMessages` is
+   removed (compatibility windows above) and
    `CONFORMANCE_ASSEMBLED_EVENT_METHOD` is a scheduled removal).
    The JSON-RPC harness duplicates a little of the bridge kit's envelope
    parsing; fold or keep deliberately.
@@ -2826,8 +2832,13 @@ reimplementing it, and `indicatorLabel` carries the matching accessible string.
    a PR lookup hits the git host and therefore cannot sit on the payload every
    sidebar loads. It reuses the host's environment-keyed query, so threads
    sharing a worktree share one lookup and the host keeps its own staleness and
-   refetch rules. Before stabilizing, confirm: the narrowed DTO (number, title,
-   url, state, attention) is enough without leaking checks/review/mergeability;
+   refetch rules. `PluginSidebarPullRequest` also exposes
+   `experimental_autoMerge`, nullable `experimental_inMergeQueue` (null means
+   the queue lookup failed), and `experimental_checks`, `experimental_review`,
+   and `experimental_mergeability` with normalized `state` fields. Attention
+   includes `queued`; failures precede waiting states and generic blocking is
+   a fallback after checks and reviews. Before stabilizing, confirm the state
+   summaries and unknown-queue semantics meet sidebar needs;
    a sidebar of many distinct worktrees does not stampede the git host; and
    returning `null` for "lookup failed" (rather than an error) is the right
    failure for a row that should simply show nothing.
@@ -3097,9 +3108,9 @@ modes. The testing harness records accepted calls in `composer.selections`.
 
 ## Desktop browser control
 
-`bb.sdk.experimental_desktopBrowsers` and the exported `ExperimentalDesktopBrowsersArea`, `ExperimentalDesktopBrowserScope`, `ExperimentalDesktopBrowserLease`, `ExperimentalDesktopBrowserCreateInput`, and `ExperimentalDesktopBrowserAcquireInput` expose explicit host/window/thread discovery, isolated tab creation, expiring control leases, scoped CDP connections, capture, reveal, close, release, disposable tab-state subscriptions, and cookie import from an installed browser through `listImportSources` and `importCookies` (`ExperimentalDesktopBrowserInstanceRequest`, `ExperimentalDesktopBrowserImportCookiesInput`, `ExperimentalDesktopBrowserImportSources`, `ExperimentalDesktopBrowserImportOutcome`). The matching core CLI is `bb browser`.
+`bb.sdk.experimental_desktopBrowsers` and the exported `ExperimentalDesktopBrowsersArea`, `ExperimentalDesktopBrowserScope`, `ExperimentalDesktopBrowserLease`, `ExperimentalDesktopBrowserCreateInput`, and `ExperimentalDesktopBrowserAcquireInput` expose explicit host/window/thread discovery, tab creation in the BB browser profile, expiring control leases, scoped CDP connections, capture, reveal, close, release, disposable tab-state subscriptions, and cookie import from an installed browser through `listImportSources` and `importCookies` (`ExperimentalDesktopBrowserInstanceRequest`, `ExperimentalDesktopBrowserImportCookiesInput`, `ExperimentalDesktopBrowserImportSources`, `ExperimentalDesktopBrowserImportOutcome`). The matching core CLI is `bb browser`.
 
-Before stabilization, audit cookie import authorization: any caller with server access can copy the desktop user's browser sessions into a BB profile, including an automation profile an agent controls, with OS consent only where the platform demands it (macOS Keychain for Chromium, Full Disk Access for Safari; none for Firefox or keyring-free Linux Chromium). Decide whether imports into automation profiles need an explicit handoff like personal-tab control, and whether the daemon should require a desktop-side confirmation. Also audit personal-profile handoff policy, per-tab mutual exclusion and child-target scope, native popup handling, debugger detachment, daemon/desktop disconnect and reconnect generations, expiry and cancellation races, bounded screenshot bytes, and cross-platform desktop startup. Connection credentials must remain private to workers on the browser host. `subscribe` polls every two seconds with one outstanding request; it is state observation, not a lossless event log. Cloud browsers and external provider registration are outside this surface.
+Every desktop tab, including tabs created for an agent, uses the single BB browser profile and its signed-in cookies. Before stabilization, audit control and cookie import authorization: any caller with server access can control tabs carrying the user's logins and copy the desktop user's browser sessions into that profile, with OS consent only where the platform demands it (macOS Keychain for Chromium, Full Disk Access for Safari; none for Firefox or keyring-free Linux Chromium). Decide whether control or import should require a desktop-side confirmation. Also audit per-tab mutual exclusion and child-target scope, native popup handling, debugger detachment, daemon/desktop disconnect and reconnect generations, expiry and cancellation races, bounded screenshot bytes, and cross-platform desktop startup. Connection credentials must remain private to workers on the browser host. `subscribe` polls every two seconds with one outstanding request; it is state observation, not a lossless event log. Cloud browsers and external provider registration are outside this surface.
 
 ## Machine paths and environment cleanup
 
@@ -3675,3 +3686,15 @@ Deleted threads and projects are excluded.
 Backs Ctrl+R in the composer and `bb thread prompt-search`. Audit non-ASCII case
 folding, ranking beyond recency, pagination, and whether hidden or archived
 threads belong in results before stabilizing.
+### Provider discovery metadata
+
+`package.json` → `bb.experimental_providers` statically declares
+`{ kind, id, displayName }` provider identities before a plugin runs. `kind`
+uses the `providerKind` vocabulary and currently accepts only `"agent"`, which
+feeds Settings → Providers so disabled plugins' agents stay discoverable. It does
+not grant runtime capabilities or execute code. Core also retains the last
+registered agent identities when disabling a plugin, preserving custom providers
+across restart. Add `"environment"` or `"machine"` only together with a consumer.
+Stabilize after validating first-install discovery, shared-plugin enablement,
+dynamic provider removal, plugin upgrades, and duplicate-ID ownership behavior
+with third-party providers.

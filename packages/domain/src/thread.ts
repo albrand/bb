@@ -18,10 +18,7 @@ import { threadOriginKindSchema } from "./thread-origin-kind.js";
 import { threadVisibilitySchema } from "./thread-visibility.js";
 export { threadStatusSchema, threadStatusValues } from "./thread-status.js";
 export type { ThreadStatus } from "./thread-status.js";
-export {
-  threadOriginKindSchema,
-  threadOriginKindValues,
-} from "./thread-origin-kind.js";
+export { threadOriginKindSchema } from "./thread-origin-kind.js";
 export type { ThreadOriginKind } from "./thread-origin-kind.js";
 
 /**
@@ -217,6 +214,8 @@ export const gitHostPullRequestSchema = z
     state: z.enum(["OPEN", "CLOSED", "MERGED"]),
     url: z.string().url(),
     isDraft: z.boolean(),
+    autoMerge: z.boolean(),
+    inMergeQueue: z.boolean().nullable(),
     baseRefName: z.string(),
     headRefName: z.string(),
     updatedAt: z.string().datetime(),
@@ -307,6 +306,7 @@ const threadPullRequestAttentionStateSchema = z.enum([
   "conflicts",
   "blocked",
   "draft",
+  "queued",
   "ready_to_merge",
   "merged",
   "closed",
@@ -325,6 +325,8 @@ export const threadPullRequestSchema = z
     baseRefName: z.string(),
     headRefName: z.string(),
     updatedAt: z.string().datetime(),
+    autoMerge: z.boolean(),
+    inMergeQueue: z.boolean().nullable(),
     checks: threadPullRequestChecksSchema,
     review: threadPullRequestReviewSchema,
     mergeability: threadPullRequestMergeabilitySchema,

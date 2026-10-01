@@ -101,7 +101,7 @@ export function shouldAutoCloseCleanTerminalSession({
   );
 }
 
-export function shouldMountTerminalViewForPanel({
+function shouldMountTerminalViewForPanel({
   hasPanelOpened,
   isPanelOpen,
   isPanelPersistedOpen,

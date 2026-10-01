@@ -80,6 +80,7 @@ import {
   useThread,
   useThreadDetailBootstrap,
   useThreadPendingInteractions,
+  useThreadStorageLocation,
   type ProjectThreadSubsetFilters,
 } from "../../hooks/queries/thread-queries";
 import { isTransientReadError } from "@/hooks/queries/query-helpers";
@@ -309,7 +310,7 @@ import {
 } from "./threadSecondaryPanelSelection";
 import { useRouteState } from "@/hooks/useRouteState";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
-import { DefaultPaneContextProvider, usePaneContext } from "./PaneContext";
+import { usePaneContext } from "./PaneContext";
 import { ThreadArchiveCommandHandler } from "./ThreadArchiveCommandHandler";
 import { ThreadRenameCommandHandler } from "./ThreadRenameCommandHandler";
 
@@ -381,7 +382,6 @@ function getPullRequestMergeLoadingTitle(
 
 interface ThreadDetailViewPageProps {
   surface: "page";
-  onRequestClose?: (() => void) | null;
 }
 
 interface ThreadDetailViewPaneProps extends ThreadRoutePathArgs {
@@ -492,11 +492,7 @@ function ThreadDetailNotFound() {
   );
 }
 
-function RoutedThreadDetailView({
-  onRequestClose,
-}: {
-  onRequestClose?: (() => void) | null;
-}) {
+function RoutedThreadDetailView() {
   const { projectId, threadId } = useRouteState();
 
   if (!projectId || !threadId) {
@@ -504,13 +500,11 @@ function RoutedThreadDetailView({
   }
 
   return (
-    <DefaultPaneContextProvider onRequestClose={onRequestClose}>
-      <ThreadDetailViewInternal
-        projectId={projectId}
-        threadId={threadId}
-        timelineEnabled
-      />
-    </DefaultPaneContextProvider>
+    <ThreadDetailViewInternal
+      projectId={projectId}
+      threadId={threadId}
+      timelineEnabled
+    />
   );
 }
 
@@ -518,7 +512,7 @@ export function ThreadDetailView(props: ThreadDetailViewProps) {
   if (props.surface === "pane") {
     return <ThreadDetailViewInternal {...props} />;
   }
-  return <RoutedThreadDetailView onRequestClose={props.onRequestClose} />;
+  return <RoutedThreadDetailView />;
 }
 
 function ThreadDetailViewInternal(
@@ -683,14 +677,17 @@ function ThreadDetailViewInternal(
   const {
     checkThreadStorageFileExists,
     isThreadStorageFilesLoading,
-    refetchThreadStorageFiles,
     threadStorageFiles,
     threadStorageFilesError,
-    threadStorageRootPath,
   } = useThreadStorageViewer({
     fileListEnabled: shouldLoadThreadStorageFiles,
     threadId,
   });
+  const threadStorageLocationQuery = useThreadStorageLocation(threadId, {
+    enabled: Boolean(thread?.environmentId),
+  });
+  const threadStorageRootPath =
+    threadStorageLocationQuery.data?.storageRootPath ?? null;
   const terminalsListQuery = useThreadTerminals(threadId, {
     enabled: isSecondaryPanelOpen,
   });
@@ -2122,51 +2119,20 @@ function ThreadDetailViewInternal(
       link: ThreadTimelineLocalFileLink,
       options?: ThreadSecondaryPanelFileOpenOptions,
     ) => {
-      const resolution = resolveThreadLocalFileLink({
-        hostFileLinksAvailable:
-          thread?.environmentId !== null && thread?.environmentId !== undefined,
-        link,
-        threadStorageRootPath,
-        workspaceRootPath: workspacePreviewRootPath,
-      });
-
-      if (
-        resolution.kind !== "open-host-path" ||
-        threadStorageRootPath !== null
-      ) {
-        return handleTimelineLocalFileLinkResolution(resolution, options);
-      }
-
-      void refetchThreadStorageFiles()
-        .then((result) => {
-          const resolvedThreadStorageRootPath =
-            result.data?.storageRootPath ?? null;
-          if (resolvedThreadStorageRootPath === null) {
-            appToast.error("Failed to open file locally", {
-              description: "Thread storage path is not available yet.",
-            });
-            return;
-          }
-
-          const resolvedResolution = resolveThreadLocalFileLink({
-            hostFileLinksAvailable: true,
-            link,
-            threadStorageRootPath: resolvedThreadStorageRootPath,
-            workspaceRootPath: workspacePreviewRootPath,
-          });
-          handleTimelineLocalFileLinkResolution(resolvedResolution, options);
-        })
-        .catch((error: Error) => {
-          appToast.error("Failed to open file locally", {
-            description: error.message,
-          });
-        });
-
-      return true;
+      return handleTimelineLocalFileLinkResolution(
+        resolveThreadLocalFileLink({
+          hostFileLinksAvailable:
+            thread?.environmentId !== null &&
+            thread?.environmentId !== undefined,
+          link,
+          threadStorageRootPath,
+          workspaceRootPath: workspacePreviewRootPath,
+        }),
+        options,
+      );
     },
     [
       handleTimelineLocalFileLinkResolution,
-      refetchThreadStorageFiles,
       thread?.environmentId,
       threadStorageRootPath,
       workspacePreviewRootPath,

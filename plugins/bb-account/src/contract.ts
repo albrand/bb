@@ -9,14 +9,11 @@ import {
 
 export {
   ACCOUNT_REALTIME_CHANNEL,
-  type Account,
   type AccountStatus,
   type LoginState,
   type LoginView,
   type SignOutResult,
 } from "./schemas.js";
-
-export const ACCOUNT_PLUGIN_ID = "bb-account";
 export const CONNECT_PLUGIN_ID = "connect";
 
 export const STATUS_METHOD = "bb-account.v1.status";
@@ -31,6 +28,7 @@ export const CONFIRM_REFUSED_CREDENTIAL_METHOD =
 
 export const LONG_POLL_TIMEOUT_MS = 25_000;
 export const FETCH_BODY_MAX_BYTES = 1024 * 1024;
+export const FETCH_REQUEST_BODY_MAX_BYTES = 16 * 1024 * 1024;
 export const FETCH_TIMEOUT_MIN_MS = 1_000;
 export const FETCH_TIMEOUT_MAX_MS = 15_000;
 
