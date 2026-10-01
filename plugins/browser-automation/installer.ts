@@ -446,6 +446,7 @@ export async function acquireLock(
   const acquireAt = async (
     lockPath: string,
     staleMs: number,
+    ageCanExpireLiveOwner = true,
   ): Promise<() => Promise<void>> => {
     const token = randomBytes(8).toString("hex");
     const claim = `${lockPath}.claim-${process.pid}-${token}`;
@@ -485,8 +486,9 @@ export async function acquireLock(
         seen = { ino: info.ino, mtimeMs: Number(info.mtimeMs) };
         const age = Date.now() - seen.mtimeMs;
         holder = await lockOwner(lockPath);
-        if (age > staleMs) stale = true;
-        else if (holder === null) stale = age > lockInitGraceMs;
+        if (age > staleMs && ageCanExpireLiveOwner) stale = true;
+        else if (holder === null)
+          stale = age > (ageCanExpireLiveOwner ? lockInitGraceMs : staleMs);
         else if (holder !== process.pid) {
           try {
             process.kill(holder, 0);
@@ -505,7 +507,11 @@ export async function acquireLock(
       if (stale && seen) {
         let unlockReaper: (() => Promise<void>) | undefined;
         try {
-          unlockReaper = await acquireAt(`${lockPath}.reap`, reapLockStaleMs);
+          unlockReaper = await acquireAt(
+            `${lockPath}.reap`,
+            reapLockStaleMs,
+            false,
+          );
           const current = await stat(lockPath, { bigint: true });
           if (
             current.ino === seen.ino &&

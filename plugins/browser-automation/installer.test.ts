@@ -482,6 +482,23 @@ describe("runtime installer", () => {
     await expect(readFile(reaperPath, "utf8")).rejects.toThrow();
     await unlock();
   }, 30_000);
+  it("does not steal an aged reap lock from a live reaper", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "live-reaper.lock");
+    const reaperPath = `${path}.reap`;
+    const reaperOwner = `${process.pid} ${"a".repeat(16)}`;
+    await writeFile(path, "999999999");
+    await writeFile(reaperPath, reaperOwner);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+    await utimes(reaperPath, old, old);
+
+    await expect(
+      acquireLock(path, AbortSignal.timeout(2_000)),
+    ).rejects.toThrow();
+    expect(await readFile(reaperPath, "utf8")).toBe(reaperOwner);
+  }, 30_000);
   it("hands the lock over in order, keeps unparsable young locks, and never removes a replaced lock", async () => {
     const dir = await dataDir();
     await mkdir(installRoot(dir), { recursive: true });
