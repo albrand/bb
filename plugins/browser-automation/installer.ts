@@ -432,146 +432,96 @@ async function fetchText(url: string, signal: AbortSignal): Promise<string> {
 }
 
 const lockInitGraceMs = 10_000;
+const reapLockStaleMs = 30_000;
 
 async function lockOwner(path: string): Promise<number | null> {
   const match = (await readFile(path, "utf8")).trim().match(/^([0-9]+)(?: |$)/);
   return match ? Number(match[1]) : null;
 }
 
-async function acquireFileLock(
-  path: string,
-  signal: AbortSignal,
-): Promise<() => Promise<void>> {
-  const token = randomBytes(8).toString("hex");
-  const claim = `${path}.claim-${process.pid}-${token}`;
-  const content = `${process.pid} ${token}`;
-  while (true) {
-    signal.throwIfAborted();
-    await writeFile(claim, content);
-    try {
-      await link(claim, path);
-      const acquired = (await stat(claim, { bigint: true })).ino;
-      await unlink(claim);
-      return async () => {
-        try {
-          if (
-            (await stat(path, { bigint: true })).ino === acquired &&
-            (await readFile(path, "utf8")) === content
-          )
-            await unlink(path);
-        } catch {}
-      };
-    } catch (error) {
-      await unlink(claim).catch(() => {});
-      if (
-        !(error instanceof Error && "code" in error && error.code === "EEXIST")
-      )
-        throw error;
-    }
-    let stale = false;
-    let holder: number | null = null;
-    let seen: { ino: bigint; mtimeMs: number } | null = null;
-    try {
-      const info = await stat(path, { bigint: true });
-      seen = { ino: info.ino, mtimeMs: Number(info.mtimeMs) };
-      const age = Date.now() - seen.mtimeMs;
-      holder = await lockOwner(path);
-      if (age > lockStaleMs) stale = true;
-      else if (holder === null) stale = age > lockInitGraceMs;
-      else if (holder !== process.pid) {
-        try {
-          process.kill(holder, 0);
-        } catch (probe) {
-          if (
-            probe instanceof Error &&
-            "code" in probe &&
-            probe.code === "ESRCH"
-          )
-            stale = true;
-        }
-      }
-    } catch {
-      continue;
-    }
-    if (stale && seen) {
-      try {
-        const current = await stat(path, { bigint: true });
-        if (
-          current.ino === seen.ino &&
-          Number(current.mtimeMs) === seen.mtimeMs &&
-          (await lockOwner(path)) === holder
-        )
-          await unlink(path);
-      } catch {}
-    } else await delay(250, undefined, { signal });
-  }
-}
-
-const processLockQueues = new Map<string, Promise<void>>();
-
-async function acquireProcessLock(
-  path: string,
-  signal: AbortSignal,
-): Promise<() => void> {
-  const previous = processLockQueues.get(path) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const queued = previous.then(() => gate);
-  processLockQueues.set(path, queued);
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener("abort", abort);
-        resolve();
-      };
-      const abort = () => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener("abort", abort);
-        reject(signal.reason ?? new Error("Lock acquisition was cancelled."));
-      };
-      signal.addEventListener("abort", abort, { once: true });
-      if (signal.aborted) {
-        abort();
-        return;
-      }
-      previous.then(finish, (error) => {
-        signal.removeEventListener("abort", abort);
-        reject(error);
-      });
-    });
-    return () => {
-      release();
-      if (processLockQueues.get(path) === queued)
-        processLockQueues.delete(path);
-    };
-  } catch (error) {
-    release();
-    void queued.then(
-      () => {
-        if (processLockQueues.get(path) === queued)
-          processLockQueues.delete(path);
-      },
-      () => {
-        if (processLockQueues.get(path) === queued)
-          processLockQueues.delete(path);
-      },
-    );
-    throw error;
-  }
-}
-
 export async function acquireLock(
   path: string,
   signal: AbortSignal,
 ): Promise<() => Promise<void>> {
-  return acquireFileLock(path, signal);
+  const acquireAt = async (
+    lockPath: string,
+    staleMs: number,
+  ): Promise<() => Promise<void>> => {
+    const token = randomBytes(8).toString("hex");
+    const claim = `${lockPath}.claim-${process.pid}-${token}`;
+    const content = `${process.pid} ${token}`;
+    while (true) {
+      signal.throwIfAborted();
+      await writeFile(claim, content);
+      try {
+        await link(claim, lockPath);
+        const acquired = (await stat(claim, { bigint: true })).ino;
+        await unlink(claim);
+        return async () => {
+          try {
+            if (
+              (await stat(lockPath, { bigint: true })).ino === acquired &&
+              (await readFile(lockPath, "utf8")) === content
+            )
+              await unlink(lockPath);
+          } catch {}
+        };
+      } catch (error) {
+        await unlink(claim).catch(() => {});
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "EEXIST"
+          )
+        )
+          throw error;
+      }
+      let stale = false;
+      let holder: number | null = null;
+      let seen: { ino: bigint; mtimeMs: number } | null = null;
+      try {
+        const info = await stat(lockPath, { bigint: true });
+        seen = { ino: info.ino, mtimeMs: Number(info.mtimeMs) };
+        const age = Date.now() - seen.mtimeMs;
+        holder = await lockOwner(lockPath);
+        if (age > staleMs) stale = true;
+        else if (holder === null) stale = age > lockInitGraceMs;
+        else if (holder !== process.pid) {
+          try {
+            process.kill(holder, 0);
+          } catch (probe) {
+            if (
+              probe instanceof Error &&
+              "code" in probe &&
+              probe.code === "ESRCH"
+            )
+              stale = true;
+          }
+        }
+      } catch {
+        continue;
+      }
+      if (stale && seen) {
+        let unlockReaper: (() => Promise<void>) | undefined;
+        try {
+          unlockReaper = await acquireAt(`${lockPath}.reap`, reapLockStaleMs);
+          const current = await stat(lockPath, { bigint: true });
+          if (
+            current.ino === seen.ino &&
+            Number(current.mtimeMs) === seen.mtimeMs &&
+            (await lockOwner(lockPath)) === holder
+          )
+            await unlink(lockPath);
+        } catch (error) {
+          if (signal.aborted) throw error;
+        } finally {
+          await unlockReaper?.();
+        }
+      } else await delay(250, undefined, { signal });
+    }
+  };
+  return acquireAt(path, lockStaleMs);
 }
 
 function stagingPrefix(release: RuntimeRelease): string {
@@ -616,14 +566,7 @@ export async function installRuntime(
   await mkdir(root, { recursive: true, mode: 0o700 });
   const finalDir = installDir(dataDir, release);
   const lockPath = `${finalDir}.lock`;
-  const releaseProcessLock = await acquireProcessLock(lockPath, signal);
-  let unlock: (() => Promise<void>) | undefined;
-  try {
-    unlock = await acquireLock(lockPath, signal);
-  } catch (error) {
-    releaseProcessLock();
-    throw error;
-  }
+  const unlock = await acquireLock(lockPath, signal);
   try {
     const raced = await verifyInstalled(release, dataDir, platform);
     if (raced) return raced;
@@ -801,10 +744,6 @@ export async function installRuntime(
       throw new Error("DevBrowser runtime failed verification after install");
     return installed;
   } finally {
-    try {
-      await unlock();
-    } finally {
-      releaseProcessLock();
-    }
+    await unlock();
   }
 }

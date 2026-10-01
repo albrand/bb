@@ -20,8 +20,31 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 import { unlink, utimes } from "node:fs/promises";
+
+const lockRace = vi.hoisted(() => ({
+  path: null as string | null,
+  onUnlink: null as (() => Promise<void>) | null,
+  onReapLink: null as (() => void) | null,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    link: async (existingPath: string, newPath: string) => {
+      if (newPath === `${lockRace.path}.reap`) lockRace.onReapLink?.();
+      return actual.link(existingPath, newPath);
+    },
+    unlink: async (path: string) => {
+      if (path === lockRace.path) await lockRace.onUnlink?.();
+      return actual.unlink(path);
+    },
+  };
+});
+
 import {
   acquireLock,
   checkProvenance,
@@ -356,6 +379,91 @@ describe("runtime installer", () => {
       `dev-browser@${version}`,
     ]);
   });
+  it("serializes stale-lock reaping before another caller can enter", async () => {
+    const dir = await dataDir();
+    await mkdir(installRoot(dir), { recursive: true });
+    const path = join(installRoot(dir), "stale-race.lock");
+    await writeFile(path, "999999999");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(path, old, old);
+
+    let unblockFirstUnlink!: () => void;
+    const firstUnlinkGate = new Promise<void>((resolve) => {
+      unblockFirstUnlink = resolve;
+    });
+    let markFirstUnlink!: () => void;
+    const firstUnlinkStarted = new Promise<void>((resolve) => {
+      markFirstUnlink = resolve;
+    });
+    let markSecondUnlink!: () => void;
+    const secondUnlink = new Promise<void>((resolve) => {
+      markSecondUnlink = resolve;
+    });
+    let markSecondReapLink!: () => void;
+    const secondReapLink = new Promise<void>((resolve) => {
+      markSecondReapLink = resolve;
+    });
+    let unlinkCount = 0;
+    let reapLinkCount = 0;
+    lockRace.path = path;
+    lockRace.onUnlink = async () => {
+      unlinkCount += 1;
+      if (unlinkCount === 1) {
+        markFirstUnlink();
+        await firstUnlinkGate;
+      } else if (unlinkCount === 2) markSecondUnlink();
+    };
+    lockRace.onReapLink = () => {
+      reapLinkCount += 1;
+      if (reapLinkCount === 2) markSecondReapLink();
+    };
+
+    const signal = new AbortController().signal;
+    const held: Array<() => Promise<void>> = [];
+    let secondAcquired = false;
+    const first = acquireLock(path, signal).then((unlock) => {
+      held.push(unlock);
+      return unlock;
+    });
+    let firstUnlinkReleased = false;
+    try {
+      await firstUnlinkStarted;
+      const second = acquireLock(path, signal).then((unlock) => {
+        secondAcquired = true;
+        held.push(unlock);
+        return unlock;
+      });
+      const interleaving = await Promise.race([
+        secondUnlink.then(() => "unprotected" as const),
+        secondReapLink.then(() => "serialized" as const),
+      ]);
+
+      if (interleaving === "unprotected") {
+        await second;
+        unblockFirstUnlink();
+        firstUnlinkReleased = true;
+        await first;
+        expect(held).toHaveLength(1);
+      } else {
+        unblockFirstUnlink();
+        firstUnlinkReleased = true;
+        const unlockFirst = await first;
+        expect(secondAcquired).toBe(false);
+        await unlockFirst();
+        const unlockSecond = await second;
+        expect(secondAcquired).toBe(true);
+        await unlockSecond();
+      }
+    } finally {
+      if (!firstUnlinkReleased) unblockFirstUnlink();
+      await Promise.all(held.map((unlock) => unlock()));
+      lockRace.path = null;
+      lockRace.onUnlink = null;
+      lockRace.onReapLink = null;
+      await unlink(path).catch(() => {});
+      await unlink(`${path}.reap`).catch(() => {});
+    }
+  }, 30_000);
   it("hands the lock over in order, keeps unparsable young locks, and never removes a replaced lock", async () => {
     const dir = await dataDir();
     await mkdir(installRoot(dir), { recursive: true });
