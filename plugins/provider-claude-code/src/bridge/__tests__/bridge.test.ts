@@ -1515,6 +1515,204 @@ describe("bridge", () => {
     }
   });
 
+  it("preserves a static MCP server when its configured URL is malformed", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const originalUrl = "https://fixture.invalid/mcp";
+    const validConfig = JSON.stringify({
+      projects: {
+        [cwd]: {
+          mcpServers: { fixture: { type: "http", url: originalUrl } },
+        },
+      },
+    });
+    writeFileSync(userConfig, validConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "fixture",
+        status: "connected",
+        scope: "local",
+        config: { type: "http", url: originalUrl },
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-malformed-url";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load static server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load static server");
+      await bridge.waitForResponse(2);
+      expect(query.toggleMcpServer).not.toHaveBeenCalled();
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: { fixture: { type: "http", url: "not a URL" } },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Preserve after invalid URL" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Preserve after invalid URL");
+      await bridge.waitForResponse(3);
+      expect(query.toggleMcpServer).not.toHaveBeenCalled();
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+
+      writeFileSync(userConfig, validConfig);
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Restore original server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Restore original server");
+      await bridge.waitForResponse(4);
+      expect(query.toggleMcpServer).not.toHaveBeenCalled();
+      expect(query.setMcpServers).toHaveBeenCalledTimes(1);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
+  it("restores a static MCP server when its valid replacement fails", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
+    tempDirs.push(home);
+    const cwd = join(home, "project");
+    mkdirSync(cwd, { recursive: true });
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
+    const userConfig = join(home, ".claude.json");
+    const originalUrl = "https://fixture.invalid/mcp";
+    const validConfig = JSON.stringify({
+      projects: {
+        [cwd]: {
+          mcpServers: { fixture: { type: "http", url: originalUrl } },
+        },
+      },
+    });
+    writeFileSync(userConfig, validConfig);
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    query.mcpServerStatus.mockResolvedValue([
+      {
+        name: "fixture",
+        status: "connected",
+        scope: "local",
+        config: { type: "http", url: originalUrl },
+      },
+    ]);
+    queryMock.mockReturnValue(query);
+    const threadId = "thread-live-mcp-replacement-error";
+
+    try {
+      await startBridgeThread({ bridge, cwd, threadId });
+      const call = queryMock.mock.calls[0]?.[0];
+      if (!isClaudeQueryCall(call))
+        throw new Error("Expected Claude SDK query");
+
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Load static server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Load static server");
+      await bridge.waitForResponse(2);
+
+      query.setMcpServers.mockResolvedValueOnce({
+        added: [],
+        removed: [],
+        errors: { fixture: "fixture connection failed" },
+      });
+      writeFileSync(
+        userConfig,
+        JSON.stringify({
+          projects: {
+            [cwd]: {
+              mcpServers: {
+                fixture: {
+                  type: "http",
+                  url: "https://fixture.invalid/unavailable",
+                },
+              },
+            },
+          },
+        }),
+      );
+      bridge.sendRequest(
+        3,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Handle failed replacement" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Handle failed replacement");
+      await bridge.waitForResponse(3);
+      expect(query.toggleMcpServer).toHaveBeenCalledTimes(2);
+      expect(query.toggleMcpServer).toHaveBeenNthCalledWith(
+        1,
+        "fixture",
+        false,
+      );
+      expect(query.toggleMcpServer).toHaveBeenNthCalledWith(2, "fixture", true);
+
+      writeFileSync(userConfig, validConfig);
+      bridge.sendRequest(
+        4,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Restore original server" }],
+        }),
+      );
+      expect(await readNextPromptText(call)).toBe("Restore original server");
+      await bridge.waitForResponse(4);
+      expect(query.toggleMcpServer).toHaveBeenCalledTimes(2);
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      query.finish();
+      await stopBridgeThread({ bridge, queries: [query], threadId });
+      bridge.restore();
+    }
+  });
+
   it("preserves current MCP servers when a config read hits premature EOF", async () => {
     const home = mkdtempSync(join(tmpdir(), "bb-claude-mcp-home-"));
     tempDirs.push(home);

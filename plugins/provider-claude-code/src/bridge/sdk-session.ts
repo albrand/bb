@@ -173,7 +173,7 @@ export class SdkSession {
   private readonly abortController = new AbortController();
   private readonly completion: Promise<void>;
   private readonly baseMcpServers: Record<string, McpServerConfig>;
-  private readonly removedConfiguredServers = new Map<
+  private readonly bridgeDisabledStaticServers = new Map<
     string,
     McpServerStatus["config"]
   >();
@@ -226,6 +226,7 @@ export class SdkSession {
       string,
       McpServerConfig
     >;
+    const restoreAfterFailedReplacement = new Set<string>();
     for (const status of statuses) {
       const configuredServer = servers[status.name];
       if (!isClaudeConfigScope(status.scope)) {
@@ -244,29 +245,32 @@ export class SdkSession {
       if (configuredServer === undefined) {
         if (status.status !== "disabled") {
           await this.query.toggleMcpServer(status.name, false);
-          this.removedConfiguredServers.set(status.name, status.config);
+          this.bridgeDisabledStaticServers.set(status.name, status.config);
         }
         continue;
       }
       if (!isDeepStrictEqual(status.config, configuredServer)) {
         if (status.status !== "disabled") {
           await this.query.toggleMcpServer(status.name, false);
+          this.bridgeDisabledStaticServers.set(status.name, status.config);
         }
-        this.removedConfiguredServers.delete(status.name);
+        if (this.bridgeDisabledStaticServers.has(status.name)) {
+          restoreAfterFailedReplacement.add(status.name);
+        }
         dynamicServers[status.name] = configuredServer;
         continue;
       }
       if (status.status === "disabled") {
         if (
-          this.removedConfiguredServers.has(status.name) &&
-          (this.removedConfiguredServers.get(status.name) === undefined ||
+          this.bridgeDisabledStaticServers.has(status.name) &&
+          (this.bridgeDisabledStaticServers.get(status.name) === undefined ||
             isDeepStrictEqual(
-              this.removedConfiguredServers.get(status.name),
+              this.bridgeDisabledStaticServers.get(status.name),
               configuredServer,
             ))
         ) {
           await this.query.toggleMcpServer(status.name, true);
-          this.removedConfiguredServers.delete(status.name);
+          this.bridgeDisabledStaticServers.delete(status.name);
         }
       } else if (reconnectConfiguredServers) {
         await this.query.reconnectMcpServer(status.name);
@@ -276,13 +280,23 @@ export class SdkSession {
       if (!statusesByName.has(name)) dynamicServers[name] = config;
     }
     const nextServers = { ...dynamicServers, ...this.baseMcpServers };
-    const result = await this.query.setMcpServers(nextServers);
-    if (Object.keys(result.errors).length > 0) {
-      throw new Error(
-        `MCP server connection failed: ${Object.entries(result.errors)
-          .map(([name, message]) => `${name}: ${message}`)
-          .join("; ")}`,
-      );
+    try {
+      const result = await this.query.setMcpServers(nextServers);
+      if (Object.keys(result.errors).length > 0) {
+        throw new Error(
+          `MCP server connection failed: ${Object.entries(result.errors)
+            .map(([name, message]) => `${name}: ${message}`)
+            .join("; ")}`,
+        );
+      }
+    } catch (error) {
+      for (const name of restoreAfterFailedReplacement) {
+        try {
+          await this.query.toggleMcpServer(name, true);
+          this.bridgeDisabledStaticServers.delete(name);
+        } catch {}
+      }
+      throw error;
     }
     this.options.mcpServers = nextServers;
   }

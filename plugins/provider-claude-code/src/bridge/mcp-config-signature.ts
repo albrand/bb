@@ -256,6 +256,20 @@ function stringRecord(value: unknown, field: string): Record<string, string> {
   return Object.fromEntries(entries) as Record<string, string>;
 }
 
+function resolveHttpUrl(value: string, env: NodeJS.ProcessEnv): string {
+  const resolved = expandEnvironment(value, env);
+  let url: URL;
+  try {
+    url = new URL(resolved);
+  } catch {
+    invalidMcpConfig("HTTP and SSE server urls must be absolute HTTP(S) urls");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    invalidMcpConfig("HTTP and SSE server urls must be absolute HTTP(S) urls");
+  }
+  return resolved;
+}
+
 function resolveServerConfig(
   value: unknown,
   env: NodeJS.ProcessEnv,
@@ -267,7 +281,7 @@ function resolveServerConfig(
     }
     const config: Record<string, unknown> = {
       ...value,
-      url: expandEnvironment(value.url, env),
+      url: resolveHttpUrl(value.url, env),
     };
     if (value.headers !== undefined) {
       config.headers = Object.fromEntries(
