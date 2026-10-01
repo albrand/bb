@@ -61,9 +61,9 @@ Claude Code MCP servers:
   failure, leaves reconciliation pending, and still sends the turn input.
   Per-server connection errors are logged without marking the whole server set
   pending, so other servers remain available. If a whole-set update cannot be
-  applied, the bridge temporarily denies external MCP tool calls while
-  reconciliation retries; non-MCP tools and the bb bridge's own tools remain
-  available.
+  applied, or status/disable/restore state is uncertain, the bridge temporarily
+  denies external MCP tool calls while reconciliation retries on later turns;
+  turn input, non-MCP tools, and the bb bridge's own tools remain available.
   The project .mcp.json approval checks still apply before those servers can be
   passed to the SDK.
 
