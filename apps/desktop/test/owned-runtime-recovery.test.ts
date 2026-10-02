@@ -30,6 +30,9 @@ describe("owned runtime recovery", () => {
     expect(exitWatcherEnd).toBeGreaterThan(exitWatcherStart);
     expect(exitWatcher).toContain("exit: bbProcess.exit");
     expect(exitWatcher).toContain("await ownedRuntimeRecovery?.start()");
+    expect(exitWatcher).toContain(
+      "isRecoveryActive: ownedRuntimeRecovery?.isRunning() ?? false",
+    );
     expect(recoverySetup).toContain("getRuntime: () => currentRuntime");
     expect(recoverySetup).toContain("loadLoadingView,");
     expect(recoverySetup).toContain("loadServer: loadBbApp");
