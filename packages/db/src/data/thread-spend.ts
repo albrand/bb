@@ -31,6 +31,10 @@ export interface TokenUsageObservation {
   threadId: string;
   total: SpendUsageBreakdown;
   turnId: string | null;
+  turnSpendUsage?: {
+    cachedInputTokens: number | null;
+    reasoningOutputTokens: number | null;
+  };
 }
 
 export interface SpendContribution {

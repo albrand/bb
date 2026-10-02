@@ -9,7 +9,10 @@ import {
   getHost,
   getThread,
   getThreadSectionById,
+  ensureSpendTables,
   listThreadMentionRowsByIds,
+  listNonDeletedChildThreads,
+  listSpendRollupRows,
   listThreadsWithPendingInteractionState,
   markThreadDeleted,
   listLifecycleThreadTree,
@@ -399,11 +402,37 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
   });
 
   function getThreadChildSummary(thread: Thread): ThreadChildSummaryResponse {
+    ensureSpendTables(deps.db);
+    const children = listNonDeletedChildThreads(deps.db, {
+      parentThreadId: thread.id,
+    });
+    const counts = { failed: 0, idle: 0, waiting: 0, working: 0 };
+    for (const child of children) {
+      if (child.status === "error") counts.failed += 1;
+      else if (child.status === "idle") counts.idle += 1;
+      else if (child.status === "pending") counts.waiting += 1;
+      else counts.working += 1;
+    }
+    const totalTokens = children.reduce((total: number | null, child) => {
+      const rows = listSpendRollupRows(deps.db, { threadId: child.id });
+      if (rows.length === 0 || total === null) return null;
+      return (
+        total +
+        rows.reduce((childTotal, row) => childTotal + row.totalTokens, 0)
+      );
+    }, 0);
     const nonDeletedChildCount = countNonDeletedAssignedChildThreads(deps.db, {
       parentThreadId: thread.id,
     });
     return {
       nonDeletedChildCount,
+      ...counts,
+      totalTokens,
+      children: children.map(({ id, status, title }) => ({
+        id,
+        status,
+        title,
+      })),
       unarchivedDescendantCount: countUnarchivedThreadDescendants(
         deps.db,
         thread,

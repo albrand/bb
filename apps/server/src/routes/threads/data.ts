@@ -2,6 +2,7 @@ import { extractThreadContextWindowUsage } from "@bb/thread-view";
 import { clearTimelineOrderingContextCache } from "../../services/threads/timeline-context-order.js";
 import {
   getAppSettings,
+  ensureSpendTables,
   getDatabaseDataVersion,
   getThreadPluginMetadata,
   patchThreadPluginMetadata,
@@ -12,6 +13,8 @@ import {
   getThreadExecutionOverride,
   getThreadExecutionReport,
   listQueuedThreadMessages,
+  listSpendRollupRows,
+  listThreadTurnSpend,
 } from "@bb/db";
 import type { Hono } from "hono";
 import {
@@ -30,6 +33,7 @@ import {
   type ThreadConversationOutlineResponse,
   type ThreadExecutionProfileResponse,
   type ThreadTimelineQuery,
+  type ThreadSpendSummaryResponse,
 } from "@bb/server-contract";
 import type { AppDeps } from "../../types.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
@@ -434,6 +438,44 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         sourceSeqEnd: parseInteger(query.sourceSeqEnd, "sourceSeqEnd"),
       }),
     );
+  });
+
+  get(routes.spendSummary, (context) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    ensureSpendTables(deps.db);
+    const dailyRows = listSpendRollupRows(deps.db, { threadId: thread.id });
+    const turns = listThreadTurnSpend(deps.db, { threadId: thread.id });
+    const sumDaily = (
+      field: "inputTokens" | "outputTokens" | "totalTokens",
+    ): number | null =>
+      dailyRows.length === 0
+        ? null
+        : dailyRows.reduce((sum, row) => sum + row[field], 0);
+    const dailyTotalTokens = sumDaily("totalTokens");
+    const turnSpendIsComplete =
+      dailyTotalTokens !== null &&
+      turns.reduce((sum, turn) => sum + turn.totalTokens, 0) ===
+        dailyTotalTokens;
+    const sumTurnKind = (
+      field: "cachedInputTokens" | "reasoningOutputTokens",
+    ): number | null =>
+      !turnSpendIsComplete ||
+      turns.length === 0 ||
+      turns.some((turn) => turn[field] === null)
+        ? null
+        : turns.reduce((sum, turn) => sum + (turn[field] ?? 0), 0);
+    const total = {
+      cachedInputTokens: sumTurnKind("cachedInputTokens"),
+      inputTokens: sumDaily("inputTokens"),
+      outputTokens: sumDaily("outputTokens"),
+      reasoningOutputTokens: sumTurnKind("reasoningOutputTokens"),
+      totalTokens: dailyTotalTokens,
+    };
+    const response: ThreadSpendSummaryResponse = {
+      total,
+      turns,
+    };
+    return context.json(response);
   });
 
   get(routes.output, (context) => {

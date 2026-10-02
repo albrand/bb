@@ -233,6 +233,7 @@ import type {
   TerminalResizeRequest,
   ThreadArchiveAllResponse,
   ThreadChildSummaryResponse,
+  ThreadSpendSummaryResponse,
   ThreadEventWaitQuery,
   ThreadEventsQuery,
   ThreadSectionMutationResponse,
@@ -1406,6 +1407,12 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest<PathId>(),
       response: jsonResponse<ThreadChildSummaryResponse>(),
+    }),
+    spendSummary: defineRoute({
+      path: "/threads/:id/spend-summary",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ThreadSpendSummaryResponse>(),
     }),
     send: defineRoute({
       path: "/threads/:id/send",

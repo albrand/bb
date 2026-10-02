@@ -573,9 +573,42 @@ export type ThreadQueuedMessageListResponse = z.infer<
 export const threadChildSummaryResponseSchema = z.object({
   nonDeletedChildCount: z.number().int().nonnegative(),
   unarchivedDescendantCount: z.number().int().nonnegative(),
+  working: z.number().int().nonnegative().optional(),
+  waiting: z.number().int().nonnegative().optional(),
+  idle: z.number().int().nonnegative().optional(),
+  failed: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().nullable().optional(),
+  children: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string().nullable(),
+        status: threadStatusSchema,
+      }),
+    )
+    .optional(),
 });
 export type ThreadChildSummaryResponse = z.infer<
   typeof threadChildSummaryResponseSchema
+>;
+
+export const threadSpendBreakdownSchema = z.object({
+  inputTokens: z.number().nullable(),
+  cachedInputTokens: z.number().nullable(),
+  outputTokens: z.number().nullable(),
+  reasoningOutputTokens: z.number().nullable(),
+  totalTokens: z.number().nullable(),
+});
+
+export const threadSpendSummaryResponseSchema = z.object({
+  total: threadSpendBreakdownSchema,
+  turns: z.array(threadSpendBreakdownSchema.extend({ turnId: z.string() })),
+});
+export type ThreadSpendBreakdownResponse = z.infer<
+  typeof threadSpendBreakdownSchema
+>;
+export type ThreadSpendSummaryResponse = z.infer<
+  typeof threadSpendSummaryResponseSchema
 >;
 
 export const deleteThreadRequestSchema = z.object({

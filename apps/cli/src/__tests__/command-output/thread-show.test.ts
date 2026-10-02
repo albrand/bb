@@ -15,6 +15,32 @@ import { registerThreadCommands } from "../../commands/thread/index.js";
 describe("bb thread show command output", () => {
   setupCommandOutputTestEnvironment();
 
+  function stubThreadApi(handlers: Parameters<typeof stubServerApi>[0]): void {
+    stubServerApi({
+      "v1.threads.:id.child-summary.$get": vi.fn(async () => ({
+        nonDeletedChildCount: 0,
+        unarchivedDescendantCount: 0,
+        working: 0,
+        waiting: 0,
+        idle: 0,
+        failed: 0,
+        totalTokens: 0,
+        children: [],
+      })),
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        total: {
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          totalTokens: null,
+        },
+        turns: [],
+      })),
+      ...handlers,
+    });
+  }
+
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
@@ -77,7 +103,7 @@ describe("bb thread show command output", () => {
       });
       const get = vi.fn(async () => thread);
       const timelineGet = fixtures.makeEmptyTimelineGetMock();
-      stubServerApi({
+      stubThreadApi({
         "v1.threads.:id.$get": get,
         "v1.threads.:id.timeline.$get": timelineGet,
       });
@@ -120,7 +146,7 @@ describe("bb thread show command output", () => {
       },
     ]);
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.threads.:id.$get": get,
       "v1.threads.:id.events.$get": events,
       "v1.threads.:id.timeline.$get": timelineGet,
@@ -153,7 +179,7 @@ describe("bb thread show command output", () => {
     });
     const get = vi.fn(async () => thread);
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -193,7 +219,7 @@ describe("bb thread show command output", () => {
     }));
     const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.environments.:id.status.$get": statusGet,
@@ -264,7 +290,7 @@ describe("bb thread show command output", () => {
     const diffGet = vi.fn(async () => diffResponse);
     const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.diff.$get": diffGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
@@ -318,7 +344,7 @@ describe("bb thread show command output", () => {
     const diffGet = vi.fn(async () => diffResponse);
     const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.diff.$get": diffGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
@@ -380,7 +406,7 @@ describe("bb thread show command output", () => {
       pullRequest,
     }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
@@ -433,7 +459,7 @@ describe("bb thread show command output", () => {
       message: "gh pr view failed: authentication required",
     }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
@@ -446,6 +472,92 @@ describe("bb thread show command output", () => {
     expect(output).toContain("Pull request: unavailable");
     expect(output).toContain("gh pr view failed: authentication required");
     expect(output).not.toContain("Pull request: none");
+  });
+
+  it("prints token kinds and child agent states", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-spend-show",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        total: {
+          inputTokens: 1_200,
+          cachedInputTokens: 300,
+          outputTokens: 80_000,
+          reasoningOutputTokens: 12_000,
+          totalTokens: 93_500,
+        },
+        turns: [
+          {
+            turnId: "turn-1",
+            inputTokens: 1_000,
+            cachedInputTokens: null,
+            outputTokens: 20,
+            reasoningOutputTokens: 4,
+            totalTokens: 1_024,
+          },
+        ],
+      })),
+      "v1.threads.:id.child-summary.$get": vi.fn(async () => ({
+        nonDeletedChildCount: 2,
+        unarchivedDescendantCount: 2,
+        working: 1,
+        waiting: 0,
+        idle: 1,
+        failed: 0,
+        totalTokens: 64_400_000,
+        children: [],
+      })),
+    });
+
+    await runCommand(["thread", "show", thread.id], register);
+
+    const lines = collectLogLines(vi.mocked(console.log));
+    expect(lines).toContain(
+      "  Thread: In 1.2K · Out 80K · Reasoning 12K · Cached 300 · Σ 93.5K",
+    );
+    expect(lines).toContain(
+      "  Turn turn-1: In 1K · Out 20 · Reasoning 4 · Cached unavailable · Σ 1K",
+    );
+    expect(lines).toContain("Ran 2 agents:");
+    expect(lines).toContain(
+      "  1 working · 0 waiting · 1 idle · 0 failed · Σ 64.4M",
+    );
+  });
+
+  it("keeps thread show available when spend summary routes fail", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-spend-unavailable",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => {
+        throw new Error("spend summary unavailable");
+      }),
+      "v1.threads.:id.child-summary.$get": vi.fn(async () => {
+        throw new Error("child summary unavailable");
+      }),
+    });
+
+    await runCommand(["thread", "show", thread.id], register);
+
+    const lines = collectLogLines(vi.mocked(console.log));
+    expect(lines).toContain("Token usage: unavailable");
+    expect(lines).not.toContain("Ran 0 agents:");
+    expect(lines.some((line) => line.includes("Status: idle"))).toBe(true);
   });
 
   it("bb thread show --json includes pull request details", async () => {
@@ -473,7 +585,7 @@ describe("bb thread show command output", () => {
       pullRequest,
     }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
@@ -498,6 +610,26 @@ describe("bb thread show command output", () => {
       },
       pendingTodos: null,
       execution: null,
+      childSummary: {
+        nonDeletedChildCount: 0,
+        unarchivedDescendantCount: 0,
+        working: 0,
+        waiting: 0,
+        idle: 0,
+        failed: 0,
+        totalTokens: 0,
+        children: [],
+      },
+      spendSummary: {
+        total: {
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          totalTokens: null,
+        },
+        turns: [],
+      },
     });
   });
 
@@ -512,7 +644,7 @@ describe("bb thread show command output", () => {
     });
     const get = vi.fn(async () => thread);
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubServerApi({
+    stubThreadApi({
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -529,6 +661,26 @@ describe("bb thread show command output", () => {
       environment: null,
       pendingTodos: null,
       execution: null,
+      childSummary: {
+        nonDeletedChildCount: 0,
+        unarchivedDescendantCount: 0,
+        working: 0,
+        waiting: 0,
+        idle: 0,
+        failed: 0,
+        totalTokens: 0,
+        children: [],
+      },
+      spendSummary: {
+        total: {
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          totalTokens: null,
+        },
+        turns: [],
+      },
     });
   });
 });

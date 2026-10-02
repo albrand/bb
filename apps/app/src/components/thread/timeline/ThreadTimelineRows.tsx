@@ -135,6 +135,7 @@ import {
   type PluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
 import { isPluginSideChatSenderThread } from "@/lib/side-chat-plugin.js";
+import { ThreadTurnTokenSummary } from "@/components/thread/ThreadUsageSummary.js";
 import {
   buildMessageDirectiveRegistry,
   MessageDirectiveRegistryProvider,
@@ -1312,16 +1313,19 @@ function LazyTurnRowBody({
   }
   if (rows) {
     return (
-      <TimelineRowsList
-        rows={rows}
-        scopeActive={false}
-        showAssistantMessageActions={showAssistantMessageActions}
-        compactActivityIntents={compactActivityIntents}
-        spacing="nested"
-        className={NESTED_TIMELINE_GROUP_LINE_CLASS_NAME}
-        unreadDividerAutoScroll={false}
-        unreadDividerPlacement={null}
-      />
+      <div className="grid gap-1">
+        <TimelineRowsList
+          rows={rows}
+          scopeActive={false}
+          showAssistantMessageActions={showAssistantMessageActions}
+          compactActivityIntents={compactActivityIntents}
+          spacing="nested"
+          className={NESTED_TIMELINE_GROUP_LINE_CLASS_NAME}
+          unreadDividerAutoScroll={false}
+          unreadDividerPlacement={null}
+        />
+        <ThreadTurnTokenSummary threadId={identity.threadId} turnId={turnId} />
+      </div>
     );
   }
   return (
