@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserWindowConstructorOptions } from "electron";
 import { afterEach, describe, expect, it } from "vitest";
+import { createDesktopOwnedRuntimeRecovery } from "../src/owned-runtime-recovery.js";
 import {
   createDesktopWindowFactory,
   type DesktopBrowserWindow,
@@ -302,6 +303,71 @@ describe("desktop window factory", () => {
         isMaximized: false,
         stateKey: "window-second",
       },
+    ]);
+  });
+
+  it("retries recovery when the active window factory rejects a server load", async () => {
+    const { createdWindows, factory } = await createFactoryHarness();
+    const loadingUrl = "bb-local://loading";
+    const serverUrl = "http://127.0.0.1:38886";
+    const browserWindow = await factory.createWindow({
+      initialUrl: loadingUrl,
+      stateKey: null,
+    });
+    const originalLoadURL = browserWindow.loadURL.bind(browserWindow);
+    let serverLoadAttempts = 0;
+    browserWindow.loadURL = async (url) => {
+      if (url === serverUrl) {
+        serverLoadAttempts += 1;
+        if (serverLoadAttempts === 1) {
+          throw new Error("ERR_CONNECTION_REFUSED");
+        }
+      }
+      await originalLoadURL(url);
+    };
+
+    const events: string[] = [];
+    let runtimeStarts = 0;
+    const recovery = createDesktopOwnedRuntimeRecovery({
+      getRuntime: () => ({ serverUrl }),
+      isCurrent: () => true,
+      loadLoadingView: () => factory.loadUrl({ url: loadingUrl }),
+      loadServer: (url) => factory.loadUrl({ url }),
+      onLoadFailure: (error) => events.push(`load failed: ${String(error)}`),
+      onRestoreFailure: () => events.push("retry window load"),
+      onUnavailable: () => events.push("runtime unavailable"),
+      onRecovered: () => events.push("recovered"),
+      refreshApplicationMenu: () => events.push("refresh menu"),
+      restartRuntime: async () => {
+        runtimeStarts += 1;
+        return runtimeStarts === 2;
+      },
+      startSystemConfigSync: () => events.push("sync system config"),
+      wait: async () => {
+        events.push("wait before retry");
+      },
+    });
+
+    await recovery.start();
+
+    expect(runtimeStarts).toBe(2);
+    expect(serverLoadAttempts).toBe(2);
+    expect(createdWindows[0]?.loadedUrls).toEqual([
+      loadingUrl,
+      loadingUrl,
+      loadingUrl,
+      serverUrl,
+    ]);
+    expect(events).toEqual([
+      "wait before retry",
+      "runtime unavailable",
+      "wait before retry",
+      "load failed: Error: ERR_CONNECTION_REFUSED",
+      "retry window load",
+      "wait before retry",
+      "sync system config",
+      "refresh menu",
+      "recovered",
     ]);
   });
 

@@ -94,6 +94,10 @@ import {
   writeOwnedRuntimePidFile,
 } from "./owned-runtime-supervisor.js";
 import {
+  createDesktopOwnedRuntimeRecovery,
+  watchOwnedRuntimeExit,
+} from "./owned-runtime-recovery.js";
+import {
   probeBbServer,
   waitForCompatibleServer,
   type CompatibleServerProbeResult,
@@ -398,6 +402,9 @@ let currentApplicationMenuAccelerators = DEFAULT_APPLICATION_MENU_ACCELERATORS;
 let desktopUpdateService: DesktopUpdateService | null = null;
 let desktopAutoUpdateService: DesktopAutoUpdateService | null = null;
 let currentRuntime: DesktopRuntime | null = null;
+let ownedRuntimeRecovery: ReturnType<
+  typeof createDesktopOwnedRuntimeRecovery
+> | null = null;
 let currentWindowUrl: string | null = null;
 let logViewerLineBuffer: LogLineBuffer | null = null;
 let logViewerPreloadPath: string | null = null;
@@ -2451,32 +2458,48 @@ async function spawnOwnedRuntime(
   });
   setCurrentRuntime(runtime);
 
-  void bbProcess.exit.then((exit) => {
-    void clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
-    if (quitting || currentRuntime !== runtime) {
-      return;
-    }
-    setCurrentRuntime(null);
-    if (localServerMove !== null) {
+  void watchOwnedRuntimeExit({
+    exit: bbProcess.exit,
+    clearPidFile: () => {
+      void clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
+    },
+    getState: () => ({
+      appLoaded: bbAppLoaded,
+      hasRecoveryController: ownedRuntimeRecovery !== null,
+      isCurrentRuntime: currentRuntime === runtime,
+      isRecoveryActive: ownedRuntimeRecovery?.isRunning() ?? false,
+      isQuitting: quitting,
+      isServerMoving: localServerMove !== null,
+    }),
+    clearCurrentRuntime: () => setCurrentRuntime(null),
+    recover: async (exit) => {
+      desktopLogger.warn(
+        `[desktop] the Electron-owned bb-app process exited with ${formatExitResult(exit)}; restarting it`,
+      );
+      await ownedRuntimeRecovery?.start();
+    },
+    showServerMoving: (exit) => {
       desktopLogger.warn(
         `[desktop] the Electron-owned bb-app process that runs this computer as a machine stopped with ${formatExitResult(exit)}`,
       );
-      return;
-    }
-    void loadStartupError({
-      details: `The Electron-owned bb-app process stopped with ${formatExitResult(
-        exit,
-      )}.`,
-      logs: bbProcess.logs.text(),
-      actions: [],
-      title: "bb stopped",
-    });
+    },
+    showError: (exit) => {
+      void loadStartupError({
+        details: `The Electron-owned bb-app process stopped with ${formatExitResult(
+          exit,
+        )}.`,
+        logs: bbProcess.logs.text(),
+        actions: [],
+        title: "bb stopped",
+      });
+    },
   });
   return { bbProcess, runtime };
 }
 
 async function startOwnedRuntime(
   args: StartOwnedRuntimeArgs,
+  options: { suppressStartupError?: boolean } = {},
 ): Promise<DesktopRuntime | null> {
   const { bbProcess, runtime } = await spawnOwnedRuntime(args);
 
@@ -2496,14 +2519,16 @@ async function startOwnedRuntime(
   ]);
 
   if (raceResult.kind === "process-exited") {
-    await loadStartupError({
-      details: `bb-app exited before the server was ready with ${formatExitResult(
-        raceResult.exit,
-      )}.`,
-      logs: bbProcess.logs.text(),
-      actions: [],
-      title: "Could not start bb",
-    });
+    if (!options.suppressStartupError) {
+      await loadStartupError({
+        details: `bb-app exited before the server was ready with ${formatExitResult(
+          raceResult.exit,
+        )}.`,
+        logs: bbProcess.logs.text(),
+        actions: [],
+        title: "Could not start bb",
+      });
+    }
     setCurrentRuntime(null);
     return null;
   }
@@ -2512,15 +2537,17 @@ async function startOwnedRuntime(
     return runtime;
   }
 
-  await loadStartupError({
-    details:
-      raceResult.result.kind === "incompatible"
-        ? `Port ${args.serverUrl} is responding, but it does not look like bb: ${raceResult.result.reason}.`
-        : `Timed out waiting for bb at ${args.serverUrl}: ${raceResult.result.reason}.`,
-    logs: bbProcess.logs.text(),
-    actions: [],
-    title: "Could not start bb",
-  });
+  if (!options.suppressStartupError) {
+    await loadStartupError({
+      details:
+        raceResult.result.kind === "incompatible"
+          ? `Port ${args.serverUrl} is responding, but it does not look like bb: ${raceResult.result.reason}.`
+          : `Timed out waiting for bb at ${args.serverUrl}: ${raceResult.result.reason}.`,
+      logs: bbProcess.logs.text(),
+      actions: [],
+      title: "Could not start bb",
+    });
+  }
   await stopOwnedRuntime();
   return null;
 }
@@ -2639,6 +2666,42 @@ async function decideOnExistingServer(
 }
 
 async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
+  ownedRuntimeRecovery = createDesktopOwnedRuntimeRecovery({
+    getRuntime: () => currentRuntime,
+    isCurrent: () => !quitting && localServerMove === null,
+    loadLoadingView,
+    loadServer: loadBbApp,
+    restartRuntime: async () =>
+      (await startOwnedRuntime(args, { suppressStartupError: true })) !== null,
+    startSystemConfigSync,
+    refreshApplicationMenu,
+    onLoadFailure: (error) => {
+      desktopLogger.error(
+        `[desktop] could not load the restarted bb server: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+    onUnavailable: () => {
+      desktopLogger.warn(
+        "[desktop] bb-app restart did not reach a healthy server; retrying",
+      );
+    },
+    onRestoreFailure: () => {
+      desktopLogger.warn(
+        "[desktop] could not reload the restarted bb server; retrying the window load",
+      );
+    },
+    onRecovered: () => {
+      desktopLogger.info(
+        "[desktop] reconnected the window to its restarted bb server",
+      );
+    },
+    onRetry: (error) => {
+      desktopLogger.warn(
+        `[desktop] could not restart bb-app: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
+
   const existingProbe = await probeBbServer({
     serverUrl: args.serverUrl,
     timeoutMs: ATTACH_PROBE_TIMEOUT_MS,
