@@ -308,7 +308,7 @@ afterEach(() => {
 });
 
 describe("ThreadRow", () => {
-  it("renders Needs input, Working, Woke, and Done labels on their rows", async () => {
+  it("renders Needs input, Working, Woke 3m elapsed, and Done labels", async () => {
     const callRpc = vi.fn().mockResolvedValue({
       automations: [
         {
