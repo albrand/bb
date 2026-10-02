@@ -28,7 +28,6 @@ describe("bb thread show command output", () => {
         children: [],
       })),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        providerId: "codex",
         historyComplete: false,
         total: {
           inputTokens: null,
@@ -489,7 +488,6 @@ describe("bb thread show command output", () => {
       "v1.threads.:id.$get": vi.fn(async () => thread),
       "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        providerId: "codex",
         historyComplete: true,
         total: {
           inputTokens: 1_200,
@@ -549,7 +547,6 @@ describe("bb thread show command output", () => {
       "v1.threads.:id.$get": vi.fn(async () => thread),
       "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        providerId: "claude-code",
         historyComplete: false,
         total: {
           inputTokens: 6_442,
@@ -582,10 +579,10 @@ describe("bb thread show command output", () => {
     await runCommand(["thread", "show", thread.id], register);
 
     expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "  Thread: Input (uncached) ≥ 6.4K (partial history) · Out ≥ 1.8M (partial history) · Reasoning included in output · Cached (read + write) ≥ 686.7M (partial history) · Σ ≥ 688.5M (partial history)",
+      "  Thread: Input (uncached) ≥ 6.4K (partial history) · Out ≥ 1.8M (partial history) · Reasoning included in output · Cached ≥ 686.7M (partial history) · Σ ≥ 688.5M (partial history)",
     );
     expect(collectLogLines(vi.mocked(console.log)).join("\n")).toMatch(
-      /Turn da385f7e5d-t2: Input \(uncached\) 8 · Out 831 · Reasoning included in output · Cached \(read \+ write\) 788K · Σ 788\.9K/,
+      /Turn da385f7e5d-t2: Input \(uncached\) 8 · Out 831 · Reasoning included in output · Cached 788K · Σ 788\.9K/,
     );
   });
 
@@ -678,7 +675,6 @@ describe("bb thread show command output", () => {
         children: [],
       },
       spendSummary: {
-        providerId: "codex",
         historyComplete: false,
         total: {
           inputTokens: null,
@@ -731,7 +727,6 @@ describe("bb thread show command output", () => {
         children: [],
       },
       spendSummary: {
-        providerId: "codex",
         historyComplete: false,
         total: {
           inputTokens: null,

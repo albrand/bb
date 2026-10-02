@@ -174,7 +174,6 @@ describe("public thread spend summaries", () => {
         reasoningOutputTokens: 10,
         totalTokens: 153,
       });
-      expect(spend.providerId).toBe("codex");
       expect(spend.historyComplete).toBe(false);
       expect(spend.turns).toEqual([
         {
@@ -259,7 +258,6 @@ describe("public thread spend summaries", () => {
       );
 
       expect(spend).toEqual({
-        providerId: "claude-code",
         historyComplete: false,
         total: {
           cachedInputTokens: 9_000_000,

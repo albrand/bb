@@ -22,7 +22,6 @@ describe("thread usage summary", () => {
     childSummary.mockReset();
     useThreadSpendSummary.mockReturnValue({
       data: {
-        providerId: "claude-code",
         historyComplete: false,
         total: {
           inputTokens: 6_442,
@@ -79,14 +78,14 @@ describe("thread usage summary", () => {
 
     expect(
       screen.getByText(
-        /Input \(uncached\) 30 · Out 6\.1K · Reasoning included in output · Cached \(read \+ write\) 2\.8M/,
+        /Input \(uncached\) 30 · Out 6\.1K · Reasoning included in output · Cached 2\.8M/,
       ),
     ).toBeTruthy();
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
     expect(screen.getByText(/Σ 64.4M/)).toBeTruthy();
     expect(
       screen.getByText(
-        /Input \(uncached\) ≥ 6\.4K \(partial history\) · Out ≥ 1\.8M \(partial history\) · Reasoning included in output · Cached \(read \+ write\) ≥ 686\.7M \(partial history\)/,
+        /Input \(uncached\) ≥ 6\.4K \(partial history\) · Out ≥ 1\.8M \(partial history\) · Reasoning included in output · Cached ≥ 686\.7M \(partial history\)/,
       ),
     ).toBeTruthy();
     expect(screen.getByText(/Σ ≥ 688\.5M \(partial history\)/)).toBeTruthy();
@@ -125,7 +124,6 @@ describe("thread usage summary", () => {
   it("labels Codex cached and reasoning tokens without overstating the sum", () => {
     useThreadSpendSummary.mockReturnValue({
       data: {
-        providerId: "codex",
         historyComplete: true,
         total: {
           inputTokens: 70,

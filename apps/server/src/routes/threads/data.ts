@@ -466,7 +466,6 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       totalTokens: dailyTotalTokens,
     };
     const response: ThreadSpendSummaryResponse = {
-      providerId: thread.providerId,
       historyComplete: isSpendThreadHistoryComplete(deps.db, {
         threadId: thread.id,
       }),

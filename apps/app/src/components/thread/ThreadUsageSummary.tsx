@@ -35,23 +35,23 @@ function coverageTokens(
 function BreakdownDetails({
   breakdown,
   label,
-  providerId,
+  reasoningDisplayValue = breakdown.reasoningOutputTokens,
   historyComplete = true,
 }: {
   breakdown: ThreadSpendBreakdownResponse;
   label: string;
-  providerId: string;
+  reasoningDisplayValue?: number | null;
   historyComplete?: boolean;
 }) {
-  const labels = tokenBreakdownLabels(providerId);
+  const labels = tokenBreakdownLabels(reasoningDisplayValue);
   const partial = (value: number | null) =>
     historyComplete || value === null
       ? compactTokens(value)
       : `≥ ${compactTokens(value)} (partial history)`;
   const reasoning =
-    providerId === "claude-code"
+    reasoningDisplayValue === null || reasoningDisplayValue === 0
       ? labels.reasoning
-      : `${labels.reasoning} ${partial(breakdown.reasoningOutputTokens)}`;
+      : `${labels.reasoning} ${partial(reasoningDisplayValue)}`;
   return (
     <details className="text-xs text-muted-foreground">
       <summary className="flex min-w-0 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded-sm px-1 py-0.5 hover:bg-state-hover">
@@ -73,14 +73,11 @@ function BreakdownDetails({
         <span>
           Output: {coverageTokens(breakdown.outputTokens, historyComplete)}
         </span>
-        {providerId === "claude-code" ? (
-          <span>{labels.reasoning}</span>
-        ) : (
-          <span>
-            {labels.reasoning}:{" "}
-            {coverageTokens(breakdown.reasoningOutputTokens, historyComplete)}
-          </span>
-        )}
+        <span>
+          {reasoningDisplayValue === null || reasoningDisplayValue === 0
+            ? labels.reasoning
+            : `${labels.reasoning}: ${coverageTokens(reasoningDisplayValue, historyComplete)}`}
+        </span>
         <span>
           {labels.cache}:{" "}
           {coverageTokens(breakdown.cachedInputTokens, historyComplete)}
@@ -104,7 +101,11 @@ export function ThreadTurnTokenSummary({
     <BreakdownDetails
       breakdown={turn}
       label="Tokens"
-      providerId={data?.providerId ?? ""}
+      reasoningDisplayValue={
+        data?.total.reasoningOutputTokens === 0
+          ? 0
+          : turn.reasoningOutputTokens
+      }
     />
   );
 }
@@ -126,7 +127,6 @@ export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
         <BreakdownDetails
           breakdown={spend.total}
           label="Thread tokens"
-          providerId={spend.providerId}
           historyComplete={spend.historyComplete}
         />
       ) : null}

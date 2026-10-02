@@ -4,13 +4,17 @@ export interface TokenBreakdownLabels {
   reasoning: string;
 }
 
-export function tokenBreakdownLabels(providerId: string): TokenBreakdownLabels {
+export function tokenBreakdownLabels(
+  reasoningOutputTokens: number | null,
+): TokenBreakdownLabels {
   return {
-    cache: providerId === "claude-code" ? "Cached (read + write)" : "Cached",
+    cache: "Cached",
     input: "Input (uncached)",
     reasoning:
-      providerId === "claude-code"
-        ? "Reasoning included in output"
-        : "Reasoning (within output)",
+      reasoningOutputTokens === null
+        ? "Reasoning unavailable"
+        : reasoningOutputTokens === 0
+          ? "Reasoning included in output"
+          : "Reasoning (within output)",
   };
 }
