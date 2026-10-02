@@ -28,6 +28,7 @@ describe("bb thread show command output", () => {
         children: [],
       })),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        historyComplete: false,
         total: {
           inputTokens: null,
           cachedInputTokens: null,
@@ -487,6 +488,7 @@ describe("bb thread show command output", () => {
       "v1.threads.:id.$get": vi.fn(async () => thread),
       "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        historyComplete: true,
         total: {
           inputTokens: 1_200,
           cachedInputTokens: 300,
@@ -521,14 +523,66 @@ describe("bb thread show command output", () => {
 
     const lines = collectLogLines(vi.mocked(console.log));
     expect(lines).toContain(
-      "  Thread: In 1.2K · Out 80K · Reasoning 12K · Cached 300 · Σ 93.5K",
+      "  Thread: Input (uncached) 1.2K · Out 80K · Reasoning (within output) 12K · Cached 300 · Σ 93.5K",
     );
     expect(lines).toContain(
-      "  Turn turn-1: In 1K · Out 20 · Reasoning 4 · Cached unavailable · Σ 1K",
+      "  Turn turn-1: Input (uncached) 1K · Out 20 · Reasoning (within output) 4 · Cached unavailable · Σ 1K",
     );
     expect(lines).toContain("Ran 2 agents:");
     expect(lines).toContain(
       "  1 working · 0 waiting · 1 idle · 0 failed · Σ 64.4M",
+    );
+  });
+
+  it("renders the live Claude token rows with partial-history labels", async () => {
+    const thread = fixtures.makeThread({
+      id: "thr_k3d6qji9a4",
+      projectId: "proj-1",
+      providerId: "claude-code",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        historyComplete: false,
+        total: {
+          inputTokens: 6_442,
+          cachedInputTokens: 686_719_425,
+          outputTokens: 1_809_971,
+          reasoningOutputTokens: 0,
+          totalTokens: 688_535_838,
+        },
+        turns: [
+          {
+            turnId: "da385f7e5d-t1",
+            inputTokens: 30,
+            cachedInputTokens: 2_843_776,
+            outputTokens: 6_149,
+            reasoningOutputTokens: null,
+            totalTokens: 2_849_955,
+          },
+          {
+            turnId: "da385f7e5d-t2",
+            inputTokens: 8,
+            cachedInputTokens: 788_012,
+            outputTokens: 831,
+            reasoningOutputTokens: null,
+            totalTokens: 788_851,
+          },
+        ],
+      })),
+    });
+
+    await runCommand(["thread", "show", thread.id], register);
+
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "  Thread: Input (uncached) ≥ 6.4K (partial history) · Out ≥ 1.8M (partial history) · Reasoning included in output · Cached ≥ 686.7M (partial history) · Σ ≥ 688.5M (partial history)",
+    );
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toMatch(
+      /Turn da385f7e5d-t2: Input \(uncached\) 8 · Out 831 · Reasoning included in output · Cached 788K · Σ 788\.9K/,
     );
   });
 
@@ -621,6 +675,7 @@ describe("bb thread show command output", () => {
         children: [],
       },
       spendSummary: {
+        historyComplete: false,
         total: {
           inputTokens: null,
           cachedInputTokens: null,
@@ -672,6 +727,7 @@ describe("bb thread show command output", () => {
         children: [],
       },
       spendSummary: {
+        historyComplete: false,
         total: {
           inputTokens: null,
           cachedInputTokens: null,

@@ -106,6 +106,7 @@ beforeEach(() => {
     children: [],
   });
   vi.spyOn(sdk.threads, "spendSummary").mockResolvedValue({
+    historyComplete: false,
     total: {
       inputTokens: null,
       cachedInputTokens: null,

@@ -6,6 +6,7 @@ import {
 } from "@bb/thread-view";
 import {
   resolveEnvironmentMergeBaseBranch,
+  tokenBreakdownLabels,
   type Environment,
   type Thread,
   type ThreadEventRow,
@@ -243,14 +244,31 @@ function compactTokenCount(value: number | null | undefined): string {
 
 function printSpendSummary(summary: ThreadSpendSummaryResult): void {
   const total = summary.total;
+  const labels = tokenBreakdownLabels(total.reasoningOutputTokens);
+  const render = (value: number | null, partial = false): string => {
+    const formatted = compactTokenCount(value);
+    return partial && value !== null
+      ? `≥ ${formatted} (partial history)`
+      : formatted;
+  };
+  const reasoning =
+    total.reasoningOutputTokens === null || total.reasoningOutputTokens === 0
+      ? labels.reasoning
+      : `${labels.reasoning} ${render(total.reasoningOutputTokens, !summary.historyComplete)}`;
   console.log("");
   console.log("Token usage:");
   console.log(
-    `  Thread: In ${compactTokenCount(total.inputTokens)} · Out ${compactTokenCount(total.outputTokens)} · Reasoning ${compactTokenCount(total.reasoningOutputTokens)} · Cached ${compactTokenCount(total.cachedInputTokens)} · Σ ${compactTokenCount(total.totalTokens)}`,
+    `  Thread: ${labels.input} ${render(total.inputTokens, !summary.historyComplete)} · Out ${render(total.outputTokens, !summary.historyComplete)} · ${reasoning} · ${labels.cache} ${render(total.cachedInputTokens, !summary.historyComplete)} · Σ ${render(total.totalTokens, !summary.historyComplete)}`,
   );
   for (const turn of summary.turns) {
+    const turnReasoning =
+      total.reasoningOutputTokens === 0
+        ? labels.reasoning
+        : turn.reasoningOutputTokens === null
+          ? tokenBreakdownLabels(null).reasoning
+          : `${tokenBreakdownLabels(turn.reasoningOutputTokens).reasoning} ${compactTokenCount(turn.reasoningOutputTokens)}`;
     console.log(
-      `  Turn ${turn.turnId}: In ${compactTokenCount(turn.inputTokens)} · Out ${compactTokenCount(turn.outputTokens)} · Reasoning ${compactTokenCount(turn.reasoningOutputTokens)} · Cached ${compactTokenCount(turn.cachedInputTokens)} · Σ ${compactTokenCount(turn.totalTokens)}`,
+      `  Turn ${turn.turnId}: ${labels.input} ${compactTokenCount(turn.inputTokens)} · Out ${compactTokenCount(turn.outputTokens)} · ${turnReasoning} · ${labels.cache} ${compactTokenCount(turn.cachedInputTokens)} · Σ ${compactTokenCount(turn.totalTokens)}`,
     );
   }
 }
