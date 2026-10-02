@@ -53,7 +53,7 @@ export function assertElectronRuntime(
   }
   if (frameworkSize < MINIMUM_MACOS_FRAMEWORK_BYTES) {
     throw new Error(
-      `Electron framework is truncated (${frameworkSize} bytes; expected at least ${MINIMUM_MACOS_FRAMEWORK_BYTES}): ${framework}. Reinstall Electron with pnpm rebuild electron.`,
+      `Electron framework is truncated (${frameworkSize} bytes; expected at least ${MINIMUM_MACOS_FRAMEWORK_BYTES}): ${framework}. Reinstall Electron with pnpm rebuild electron or rebuild the packaged app.`,
     );
   }
 
