@@ -30,6 +30,7 @@ import { registerQueueRoutes } from "./routes/queue.js";
 import { registerSpendRoutes } from "./routes/spend.js";
 import { registerPluginRoutes } from "./routes/plugins.js";
 import { registerPluginCatalogRoutes } from "./routes/plugin-catalog.js";
+import { registerPromptHistoryRoutes } from "./routes/prompt-history.js";
 import { registerSkillsRegistryRoutes } from "./routes/skills-registry.js";
 import {
   createPluginService,
@@ -824,6 +825,7 @@ export function createApp(
     warn: (message) => deps.logger.warn(message),
   });
   registerProjectRoutes(publicApi, deps);
+  registerPromptHistoryRoutes(publicApi, deps);
   registerThreadSectionRoutes(publicApi, deps);
   registerFileRoutes(publicApi, deps);
   registerHostRoutes(publicApi, deps, pluginService);

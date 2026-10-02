@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,19 +17,6 @@ let stateDirectory: string;
 let output = "";
 
 beforeAll(async () => {
-  const port = await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address === null || typeof address === "string") {
-        reject(new Error("Expected a TCP address"));
-        return;
-      }
-      server.close(() => resolve(address.port));
-    });
-  });
-  origin = `http://127.0.0.1:${port}`;
   stateDirectory = await mkdtemp(join(tmpdir(), "bb-demo-worker-"));
   worker = spawn(
     process.execPath,
@@ -38,8 +24,10 @@ beforeAll(async () => {
       "node_modules/wrangler/bin/wrangler.js",
       "dev",
       "--local",
+      "--ip",
+      "127.0.0.1",
       "--port",
-      String(port),
+      "0",
       "--persist-to",
       stateDirectory,
     ],
@@ -52,11 +40,13 @@ beforeAll(async () => {
     output += chunk.toString();
   });
   const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(`${origin}/health`)).ok) return;
-    } catch {
-      if (worker.exitCode !== null) break;
+  while (Date.now() < deadline && worker.exitCode === null) {
+    const ready = /Ready on (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
+    if (ready) {
+      origin = ready[1];
+      try {
+        if ((await fetch(`${origin}/health`)).ok) return;
+      } catch {}
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -97,6 +87,50 @@ it("serves the shell, deep links, and its JavaScript and styles", async () => {
   expect(await deepLink.text()).toBe(html);
   expect((await fetch(origin, { method: "HEAD" })).status).toBe(200);
 });
+
+it("serves the sidebar plugin frontends", async () => {
+  const catalog = pluginListResponseSchema.parse(
+    await (await fetch(`${origin}/api/v1/plugins`)).json(),
+  );
+  expect(catalog.plugins.map((plugin) => plugin.id)).toEqual([
+    "navigation",
+    "thread-list",
+  ]);
+  await Promise.all(
+    catalog.plugins.flatMap((plugin) => {
+      if (plugin.app.bundle === null)
+        throw new Error("Missing sidebar frontend");
+      return [plugin.app.bundle.jsUrl, plugin.app.bundle.cssUrl].map(
+        async (path) => {
+          if (path === null) throw new Error("Missing sidebar asset URL");
+          const asset = await fetch(new URL(path, origin));
+          expect(asset.status, path).toBe(200);
+          expect(asset.headers.get("content-type"), path).not.toContain(
+            "text/html",
+          );
+          expect((await asset.arrayBuffer()).byteLength, path).toBeGreaterThan(
+            0,
+          );
+        },
+      );
+    }),
+  );
+}, 15_000);
+
+it("serves the provider logos", async () => {
+  await Promise.all(
+    PROVIDERS.map(async (provider) => {
+      if (provider.logoUrl === null)
+        throw new Error("Missing demo provider logo URL");
+      const logo = await fetch(new URL(provider.logoUrl, origin));
+      expect(logo.status, provider.id).toBe(200);
+      expect(logo.headers.get("content-type"), provider.id).toContain(
+        "image/svg+xml",
+      );
+      expect(await logo.text(), provider.id).toContain("<svg");
+    }),
+  );
+}, 15_000);
 
 it("serves the sidebar plugin frontends and sample conversation in current contract shape", async () => {
   const [catalogResponse, bootstrapResponse] = await Promise.all([

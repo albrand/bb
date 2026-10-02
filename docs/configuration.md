@@ -33,6 +33,18 @@ removes that worktree. See [Worktrees, setup scripts, and teardown
 scripts](worktrees.md) for the lifecycle, environment, timeout, and failure
 contracts.
 
+## Linux machine installer
+
+The machine installer normally installs a persistent systemd user service. If
+the current user's bus is unavailable, it retries using the runtime path from
+`loginctl`. On a systemd host it then fails before enrolling if the bus still
+cannot be reached. In containers and on machines without systemd as init, it
+runs a detached daemon instead. Set
+`BB_INSTALL_SKIP_SERVICE=1` on the installer command only when running without
+a service is intentional. No service starts the daemon after a reboot. The
+temporary daemon used for a first join is not supervised; a previously joined
+daemon started by the installer is supervised while its launcher runs.
+
 `bb-app config list` shows non-secret values. `bb-app env list` redacts every
 value and only shows whether a key is set.
 
@@ -222,10 +234,13 @@ bb settings ai-services test thread-title
 Each task is `automatic` (the default), `off`, or a service id. A service is
 identified by its plugin and its id, so two plugins may register the same id;
 pass `--plugin <plugin-id>` to `set` when they do. Automatic tries
-the services bb ships in order: Codex (`codex`, using the Codex CLI login on the
-primary machine), then bb cloud (`bb`, the `bb-ai` plugin, for a signed-in bb
-account). bb cloud is on by default once you sign in; `bb ai off` turns it off
-(it then sends nothing to getbb.app) and `bb ai on` turns it back on. Automatic never sends text to a third-party plugin. A service you pick
+bb cloud (`bb`, the `bb-ai` plugin, for a signed-in bb account) first,
+then all other registered services in lexicographic order of plugin id and
+service id, including third-party plugins. Only services supporting the task
+participate; unavailable services and failed requests fall through to the next.
+Codex (`codex`, the `provider-codex` plugin) uses the Codex CLI login on the
+primary machine. bb cloud is on by default once you sign in; `bb ai off` turns it off
+(it then sends nothing to getbb.app) and `bb ai on` turns it back on. A service you pick
 is used alone; if it fails, titles fall back to the start of the prompt and
 commits to `bb: automated commit`. Each plugin picks its own model.
 
@@ -333,13 +348,14 @@ and falls back to the provider default; the next send records that default, so
 select the custom model again after you turn streamer mode off. Set it with
 `bb settings general streamerMode <true|false>`.
 
-The "Allow fast service tier" switch in Settings → Providers defaults to on.
+The "Allow faster service tiers" switch in Settings → Providers defaults to on.
 Turn it off with `bb settings general allowFastServiceTier false` or
 `bb.sdk.system.updateGeneralSettings`. While off, new turns use the default
-service tier, including explicit fast requests, automations, and previously
-queued messages. The app hides Fast mode. Turn the setting on to choose fast
-again; completed turns and project defaults saved while it was off retain the
-default tier.
+service tier, including explicit requests for another tier (`fast`, Codex
+`ultrafast`, or any other tier a provider lists), automations, and previously
+queued messages. The app hides the service tier control. Turn the setting on to
+choose a faster tier again; completed turns and project defaults saved while it
+was off retain the default tier.
 
 The "New branch prefix" field in Settings → General sets the text bb
 puts in front of every branch name it creates for a managed worktree or a new
@@ -395,6 +411,13 @@ tools on for bb threads with
 Claude Code with `--chrome`. The host needs the Claude in Chrome extension and a
 claude.ai login; API-key sessions keep Chrome off. A change restarts the thread's
 Claude process before its next turn and keeps the conversation.
+
+In Accept Edits and Approve for me modes, bb runs Claude Code's Bash commands in
+Claude Code's sandbox. Turn it off with
+`bb plugin config provider-claude-code set sandboxEnabled false`. Bash commands
+then go through Claude Code's normal approvals and your own Claude Code
+permission and sandbox settings. A change restarts the thread's Claude process
+before its next turn and keeps the conversation.
 
 Outside an open typeahead menu, Shift+Enter inserts a newline. On
 coarse-pointer touch devices, the software-keyboard Return path inserts a
@@ -648,6 +671,12 @@ setting changes, with no restart and no `config refresh`.
 
 A configured agent's command is local code execution and only works with a
 co-located daemon.
+
+BB launches OpenCode sessions with `OPENCODE_CLIENT=acp` and
+`OPENCODE_ENABLE_QUESTION_TOOL=false`, overriding inherited and custom launch
+values. Native questions have no ACP interaction handler in BB; agents use the
+ask-user-question plugin’s `AskUserQuestion` tool instead. This also applies to
+custom agents with `dialect: "opencode"` and does not change OpenCode config files.
 
 ## OpenCode Go Usage
 
@@ -963,7 +992,10 @@ value. A change on one device reaches every other connected window through the
 `ui-preferences-changed` broadcast without a reload.
 
 Sidebar width and open state stay in the browser because they depend on the
-window size.
+window size, and each browser tab or desktop window keeps its own. Collapsing or
+resizing the sidebar in one tab leaves every other open tab alone; a newly
+opened tab or window starts from the most recent choice made anywhere in this
+browser.
 
 ### Thread-list visibility
 
@@ -1289,13 +1321,9 @@ while keeping workspace changes.
 
 Experimental surfaces are changed in Settings → Experiments or with
 `bb settings experiment <key> <true|false>`. All experiments start off.
+bb stores only the experiments you set; the others follow the shipped default.
 The default-off `changelogPreview` experiment shows the latest release notes
 as a compact, dismissible card on Settings → Updates.
-The default-off `legacyJitiPluginLoader` experiment restores the previous JITI
-plugin server loader. Toggling it leaves running plugin instances unchanged;
-the selected loader applies on the next install, reload, enable, update, or
-server restart. Set it with `bb settings experiment legacyJitiPluginLoader
-<true|false>`.
 
 BB releases restorable provider sessions after 30 idle minutes. The daemon
 checks for these sessions every five minutes. Active turns, commands, agents,

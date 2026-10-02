@@ -552,16 +552,18 @@ describe("createServerMovedWatcher", () => {
     const harness = await createHarness({ confirmMove: async () => false });
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
-    await harness.timers.flush({ waitForCallbacks: true });
+    try {
+      await harness.timers.flush({ waitForCallbacks: true });
+      expect(harness.confirmMove).toHaveBeenCalledOnce();
+      expect(harness.onMove).not.toHaveBeenCalled();
 
-    expect(harness.confirmMove).toHaveBeenCalledOnce();
-    expect(harness.onMove).not.toHaveBeenCalled();
-
-    harness.confirmMove.mockImplementation(async () => true);
-    harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
-    await harness.timers.flush({ waitForCallbacks: true });
-    expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
-    harness.watcher.stop();
+      harness.confirmMove.mockImplementation(async () => true);
+      harness.fakeWatch.emit(SERVER_MOVED_FILE_NAME);
+      await harness.timers.flush({ waitForCallbacks: true });
+      expect(harness.onMove).toHaveBeenCalledExactlyOnceWith(CONNECT_MOVE);
+    } finally {
+      harness.watcher.stop();
+    }
   });
 
   it("checks again when the lock changes during a confirmation", async () => {
@@ -655,9 +657,11 @@ describe("createServerMovedWatcher", () => {
     harness.watcher.start();
     await harness.timers.flush();
     await confirmationStarted.promise;
-    expect(cancellationChecks.map((isCancelled) => isCancelled())).toEqual([
-      false,
-    ]);
+    await vi.waitFor(() => {
+      expect(cancellationChecks.map((isCancelled) => isCancelled())).toEqual([
+        false,
+      ]);
+    });
 
     harness.watcher.stop();
     expect(cancellationChecks[0]?.()).toBe(true);

@@ -442,7 +442,7 @@ export function ProvidersSettingsSection({
       </SettingsSection>
       <SettingsSection title="Configuration">
         <SettingsWithControl
-          label="Allow fast service tier"
+          label="Allow faster service tiers"
           description="Turn this off to use the default service tier for all new turns, including those from queued messages and automations."
         >
           <Switch
@@ -454,7 +454,7 @@ export function ProvidersSettingsSection({
                 allowFastServiceTier: enabled,
               })
             }
-            aria-label="Allow fast service tier"
+            aria-label="Allow faster service tiers"
           />
         </SettingsWithControl>
         {providers.length === 0 ? null : (

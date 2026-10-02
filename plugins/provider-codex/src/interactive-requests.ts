@@ -3,6 +3,7 @@ import {
   ProviderResponseEncodeError,
   USER_QUESTION_MAX_OPTIONS,
   USER_QUESTION_MAX_QUESTIONS,
+  isApprovalInteractionOutcome,
   type ApprovalInteractionOutcome,
   type DecodedInteractiveRequest,
   type PendingInteractionUserQuestionQuestion,
@@ -36,7 +37,12 @@ import type {
 type CodexInteractiveResponse =
   | CommandExecutionRequestApprovalResponse
   | FileChangeRequestApprovalResponse
-  | PermissionsRequestApprovalResponse;
+  | PermissionsRequestApprovalResponse
+  | { answers: Record<string, { answers: string[] }> };
+
+type CodexInteractionOutcome =
+  | ApprovalInteractionOutcome
+  | UserQuestionInteractionOutcome;
 
 export interface CodexUserInputResponse {
   answers: Record<string, { answers: string[] }>;
@@ -232,6 +238,39 @@ function filterSessionDecisionWithoutGrant(
   return filtered;
 }
 
+function buildCodexUserQuestionResponse(args: UserQuestionInteractionOutcome): {
+  answers: Record<string, { answers: string[] }>;
+} {
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const question of args.payload.questions) {
+    const answer = args.resolution.answers[question.id];
+    if (!answer) {
+      throw new ProviderResponseEncodeError(
+        `Missing answer for user question '${question.id}'`,
+      );
+    }
+    const selected = answer.selected.map((value) => {
+      const option = question.options?.find(
+        (candidate) => candidate.value === value,
+      );
+      if (!option) {
+        throw new ProviderResponseEncodeError(
+          `Unknown selected option '${value}' for user question '${question.id}'`,
+        );
+      }
+      return option.label;
+    });
+    const values = answer.freeText ? [...selected, answer.freeText] : selected;
+    if (values.length === 0) {
+      throw new ProviderResponseEncodeError(
+        `Answer for user question '${question.id}' is empty`,
+      );
+    }
+    answers[question.id] = { answers: values };
+  }
+  return { answers };
+}
+
 export function decodeCodexInteractiveRequest(
   request: ProviderInboundRequest,
 ): DecodedInteractiveRequest | null {
@@ -372,8 +411,11 @@ export function decodeCodexInteractiveRequest(
 }
 
 export function buildCodexInteractiveResponse(
-  args: ApprovalInteractionOutcome,
+  args: CodexInteractionOutcome,
 ): CodexInteractiveResponse {
+  if (!isApprovalInteractionOutcome(args)) {
+    return buildCodexUserQuestionResponse(args);
+  }
   switch (args.payload.subject.kind) {
     case "command": {
       const response: CommandExecutionRequestApprovalResponse = {

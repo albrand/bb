@@ -54,6 +54,7 @@ interface CreateFetchRecorderArgs {
   inactiveSessionOnFirstEventPost?: boolean;
   interactiveRequestError?: Error;
   interactiveRequestResponse?: HostDaemonInteractiveRequestResponse;
+  interruptResponses?: Array<() => Response>;
   retiredEnvironmentIds?: string[];
   sessionIds?: string[];
 }
@@ -117,6 +118,7 @@ function createFetchRecorder(
 ): FetchRecorder {
   const requests: RecordedFetchRequest[] = [];
   let eventPostCount = 0;
+  let interruptCount = 0;
   let sessionOpenCount = 0;
   const fetchFn: FetchFn = async (input, init) => {
     const url = readFetchUrl(input);
@@ -183,6 +185,11 @@ function createFetchRecorder(
       });
     }
     if (url.pathname === "/internal/session/interactive-request/interrupt") {
+      const scripted = args.interruptResponses?.[interruptCount];
+      interruptCount += 1;
+      if (scripted) {
+        return scripted();
+      }
       return Response.json({
         ok: true,
         interactionIds: ["pint_app_test"],
@@ -1225,6 +1232,167 @@ describe("createHostDaemonApp", () => {
     }
   });
 
+  it("drops an interactive interrupt the server rejects instead of retrying it ahead of later interrupts", async () => {
+    const { app, fetchRecorder, logger, runtimeOptions } =
+      await createAppFixture({
+        interruptResponses: [
+          () =>
+            Response.json(
+              {
+                code: "thread_environment_unavailable",
+                message: "Thread environment is unavailable",
+              },
+              { status: 409 },
+            ),
+        ],
+      });
+    try {
+      await app.connection.start();
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-rejected-interrupt",
+        workspacePath: await makeTempDir("bb-host-daemon-app-workspace-"),
+      });
+      const options = runtimeOptions.current;
+      if (!options?.onProcessExit) {
+        throw new Error("Expected runtime callbacks to be captured");
+      }
+      const exitThread = (threadId: string) =>
+        options.onProcessExit?.({
+          providerId: "codex",
+          threads: [
+            {
+              threadId,
+              activeTurnId: null,
+              pendingTurnStart: false,
+              providerThreadId: null,
+            },
+          ],
+          code: null,
+          expected: true,
+          signal: "SIGTERM",
+          stderr: null,
+        });
+      const interruptedThreadIds = () =>
+        fetchRecorder.requests
+          .filter(
+            (record) =>
+              record.pathname ===
+              "/internal/session/interactive-request/interrupt",
+          )
+          .map(
+            (record) =>
+              hostDaemonInteractiveInterruptRequestSchema.parse(
+                JSON.parse(record.body ?? "{}"),
+              ).threadIds,
+          );
+
+      exitThread("thr_app_rejected_interrupt");
+      await vi.waitFor(() => {
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            threadIds: ["thr_app_rejected_interrupt"],
+          }),
+          "Dropped pending interactive interrupt request the server rejected",
+        );
+      });
+
+      exitThread("thr_app_later_interrupt");
+      await vi.waitFor(() => {
+        expect(interruptedThreadIds()).toEqual([
+          ["thr_app_rejected_interrupt"],
+          ["thr_app_later_interrupt"],
+        ]);
+      });
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
+  it("backs off between retries of an interactive interrupt that fails transiently", async () => {
+    const unavailable = () => new Response("offline", { status: 503 });
+    const { app, fetchRecorder, runtimeOptions } = await createAppFixture({
+      interruptResponses: [unavailable, unavailable, unavailable],
+    });
+    try {
+      await app.connection.start();
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-transient-interrupt",
+        workspacePath: await makeTempDir("bb-host-daemon-app-workspace-"),
+      });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const options = runtimeOptions.current;
+      if (!options?.onProcessExit) {
+        throw new Error("Expected runtime callbacks to be captured");
+      }
+      const interruptAttempts = () =>
+        fetchRecorder.requests.filter(
+          (record) =>
+            record.pathname ===
+            "/internal/session/interactive-request/interrupt",
+        ).length;
+
+      options.onProcessExit({
+        providerId: "codex",
+        threads: [
+          {
+            threadId: "thr_app_transient_interrupt",
+            activeTurnId: null,
+            pendingTurnStart: false,
+            providerThreadId: null,
+          },
+        ],
+        code: null,
+        expected: true,
+        signal: "SIGTERM",
+        stderr: null,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(interruptAttempts()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(interruptAttempts()).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(interruptAttempts()).toBe(2);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(interruptAttempts()).toBe(3);
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(interruptAttempts()).toBe(4);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interruptAttempts()).toBe(4);
+    } finally {
+      vi.useRealTimers();
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
+  it("forwards the runtime cancellation signal through the daemon tool callback", async () => {
+    let signal: AbortSignal | null | undefined;
+    const { app, runtimeOptions } = await createAppFixture({
+      onToolCallSignal: (value) => {
+        signal = value;
+      },
+    });
+    try {
+      const workspacePath = await makeTempDir("bb-host-daemon-app-abort-");
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-abort",
+        workspacePath,
+      });
+      await app.connection.start();
+      const controller = new AbortController();
+      const callback = runtimeOptions.current?.onToolCall;
+      if (!callback) throw new Error("Tool callback missing");
+      await expect(
+        callback(createToolCallRequest(), controller.signal),
+      ).rejects.toThrow("Failed to call tool");
+      controller.abort();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
   it("settles an interactive request whose turn the provider completed without waiting for it", async () => {
     const { app, fetchRecorder, runtimeOptions } = await createAppFixture();
     try {

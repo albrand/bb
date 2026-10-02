@@ -2365,6 +2365,18 @@ export interface ComposerCustomization {
   /** Host-rendered rows in the menu next to the composer's send button. */
   sendMenu?: readonly ComposerSendMenuItem[];
   richText?: ComposerRichTextSpec;
+  /** Host-managed popups sharing the mention menu's above/below placement, with a responsive drawer on compact screens. Open by popup id, unique within this plugin. */
+  experimental_popups?: readonly ExperimentalComposerPopupRegistration[];
+}
+
+/** Content for one composer's popup. The host owns placement, dismissal and focus restoration; the component owns its content and keyboard navigation. */
+export interface ExperimentalComposerPopupRegistration {
+  /** Popup id, unique across this plugin's composer customizations. */
+  id: string;
+  /** Accessible name of the popup and compact drawer. */
+  label: string;
+  /** Inside this component, useComposer() is bound to the composer that opened it. */
+  component: ComponentType;
 }
 
 /** Host-rendered menu row in the composer's `+` menu. */
@@ -2572,6 +2584,10 @@ export interface PluginComposerMention {
  * text methods log a warning and do nothing.
  */
 export interface PluginComposerApi {
+  /** Open this plugin's registered composer popup by popup id in this mounted composer. Returns false for an unavailable, suppressed or out-of-scope popup. */
+  experimental_openPopup(popupId: string): boolean;
+  /** Close this plugin's open popup in this composer and restore editor focus. Returns false if this plugin has no open popup. */
+  experimental_closePopup(): boolean;
   scope: PluginComposerScope;
   /**
    * Stable identity for this composer's draft: the same across remounts and
@@ -2738,8 +2754,8 @@ export interface PluginComposerApi {
    * selection as it stands. The result carries only the fields this composer
    * has, so a missing key means "no such picker here" and a value that
    * differs from the one passed was reconciled (a reasoning level the model
-   * does not support, a permission mode above the machine's ceiling, a model
-   * the provider does not list). A provider the composer does not list is
+   * does not support, a service tier the model does not offer, a permission
+   * mode above the machine's ceiling, a model the provider does not list). A provider the composer does not list is
    * ignored together with the model and reasoning level meant for it, so the
    * stored provider preference never names something the picker could not
    * have chosen. `environment` is absent while the composer
@@ -2750,8 +2766,8 @@ export interface PluginComposerApi {
    * Rejects, with a message safe to show to the user, in a composer with no
    * pickers at all (a queued-message editor, a side chat, a plugin surface
    * mounted outside any composer), when the calling surface is no longer
-   * active, and when a value is not a known reasoning level, service tier or
-   * permission mode.
+   * active, and when a value is not a known reasoning level or permission
+   * mode, or is an empty service tier.
    */
   setSelection(selection: ComposerSelection): Promise<ComposerSelection>;
   /** @internal Old name of `removeMention`; kept for plugins built against older SDKs. */
@@ -2787,7 +2803,11 @@ export interface ComposerSelection {
   model?: string;
   /** Applied only when the composer ends up on the requested provider (or none was requested). */
   reasoningLevel?: ReasoningLevel;
-  /** Ignored by a provider with no service tiers. */
+  /**
+   * A tier id the provider declares (`"default"`, `"fast"`, …). Ignored by a
+   * provider with no service tiers; a tier the selected model does not offer
+   * becomes `"default"`.
+   */
   serviceTier?: ServiceTier;
   permissionMode?: PermissionMode;
 }
@@ -2894,7 +2914,10 @@ export interface ExperimentalProviderModelPickerValue {
   providerId: string;
   model: string;
   reasoningLevel: ReasoningLevel;
-  /** Present only when the selected provider supports service tiers. */
+  /**
+   * Present only when the selected provider supports service tiers. A tier
+   * id the provider declares; `"default"` when the selected model offers none.
+   */
   serviceTier?: ServiceTier;
 }
 

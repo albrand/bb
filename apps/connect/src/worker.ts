@@ -46,8 +46,13 @@ import {
   GATE_AUTH_HEADER,
   GATE_MACHINE_ID_HEADER,
   MACHINE_CREDENTIAL_HEADER,
+  RELAY_CONTENT_LENGTH_HEADER,
+  RELAY_HAS_BODY_HEADER,
+  RELAY_HEADER,
+  RELAY_METHOD_HEADER,
   TUNNEL_TARGET_HEADER,
 } from "./protocol-headers.js";
+import { fetchThroughRelay, workerHeldResponsesEnabled } from "./relay.js";
 
 export { TunnelDO };
 
@@ -220,14 +225,23 @@ function isRetryableTunnelDoError(error: unknown): boolean {
 }
 
 async function fetchTunnelDo(
-  env: Pick<Env, "TUNNEL_DO">,
+  env: Pick<Env, "TUNNEL_DO" | "WORKER_HELD_RESPONSES">,
   routingKey: string,
   request: Request,
+  transport: "direct" | "relay-when-enabled",
 ): Promise<Response> {
   const replayable = REPLAYABLE_TUNNEL_METHODS.has(request.method);
+  const relay =
+    transport === "relay-when-enabled" &&
+    workerHeldResponsesEnabled(env) &&
+    request.headers.get("upgrade")?.toLowerCase() !== "websocket";
   for (let attempt = 0; ; attempt += 1) {
     const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(routingKey));
     try {
+      if (relay) {
+        const relayed = await fetchThroughRelay(stub, request);
+        if (relayed !== null) return relayed;
+      }
       return await stub.fetch(replayable ? new Request(request) : request);
     } catch (error) {
       const delayMs = TUNNEL_DO_RETRY_DELAYS_MS[attempt];
@@ -254,6 +268,10 @@ export function requestForTunnelDo(
   headers.delete(MACHINE_CREDENTIAL_HEADER);
   headers.delete(GATE_AUTH_HEADER);
   headers.delete(GATE_MACHINE_ID_HEADER);
+  headers.delete(RELAY_HEADER);
+  headers.delete(RELAY_METHOD_HEADER);
+  headers.delete(RELAY_HAS_BODY_HEADER);
+  headers.delete(RELAY_CONTENT_LENGTH_HEADER);
   stripCloudDevHeader(headers);
   if (target !== null) {
     headers.set(TUNNEL_TARGET_HEADER, target);
@@ -362,7 +380,7 @@ const gate = {
     const routingKey =
       resolved.kind === "machine" ? resolved.routingKey : label;
     const tunnelDo = (doRequest: Request) =>
-      fetchTunnelDo(env, routingKey, doRequest);
+      fetchTunnelDo(env, routingKey, doRequest, "relay-when-enabled");
 
     if (isTunnelDial) {
       if (target !== null) return text("bb connect: not found\n", 404);
@@ -391,7 +409,12 @@ const gate = {
       }
       const headers = new Headers(request.headers);
       stripCloudDevHeader(headers);
-      return tunnelDo(new Request(new Request(forward, request), { headers }));
+      return fetchTunnelDo(
+        env,
+        routingKey,
+        new Request(new Request(forward, request), { headers }),
+        "direct",
+      );
     }
 
     if (url.pathname.startsWith("/__"))

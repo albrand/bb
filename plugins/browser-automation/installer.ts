@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { constants, createReadStream, createWriteStream } from "node:fs";
+import {
+  constants,
+  createReadStream,
+  createWriteStream,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import {
   access,
   chmod,
@@ -434,8 +441,10 @@ async function fetchText(url: string, signal: AbortSignal): Promise<string> {
 const lockInitGraceMs = 10_000;
 const reapLockStaleMs = 30_000;
 
-async function lockOwner(path: string): Promise<number | null> {
-  const match = (await readFile(path, "utf8")).trim().match(/^([0-9]+)(?: |$)/);
+function lockOwner(path: string): number | null {
+  const match = readFileSync(path, "utf8")
+    .trim()
+    .match(/^([0-9]+)(?: |$)/);
   return match ? Number(match[1]) : null;
 }
 
@@ -628,6 +637,7 @@ export async function acquireLock(
     }
   };
   return acquirePrimary();
+
 }
 
 function stagingPrefix(release: RuntimeRelease): string {

@@ -16,6 +16,7 @@ function buildModelProbeOptions(env: NodeJS.ProcessEnv): Options {
   const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env });
   return {
     cwd: process.cwd(),
+    env,
     maxTurns: 0,
     persistSession: false,
     settingSources: ["user", "project", "local"],
@@ -23,8 +24,8 @@ function buildModelProbeOptions(env: NodeJS.ProcessEnv): Options {
   };
 }
 
-export async function probeClaudeCodeDiscoveredModels(
-  env: NodeJS.ProcessEnv = process.env,
+async function probeClaudeCodeModelsOnce(
+  env: NodeJS.ProcessEnv,
 ): Promise<ModelInfo[]> {
   let session: ReturnType<typeof query>;
   try {
@@ -47,6 +48,24 @@ export async function probeClaudeCodeDiscoveredModels(
   } finally {
     await afterClaudeRenewalSettles(env);
     session.close();
+  }
+}
+
+export async function probeClaudeCodeDiscoveredModels(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ModelInfo[]> {
+  try {
+    return await probeClaudeCodeModelsOnce(env);
+  } catch (error) {
+    if (
+      env.ANTHROPIC_MODEL &&
+      error instanceof Error &&
+      error.message.includes("--client-data-url:") &&
+      error.message.includes("pass the matching --model")
+    ) {
+      return probeClaudeCodeModelsOnce({ ...env, ANTHROPIC_MODEL: undefined });
+    }
+    throw error;
   }
 }
 

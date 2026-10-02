@@ -334,11 +334,12 @@ const codexUserInputQuestionSchema = z
     id: z.string(),
     header: z.string(),
     question: z.string(),
-    isOther: z.boolean(),
-    isSecret: z.boolean(),
+    isOther: z.boolean().default(false),
+    isSecret: z.boolean().default(false),
     options: z
       .array(z.object({ label: z.string(), description: z.string() }))
-      .nullable(),
+      .nullable()
+      .default(null),
   })
   .passthrough();
 export type CodexUserInputQuestion = z.infer<

@@ -220,7 +220,11 @@ vi.mock("@/components/pickers/PermissionModePicker", () => ({
     showChevronWhenDisabled?: boolean;
   }) => {
     mocks.permissionModePicker(props);
-    return null;
+    return props.disabled ? (
+      <button type="button" disabled>
+        Permission mode
+      </button>
+    ) : null;
   },
 }));
 
@@ -1092,7 +1096,7 @@ describe("FollowUpPromptBox", () => {
     expect(screen.getByTestId("prompt-box").getAttribute("data-compact")).toBe(
       "false",
     );
-    expect(screen.getByText("Local environment")).toBeTruthy();
+    expect(screen.queryByText("Local environment")).toBeNull();
 
     fireEvent.blur(input, { relatedTarget: submit });
     fireEvent.focus(submit);
@@ -1369,17 +1373,13 @@ describe("FollowUpPromptBox", () => {
   it("stays expanded after pressing a non-focusable composer control", () => {
     mocks.isCompactViewport = true;
     const props = createFollowUpPromptBoxProps({ kind: "ready" });
-    props.environmentSummary = (
-      <button type="button" disabled>
-        Read only mode
-      </button>
-    );
+    props.permissionReadOnly = true;
     render(<FollowUpPromptBox {...props} />);
     const input = screen.getByRole("textbox", { name: "Follow-up prompt" });
     act(() => input.focus());
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Read only mode" }),
+      screen.getByRole("button", { name: "Permission mode" }),
     );
 
     expect(screen.getByTestId("prompt-box").getAttribute("data-compact")).toBe(

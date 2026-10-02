@@ -69,10 +69,7 @@ import {
   type PluginNavPanelChrome,
 } from "@/lib/plugin-nav-panel-chrome";
 import type { PluginNavPanelSlot } from "@/lib/plugin-slots";
-import {
-  booleanLocalStorage,
-  createLocalStorageSyncStorage,
-} from "@/lib/browser-storage";
+import { createTabScopedStorage } from "@/lib/browser-storage";
 import {
   BROWSER_SIDEBAR_TRIGGER_INSET_CLASS,
   CHROME_ROW_CLASS,
@@ -132,19 +129,23 @@ function clampSidebarWidth(value: number) {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
 }
 
-const sidebarWidthStorage = createLocalStorageSyncStorage<number>({
-  parse: (storedValue, initialValue) => {
-    if (storedValue === null) {
-      return initialValue;
-    }
-    const parsedValue = Number(storedValue);
-    if (!Number.isFinite(parsedValue)) {
-      return initialValue;
-    }
-    return clampSidebarWidth(parsedValue);
+const sidebarWidthStorage = createTabScopedStorage<number>(
+  {
+    parse: (storedValue, initialValue) => {
+      if (storedValue === null) {
+        return initialValue;
+      }
+      const parsedValue = Number(storedValue);
+      if (!Number.isFinite(parsedValue)) {
+        return initialValue;
+      }
+      return clampSidebarWidth(parsedValue);
+    },
+    serialize: (value) => String(clampSidebarWidth(value)),
   },
-  serialize: (value) => String(clampSidebarWidth(value)),
-});
+  { persistInitialValue: true },
+);
+
 const sidebarWidthAtom = atomWithStorage<number>(
   SIDEBAR_WIDTH_KEY,
   SIDEBAR_DEFAULT_WIDTH,
@@ -153,10 +154,22 @@ const sidebarWidthAtom = atomWithStorage<number>(
 );
 const sidebarLiveWidthAtom = atom<number | null>(null);
 
+const sidebarOpenStorage = createTabScopedStorage<boolean>(
+  {
+    parse: (storedValue, initialValue) => {
+      if (storedValue === "true") return true;
+      if (storedValue === "false") return false;
+      return initialValue;
+    },
+    serialize: (value) => String(value),
+  },
+  { persistInitialValue: true },
+);
+
 const sidebarOpenAtom = atomWithStorage<boolean>(
   SIDEBAR_OPEN_KEY,
   true,
-  booleanLocalStorage,
+  sidebarOpenStorage,
   { getOnInit: true },
 );
 
@@ -787,6 +800,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                   <div
                     ref={setContentShell}
                     data-testid="app-layout-content-shell"
+                    data-app-content-shell=""
                     className="relative flex h-full min-h-0 min-w-0 w-full flex-col pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)]"
                   >
                     {showHeader ? (

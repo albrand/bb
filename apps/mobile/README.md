@@ -436,6 +436,18 @@ add-root-cert`). Env: `BB_MOBILE_E2E_GATE_PORT` (42998),
 
 ## Push notifications and deep links (Phase 5)
 
+Android disables Firebase Messaging auto-initialization and Analytics collection
+in the generated manifest. The app requests a push token only for a server with
+notifications enabled and OS permission granted. It refreshes registration on
+foreground/sync and token-change events. Turning notifications off for every
+server, removing the last enabled server, or revoking OS permission deletes the
+Android FCM token. Disabling one server preserves the shared token for other
+enabled servers. Failed server-subscription removal is retained for retry;
+local token deletion does not require that server to be reachable. This does not
+delete the Firebase installation ID or previously processed provider data.
+iOS keeps its existing APNs registration behavior.
+
+
 - Registration: `PushNotificationsHost` (mounted once in `app/_layout.tsx`)
   registers the phone's Expo push token with each enabled server through
   Settings → This device → Notifications. It calls the `push-notifications`
@@ -695,3 +707,10 @@ upload date. The server fetches only public metadata, caches it for five minutes
 and returns `android: null` if unavailable or inconsistent. Download links remain
 usable during metadata failures. iOS version and release date are shown in TestFlight.
 Publish updates with **Mobile Android (EAS)**, profile `preview`, **publish** on.
+The preview Gradle command builds `arm64-v8a` and `armeabi-v7a`, supporting
+both 64-bit and 32-bit ARM phones. It omits Intel x86/x86_64 libraries to reduce
+the direct download; Intel devices and x86 emulators cannot install this APK.
+Production AABs retain all architectures so Google Play can deliver
+device-specific packages. Keep EAS signing credentials unchanged so existing
+sideload installations can update. The smaller APK still undergoes browser
+security scanning; reduced size does not guarantee a fix for scanning hangs.

@@ -21,6 +21,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { serve } from "@hono/node-server";
 import {
+  withChildThreadNotificationClock,
+  flushChildThreadNotifications,
+} from "../helpers/child-thread-notification-clock.js";
+import {
   internalAuthHeaders,
   listQueuedThreadCommands,
   reportQueuedCommandSuccess,
@@ -99,11 +103,6 @@ async function postToolCall(args: {
       arguments: args.arguments,
     }),
   });
-}
-
-async function flushDeferredChildThreadNotifications(): Promise<void> {
-  await new Promise((resolve) => setImmediate(resolve));
-  await sleep(2_100);
 }
 
 describe("internal event and tool-call routes", () => {
@@ -716,7 +715,7 @@ describe("internal event and tool-call routes", () => {
   });
 
   it("does not notify a parent when a child thread nested turn completes", async () => {
-    await withTestHarness(async (harness) => {
+    await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
@@ -787,7 +786,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushDeferredChildThreadNotifications();
+      await flushChildThreadNotifications();
 
       expect(
         harness.db
@@ -808,7 +807,7 @@ describe("internal event and tool-call routes", () => {
   });
 
   it("notifies a parent when a hidden delegated child root turn completes", async () => {
-    await withTestHarness(async (harness) => {
+    await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
@@ -865,7 +864,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushDeferredChildThreadNotifications();
+      await flushChildThreadNotifications();
       expect(getThread(harness.db, childThread.id)?.status).toBe("idle");
       expect(
         listQueuedThreadCommands(harness, "turn.submit", parentThread.id),
@@ -874,7 +873,7 @@ describe("internal event and tool-call routes", () => {
   });
 
   it("does not notify a parent when a side-chat child root turn completes", async () => {
-    await withTestHarness(async (harness) => {
+    await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
@@ -933,7 +932,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushDeferredChildThreadNotifications();
+      await flushChildThreadNotifications();
       expect(getThread(harness.db, childThread.id)?.status).toBe("idle");
       expect(
         listQueuedThreadCommands(harness, "turn.submit", parentThread.id),

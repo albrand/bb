@@ -320,7 +320,7 @@ function EmbeddedThreadChatWithComposer({
     supportsPermissionModeSelection,
     supportsServiceTier,
     serviceTierSupportByProvider,
-    serviceTierFastLabel,
+    serviceTierOptions,
     isLoadingModels,
   } = threadCreationOptions;
   const selectedExecutionModel = activeModel?.model ?? selectedModel;
@@ -1067,7 +1067,7 @@ function EmbeddedThreadChatWithComposer({
         onChange: setServiceTier,
         supported: supportsServiceTier,
         supportByProvider: serviceTierSupportByProvider,
-        fastLabel: serviceTierFastLabel,
+        options: serviceTierOptions,
       },
       reasoning: {
         value: reasoningLevel,
@@ -1095,7 +1095,7 @@ function EmbeddedThreadChatWithComposer({
       setSelectedModel,
       setServiceTier,
       supportsServiceTier,
-      serviceTierFastLabel,
+      serviceTierOptions,
     ],
   );
   const inlineExecutionConfig = useMemo<ExecutionControlsProps | null>(
@@ -1113,7 +1113,7 @@ function EmbeddedThreadChatWithComposer({
               onChange: setServiceTier,
               supported: supportsServiceTier,
               supportByProvider: serviceTierSupportByProvider,
-              fastLabel: serviceTierFastLabel,
+              options: serviceTierOptions,
             },
             reasoning: {
               ...bottomExecutionConfig.reasoning,
@@ -1127,7 +1127,7 @@ function EmbeddedThreadChatWithComposer({
       serviceTierSupportByProvider,
       setServiceTier,
       supportsServiceTier,
-      serviceTierFastLabel,
+      serviceTierOptions,
     ],
   );
 
