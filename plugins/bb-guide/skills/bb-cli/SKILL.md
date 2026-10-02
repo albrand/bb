@@ -37,6 +37,9 @@ one page.
   `bb thread show --json` nests under `.thread`, `bb terminal list --json`
   wraps in `.sessions`. `bb guide json` lists each shape, and the help of the
   most-parsed commands ends with its JSON shape.
+- `bb thread list` includes a **Needs you** column for input needed, active
+  work, automation wakeups, and unread completion; its JSON rows include
+  `listIndicator`.
 - Pass long or multi-line text from a file: `bb thread tell <id>
 --message-file <path>`, `bb thread spawn --prompt-file <path>`, with `-` for
   stdin. Inside double quotes the shell runs `backticks` and `$(...)` before

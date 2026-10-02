@@ -649,7 +649,7 @@ describe("ProjectRow interactions", () => {
         name: "Expand Feature workspace threads",
       }),
     ).not.toBeNull();
-    expect(screen.getByLabelText("Thread working")).not.toBeNull();
+    expect(screen.getByLabelText("Working")).not.toBeNull();
     expect(screen.queryByLabelText("Workflow running")).toBeNull();
   });
 
@@ -728,9 +728,7 @@ describe("ProjectRow interactions", () => {
       { draftThreadIds: ["thr_worktree_draft"] },
     );
 
-    expect(
-      screen.getByLabelText("Thread working with unsubmitted draft"),
-    ).not.toBeNull();
+    expect(screen.getByLabelText("Working")).not.toBeNull();
     expect(screen.queryByLabelText("Plan mode active")).toBeNull();
   });
 
@@ -806,10 +804,8 @@ describe("ProjectRow interactions", () => {
     ).toBe(sectionId);
 
     expect(screen.queryByText("Test thread")).toBeNull();
-    expect(screen.getAllByLabelText("Plan mode active")).not.toHaveLength(0);
-    expectCollapsedActivityAtSidebarEdge("Plan mode active");
-    expect(screen.queryByLabelText("Thread working")).toBeNull();
-    expect(screen.queryByLabelText("Goal active")).toBeNull();
+    expect(screen.getAllByLabelText("Working")).not.toHaveLength(0);
+    expectCollapsedActivityAtSidebarEdge("Working");
   });
 
   it("shows a working draft before Plan for a collapsed section", () => {
@@ -831,10 +827,7 @@ describe("ProjectRow interactions", () => {
       ["thr_section_draft"],
     );
 
-    expect(
-      screen.getAllByLabelText("Thread working with unsubmitted draft"),
-    ).not.toHaveLength(0);
-    expect(screen.queryByLabelText("Plan mode active")).toBeNull();
+    expect(screen.getAllByLabelText("Working")).not.toHaveLength(0);
   });
 
   it("hides loose Threads in More and restores them", async () => {
@@ -1018,8 +1011,8 @@ describe("ProjectRow interactions", () => {
     );
 
     expect(screen.queryByText("Test thread")).toBeNull();
-    expect(screen.getAllByLabelText("Goal active")).not.toHaveLength(0);
-    expectCollapsedActivityAtSidebarEdge("Goal active");
+    expect(screen.getAllByLabelText("Working")).not.toHaveLength(0);
+    expectCollapsedActivityAtSidebarEdge("Working");
   });
 
   it("shows unread success before an idle draft for a collapsed project", () => {
@@ -1041,9 +1034,7 @@ describe("ProjectRow interactions", () => {
       { draftThreadIds: ["thr_project_draft"] },
     );
 
-    expect(
-      screen.getAllByLabelText("Unread thread succeeded"),
-    ).not.toHaveLength(0);
+    expect(screen.getAllByLabelText("Done")).not.toHaveLength(0);
     expect(screen.queryByLabelText("Thread has unsubmitted draft")).toBeNull();
   });
 

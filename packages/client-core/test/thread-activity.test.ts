@@ -51,6 +51,7 @@ const idleIndicatorState: ThreadListIndicatorState = {
   hasUnsubmittedDraft: false,
   hasUnreadError: false,
   hasUnreadSuccess: false,
+  isAutomationWoken: false,
   isBackgroundAgentActive: false,
   isBackgroundCommandActive: false,
   isGoalActive: false,
@@ -63,11 +64,61 @@ const idleIndicatorState: ThreadListIndicatorState = {
 describe("thread-activity", () => {
   describe("resolveThreadListIndicator", () => {
     it.each([
-      ["hasPendingInteraction", "waiting-for-input"],
-      ["hasUnreadError", "unread-error"],
-      ["hasUnsubmittedDraft", "working-draft"],
-      ["isPlanModeActive", "plan-mode"],
-      ["isGoalActive", "goal"],
+      ["needs input", { hasPendingInteraction: true }, "needs-input"],
+      ["working", { isRuntimeActive: true }, "working"],
+      ["woke", { isAutomationWoken: true }, "woke"],
+      ["done unread", { hasUnreadSuccess: true }, "done-unread"],
+      ["at rest", {}, "none"],
+    ] as const)("resolves %s", (_name, state, expected) => {
+      expect(
+        resolveThreadListIndicator({ ...idleIndicatorState, ...state }),
+      ).toBe(expected);
+    });
+
+    it("uses needs input, working, woke, done, then at-rest precedence", () => {
+      const all = {
+        ...idleIndicatorState,
+        hasPendingInteraction: true,
+        isRuntimeActive: true,
+        isAutomationWoken: true,
+        hasUnreadSuccess: true,
+      };
+      expect(resolveThreadListIndicator(all)).toBe("needs-input");
+      expect(
+        resolveThreadListIndicator({ ...all, hasPendingInteraction: false }),
+      ).toBe("working");
+      expect(
+        resolveThreadListIndicator({
+          ...all,
+          hasPendingInteraction: false,
+          isRuntimeActive: false,
+        }),
+      ).toBe("woke");
+      expect(
+        resolveThreadListIndicator({
+          ...all,
+          hasPendingInteraction: false,
+          isRuntimeActive: false,
+          isAutomationWoken: false,
+        }),
+      ).toBe("done-unread");
+      expect(
+        resolveThreadListIndicator({
+          ...idleIndicatorState,
+          hasPendingInteraction: false,
+          isRuntimeActive: false,
+          isAutomationWoken: false,
+          hasUnreadSuccess: false,
+        }),
+      ).toBe("none");
+    });
+
+    it.each([
+      ["hasPendingInteraction", "needs-input"],
+      ["hasUnreadError", "working"],
+      ["hasUnsubmittedDraft", "working"],
+      ["isPlanModeActive", "working"],
+      ["isGoalActive", "working"],
     ] as const)("shows %s as %s over the runtime spinner", (flag, kind) => {
       expect(
         resolveThreadListIndicator({
@@ -90,7 +141,7 @@ describe("thread-activity", () => {
           isRuntimeActive: true,
           [flag]: true,
         }),
-      ).toBe("runtime");
+      ).toBe("working");
     });
 
     it.each([
@@ -99,14 +150,14 @@ describe("thread-activity", () => {
       "isBackgroundCommandActive",
       "isPlanModeActive",
       "isGoalActive",
-    ] as const)("uses the working draft pencil with %s", (flag) => {
+    ] as const)("uses Working with %s", (flag) => {
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
           hasUnsubmittedDraft: true,
           [flag]: true,
         }),
-      ).toBe("working-draft");
+      ).toBe("working");
     });
 
     it("shows the queued clock over a draft, and never over active work", () => {
@@ -126,14 +177,14 @@ describe("thread-activity", () => {
           queuedWork: "waiting",
           isRuntimeActive: true,
         }),
-      ).toBe("runtime");
+      ).toBe("working");
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
           hasPendingInteraction: true,
           queuedWork: "waiting",
         }),
-      ).toBe("waiting-for-input");
+      ).toBe("needs-input");
     });
 
     it("promotes a failed queued row over a waiting one, but not over work", () => {
@@ -153,7 +204,7 @@ describe("thread-activity", () => {
           queuedWork: "failed",
           isBackgroundCommandActive: true,
         }),
-      ).toBe("background-command");
+      ).toBe("working");
       // And below the thread's own unread failure, which is the same glyph
       // reporting the bigger fact.
       expect(
@@ -162,12 +213,12 @@ describe("thread-activity", () => {
           hasUnreadError: true,
           queuedWork: "failed",
         }),
-      ).toBe("unread-error");
+      ).toBe("done-unread");
     });
 
     it.each([
-      ["waiting", "unread-success"],
-      ["failed", "queued-failed"],
+      ["waiting", "done-unread"],
+      ["failed", "done-unread"],
     ] as const)(
       "resolves unread success and %s queued work as %s",
       (queuedWork, expectedIndicator) => {
@@ -188,7 +239,7 @@ describe("thread-activity", () => {
           isGoalActive: true,
           isPlanModeActive: true,
         }),
-      ).toBe("plan-mode");
+      ).toBe("working");
     });
 
     it("applies idle activity precedence before background work", () => {
@@ -200,7 +251,7 @@ describe("thread-activity", () => {
           isGoalActive: true,
           isPlanModeActive: true,
         }),
-      ).toBe("plan-mode");
+      ).toBe("working");
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
@@ -208,7 +259,7 @@ describe("thread-activity", () => {
           isBackgroundCommandActive: true,
           isGoalActive: true,
         }),
-      ).toBe("goal");
+      ).toBe("working");
     });
 
     it("applies critical, idle draft, and unread precedence", () => {
@@ -219,27 +270,27 @@ describe("thread-activity", () => {
           hasUnreadError: true,
           isWorkflowActive: true,
         }),
-      ).toBe("unread-error");
+      ).toBe("needs-input");
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
           hasPendingInteraction: true,
           isWorkflowActive: true,
         }),
-      ).toBe("waiting-for-input");
+      ).toBe("needs-input");
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
           hasUnsubmittedDraft: true,
           hasUnreadSuccess: true,
         }),
-      ).toBe("unread-success");
+      ).toBe("done-unread");
       expect(
         resolveThreadListIndicator({
           ...idleIndicatorState,
           hasUnreadSuccess: true,
         }),
-      ).toBe("unread-success");
+      ).toBe("done-unread");
     });
   });
 
@@ -289,6 +340,7 @@ describe("thread-activity", () => {
       expect(threadListIndicatorStateForThread(thread, false)).toMatchObject({
         hasUnreadError: true,
         hasUnreadSuccess: false,
+        isAutomationWoken: false,
         hasUnsubmittedDraft: false,
       });
     });
@@ -326,6 +378,7 @@ describe("thread-activity", () => {
         hasUnsubmittedDraft: false,
         hasUnreadError: false,
         hasUnreadSuccess: false,
+        isAutomationWoken: false,
         isBackgroundAgentActive: false,
         isBackgroundCommandActive: true,
         isGoalActive: true,

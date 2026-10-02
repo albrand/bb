@@ -9,6 +9,7 @@ import {
 import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
+import { formatThreadListIndicator } from "../../commands/thread/list.js";
 
 describe("bb thread list command output", () => {
   setupCommandOutputTestEnvironment();
@@ -97,13 +98,13 @@ describe("bb thread list command output", () => {
       flag: "archived",
       stamp: { archivedAt: 1 },
       table:
-        "ID                 Title  Project  Status         \n-----------------  -----  -------  ---------------\nthread-archived-1  -      Alpha    idle (archived)",
+        "ID                 Title  Project  Status           Needs you \n-----------------  -----  -------  ---------------  ----------\nthread-archived-1  -      Alpha    idle (archived)  -         ",
     },
     {
       flag: "pinned",
       stamp: { pinnedAt: 1 },
       table:
-        "ID               Title  Project  Status       \n---------------  -----  -------  -------------\nthread-pinned-1  -      Alpha    idle (pinned)",
+        "ID               Title  Project  Status         Needs you \n---------------  -----  -------  -------------  ----------\nthread-pinned-1  -      Alpha    idle (pinned)  -         ",
     },
   ])(
     "bb thread list renders $flag status in the shared borderless table",
@@ -161,7 +162,7 @@ describe("bb thread list command output", () => {
     });
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
       "",
-      "ID                 Title  Project  Status      \n-----------------  -----  -------  ------------\nthread-personal-1  -      -        idle        ",
+      "ID                 Title  Project  Status        Needs you \n-----------------  -----  -------  ------------  ----------\nthread-personal-1  -      -        idle          -         ",
       "",
     ]);
   });
@@ -230,6 +231,40 @@ describe("bb thread list command output", () => {
     await runCommand(["thread", "list", "--json"], register);
 
     expect(projects).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["needs-input", "Needs input"],
+    ["working", "Working"],
+    ["woke", "Woke"],
+    ["done-unread", "Done"],
+    ["none", "-"],
+  ] as const)(
+    "renders %s as %s in the Needs you column",
+    (listIndicator, label) => {
+      expect(
+        formatThreadListIndicator(
+          { id: "thread-status", listIndicator },
+          new Set(listIndicator === "woke" ? ["thread-status"] : []),
+        ),
+      ).toBe(label);
+    },
+  );
+
+  it("keeps Working and Needs input ahead of the Woke overlay", () => {
+    const wokeThreadIds = new Set(["thread-status"]);
+    expect(
+      formatThreadListIndicator(
+        { id: "thread-status", listIndicator: "working" },
+        wokeThreadIds,
+      ),
+    ).toBe("Working");
+    expect(
+      formatThreadListIndicator(
+        { id: "thread-status", listIndicator: "needs-input" },
+        wokeThreadIds,
+      ),
+    ).toBe("Needs input");
   });
 
   it("bb thread list does not infer parent-thread from BB_THREAD_ID", async () => {

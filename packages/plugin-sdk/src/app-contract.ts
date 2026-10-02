@@ -1029,6 +1029,10 @@ export interface ExperimentalSidebarFooter {
  * message ranks just below it).
  */
 export type PluginSidebarThreadIndicator =
+  | "needs-input"
+  | "working"
+  | "woke"
+  | "done-unread"
   | "unread-error"
   | "waiting-for-input"
   | "working-draft"

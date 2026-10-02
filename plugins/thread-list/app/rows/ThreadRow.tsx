@@ -33,10 +33,12 @@ import {
 } from "../model/thread-activity.js";
 import {
   experimental_useSidebarThreadActions,
+  experimental_useSidebarThreadPullRequest,
   experimental_useSidebarThreadSplit,
   experimental_useProviders,
   experimental_ProviderIcon as ProviderIcon,
   ThreadTitle,
+  UrlLink,
   useSidebarSplitLayout,
   useSidebarThreadDraft,
   useSidebarThreadRowStatus,
@@ -49,6 +51,7 @@ import {
   NO_THREAD_IDS,
   useThreadsHaveDraft,
 } from "../list/sidebarDraftPresence.js";
+import { useAutomationWokeAt } from "../model/automation-woke.js";
 import { useSidebarProjectName } from "../model/use-sidebar-data.js";
 import {
   sidebarShowProviderIconsAtom,
@@ -74,6 +77,7 @@ import {
   SIDEBAR_ROW_OPEN_IN_SPLIT_STATE_CLASS,
   SIDEBAR_ROW_SELECTED_STATE_CLASS,
   SIDEBAR_STATUS_GLYPH_BOX_CLASS,
+  SIDEBAR_WORKING_STATUS_COLOR_CLASS,
   getSidebarThreadGroupLineLeft,
   getSidebarThreadRowPaddingLeft,
 } from "./sidebarRowClasses.js";
@@ -251,6 +255,7 @@ export function CollapsedThreadStatusGlyph({
     hasUnsubmittedDraft,
     hasUnreadError: activity.unreadError,
     hasUnreadSuccess: activity.unread,
+    isAutomationWoken: false,
     isBackgroundAgentActive: activity.backgroundAgent,
     isBackgroundCommandActive: activity.backgroundCommand,
     isGoalActive: activity.goal,
@@ -264,14 +269,19 @@ export function CollapsedThreadStatusGlyph({
 
 type ThreadTrailingIndicatorProps = ThreadStatusGlyphProps & {
   pluginStatus: PluginSidebarThreadRowStatus | null;
+  threadId: string;
 };
 
 function ThreadTrailingIndicator({
   pluginStatus,
+  threadId,
   ...statusProps
 }: ThreadTrailingIndicatorProps) {
+  const { startedAt: automationStartedAt, now } = useAutomationWokeAt(threadId);
+  const isAutomationWoken = automationStartedAt !== null;
+  const resolvedStatusProps = { ...statusProps, isAutomationWoken };
   const { indicatorKind, pluginStatusIsVisible } = resolveThreadStatus(
-    statusProps,
+    resolvedStatusProps,
     pluginStatus,
   );
 
@@ -279,15 +289,41 @@ function ThreadTrailingIndicator({
     return null;
   }
 
+  const elapsedMinutes =
+    automationStartedAt === null
+      ? null
+      : Math.max(1, Math.floor((now - automationStartedAt) / 60_000));
+  const statusText =
+    indicatorKind === "needs-input"
+      ? "Needs input"
+      : indicatorKind === "working"
+        ? `Working${elapsedMinutes === null ? "" : ` ${elapsedMinutes}m`}`
+        : indicatorKind === "woke"
+          ? `Woke${elapsedMinutes === null ? "" : ` ${elapsedMinutes}m`}`
+          : indicatorKind === "done-unread"
+            ? "Done"
+            : null;
+
   return (
     <span
       data-sidebar-thread-trailing-indicator=""
       className={cn(
-        SIDEBAR_ROW_GLYPH_SLOT_CLASS,
-        SIDEBAR_STATUS_GLYPH_BOX_CLASS,
+        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full px-1.5 font-medium text-xs",
+        indicatorKind === "needs-input" && "text-warning",
+        indicatorKind === "working" && SIDEBAR_WORKING_STATUS_COLOR_CLASS,
+        indicatorKind === "woke" && "text-attention",
+        indicatorKind === "done-unread" && "text-success-foreground",
+        statusText === null && SIDEBAR_ROW_GLYPH_SLOT_CLASS,
+        statusText === null && SIDEBAR_STATUS_GLYPH_BOX_CLASS,
       )}
+      aria-label={statusText ?? undefined}
     >
-      <ThreadStatusGlyph {...statusProps} pluginStatus={pluginStatus} />
+      <ThreadStatusGlyph
+        {...resolvedStatusProps}
+        hideAccessibleLabel={statusText !== null}
+        pluginStatus={pluginStatus}
+      />
+      {statusText}
     </span>
   );
 }
@@ -304,6 +340,68 @@ function ThreadRestoreStatusAction({ thread }: { thread: SidebarThread }) {
         className={SIDEBAR_CONTROL_BUTTON_CLASS}
       />
     </span>
+  );
+}
+
+const PULL_REQUEST_STATE_CLASS = {
+  draft: "text-muted-foreground",
+  open: "text-success-foreground",
+  merged: "text-accent-foreground",
+  closed: "text-destructive",
+} as const;
+
+function getPullRequestRepository(url: string): string {
+  const parsedUrl = new URL(url);
+  const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+  const pullRequestSegment = pathSegments.findIndex((segment) =>
+    [
+      "pull",
+      "pulls",
+      "pull-requests",
+      "merge_requests",
+      "pullrequest",
+    ].includes(segment.toLowerCase()),
+  );
+  const repositorySegments = (
+    pullRequestSegment >= 0
+      ? pathSegments.slice(0, pullRequestSegment)
+      : pathSegments.slice(0, 2)
+  ).filter((segment) => segment !== "-" && segment !== "_git");
+
+  return repositorySegments.length > 0
+    ? repositorySegments.join("/")
+    : parsedUrl.hostname;
+}
+
+function SidebarThreadPullRequestChip({ threadId }: { threadId: string }) {
+  const { pullRequest } = experimental_useSidebarThreadPullRequest(threadId);
+  if (pullRequest === null) return null;
+
+  const stateLabel =
+    pullRequest.state[0].toUpperCase() + pullRequest.state.slice(1);
+  const repository = getPullRequestRepository(pullRequest.url);
+  const accessibleLabel = `Pull request #${pullRequest.number}: ${pullRequest.title}, ${stateLabel}, ${repository}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <UrlLink
+          data-sidebar-thread-pull-request=""
+          href={pullRequest.url}
+          aria-label={accessibleLabel}
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "relative z-20 rounded-sm px-1 text-xs font-medium tabular-nums no-underline outline-none focus-visible:ring-1 focus-visible:ring-ring hover:underline",
+            PULL_REQUEST_STATE_CLASS[pullRequest.state],
+          )}
+        >
+          #{pullRequest.number}
+        </UrlLink>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        {pullRequest.title} · {stateLabel} · {repository}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -417,6 +515,7 @@ function ThreadRowComponent({
     hasUnreadSuccess:
       threadStatus.hasUnreadSuccess ||
       (hasHiddenChildren && childActivity.unread),
+    isAutomationWoken: false,
     isBackgroundAgentActive:
       threadStatus.isBackgroundAgentActive ||
       (hasHiddenChildren && childActivity.backgroundAgent),
@@ -658,6 +757,7 @@ function ThreadRowComponent({
           isEditing && "hidden",
         )}
       >
+        <SidebarThreadPullRequestChip threadId={thread.id} />
         {thread.archivedAt !== null ? (
           <span className="relative flex items-center max-md:pointer-coarse:hidden">
             <div
@@ -721,6 +821,7 @@ function ThreadRowComponent({
                 ) : (
                   <ThreadTrailingIndicator
                     {...trailingIndicatorState}
+                    threadId={thread.id}
                     hideIdleDraftLabel={
                       !hasHiddenChildren && trailingIndicatorKind === "draft"
                     }

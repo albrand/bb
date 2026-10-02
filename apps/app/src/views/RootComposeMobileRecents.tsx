@@ -270,6 +270,7 @@ function MobileRecentThreadRow({
           indicatorState.isRuntimeActive || childActivity.runtimeWorking,
         isWorkflowActive:
           indicatorState.isWorkflowActive || childActivity.workflow,
+        isAutomationWoken: indicatorState.isAutomationWoken,
       }
     : indicatorState;
   const indicatorKind = resolveThreadListIndicator(trailingIndicatorState);

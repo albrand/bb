@@ -2,6 +2,7 @@ import { assertNever } from "@bb/core-ui";
 import type {
   Thread,
   ThreadListEntry,
+  ThreadListIndicator,
   ThreadQueuedWork,
   ThreadWithRuntime,
 } from "@bb/domain";
@@ -66,6 +67,7 @@ export interface ThreadListIndicatorState {
   hasUnsubmittedDraft: boolean;
   hasUnreadError: boolean;
   hasUnreadSuccess: boolean;
+  isAutomationWoken: boolean;
   isBackgroundAgentActive: boolean;
   isBackgroundCommandActive: boolean;
   isGoalActive: boolean;
@@ -81,21 +83,7 @@ export interface ThreadListIndicatorState {
   queuedWork: ThreadQueuedWork;
 }
 
-export type ThreadListIndicatorKind =
-  | "unread-error"
-  | "waiting-for-input"
-  | "working-draft"
-  | "workflow"
-  | "background-agent"
-  | "background-command"
-  | "plan-mode"
-  | "goal"
-  | "runtime"
-  | "queued-failed"
-  | "queued-waiting"
-  | "draft"
-  | "unread-success"
-  | "none";
+export type ThreadListIndicatorKind = ThreadListIndicator;
 
 const THREAD_LIST_INDICATOR_LABELS: Record<
   Exclude<ThreadListIndicatorKind, "none">,
@@ -103,6 +91,10 @@ const THREAD_LIST_INDICATOR_LABELS: Record<
 > = {
   "unread-error": "Unread thread failed",
   "waiting-for-input": "Thread needs user input",
+  "needs-input": "Needs input",
+  working: "Working",
+  woke: "Woke",
+  "done-unread": "Done",
   "working-draft": "Thread working with unsubmitted draft",
   workflow: "Workflow running",
   "background-agent": "Background agent running",
@@ -145,6 +137,7 @@ export function threadListIndicatorStateForThread(
     hasUnsubmittedDraft,
     hasUnreadError: unreadDone && thread.status === "error",
     hasUnreadSuccess: unreadDone && thread.status !== "error",
+    isAutomationWoken: false,
     isBackgroundAgentActive: hasActiveBackgroundAgentActivity(thread),
     isBackgroundCommandActive: hasActiveBackgroundCommandActivity(thread),
     isGoalActive: hasActiveGoalActivity(thread),
@@ -158,19 +151,12 @@ export function threadListIndicatorStateForThread(
 export function resolveThreadListIndicator(
   state: ThreadListIndicatorState,
 ): ThreadListIndicatorKind {
-  if (state.hasUnreadError) return "unread-error";
-  if (state.hasPendingInteraction) return "waiting-for-input";
-
+  if (state.hasPendingInteraction) return "needs-input";
   const hasActiveWork = hasThreadListWorkingActivity(state);
-  if (state.hasUnsubmittedDraft && hasActiveWork) return "working-draft";
-  if (state.isPlanModeActive) return "plan-mode";
-  if (state.isGoalActive) return "goal";
-  if (state.isRuntimeActive) return "runtime";
-  if (state.isWorkflowActive) return "workflow";
-  if (state.isBackgroundAgentActive) return "background-agent";
-  if (state.isBackgroundCommandActive) return "background-command";
+  if (hasActiveWork) return "working";
+  if (state.isAutomationWoken) return "woke";
+  if (state.hasUnreadError || state.hasUnreadSuccess) return "done-unread";
   if (state.queuedWork === "failed") return "queued-failed";
-  if (state.hasUnreadSuccess) return "unread-success";
   if (state.queuedWork === "waiting") return "queued-waiting";
   if (state.hasUnsubmittedDraft) return "draft";
   return "none";

@@ -375,8 +375,7 @@ describe("sidebar organization mode sections", () => {
     renderMachineMode(store, [makeThread()]);
 
     expect(screen.queryByText("Machine activity")).toBeNull();
-    expect(screen.getByLabelText("Plan mode active")).not.toBeNull();
-    expect(screen.queryByLabelText("Thread working")).toBeNull();
+    expect(screen.getByLabelText("Working")).not.toBeNull();
   });
 
   it("marks More and the hidden section as the breadcrumb to the selected thread", async () => {
@@ -421,7 +420,7 @@ describe("sidebar organization mode sections", () => {
     renderMachineMode(store, [makeThread()]);
 
     const more = screen.getByRole("button", { name: "More machines" });
-    expect(within(more).getByLabelText("Plan mode active")).not.toBeNull();
+    expect(within(more).getByLabelText("Working")).not.toBeNull();
     expect(screen.queryByText("No machine")).toBeNull();
     expect(screen.queryByText("Machine activity")).toBeNull();
 
@@ -430,7 +429,7 @@ describe("sidebar organization mode sections", () => {
     expect(screen.queryByText("Machine activity")).toBeNull();
     fireEvent.keyDown(section, { key: "ArrowRight" });
     expect(await screen.findByText("Machine activity")).not.toBeNull();
-    expect(within(more).getByLabelText("Plan mode active")).not.toBeNull();
+    expect(within(more).getByLabelText("Working")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add to list" }));
 
     await waitFor(() =>

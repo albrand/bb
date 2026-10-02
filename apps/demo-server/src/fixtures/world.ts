@@ -81,6 +81,7 @@ export function threadListEntry(
     environmentIsWorktree: null,
     environmentWorkspaceDisplayKind: "other",
     queuedWork: "none",
+    listIndicator: busy ? "working" : "none",
   };
 }
 
@@ -100,6 +101,7 @@ export function threadResponse(
     environmentIsWorktree: _environmentIsWorktree,
     environmentWorkspaceDisplayKind: _environmentWorkspaceDisplayKind,
     queuedWork: _queuedWork,
+    listIndicator: _listIndicator,
     ...thread
   } = threadListEntry(view, now);
   return {

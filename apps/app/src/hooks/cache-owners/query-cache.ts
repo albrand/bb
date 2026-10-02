@@ -565,6 +565,7 @@ export function optimisticallyInsertThread(
       activeGoalCount: 0,
     },
     environmentBranchName: null,
+    listIndicator: "none",
     environmentHostId,
     environmentName: null,
     environmentPath: null,

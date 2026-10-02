@@ -325,6 +325,7 @@ function makeThread(
     environmentWorkspaceDisplayKind: "other",
     runtime: { displayStatus: "idle" },
     queuedWork: "none",
+    listIndicator: "none",
     ...overrides,
   };
 }
@@ -1200,9 +1201,7 @@ describe("CommandPalette", () => {
     expectText(match, "Matching");
     expectClasses(match, "bg-[var(--sidebar-search-match)]", "text-foreground");
     expectClasses(match?.closest(".bb-thread-title"), "text-foreground");
-    expect(
-      within(rows[1]).getByRole("img", { name: "Unread thread succeeded" }),
-    ).toBeTruthy();
+    expect(within(rows[1]).getByRole("img", { name: "Done" })).toBeTruthy();
     expect(results.querySelector('[data-icon="Archive"]')).toBeNull();
     expectClasses(within(results).getByText("Active"), "px-2", "py-1");
     expectClasses(within(results).getByText("Archived"), "px-2", "py-1");
@@ -1225,9 +1224,7 @@ describe("CommandPalette", () => {
     ).toHaveLength(1);
     expect(
       rows[1].querySelector("[data-palette-thread-details]")?.lastElementChild,
-    ).toBe(
-      within(rows[1]).getByRole("img", { name: "Unread thread succeeded" }),
-    );
+    ).toBe(within(rows[1]).getByRole("img", { name: "Done" }));
   });
 
   it("caps mixed matches, expands sections independently, and resets on query changes", async () => {
@@ -1462,10 +1459,10 @@ describe("CommandPalette", () => {
         idleRow.querySelector("[data-palette-thread-details]")?.children,
       ).toHaveLength(1);
       for (const [title, label, icon] of [
-        ["Title working", "Thread working", "Loading"],
+        ["Title working", "Working", "Loading"],
         ["Title draft", "Thread has unsubmitted draft", "Edit"],
-        ["Title waiting", "Thread needs user input", "CircleQuestion"],
-        ["Title workflow", "Workflow running", "Workflow"],
+        ["Title waiting", "Needs input", "CircleQuestion"],
+        ["Title workflow", "Working", "Loading"],
       ]) {
         const row = within(results).getByRole("option", {
           name: new RegExp(title),
@@ -1530,7 +1527,7 @@ describe("CommandPalette", () => {
       within(screen.getByRole("option", { name: /Title waiting/ })).getByRole(
         "img",
         {
-          name: "Thread needs user input",
+          name: "Needs input",
         },
       ),
     ).toBeTruthy();

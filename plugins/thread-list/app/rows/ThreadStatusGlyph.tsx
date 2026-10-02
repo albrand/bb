@@ -120,10 +120,13 @@ export function resolveThreadStatus(
 ): ThreadStatusResolution {
   const indicatorKind = archived
     ? "archived"
-    : resolveThreadListIndicator(statusProps);
+    : statusProps.hasPendingInteraction
+      ? "needs-input"
+      : resolveThreadListIndicator(statusProps);
   const pluginStatusIsVisible =
     !archived &&
     pluginStatus !== null &&
+    indicatorKind !== "working" &&
     indicatorKind !== "runtime" &&
     indicatorKind !== "unread-error" &&
     indicatorKind !== "waiting-for-input";
@@ -143,6 +146,7 @@ export interface ThreadStatusGlyphProps extends ThreadListIndicatorState {
   archived?: boolean;
   pluginStatus?: PluginSidebarThreadRowStatus | null;
   hideIdleDraftLabel?: boolean;
+  hideAccessibleLabel?: boolean;
   size?: "default" | "compact";
 }
 
@@ -153,7 +157,9 @@ export function ThreadStatusGlyph({
   hasUnsubmittedDraft,
   hasUnreadError,
   hasUnreadSuccess,
+  isAutomationWoken,
   hideIdleDraftLabel = false,
+  hideAccessibleLabel = false,
   isBackgroundAgentActive,
   isBackgroundCommandActive,
   isGoalActive,
@@ -171,6 +177,7 @@ export function ThreadStatusGlyph({
       hasUnsubmittedDraft,
       hasUnreadError,
       hasUnreadSuccess,
+      isAutomationWoken,
       isBackgroundAgentActive,
       isBackgroundCommandActive,
       isGoalActive,
@@ -188,6 +195,62 @@ export function ThreadStatusGlyph({
   }
 
   switch (kind) {
+    case "needs-input":
+      return (
+        <Icon
+          name="CircleQuestion"
+          className={cn("text-warning", iconSizeClass)}
+          aria-label={
+            hideAccessibleLabel
+              ? undefined
+              : (getThreadListIndicatorLabel(kind) ?? undefined)
+          }
+          aria-hidden={hideAccessibleLabel}
+        />
+      );
+    case "working":
+      return (
+        <Icon
+          name="Loading"
+          className={cn(
+            "animate-spin motion-reduce:animate-none",
+            SIDEBAR_WORKING_STATUS_COLOR_CLASS,
+            iconSizeClass,
+          )}
+          aria-label={
+            hideAccessibleLabel
+              ? undefined
+              : (getThreadListIndicatorLabel(kind) ?? undefined)
+          }
+          aria-hidden={hideAccessibleLabel}
+        />
+      );
+    case "woke":
+      return (
+        <Icon
+          name="AlarmClock"
+          className={cn("text-attention", iconSizeClass)}
+          aria-label={
+            hideAccessibleLabel
+              ? undefined
+              : (getThreadListIndicatorLabel(kind) ?? undefined)
+          }
+          aria-hidden={hideAccessibleLabel}
+        />
+      );
+    case "done-unread":
+      return (
+        <Icon
+          name="Check"
+          className={cn(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS, iconSizeClass)}
+          aria-label={
+            hideAccessibleLabel
+              ? undefined
+              : (getThreadListIndicatorLabel(kind) ?? undefined)
+          }
+          aria-hidden={hideAccessibleLabel}
+        />
+      );
     case "archived":
       return (
         <Icon
