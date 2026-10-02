@@ -146,13 +146,31 @@ export type {
 } from "@get-bb/plugin-sdk";
 
 class PluginContextStaleError extends Error {
-  constructor(pluginId: string) {
+  constructor(pluginId: string, apiMember: string) {
     super(
       `plugin "${pluginId}" used a stale API handle — it was reloaded or disabled; ` +
         `re-entry happens via a fresh factory call`,
     );
     this.name = "PluginContextStaleError";
+    this.pluginId = pluginId;
+    this.apiMember = apiMember;
   }
+
+  readonly pluginId: string;
+  readonly apiMember: string;
+}
+
+export function getPluginContextStaleErrorDetails(
+  error: unknown,
+): { pluginId: string; apiMember: string } | undefined {
+  return error instanceof PluginContextStaleError
+    ? { pluginId: error.pluginId, apiMember: error.apiMember }
+    : undefined;
+}
+
+function inferPluginApiMember(): string {
+  const frame = new Error().stack?.split("\n")[3];
+  return frame?.match(/at (.+?)(?: \(|$)/)?.[1] ?? "unknown API member";
 }
 
 export function isNeedsConfigurationError(error: unknown): error is Error {
@@ -620,8 +638,8 @@ export function createPluginApi(options: {
   const backgroundServices: PluginBackgroundServiceRecord[] = [];
   const schedules: PluginScheduleRecord[] = [];
 
-  function assertLive(): void {
-    if (invalidated) throw new PluginContextStaleError(pluginId);
+  function assertLive(apiMember = inferPluginApiMember()): void {
+    if (invalidated) throw new PluginContextStaleError(pluginId, apiMember);
   }
 
   const prefix = `[plugin:${pluginId}]`;
@@ -838,7 +856,7 @@ export function createPluginApi(options: {
 
   const realtime: PluginRealtime = {
     publish(channel, payload) {
-      assertLive();
+      assertLive("realtime.publish");
       publishSignal(channel, normalizeRealtimePayload(channel, payload));
     },
   };

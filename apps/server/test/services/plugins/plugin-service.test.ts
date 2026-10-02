@@ -565,6 +565,67 @@ describe("plugin service", () => {
     expect(() => captured.onDispose(() => {})).toThrowError(/stale API handle/);
   });
 
+  it("contains stale API use from a timer that survives plugin reload", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "bb-plugin-stale-timer",
+      serverSource: `
+        export default function plugin(bb: any) {
+          const g = globalThis as any;
+          if (g.__staleTimerCallback === undefined) {
+            g.__staleTimerCallback = () => bb.realtime.publish("stale", {});
+            g.__staleTimer = setTimeout(g.__staleTimerCallback, 60_000);
+          }
+        }
+      `,
+    });
+    const vitestListeners = process.listeners("uncaughtException");
+    process.removeAllListeners("uncaughtException");
+    const unclaimed: unknown[] = [];
+    process.on("uncaughtException", (error) => {
+      if (!service.handleUncaughtException(error)) unclaimed.push(error);
+    });
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      await service.installPath(rootDir);
+      await service.reload("stale-timer");
+      warn.mockClear();
+
+      const globals = globalThis as Record<string, unknown>;
+      let thrown: unknown;
+      try {
+        (globals.__staleTimerCallback as () => void)();
+      } catch (error) {
+        thrown = error;
+      }
+      process.emit("uncaughtException", thrown as Error);
+      process.emit("uncaughtException", thrown as Error);
+
+      expect(unclaimed).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.stringContaining(
+          "[plugin:stale-timer] detached callback used stale API member realtime.publish",
+        ),
+      );
+      expect(
+        service.list().find((plugin) => plugin.id === "stale-timer")?.status,
+      ).toBe("running");
+    } finally {
+      clearTimeout(
+        (globalThis as Record<string, unknown>).__staleTimer as ReturnType<
+          typeof setTimeout
+        >,
+      );
+      delete (globalThis as Record<string, unknown>).__staleTimer;
+      delete (globalThis as Record<string, unknown>).__staleTimerCallback;
+      process.removeAllListeners("uncaughtException");
+      for (const listener of vitestListeners) {
+        process.on("uncaughtException", listener);
+      }
+    }
+  });
+
   it("marks initial engine mismatches incompatible and preserves a live plugin when reload finds its directory missing", async () => {
     const tooNew = await writePlugin(workDir, {
       name: "bb-plugin-too-new",

@@ -81,6 +81,7 @@ import {
 } from "./sdk-compat.js";
 import {
   createPluginApi,
+  getPluginContextStaleErrorDetails,
   isNeedsConfigurationError,
   type BbPluginApi,
   type PluginApiHandle,
@@ -401,6 +402,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     deps.serviceRestartBaseMs ?? DEFAULT_SERVICE_RESTART_BASE_MS;
 
   const loaded = new Map<string, LoadedPlugin>();
+  const staleHandleWarnings = new Set<string>();
   const initializedSourceBuiltinIds = new Set<string>();
   deps.pendingInteractions?.setPluginDirectory({
     isLoaded: (pluginId) => loaded.has(pluginId),
@@ -577,7 +579,18 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
 
   function handleUncaughtException(error: unknown): boolean {
     const instance = serviceContext.getStore();
-    if (instance === undefined) return false;
+    if (instance === undefined) {
+      const staleError = getPluginContextStaleErrorDetails(error);
+      if (staleError === undefined) return false;
+      if (!staleHandleWarnings.has(staleError.pluginId)) {
+        staleHandleWarnings.add(staleError.pluginId);
+        logger.warn(
+          { err: error },
+          `[plugin:${staleError.pluginId}] detached callback used stale API member ${staleError.apiMember}; exception contained`,
+        );
+      }
+      return true;
+    }
     const { id, service, controller } = instance;
     const name = service.record.name;
     const message = error instanceof Error ? error.message : String(error);
