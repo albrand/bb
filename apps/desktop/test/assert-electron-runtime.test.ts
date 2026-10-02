@@ -6,15 +6,21 @@ import { assertElectronRuntime } from "../scripts/assert-electron-runtime.mjs";
 
 const tempDirs: string[] = [];
 
-async function createMacRuntimeFixture() {
+async function createMacRuntimeFixture(
+  executableName = "Electron",
+  frameworkName = `${executableName} Framework`,
+) {
   const root = await mkdtemp(join(tmpdir(), "bb-electron-runtime-"));
   tempDirs.push(root);
-  const executable = join(root, "Electron.app/Contents/MacOS/Electron");
+  const executable = join(
+    root,
+    `${executableName}.app/Contents/MacOS/${executableName}`,
+  );
   const framework = join(
     root,
-    "Electron.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+    `${executableName}.app/Contents/Frameworks/${frameworkName}.framework/Versions/A/${frameworkName}`,
   );
-  await mkdir(join(root, "Electron.app/Contents/MacOS"), {
+  await mkdir(join(root, `${executableName}.app/Contents/MacOS`), {
     recursive: true,
   });
   await mkdir(join(framework, ".."), { recursive: true });
@@ -25,7 +31,9 @@ async function createMacRuntimeFixture() {
 
 afterEach(async () => {
   await Promise.all(
-    tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })),
+    tempDirs
+      .splice(0)
+      .map((path) => rm(path, { force: true, recursive: true })),
   );
 });
 
@@ -36,7 +44,7 @@ describe("assertElectronRuntime", () => {
 
     expect(() =>
       assertElectronRuntime(executable, { platform: "darwin" }),
-    ).toThrow(/Electron Framework is truncated \(4096 bytes/);
+    ).toThrow(/Electron framework is truncated \(4096 bytes/);
   });
 
   it("rejects a missing macOS Electron Framework", async () => {
@@ -45,7 +53,7 @@ describe("assertElectronRuntime", () => {
 
     expect(() =>
       assertElectronRuntime(executable, { platform: "darwin" }),
-    ).toThrow(/Electron runtime is missing Electron Framework/);
+    ).toThrow(/Electron runtime is missing its framework binary/);
   });
 
   it("rejects a truncated macOS Electron launcher", async () => {
@@ -59,6 +67,27 @@ describe("assertElectronRuntime", () => {
 
   it("accepts a macOS framework above the measured size floor", async () => {
     const { executable, framework } = await createMacRuntimeFixture();
+    await truncate(framework, 190_000_000);
+
+    expect(() =>
+      assertElectronRuntime(executable, { platform: "darwin" }),
+    ).not.toThrow();
+  });
+
+  it("accepts the renamed framework binary in a packaged macOS app", async () => {
+    const { executable, framework } = await createMacRuntimeFixture("bb");
+    await truncate(framework, 190_000_000);
+
+    expect(() =>
+      assertElectronRuntime(executable, { platform: "darwin" }),
+    ).not.toThrow();
+  });
+
+  it("accepts Electron Framework in a packaged macOS app", async () => {
+    const { executable, framework } = await createMacRuntimeFixture(
+      "bb",
+      "Electron Framework",
+    );
     await truncate(framework, 190_000_000);
 
     expect(() =>

@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MINIMUM_MACOS_EXECUTABLE_BYTES = 16 * 1024;
@@ -31,21 +31,29 @@ export function assertElectronRuntime(
   if (platform !== "darwin") return;
 
   const appBundle = resolve(dirname(binary), "..", "..");
-  const framework = resolve(
-    appBundle,
-    "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+  const frameworkNames = [
+    `${basename(binary)} Framework`,
+    "Electron Framework",
+  ];
+  const frameworkPaths = frameworkNames.map((frameworkName) =>
+    resolve(
+      appBundle,
+      `Contents/Frameworks/${frameworkName}.framework/Versions/A/${frameworkName}`,
+    ),
   );
+  const framework =
+    frameworkPaths.find((path) => existsSync(path)) ?? frameworkPaths[0];
   let frameworkSize;
   try {
     frameworkSize = statSync(framework).size;
   } catch {
     throw new Error(
-      `Electron runtime is missing Electron Framework: ${framework}`,
+      `Electron runtime is missing its framework binary: ${frameworkPaths.join(" or ")}`,
     );
   }
   if (frameworkSize < MINIMUM_MACOS_FRAMEWORK_BYTES) {
     throw new Error(
-      `Electron Framework is truncated (${frameworkSize} bytes; expected at least ${MINIMUM_MACOS_FRAMEWORK_BYTES}): ${framework}. Reinstall Electron with pnpm rebuild electron.`,
+      `Electron framework is truncated (${frameworkSize} bytes; expected at least ${MINIMUM_MACOS_FRAMEWORK_BYTES}): ${framework}. Reinstall Electron with pnpm rebuild electron.`,
     );
   }
 
