@@ -233,13 +233,12 @@ export function printExecutionProfile(
   console.log(`    Last provider report: ${status}: ${report}`);
 }
 
-function compactTokenCount(value: number | null): string {
-  return value === null
-    ? "unavailable"
-    : new Intl.NumberFormat("en", {
-        maximumFractionDigits: 1,
-        notation: "compact",
-      }).format(value);
+function compactTokenCount(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "unavailable";
+  return new Intl.NumberFormat("en", {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(value);
 }
 
 function printSpendSummary(summary: ThreadSpendSummaryResult): void {
