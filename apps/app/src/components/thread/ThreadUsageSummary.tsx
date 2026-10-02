@@ -9,8 +9,8 @@ import { sdk } from "@/lib/sdk";
 import { useThreadRoutePath } from "./ThreadTitleMentions";
 import { useQuery } from "@tanstack/react-query";
 
-function compactTokens(value: number | null): string {
-  if (value === null) return "unavailable";
+function compactTokens(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "unavailable";
   return new Intl.NumberFormat("en", {
     maximumFractionDigits: 1,
     notation: "compact",
