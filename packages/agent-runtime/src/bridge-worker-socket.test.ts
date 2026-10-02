@@ -26,7 +26,7 @@ import type { BridgeLineDelivery } from "./bridge-line-ack-tracker.js";
 import {
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
-  readProcessIdentity,
+  readProcessIdentityAsync,
 } from "./bridge-worker-registry.js";
 import {
   privateSocketDirectory,
@@ -548,7 +548,7 @@ describe("socket bridge workers", () => {
       onShutdown: () => undefined,
     });
     const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
-    const worker = adoptedWorker({
+    const worker = await adoptedWorker({
       dir: bridgeWorkerDir,
       pid: standIn.pid ?? 0,
       socketPath,
@@ -623,7 +623,7 @@ describe("socket bridge workers", () => {
     });
     await new Promise<void>((resolve) => listener.listen(socketPath, resolve));
     const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
-    const worker = adoptedWorker({
+    const worker = await adoptedWorker({
       dir: bridgeWorkerDir,
       pid: standIn.pid ?? 0,
       socketPath,
@@ -678,7 +678,7 @@ describe("socket bridge workers", () => {
     });
     await new Promise<void>((resolve) => listener.listen(socketPath, resolve));
     const standIn = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
-    const worker = adoptedWorker({
+    const worker = await adoptedWorker({
       dir: bridgeWorkerDir,
       pid: standIn.pid ?? 0,
       socketPath,
@@ -933,12 +933,12 @@ async function firstFrameReplayedAfterResume(
   );
 }
 
-function adoptedWorker(args: {
+async function adoptedWorker(args: {
   dir: string;
   pid: number;
   socketPath: string;
   workspacePath: string;
-}): SocketBridgeWorker {
+}): Promise<SocketBridgeWorker> {
   return new SocketBridgeWorker({
     kind: "adopt",
     workerDir: args.dir,
@@ -947,7 +947,7 @@ function adoptedWorker(args: {
       id: "abcdef012345",
       formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
       pid: args.pid,
-      processIdentity: readProcessIdentity(args.pid) ?? "",
+      processIdentity: (await readProcessIdentityAsync(args.pid)) ?? "",
       socketPath: args.socketPath,
       pluginId: "provider-scripted-echo",
       providerId: "fake",

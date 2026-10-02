@@ -1148,7 +1148,7 @@ export class RuntimeManager {
   async reconcileBridgeWorkers(): Promise<void> {
     if (this.options.dataDir === undefined) return;
     const dir = bridgeWorkerDirForDataDir(this.options.dataDir);
-    const { live, reaped, retirable } = reapDeadBridgeWorkers(dir);
+    const { live, reaped, retirable } = await reapDeadBridgeWorkers(dir);
     const normalizedLive = live.map((entry) =>
       migrateLegacyBridgeWorkerEntry(dir, entry),
     );

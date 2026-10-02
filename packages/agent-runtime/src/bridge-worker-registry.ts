@@ -1,4 +1,3 @@
-import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   lstatSync,
@@ -11,10 +10,10 @@ import {
 } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { bridgeCapabilitiesSchema } from "@bb/provider-bridge-protocol";
 import { BRIDGE_SHUTDOWN_METHOD } from "@bb/provider-bridge-protocol/bridge-kit";
 import { workspaceProvisionTypeSchema } from "@bb/domain";
+import { readProcessStartIdentity } from "@bb/process-utils";
 import { z } from "zod";
 
 const bridgeWorkerWorkspaceSchema = z.object({
@@ -197,19 +196,8 @@ function salvagedSocketPath(
   return isTrustedSocketPath(dir, id, socketPath) ? socketPath : null;
 }
 
-const execFileAsync = promisify(execFile);
 const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
-const DARWIN_PS_PATH = "/bin/ps";
 const LINUX_STAT_START_TIME_FIELD = 19;
-
-function darwinPsArgs(pid: number): string[] {
-  return ["-o", "lstart=", "-p", String(pid)];
-}
-
-function darwinProcessIdentity(psOutput: string): string | null {
-  const started = psOutput.trim();
-  return started === "" ? null : `darwin:${started}`;
-}
 
 function linuxProcessIdentity(stat: string, bootId: string): string | null {
   const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
@@ -230,43 +218,32 @@ export function readProcessIdentity(pid: number): string | null {
       return null;
     }
   }
-  if (process.platform !== "darwin") return null;
-  const result = spawnSync(DARWIN_PS_PATH, darwinPsArgs(pid), {
-    encoding: "utf8",
-    env: { LC_ALL: "C" },
-  });
-  return result.status === 0 ? darwinProcessIdentity(result.stdout) : null;
+  return null;
 }
 
 export async function readProcessIdentityAsync(
   pid: number,
 ): Promise<string | null> {
   if (process.platform !== "darwin") return readProcessIdentity(pid);
-  try {
-    const { stdout } = await execFileAsync(DARWIN_PS_PATH, darwinPsArgs(pid), {
-      encoding: "utf8",
-      env: { LC_ALL: "C" },
-    });
-    return darwinProcessIdentity(stdout);
-  } catch {
-    return null;
-  }
+  return readProcessStartIdentity(pid);
 }
 
-export function isBridgeWorkerAlive(
+export async function isBridgeWorkerAlive(
   entry: Pick<BridgeWorkerRegistryEntry, "pid" | "processIdentity">,
-): boolean {
-  return readProcessIdentity(entry.pid) === entry.processIdentity;
+): Promise<boolean> {
+  return (await readProcessIdentityAsync(entry.pid)) === entry.processIdentity;
 }
 
-export function reapDeadBridgeWorkers(
+export async function reapDeadBridgeWorkers(
   dir: string,
-  isAlive: (entry: BridgeWorkerRegistryEntry) => boolean = isBridgeWorkerAlive,
-): {
+  isAlive: (
+    entry: BridgeWorkerRegistryEntry,
+  ) => boolean | Promise<boolean> = isBridgeWorkerAlive,
+): Promise<{
   live: BridgeWorkerRegistryEntry[];
   reaped: BridgeWorkerRegistryEntry[];
   retirable: { id: string; socketPath: string }[];
-} {
+}> {
   const { entries, invalid } = readBridgeWorkerEntries(dir);
   const retirable: { id: string; socketPath: string }[] = [];
   for (const item of invalid) {
@@ -281,8 +258,9 @@ export function reapDeadBridgeWorkers(
   }
   const live: BridgeWorkerRegistryEntry[] = [];
   const reaped: BridgeWorkerRegistryEntry[] = [];
-  for (const entry of entries) {
-    if (isAlive(entry)) {
+  const alive = await Promise.all(entries.map(isAlive));
+  for (const [index, entry] of entries.entries()) {
+    if (alive[index] === true) {
       live.push(entry);
       continue;
     }

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
-import { readProcessIdentity } from "@bb/agent-runtime";
+import { readProcessIdentityAsync } from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
 import { threadScope, turnScope } from "@bb/domain";
@@ -2241,7 +2241,7 @@ describe("RuntimeManager bridge workers", () => {
       registered,
       JSON.stringify({
         ...entry,
-        processIdentity: readProcessIdentity(process.pid),
+        processIdentity: await readProcessIdentityAsync(process.pid),
       }),
     );
     await writeRegistryEntry({ dir, id: "bbbbbbbbbbbb", pid: process.pid });
@@ -2250,7 +2250,7 @@ describe("RuntimeManager bridge workers", () => {
       incompatible,
       JSON.stringify({
         ...JSON.parse(await fs.readFile(incompatible, "utf8")),
-        processIdentity: readProcessIdentity(process.pid),
+        processIdentity: await readProcessIdentityAsync(process.pid),
         transportVersion: 99,
         threads: {
           t1: {

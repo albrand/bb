@@ -13,7 +13,6 @@ import {
   type BridgeWorkerRegistryEntry,
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
-  readProcessIdentity,
   reapDeadBridgeWorkers,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -44,7 +43,7 @@ describe.skipIf(process.platform === "win32")(
         id,
         formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
         pid: process.pid,
-        processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
+        processIdentity: "test-process-identity",
         socketPath,
         pluginId: "provider-codex",
         providerId: "codex",
@@ -63,7 +62,7 @@ describe.skipIf(process.platform === "win32")(
       };
     }
 
-    it("accepts a socket beside the registry and one in the private fallback directory", () => {
+    it("accepts a socket beside the registry and one in the private fallback directory", async () => {
       const fallback = privateSocketDirectory({
         root: `/tmp/bb-${uid}`,
         uid,
@@ -88,7 +87,7 @@ describe.skipIf(process.platform === "win32")(
       }
     });
 
-    it("drops an entry whose socket path is anywhere else, and never touches that path", () => {
+    it("drops an entry whose socket path is anywhere else, and never touches that path", async () => {
       const targets = {
         cccccccccccc: join(outside, "cccccccccccc.sock"),
         dddddddddddd: `${dir}/../outside/dddddddddddd.sock`,
@@ -99,7 +98,7 @@ describe.skipIf(process.platform === "win32")(
         writeBridgeWorkerEntry(dir, entryAt(id, socketPath));
       }
 
-      const { live } = reapDeadBridgeWorkers(dir);
+      const { live } = await reapDeadBridgeWorkers(dir);
 
       expect(live).toEqual([]);
       for (const socketPath of Object.values(targets)) {
@@ -110,14 +109,14 @@ describe.skipIf(process.platform === "win32")(
       );
     });
 
-    it("drops an entry whose socket beside the registry is a symlink", () => {
+    it("drops an entry whose socket beside the registry is a symlink", async () => {
       const target = join(outside, "target");
       writeFileSync(target, "keep");
       const socketPath = join(dir, "aaaaaaaaaaaa.sock");
       symlinkSync(target, socketPath);
       writeBridgeWorkerEntry(dir, entryAt("aaaaaaaaaaaa", socketPath));
 
-      const { live } = reapDeadBridgeWorkers(dir);
+      const { live } = await reapDeadBridgeWorkers(dir);
 
       expect(live).toEqual([]);
       expect(existsSync(target)).toBe(true);

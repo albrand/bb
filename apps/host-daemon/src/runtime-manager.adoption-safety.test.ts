@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentRuntimeProcessExitInfo } from "@bb/agent-runtime";
 import {
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
-  readProcessIdentity,
+  readProcessIdentityAsync,
 } from "@bb/agent-runtime";
 import { createScriptedEchoLaunch } from "@bb/agent-runtime/test";
 import type { ThreadEvent } from "@bb/domain";
@@ -156,7 +156,7 @@ async function plantEntryWithListener(
       mutate({
         id,
         pid: process.pid,
-        processIdentity: readProcessIdentity(process.pid),
+        processIdentity: await readProcessIdentityAsync(process.pid),
         formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
         socketPath,
         pluginId: "provider-scripted-echo",

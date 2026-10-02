@@ -1,6 +1,6 @@
-import type { ChildProcess } from "node:child_process";
 import { spawnPortablePipedProcess } from "./spawn.js";
 import {
+  type ProcessGroupChildHandle,
   stopProcessGroupLeaderFirst,
   supportsProcessGroups,
   type ProcessStopResult,
@@ -28,7 +28,9 @@ export function spawnManagedProcess(
   return { child, stop: createProcessStop(child) };
 }
 
-export function createProcessStop(child: ChildProcess): ManagedProcess["stop"] {
+export function createProcessStop(
+  child: ProcessGroupChildHandle,
+): ManagedProcess["stop"] {
   let stopping: Promise<ProcessStopResult> | undefined;
   return function stop({ gracePeriodMs } = { gracePeriodMs: 1_000 }) {
     stopping ??= (async () => {

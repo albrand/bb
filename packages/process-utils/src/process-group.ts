@@ -1,6 +1,21 @@
 import type { ChildProcess } from "node:child_process";
 import { stopWindowsProcessTree } from "./windows-process-tree.js";
 
+export interface ProcessGroupChildHandle {
+  pid?: number | undefined;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  kill(signal: NodeJS.Signals): unknown;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  off(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+}
+
 interface KillProcessGroupArgs {
   child: {
     pid?: number | undefined;
@@ -10,7 +25,7 @@ interface KillProcessGroupArgs {
 }
 
 interface StopProcessGroupLeaderFirstArgs {
-  child: ChildProcess;
+  child: ProcessGroupChildHandle;
   timeoutMs: number;
   killGraceMs: number;
 }
@@ -62,7 +77,7 @@ export function isProcessGroupAlive(child: {
   }
 }
 
-function hasChildExited(child: ChildProcess): boolean {
+function hasChildExited(child: ProcessGroupChildHandle): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 

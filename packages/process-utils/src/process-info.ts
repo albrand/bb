@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -30,6 +31,39 @@ export async function readProcessIdentity(
       command: match[2] ?? null,
       startedAt: elapsed === null ? null : Date.now() - elapsed * 1_000,
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function readProcessStartIdentity(
+  pid: number,
+): Promise<string | null> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  if (process.platform === "linux") {
+    try {
+      const [stat, bootId] = await Promise.all([
+        readFile(`/proc/${pid}/stat`, "utf8"),
+        readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+      ]);
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const startedAt = fields[19];
+      return startedAt === undefined || startedAt === ""
+        ? null
+        : `linux:${bootId.trim()}:${startedAt}`;
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform !== "darwin") return null;
+  try {
+    const { stdout } = await execFileAsync(
+      "/bin/ps",
+      ["-o", "lstart=", "-p", String(pid)],
+      { encoding: "utf8", env: { LC_ALL: "C" }, timeout: 5_000 },
+    );
+    const started = stdout.trim();
+    return started === "" ? null : `darwin:${started}`;
   } catch {
     return null;
   }

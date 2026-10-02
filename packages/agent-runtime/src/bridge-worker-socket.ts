@@ -1,9 +1,9 @@
-import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
   closeSync,
+  createWriteStream,
   fstatSync,
   mkdirSync,
   openSync,
@@ -14,9 +14,10 @@ import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { PassThrough, type Readable, type Writable } from "node:stream";
 import {
-  killProcessGroup,
-  spawnPortableProcess,
-  supportsProcessGroups,
+  createProcessStop,
+  readProcessStartIdentity,
+  spawnManagedProcess,
+  type ManagedProcess,
 } from "@bb/process-utils";
 import {
   type BridgeCapabilities,
@@ -40,7 +41,6 @@ import {
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   fallbackSocketRoot,
   privateDirectoryProblem,
-  readProcessIdentity,
   readProcessIdentityAsync,
   removeBridgeWorkerFiles,
   socketDirectoryFor,
@@ -56,6 +56,9 @@ export interface BridgeWorkerProcess {
   readonly stdout: Readable;
   readonly stderr: Readable;
   kill(signal: NodeJS.Signals): boolean;
+  stop?(options?: { gracePeriodMs: number }): Promise<{
+    treeTermination: "confirmed" | "unverified";
+  }>;
   on(
     event: "exit" | "close",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
@@ -97,6 +100,14 @@ interface WorkerProcessHandle {
   readonly signalCode: NodeJS.Signals | null;
   readonly killed: boolean;
   kill(signal: NodeJS.Signals): boolean;
+  once(
+    event: "close" | "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  off(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
   on(
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
@@ -106,6 +117,7 @@ interface WorkerProcessHandle {
 }
 
 const ADOPTED_WORKER_EXIT_POLL_MS = 5_000;
+const ADOPTED_WORKER_IDENTITY_CACHE_MS = ADOPTED_WORKER_EXIT_POLL_MS * 2;
 
 class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
   exitCode: number | null = null;
@@ -113,6 +125,8 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
   killed = false;
   private readonly recordedPid: number;
   private readonly processIdentity: string;
+  private identityMatches = true;
+  private identityCheckedAt = Date.now();
   private readonly poll: NodeJS.Timeout;
   private polling = false;
 
@@ -120,6 +134,7 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
     super();
     this.recordedPid = entry.pid;
     this.processIdentity = entry.processIdentity;
+    void this.checkStillRunning();
     this.poll = setInterval(() => {
       void this.checkStillRunning();
     }, ADOPTED_WORKER_EXIT_POLL_MS);
@@ -141,6 +156,10 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
     }
   }
 
+  stop(options?: { gracePeriodMs: number }) {
+    return createProcessStop(this)(options);
+  }
+
   markGone(): void {
     if (this.exitCode !== null) return;
     this.stopWatching();
@@ -155,7 +174,8 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
   private isRecordedProcess(): boolean {
     return (
       this.exitCode === null &&
-      readProcessIdentity(this.recordedPid) === this.processIdentity
+      this.identityMatches &&
+      Date.now() - this.identityCheckedAt <= ADOPTED_WORKER_IDENTITY_CACHE_MS
     );
   }
 
@@ -164,7 +184,9 @@ class AdoptedProcessHandle extends EventEmitter implements WorkerProcessHandle {
     this.polling = true;
     try {
       const identity = await readProcessIdentityAsync(this.recordedPid);
-      if (identity !== this.processIdentity) this.markGone();
+      this.identityMatches = identity === this.processIdentity;
+      this.identityCheckedAt = Date.now();
+      if (!this.identityMatches) this.markGone();
     } finally {
       this.polling = false;
     }
@@ -287,7 +309,9 @@ export class SocketBridgeWorker
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   private readonly child: WorkerProcessHandle;
-  private readonly registryEntry: BridgeWorkerRegistryEntry | null;
+  private registryEntry: BridgeWorkerRegistryEntry | null;
+  private readonly managedProcess: ManagedProcess | null;
+  private readonly registrationReady: Promise<void>;
   private resumeRequested: boolean;
   private readonly connectTimeoutMs: number;
   private socket: Socket | null = null;
@@ -318,6 +342,8 @@ export class SocketBridgeWorker
       this.logPath = join(args.workerDir, `${args.entry.id}.log`);
       this.child = new AdoptedProcessHandle(args.entry);
       this.registryEntry = args.entry;
+      this.managedProcess = null;
+      this.registrationReady = Promise.resolve();
       this.resumeRequested = false;
     } else {
       const paths = allocateBridgeWorkerPaths(args.workerDir);
@@ -325,49 +351,33 @@ export class SocketBridgeWorker
       this.socketPath = paths.socketPath;
       this.logPath = paths.logPath;
       this.resumeRequested = true;
-      const logFd = openSync(this.logPath, "a", 0o600);
-      let child: ChildProcess;
+      const managedProcess = spawnManagedProcess({
+        command: args.command,
+        args: args.args,
+        cwd: args.cwd,
+        env: {
+          ...args.env,
+          [BRIDGE_SOCKET_ENV]: this.socketPath,
+          [BRIDGE_SPILL_ENV]: paths.spillPath,
+        },
+      });
+      const child = managedProcess.child;
+      const log = createWriteStream(this.logPath, { flags: "a", mode: 0o600 });
       try {
-        child = spawnPortableProcess({
-          command: args.command,
-          args: args.args,
-          cwd: args.cwd,
-          detached: supportsProcessGroups(),
-          env: {
-            ...args.env,
-            [BRIDGE_SOCKET_ENV]: this.socketPath,
-            [BRIDGE_SPILL_ENV]: paths.spillPath,
-          },
-          stdio: ["ignore", logFd, logFd],
-        });
-      } finally {
-        closeSync(logFd);
+        child.stdout.pipe(log, { end: false });
+        child.stderr.pipe(log, { end: false });
+        child.once("close", () => log.end());
+        child.stdin.end();
+      } catch (error) {
+        log.destroy();
+        void managedProcess.stop({ gracePeriodMs: 0 });
+        throw error;
       }
       child.unref();
       this.child = child;
-      const processIdentity =
-        child.pid === undefined ? null : readProcessIdentity(child.pid);
-      this.registryEntry =
-        child.pid === undefined || processIdentity === null
-          ? null
-          : {
-              ...args.registration,
-              id: this.id,
-              formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
-              pid: child.pid,
-              processIdentity,
-              socketPath: this.socketPath,
-              bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-              transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
-              capabilities: null,
-              capabilitiesSource: undefined,
-              startedAt: new Date().toISOString(),
-              workspace: args.workspace,
-              threads: {},
-            };
-      if (this.registryEntry !== null) {
-        writeBridgeWorkerEntry(this.workerDir, this.registryEntry);
-      }
+      this.managedProcess = managedProcess;
+      this.registryEntry = null;
+      this.registrationReady = this.registerSpawnedWorker(args, child.pid);
     }
     this.ackTracker = new BridgeLineAckTracker({
       workerId: this.id,
@@ -389,7 +399,40 @@ export class SocketBridgeWorker
       this.handleExit(code, signal);
     });
     this.connectTimeoutMs = args.connectTimeoutMs;
-    void this.connect(Date.now() + args.connectTimeoutMs);
+    const connectDeadline = Date.now() + args.connectTimeoutMs;
+    void this.registrationReady.then(() => this.connect(connectDeadline));
+  }
+
+  stop(options?: { gracePeriodMs: number }) {
+    return this.managedProcess === null
+      ? createProcessStop(this.child)(options)
+      : this.managedProcess.stop(options);
+  }
+
+  private async registerSpawnedWorker(
+    args: SpawnSocketBridgeWorkerArgs,
+    pid: number | undefined,
+  ): Promise<void> {
+    if (pid === undefined) return;
+    const processIdentity = await readProcessStartIdentity(pid);
+    if (processIdentity === null || this.child.exitCode !== null) return;
+    const entry: BridgeWorkerRegistryEntry = {
+      ...args.registration,
+      id: this.id,
+      formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
+      pid,
+      processIdentity,
+      socketPath: this.socketPath,
+      bridgeProtocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
+      transportVersion: BRIDGE_SOCKET_TRANSPORT_VERSION,
+      capabilities: null,
+      capabilitiesSource: undefined,
+      startedAt: new Date().toISOString(),
+      workspace: args.workspace,
+      threads: {},
+    };
+    this.registryEntry = entry;
+    writeBridgeWorkerEntry(this.workerDir, entry);
   }
 
   get pid(): number | undefined {
@@ -660,7 +703,7 @@ export class SocketBridgeWorker
     }
     await this.whenExited(BRIDGE_WORKER_FORCE_STOP_GRACE_MS);
     if (this.exited) return;
-    killProcessGroup({ child: this.child, signal: "SIGKILL" });
+    await this.stop({ gracePeriodMs: 0 });
   }
 
   private whenExited(timeoutMs: number): Promise<void> {

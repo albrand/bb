@@ -3,9 +3,6 @@ import { join } from "node:path";
 import {
   sanitizeInheritedChildProcessEnv,
   spawnManagedProcess,
-  isProcessGroupAlive,
-  killProcessGroup,
-  supportsProcessGroups,
   type ManagedProcess,
 } from "@bb/process-utils";
 import type { BridgeCapabilities } from "@bb/provider-bridge-protocol";
@@ -134,38 +131,6 @@ interface SpawnProviderArgs {
   pluginId: string;
   processKey: string;
   providerId: string;
-}
-
-async function stopBridgeWorkerProcess(
-  child: BridgeWorkerProcess,
-  gracePeriodMs: number,
-): Promise<Awaited<ReturnType<ManagedProcess["stop"]>>> {
-  const waitForExit = (timeoutMs: number): Promise<void> =>
-    new Promise((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        resolve();
-        return;
-      }
-      const timeout = setTimeout(resolve, timeoutMs);
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
-  const groupAlive = () =>
-    supportsProcessGroups() && isProcessGroupAlive(child);
-  killProcessGroup({ child, signal: "SIGTERM" });
-  await waitForExit(gracePeriodMs);
-  if ((child.exitCode === null && child.signalCode === null) || groupAlive()) {
-    killProcessGroup({ child, signal: "SIGKILL" });
-    await waitForExit(1_000);
-  }
-  return {
-    treeTermination:
-      (child.exitCode !== null || child.signalCode !== null) && !groupAlive()
-        ? "confirmed"
-        : "unverified",
-  };
 }
 
 interface ProviderProcessExitStatus {
@@ -537,10 +502,10 @@ export class RuntimeProviderProcessManager {
   ): RuntimeProviderProcess {
     const child = args.child;
     const managed = args.managed;
-    const stop =
-      managed?.stop ??
-      ((options = { gracePeriodMs: 1_000 }) =>
-        stopBridgeWorkerProcess(child, options.gracePeriodMs));
+    const stop = managed?.stop ?? child.stop?.bind(child);
+    if (stop === undefined) {
+      throw new Error("Provider process has no managed stop operation");
+    }
     let finalizeExit: () => void = () => undefined;
     const exitFinalized = new Promise<void>((resolve) => {
       finalizeExit = resolve;

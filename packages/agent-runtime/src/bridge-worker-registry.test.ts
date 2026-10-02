@@ -14,7 +14,6 @@ import {
   type BridgeWorkerRegistryEntry,
   BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
   readBridgeWorkerEntries,
-  readProcessIdentity,
   reapDeadBridgeWorkers,
   writeBridgeWorkerEntry,
 } from "./bridge-worker-registry.js";
@@ -27,7 +26,7 @@ function entry(
     id: "a1b2c3d4e5f6",
     formatVersion: BRIDGE_WORKER_REGISTRY_FORMAT_VERSION,
     pid: process.pid,
-    processIdentity: readProcessIdentity(process.pid) ?? "unreadable",
+    processIdentity: "test-process-identity",
     socketPath: join(dir, `${overrides.id ?? "a1b2c3d4e5f6"}.sock`),
     pluginId: "provider-codex",
     providerId: "codex",
@@ -80,7 +79,7 @@ describe("bridge worker registry", () => {
     }
   });
 
-  it("reaps entries whose worker is gone, with their socket and log, and keeps live ones", () => {
+  it("reaps entries whose worker is gone, with their socket and log, and keeps live ones", async () => {
     const live = entry(dir, { id: "aaaaaaaaaaaa" });
     const dead = entry(dir, {
       id: "bbbbbbbbbbbb",
@@ -93,7 +92,10 @@ describe("bridge worker registry", () => {
     writeFileSync(join(dir, "bbbbbbbbbbbb.log"), "worker log");
     writeFileSync(join(dir, "cccccccccccc.json"), "{ not json");
 
-    const result = reapDeadBridgeWorkers(dir);
+    const result = await reapDeadBridgeWorkers(
+      dir,
+      (candidate) => candidate.pid === process.pid,
+    );
 
     expect(result.live).toEqual([live]);
     expect(result.reaped).toEqual([dead]);
@@ -103,11 +105,11 @@ describe("bridge worker registry", () => {
 
   it.skipIf(process.platform === "win32")(
     "reaps an entry whose pid is running a different process, without signalling it",
-    () => {
+    async () => {
       const reused = entry(dir, { id: "dddddddddddd", processIdentity: "stale" });
       writeBridgeWorkerEntry(dir, reused);
 
-      const result = reapDeadBridgeWorkers(dir);
+      const result = await reapDeadBridgeWorkers(dir);
 
       expect(result.live).toEqual([]);
       expect(result.reaped).toEqual([reused]);
@@ -115,8 +117,8 @@ describe("bridge worker registry", () => {
     },
   );
 
-  it("treats a missing registry directory as empty", () => {
-    expect(reapDeadBridgeWorkers(join(dir, "missing"))).toEqual({
+  it("treats a missing registry directory as empty", async () => {
+    await expect(reapDeadBridgeWorkers(join(dir, "missing"))).resolves.toEqual({
       live: [],
       reaped: [],
       retirable: [],

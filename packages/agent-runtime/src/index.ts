@@ -8,6 +8,7 @@ export {
   readBridgeWorkerEntries,
   writeBridgeWorkerEntry,
   readProcessIdentity,
+  readProcessIdentityAsync,
   reapDeadBridgeWorkers,
   retireBridgeWorker,
 } from "./bridge-worker-registry.js";

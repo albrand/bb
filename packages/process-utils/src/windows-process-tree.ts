@@ -1,8 +1,11 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import type { ProcessStopResult } from "./process-group.js";
+import type {
+  ProcessGroupChildHandle,
+  ProcessStopResult,
+} from "./process-group.js";
 
-function hasExited(child: ChildProcess): boolean {
+function hasExited(child: ProcessGroupChildHandle): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
@@ -43,7 +46,7 @@ export function terminateWindowsProcessTrees(
   });
 }
 
-function waitForRootExit(child: ChildProcess): Promise<void> {
+function waitForRootExit(child: ProcessGroupChildHandle): Promise<void> {
   if (hasExited(child)) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const onExit = (): void => {
@@ -59,7 +62,7 @@ function waitForRootExit(child: ChildProcess): Promise<void> {
 }
 
 export async function stopWindowsProcessTree(
-  child: ChildProcess,
+  child: ProcessGroupChildHandle,
 ): Promise<ProcessStopResult> {
   if (child.pid === undefined || hasExited(child)) {
     return { treeTermination: "unverified" };
