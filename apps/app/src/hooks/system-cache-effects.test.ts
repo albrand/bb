@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryObserver } from "@tanstack/react-query";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { createAppQueryClient } from "@/lib/query-client";
+import { createRealtimeCacheEffects } from "./realtime-cache-effects";
 import {
   environmentDiffFilesQueryKey,
   environmentDiffPatchQueryKey,
   hostsQueryKey,
+  projectsQueryKey,
   sidebarNavigationQueryKey,
   systemProvidersQueryKey,
   systemExecutionOptionsQueryKey,
@@ -368,6 +370,70 @@ describe("system cache effects", () => {
     expect(queryClient.getQueryState(hostsKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(neverFetchedKey)).toBeUndefined();
+  });
+
+  it("refetches projects, hosts, and sidebar data that failed before the first websocket connection", async () => {
+    const queryClient = createCacheEffectQueryClient();
+    queryClient.mount();
+    const hostsKey = hostsQueryKey();
+    const projectsKey = projectsQueryKey();
+    const sidebarKey = sidebarNavigationQueryKey();
+    const hostsQuery = vi
+      .fn<() => Promise<{ id: string; status: string }[]>>()
+      .mockRejectedValueOnce(new Error("server is not listening"))
+      .mockResolvedValue([{ id: "host-local", status: "connected" }]);
+    const projectsQuery = vi
+      .fn<() => Promise<{ id: string }[]>>()
+      .mockRejectedValueOnce(new Error("server is not listening"))
+      .mockResolvedValue([{ id: "project-workspace" }]);
+    const sidebarQuery = vi
+      .fn<() => Promise<{ projects: { id: string }[] }>>()
+      .mockRejectedValueOnce(new Error("server is not listening"))
+      .mockResolvedValue({ projects: [{ id: "project-workspace" }] });
+    const queries = [
+      new QueryObserver(queryClient, {
+        queryKey: hostsKey,
+        queryFn: hostsQuery,
+      }),
+      new QueryObserver(queryClient, {
+        queryKey: projectsKey,
+        queryFn: projectsQuery,
+      }),
+      new QueryObserver(queryClient, {
+        queryKey: sidebarKey,
+        queryFn: sidebarQuery,
+      }),
+    ];
+    const unsubscribes = queries.map((query) => query.subscribe(() => {}));
+
+    await vi.waitFor(() => {
+      for (const query of queries) {
+        expect(query.getCurrentResult().isError).toBe(true);
+      }
+    });
+
+    const effects = createRealtimeCacheEffects({ queryClient });
+    effects.handleConnected({ reconnected: false });
+
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryData(hostsKey)).toEqual([
+        { id: "host-local", status: "connected" },
+      ]);
+      expect(queryClient.getQueryData(projectsKey)).toEqual([
+        { id: "project-workspace" },
+      ]);
+      expect(queryClient.getQueryData(sidebarKey)).toEqual({
+        projects: [{ id: "project-workspace" }],
+      });
+    });
+
+    expect(hostsQuery).toHaveBeenCalledTimes(2);
+    expect(projectsQuery).toHaveBeenCalledTimes(2);
+    expect(sidebarQuery).toHaveBeenCalledTimes(2);
+    effects.dispose();
+    unsubscribes.forEach((unsubscribe) => unsubscribe());
+    queryClient.unmount();
+    queryClient.clear();
   });
 
   it("refetches an active diff TOC query but evicts the observer-less patch cache after reconnect", async () => {

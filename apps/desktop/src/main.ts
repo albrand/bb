@@ -94,6 +94,10 @@ import {
   writeOwnedRuntimePidFile,
 } from "./owned-runtime-supervisor.js";
 import {
+  createOwnedRuntimeRecovery,
+  resolveOwnedRuntimeExitAction,
+} from "./owned-runtime-recovery.js";
+import {
   probeBbServer,
   waitForCompatibleServer,
   type CompatibleServerProbeResult,
@@ -398,6 +402,8 @@ let currentApplicationMenuAccelerators = DEFAULT_APPLICATION_MENU_ACCELERATORS;
 let desktopUpdateService: DesktopUpdateService | null = null;
 let desktopAutoUpdateService: DesktopAutoUpdateService | null = null;
 let currentRuntime: DesktopRuntime | null = null;
+let ownedRuntimeRecovery: ReturnType<typeof createOwnedRuntimeRecovery> | null =
+  null;
 let currentWindowUrl: string | null = null;
 let logViewerLineBuffer: LogLineBuffer | null = null;
 let logViewerPreloadPath: string | null = null;
@@ -2453,14 +2459,29 @@ async function spawnOwnedRuntime(
 
   void bbProcess.exit.then((exit) => {
     void clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
-    if (quitting || currentRuntime !== runtime) {
+    const exitAction = resolveOwnedRuntimeExitAction({
+      appLoaded: bbAppLoaded,
+      hasRecoveryController: ownedRuntimeRecovery !== null,
+      isCurrentRuntime: currentRuntime === runtime,
+      isRecovering: ownedRuntimeRecovery?.isRecovering() ?? false,
+      isQuitting: quitting,
+      isServerMoving: localServerMove !== null,
+    });
+    if (exitAction === "ignore") {
       return;
     }
     setCurrentRuntime(null);
-    if (localServerMove !== null) {
+    if (exitAction === "server-moving") {
       desktopLogger.warn(
         `[desktop] the Electron-owned bb-app process that runs this computer as a machine stopped with ${formatExitResult(exit)}`,
       );
+      return;
+    }
+    if (exitAction === "recover") {
+      desktopLogger.warn(
+        `[desktop] the Electron-owned bb-app process exited with ${formatExitResult(exit)}; restarting it`,
+      );
+      void ownedRuntimeRecovery?.start();
       return;
     }
     void loadStartupError({
@@ -2477,6 +2498,7 @@ async function spawnOwnedRuntime(
 
 async function startOwnedRuntime(
   args: StartOwnedRuntimeArgs,
+  options: { suppressStartupError?: boolean } = {},
 ): Promise<DesktopRuntime | null> {
   const { bbProcess, runtime } = await spawnOwnedRuntime(args);
 
@@ -2496,14 +2518,16 @@ async function startOwnedRuntime(
   ]);
 
   if (raceResult.kind === "process-exited") {
-    await loadStartupError({
-      details: `bb-app exited before the server was ready with ${formatExitResult(
-        raceResult.exit,
-      )}.`,
-      logs: bbProcess.logs.text(),
-      actions: [],
-      title: "Could not start bb",
-    });
+    if (!options.suppressStartupError) {
+      await loadStartupError({
+        details: `bb-app exited before the server was ready with ${formatExitResult(
+          raceResult.exit,
+        )}.`,
+        logs: bbProcess.logs.text(),
+        actions: [],
+        title: "Could not start bb",
+      });
+    }
     setCurrentRuntime(null);
     return null;
   }
@@ -2512,15 +2536,17 @@ async function startOwnedRuntime(
     return runtime;
   }
 
-  await loadStartupError({
-    details:
-      raceResult.result.kind === "incompatible"
-        ? `Port ${args.serverUrl} is responding, but it does not look like bb: ${raceResult.result.reason}.`
-        : `Timed out waiting for bb at ${args.serverUrl}: ${raceResult.result.reason}.`,
-    logs: bbProcess.logs.text(),
-    actions: [],
-    title: "Could not start bb",
-  });
+  if (!options.suppressStartupError) {
+    await loadStartupError({
+      details:
+        raceResult.result.kind === "incompatible"
+          ? `Port ${args.serverUrl} is responding, but it does not look like bb: ${raceResult.result.reason}.`
+          : `Timed out waiting for bb at ${args.serverUrl}: ${raceResult.result.reason}.`,
+      logs: bbProcess.logs.text(),
+      actions: [],
+      title: "Could not start bb",
+    });
+  }
   await stopOwnedRuntime();
   return null;
 }
@@ -2639,6 +2665,40 @@ async function decideOnExistingServer(
 }
 
 async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
+  ownedRuntimeRecovery = createOwnedRuntimeRecovery({
+    isCurrent: () => !quitting && localServerMove === null,
+    onRecovered: () => {
+      const runtime = currentRuntime;
+      if (runtime === null) {
+        return;
+      }
+      void loadBbApp(runtime.serverUrl)
+        .then(() => {
+          startSystemConfigSync(runtime.serverUrl);
+          refreshApplicationMenu();
+        })
+        .catch((error: unknown) => {
+          desktopLogger.error(
+            `[desktop] could not load the restarted bb server: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      desktopLogger.info(
+        "[desktop] reconnected the window to its restarted bb server",
+      );
+    },
+    onRetry: (error) => {
+      desktopLogger.warn(
+        `[desktop] could not restart bb-app: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+    restart: async () => {
+      await loadLoadingView();
+      return (
+        (await startOwnedRuntime(args, { suppressStartupError: true })) !== null
+      );
+    },
+  });
+
   const existingProbe = await probeBbServer({
     serverUrl: args.serverUrl,
     timeoutMs: ATTACH_PROBE_TIMEOUT_MS,
