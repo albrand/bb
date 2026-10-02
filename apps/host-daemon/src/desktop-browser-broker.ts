@@ -3,6 +3,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
+import { superviseTcpServerSockets } from "@bb/process-utils";
 import {
   DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE,
   desktopBrowserBrokerDescriptorSchema,
@@ -17,6 +18,7 @@ import {
   type DesktopBrowserInstance,
   type DesktopBrowserResult,
 } from "@bb/host-daemon-contract";
+import type { HostDaemonLogger } from "./logger.js";
 
 interface Peer {
   socket: WebSocket;
@@ -41,6 +43,7 @@ export interface DesktopBrowserBroker {
 export async function startDesktopBrowserBroker(options: {
   dataDir: string;
   hostId: string;
+  logger: Pick<HostDaemonLogger, "warn">;
   serverUrl: string;
   onChanged: (event: DesktopBrowserChanged) => void;
   requestTimeoutMs?: number;
@@ -54,6 +57,15 @@ export async function startDesktopBrowserBroker(options: {
   const timeoutMs = options.requestTimeoutMs ?? 15_000;
   const server = createServer((_request, response) => {
     response.writeHead(404).end();
+  });
+  superviseTcpServerSockets(server, (error, _socket, context) => {
+    options.logger.warn(
+      {
+        err: error,
+        ...context,
+      },
+      "Desktop browser broker TCP client socket failed",
+    );
   });
   const websocketServer = new WebSocketServer({
     noServer: true,

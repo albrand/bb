@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { stat, statfs } from "node:fs/promises";
 import { createServer } from "node:net";
+import { superviseTcpServerSockets } from "@bb/process-utils";
 import { isFileNotFoundError } from "./fs.js";
 
 const GH_AUTH_STATUS_TIMEOUT_MS = 10_000;
@@ -14,6 +15,17 @@ export type PortAvailabilityCheck = (port: number) => Promise<boolean>;
 function canListen(port: number, host: string): Promise<boolean> {
   return new Promise((resolveListen) => {
     const server = createServer();
+    superviseTcpServerSockets(server, (error, _socket, context) => {
+      console.warn(
+        {
+          err: error,
+          host,
+          port,
+          ...context,
+        },
+        "Host daemon port availability probe TCP client socket failed",
+      );
+    });
     server.once("error", () => resolveListen(false));
     server.listen({ port, host, exclusive: true }, () => {
       server.close(() => resolveListen(true));

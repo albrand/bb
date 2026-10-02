@@ -1,6 +1,6 @@
 import http from "node:http";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer as createNetServer } from "node:net";
+import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,13 +9,23 @@ import {
   createHostDaemonLocalClient,
   type WorkspaceOpenTarget,
 } from "@bb/host-daemon-contract";
-import { startLocalApiServer, type LocalApiServer } from "./local-api.js";
+import {
+  startLocalApiServer as startLocalApiServerImpl,
+  type LocalApiServer,
+} from "./local-api.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import { WorkspaceOpenTargetError } from "@bb/local-open-targets";
 
 describe("local API server", () => {
   let server: LocalApiServer | null = null;
+  const logger = { warn: vi.fn() };
+
+  function startLocalApiServer(
+    options: Omit<Parameters<typeof startLocalApiServerImpl>[0], "logger">,
+  ): Promise<LocalApiServer> {
+    return startLocalApiServerImpl({ ...options, logger });
+  }
 
   function createLocalApiConfig(
     overrides: Partial<HostDaemonLocalApiConfig> = {},
@@ -32,6 +42,7 @@ describe("local API server", () => {
   afterEach(async () => {
     await server?.close();
     server = null;
+    vi.clearAllMocks();
   });
 
   it("rejects a foreign browser origin instead of only withholding CORS", async () => {
@@ -193,6 +204,36 @@ describe("local API server", () => {
     });
     const healthResponse = await client.health.$get();
     expect(await healthResponse.text()).toBe("ok");
+  });
+
+  it("logs and closes a reset TCP client socket", async () => {
+    server = await startLocalApiServer({
+      hostId: "host-reset",
+      localApiConfig: createLocalApiConfig(),
+      serverUrl: "http://server.test",
+      serverPort: 3334,
+      getConnected: () => true,
+    });
+    const client = createConnection(server.port, "localhost");
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    const closed = new Promise<void>((resolve) =>
+      client.once("close", resolve),
+    );
+
+    client.resetAndDestroy();
+    await closed;
+    await vi.waitFor(() => {
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({ code: "ECONNRESET" }),
+          localPort: expect.any(Number),
+        }),
+        "Host daemon local API TCP client socket failed",
+      );
+    });
   });
 
   it("explains how to resolve a local API port collision", async () => {

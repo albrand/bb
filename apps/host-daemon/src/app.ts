@@ -723,6 +723,7 @@ export async function createHostDaemonApp(
   const desktopBrowserBroker = await startDesktopBrowserBroker({
     dataDir: options.dataDir,
     hostId: options.hostId,
+    logger: options.logger,
     serverUrl: options.serverUrl,
     onChanged: (event) => sendServerMessage(event),
   });
@@ -909,6 +910,7 @@ export async function createHostDaemonApp(
     ? await startLocalApiServer({
         dataDir: options.dataDir,
         hostId: options.hostId,
+        logger: options.logger,
         localApiConfig: options.localApiConfig,
         serverUrl: options.serverUrl,
         serverPort: Number(new URL(options.serverUrl).port) || 0,
