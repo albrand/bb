@@ -83,7 +83,7 @@ describe("assertElectronRuntime", () => {
 
   it("accepts a macOS framework above the measured size floor", async () => {
     const { executable, framework } = await createMacRuntimeFixture();
-    await truncate(framework, 190_000_000);
+    await truncate(framework, 128 * 1024 * 1024);
 
     expect(() =>
       assertElectronRuntime(executable, { platform: "darwin" }),
@@ -92,7 +92,7 @@ describe("assertElectronRuntime", () => {
 
   it("accepts the renamed framework binary in a packaged macOS app", async () => {
     const { executable, framework } = await createMacRuntimeFixture("bb");
-    await truncate(framework, 190_000_000);
+    await truncate(framework, 128 * 1024 * 1024);
 
     expect(() =>
       assertElectronRuntime(executable, { platform: "darwin" }),

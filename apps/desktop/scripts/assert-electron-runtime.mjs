@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const MINIMUM_MACOS_EXECUTABLE_BYTES = 16 * 1024;
 const MINIMUM_EXECUTABLE_BYTES = 1024 * 1024;
-const MINIMUM_MACOS_FRAMEWORK_BYTES = 190_000_000;
+const MINIMUM_MACOS_FRAMEWORK_BYTES = 128 * 1024 * 1024;
 
 export function assertElectronRuntime(
   executablePath,
