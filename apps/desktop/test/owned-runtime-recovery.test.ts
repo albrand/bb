@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   createOwnedRuntimeRecovery,
@@ -6,6 +8,40 @@ import {
 } from "../src/owned-runtime-recovery.js";
 
 describe("owned runtime recovery", () => {
+  it("wires the owned process exit watcher to the window recovery callbacks in main", () => {
+    const mainSource = readFileSync(join(process.cwd(), "src/main.ts"), "utf8");
+    const exitWatcherStart = mainSource.indexOf("void watchOwnedRuntimeExit({");
+    const exitWatcherEnd = mainSource.indexOf(
+      "return { bbProcess, runtime }",
+      exitWatcherStart,
+    );
+    const recoveryStart = mainSource.indexOf(
+      "ownedRuntimeRecovery = createOwnedRuntimeRecovery({",
+    );
+    const recoveryEnd = mainSource.indexOf(
+      "const existingProbe",
+      recoveryStart,
+    );
+    const exitWatcher = mainSource.slice(exitWatcherStart, exitWatcherEnd);
+    const recoverySetup = mainSource.slice(recoveryStart, recoveryEnd);
+
+    expect(exitWatcherStart).toBeGreaterThanOrEqual(0);
+    expect(exitWatcherEnd).toBeGreaterThan(exitWatcherStart);
+    expect(exitWatcher).toContain("exit: bbProcess.exit");
+    expect(exitWatcher).toContain("await ownedRuntimeRecovery?.start()");
+    expect(recoverySetup).toContain("await loadLoadingView()");
+    expect(recoverySetup).toContain(
+      "startOwnedRuntime(args, { suppressStartupError: true })",
+    );
+    expect(recoverySetup).toContain("onUnavailable: () =>");
+    expect(recoverySetup).toContain(
+      "bb-app restart did not reach a healthy server; retrying",
+    );
+    expect(recoverySetup).toContain("loadBbApp(runtime.serverUrl)");
+    expect(recoverySetup).toContain("startSystemConfigSync(runtime.serverUrl)");
+    expect(recoverySetup).toContain("refreshApplicationMenu()");
+  });
+
   it("restarts an owned server that exits after the application has loaded", () => {
     expect(
       resolveOwnedRuntimeExitAction({
@@ -50,9 +86,11 @@ describe("owned runtime recovery", () => {
       serverAvailable = attempts === 2;
     });
     const recovered = vi.fn();
+    const unavailable = vi.fn();
     const restart = vi.fn(async () => serverAvailable);
     const recovery = createOwnedRuntimeRecovery({
       isCurrent: () => true,
+      onUnavailable: unavailable,
       onRecovered: recovered,
       restart,
       wait,
@@ -62,6 +100,7 @@ describe("owned runtime recovery", () => {
 
     expect(wait).toHaveBeenCalledTimes(2);
     expect(restart).toHaveBeenCalledTimes(2);
+    expect(unavailable).toHaveBeenCalledOnce();
     expect(recovered).toHaveBeenCalledOnce();
   });
 
@@ -126,6 +165,32 @@ describe("owned runtime recovery", () => {
       "reload renderer",
       "refresh system config and menu",
     ]);
+  });
+
+  it("ignores an owned-process exit while another recovery is already active", async () => {
+    const clearRuntime = vi.fn();
+    const recover = vi.fn(async () => {});
+    const watching = watchOwnedRuntimeExit({
+      exit: Promise.resolve("duplicate exit"),
+      getState: () => ({
+        appLoaded: true,
+        hasRecoveryController: true,
+        isCurrentRuntime: true,
+        isRecovering: true,
+        isQuitting: false,
+        isServerMoving: false,
+      }),
+      clearPidFile: vi.fn(),
+      clearCurrentRuntime: clearRuntime,
+      recover,
+      showError: vi.fn(),
+      showServerMoving: vi.fn(),
+    });
+
+    await watching;
+
+    expect(clearRuntime).not.toHaveBeenCalled();
+    expect(recover).not.toHaveBeenCalled();
   });
 
   it("stops retrying when the desktop runtime is no longer current", async () => {

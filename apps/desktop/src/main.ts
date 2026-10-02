@@ -2667,6 +2667,11 @@ async function decideOnExistingServer(
 async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
   ownedRuntimeRecovery = createOwnedRuntimeRecovery({
     isCurrent: () => !quitting && localServerMove === null,
+    onUnavailable: () => {
+      desktopLogger.warn(
+        "[desktop] bb-app restart did not reach a healthy server; retrying",
+      );
+    },
     onRecovered: () => {
       const runtime = currentRuntime;
       if (runtime === null) {

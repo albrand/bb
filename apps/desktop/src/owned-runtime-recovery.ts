@@ -1,5 +1,6 @@
 interface CreateOwnedRuntimeRecoveryArgs {
   isCurrent: () => boolean;
+  onUnavailable?: () => void;
   onRecovered?: () => void;
   onRetry?: (error?: unknown) => void;
   restart: () => Promise<boolean>;
@@ -120,6 +121,7 @@ function wait(delayMs: number): Promise<void> {
 
 export function createOwnedRuntimeRecovery({
   isCurrent,
+  onUnavailable,
   onRecovered,
   onRetry,
   restart,
@@ -148,6 +150,7 @@ export function createOwnedRuntimeRecovery({
               onRecovered?.();
               return;
             }
+            onUnavailable?.();
           } catch (error) {
             onRetry?.(error);
           }
