@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDesktopOwnedRuntimeRecovery } from "../src/owned-runtime-recovery.js";
 import {
   createDesktopWindowFactory,
@@ -39,6 +39,7 @@ async function createTempDir(): Promise<TempDir> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
     if (tempDir !== undefined) {
@@ -304,6 +305,18 @@ describe("desktop window factory", () => {
         stateKey: "window-second",
       },
     ]);
+  });
+
+  it("keeps smoke windows hidden when requested", async () => {
+    vi.stubEnv("BB_DESKTOP_SMOKE_HIDE_WINDOWS", "1");
+    const { createdWindows, factory } = await createFactoryHarness();
+    await factory.createWindow({
+      initialUrl: "http://127.0.0.1:38886",
+      stateKey: null,
+    });
+
+    createdWindows[0]?.emitReadyToShow();
+    expect(createdWindows[0]?.shown).toBe(false);
   });
 
   it("retries recovery when the active window factory rejects a server load", async () => {

@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createPackagedAppLaunchArguments } from "../scripts/packaged-app-launch.mjs";
+import { assertElectronRuntime } from "../scripts/assert-electron-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(__filename);
@@ -321,6 +322,7 @@ describe("desktop build", () => {
 
   beforeAll(async () => {
     desktopVersion = await readDesktopPackageVersion();
+    if (ELECTRON_DISPLAY_AVAILABLE) assertElectronRuntime(electronBinary);
     await execFileAsync(process.execPath, ["scripts/build.mjs"], {
       cwd: desktopPackageRoot,
     });
@@ -376,6 +378,7 @@ describe("desktop build", () => {
         BB_DATA_DIR: join(smokeRoot, "data"),
         BB_DESKTOP_AUTO_UPDATE: "0",
         BB_DESKTOP_OPEN_DEVTOOLS: "0",
+        BB_DESKTOP_SMOKE_HIDE_WINDOWS: "1",
         BB_DESKTOP_VERSION_CHECK: "0",
         BB_SERVER_PORT: String(smokeServer.port),
       };

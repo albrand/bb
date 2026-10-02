@@ -207,6 +207,7 @@ async function loadUrlIntoWindow(args: LoadUrlIntoWindowArgs): Promise<void> {
 export function createDesktopWindowFactory(
   args: CreateDesktopWindowFactoryArgs,
 ): DesktopWindowFactory {
+  const showWindows = process.env.BB_DESKTOP_SMOKE_HIDE_WINDOWS !== "1";
   const activeWindows = new Map<WindowStateKey, DesktopBrowserWindow>();
   const pendingStateKeys = new Set<WindowStateKey>();
 
@@ -249,7 +250,7 @@ export function createDesktopWindowFactory(
       }
 
       browserWindow.once("ready-to-show", () => {
-        browserWindow.show();
+        if (showWindows) browserWindow.show();
       });
       browserWindow.on("closed", () => {
         activeWindows.delete(stateKey);

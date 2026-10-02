@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { build } from "esbuild";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -105,6 +106,7 @@ try {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const electron = require("electron");
+  assertElectronRuntime(electron);
   const child = spawn(
     "xvfb-run",
     ["-a", electron, "--no-sandbox", fixture, configPath],

@@ -12,6 +12,7 @@ import {
   resolveDesktopReleaseChannel,
 } from "./desktop-release-channel.mjs";
 import { createPackagedAppLaunchArguments } from "./packaged-app-launch.mjs";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 import { resolvePackagedAppBinary } from "./packaged-app-paths.mjs";
 import { smokePackagedNpm } from "./smoke-packaged-npm.mjs";
 
@@ -313,6 +314,7 @@ async function smokePackagedApp() {
     productName: releaseConfig.applicationName,
     releaseDir,
   });
+  assertElectronRuntime(appBinary);
   await smokePackagedNpm(appBinary);
   const smokeRoot = await mkdtemp(join(tmpdir(), "bb-desktop-packaged-smoke-"));
   const dataDir = join(smokeRoot, "data");
@@ -333,6 +335,7 @@ async function smokePackagedApp() {
     // and keep exercising the real attach path.
     BB_DESKTOP_ATTACH_WITHOUT_PROMPT: "1",
     BB_DESKTOP_OPEN_DEVTOOLS: "0",
+    BB_DESKTOP_SMOKE_HIDE_WINDOWS: "1",
     BB_DESKTOP_VERSION_FEED_URL: `${serverUrl}/desktop-version.json`,
     BB_SERVER_PORT: String(smokeServer.port),
   };

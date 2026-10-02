@@ -20,6 +20,7 @@ import {
   createDesktopReleaseConfig,
   resolveDesktopReleaseChannel,
 } from "./desktop-release-channel.mjs";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 import { resolvePackagedAppBinary } from "./packaged-app-paths.mjs";
 
 const run = promisify(execFile);
@@ -159,6 +160,7 @@ async function auditDependencies(modulesRoot) {
 
 export async function smokePackagedNpm(appBinary) {
   appBinary = resolve(appBinary);
+  assertElectronRuntime(appBinary);
   const resources =
     process.platform === "darwin"
       ? resolve(dirname(appBinary), "..", "Resources")
