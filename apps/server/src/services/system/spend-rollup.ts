@@ -10,6 +10,7 @@ import {
   listSpendBackfillThreads,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listStoredTokenUsageEvents,
+  recordThreadTurnSpendContribution,
   resolveSpendModel,
   saveSpendCursor,
   type SpendContribution,
@@ -188,6 +189,23 @@ function rollUpObservations(
     tracked.set(key, entry);
     if (contribution !== null) {
       contributions.push(contribution);
+      if (observation.turnId !== null) {
+        recordThreadTurnSpendContribution(db, {
+          at: observation.createdAt,
+          providerThreadId: observation.providerThreadId,
+          threadId: observation.threadId,
+          turnId: observation.turnId,
+          usage: {
+            cachedInputTokens:
+              observation.turnSpendUsage?.cachedInputTokens ?? null,
+            inputTokens: contribution.usage.inputTokens,
+            outputTokens: contribution.usage.outputTokens,
+            reasoningOutputTokens:
+              observation.turnSpendUsage?.reasoningOutputTokens ?? null,
+            totalTokens: contribution.usage.totalTokens,
+          },
+        });
+      }
     }
   }
 
@@ -223,6 +241,18 @@ export function recordSpendForInsertedEvents(
     threadId: source.threadId,
     total: toBreakdown(source.event.tokenUsage.total),
     turnId: source.turnId,
+    turnSpendUsage: {
+      cachedInputTokens:
+        source.event.tokenUsage.last.cacheReadInputTokens !== undefined ||
+        source.event.tokenUsage.last.cacheWriteInputTokens !== undefined ||
+        source.event.tokenUsage.last.cachedInputTokens > 0
+          ? source.event.tokenUsage.last.cachedInputTokens
+          : null,
+      reasoningOutputTokens:
+        source.providerId === "codex"
+          ? source.event.tokenUsage.last.reasoningOutputTokens
+          : null,
+    },
   }));
   ensureSpendTables(db);
   return rollUpObservations(db, observations);

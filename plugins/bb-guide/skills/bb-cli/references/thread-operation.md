@@ -114,6 +114,10 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
   absolute file/image paths and `file:` URLs are uploaded from the CLI machine before the update.
 - Use `bb thread show <thread-id>` for status, parent, environment, pull request
   status, and result.
+- `bb thread show <thread-id>` also prints the durable input, output, reasoning,
+  cached and total token counts. Parent threads include child agent counts by
+  state and their combined token total; JSON includes `spendSummary` and
+  `childSummary`.
 - Use `bb thread show <thread-id> --git-diff` to review file changes.
 - Use `bb thread log <thread-id>` to inspect the conversation. The default
   shows only the newest 20 user-message turns and ends with a notice when older

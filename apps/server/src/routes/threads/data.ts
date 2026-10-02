@@ -2,6 +2,7 @@ import { extractThreadContextWindowUsage } from "@bb/thread-view";
 import { clearTimelineOrderingContextCache } from "../../services/threads/timeline-context-order.js";
 import {
   getAppSettings,
+  ensureSpendTables,
   getDatabaseDataVersion,
   getThreadPluginMetadata,
   patchThreadPluginMetadata,
@@ -12,6 +13,8 @@ import {
   getThreadExecutionOverride,
   getThreadExecutionReport,
   listQueuedThreadMessages,
+  listSpendRollupRows,
+  listThreadTurnSpend,
 } from "@bb/db";
 import type { Hono } from "hono";
 import {
@@ -30,6 +33,7 @@ import {
   type ThreadConversationOutlineResponse,
   type ThreadExecutionProfileResponse,
   type ThreadTimelineQuery,
+  type ThreadSpendSummaryResponse,
 } from "@bb/server-contract";
 import type { AppDeps } from "../../types.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
@@ -434,6 +438,49 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         sourceSeqEnd: parseInteger(query.sourceSeqEnd, "sourceSeqEnd"),
       }),
     );
+  });
+
+  get(routes.spendSummary, (context) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    ensureSpendTables(deps.db);
+    const rows = listSpendRollupRows(deps.db, { threadId: thread.id });
+    const total =
+      rows.length === 0
+        ? {
+            cachedInputTokens: null,
+            inputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          }
+        : rows.reduce(
+            (summary, row) => ({
+              cachedInputTokens:
+                row.providerId !== "codex" && row.cachedInputTokens === 0
+                  ? null
+                  : (summary.cachedInputTokens ?? 0) + row.cachedInputTokens,
+              inputTokens: (summary.inputTokens ?? 0) + row.inputTokens,
+              outputTokens: (summary.outputTokens ?? 0) + row.outputTokens,
+              reasoningOutputTokens:
+                row.providerId !== "codex"
+                  ? null
+                  : (summary.reasoningOutputTokens ?? 0) +
+                    row.reasoningOutputTokens,
+              totalTokens: (summary.totalTokens ?? 0) + row.totalTokens,
+            }),
+            {
+              cachedInputTokens: null as number | null,
+              inputTokens: null as number | null,
+              outputTokens: null as number | null,
+              reasoningOutputTokens: null as number | null,
+              totalTokens: null as number | null,
+            },
+          );
+    const response: ThreadSpendSummaryResponse = {
+      total,
+      turns: listThreadTurnSpend(deps.db, { threadId: thread.id }),
+    };
+    return context.json(response);
   });
 
   get(routes.output, (context) => {

@@ -18,6 +18,8 @@ import {
   BbHttpError,
   type BbSdk,
   type ThreadExecutionProfileResult,
+  type ThreadChildSummaryResult,
+  type ThreadSpendSummaryResult,
 } from "@bb/sdk";
 import type {
   EnvironmentDiffQuery,
@@ -78,6 +80,8 @@ interface ThreadShowJsonPayload extends ThreadStatusPayload {
   environment: ThreadShowEnvironmentJsonPayload | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
   execution: ThreadExecutionProfileResult | null;
+  childSummary: ThreadChildSummaryResult;
+  spendSummary: ThreadSpendSummaryResult;
   workStatus?: WorkspaceStatus | null;
   gitDiff?: ThreadGitDiffResponse | null;
 }
@@ -229,6 +233,40 @@ export function printExecutionProfile(
   console.log(`    Last provider report: ${status}: ${report}`);
 }
 
+function compactTokenCount(value: number | null): string {
+  return value === null
+    ? "unavailable"
+    : new Intl.NumberFormat("en", {
+        maximumFractionDigits: 1,
+        notation: "compact",
+      }).format(value);
+}
+
+function printSpendSummary(summary: ThreadSpendSummaryResult): void {
+  const total = summary.total;
+  console.log("");
+  console.log("Token usage:");
+  console.log(
+    `  Thread: In ${compactTokenCount(total.inputTokens)} · Out ${compactTokenCount(total.outputTokens)} · Reasoning ${compactTokenCount(total.reasoningOutputTokens)} · Cached ${compactTokenCount(total.cachedInputTokens)} · Σ ${compactTokenCount(total.totalTokens)}`,
+  );
+  for (const turn of summary.turns) {
+    console.log(
+      `  Turn ${turn.turnId}: In ${compactTokenCount(turn.inputTokens)} · Out ${compactTokenCount(turn.outputTokens)} · Reasoning ${compactTokenCount(turn.reasoningOutputTokens)} · Cached ${compactTokenCount(turn.cachedInputTokens)} · Σ ${compactTokenCount(turn.totalTokens)}`,
+    );
+  }
+}
+
+function printChildSummary(summary: ThreadChildSummaryResult): void {
+  if (summary.nonDeletedChildCount === 0) return;
+  console.log("");
+  console.log(
+    `Ran ${summary.nonDeletedChildCount} ${summary.nonDeletedChildCount === 1 ? "agent" : "agents"}:`,
+  );
+  console.log(
+    `  ${summary.working ?? 0} working · ${summary.waiting ?? 0} waiting · ${summary.idle ?? 0} idle · ${summary.failed ?? 0} failed · Σ ${compactTokenCount(summary.totalTokens ?? 0)}`,
+  );
+}
+
 export function registerShowCommand(
   parent: Command,
   getUrl: () => string,
@@ -263,6 +301,10 @@ export function registerShowCommand(
 
         const statusPayload: ThreadStatusPayload =
           thread.status === "error" ? { lastError, thread } : { thread };
+        const [childSummary, spendSummary] = await Promise.all([
+          sdk.threads.childSummary({ threadId }),
+          sdk.threads.spendSummary({ threadId }),
+        ]);
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {
           if (!thread.environmentId) {
@@ -379,6 +421,8 @@ export function registerShowCommand(
             ),
             pendingTodos,
             execution,
+            childSummary,
+            spendSummary,
           };
           if (fetchedWorkStatus !== undefined) {
             jsonPayload.workStatus = fetchedWorkStatus.available
@@ -396,6 +440,8 @@ export function registerShowCommand(
 
         printThreadStatus(statusPayload, environmentInfo, fetchedPullRequest);
         printExecutionProfile(execution);
+        printSpendSummary(spendSummary);
+        printChildSummary(childSummary);
 
         printPendingTodos(pendingTodos);
 

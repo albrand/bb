@@ -30,6 +30,7 @@ import type {
   SendQueuedMessageResponse,
   ThreadArchiveAllResponse,
   ThreadChildSummaryResponse,
+  ThreadSpendSummaryResponse,
   ThreadConversationOutlineResponse,
   ThreadCountGroupBy,
   ThreadCountQuery,
@@ -181,6 +182,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
+export type ThreadSpendSummaryResult = ThreadSpendSummaryResponse;
 export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadExecutionProfileResult = ThreadExecutionProfileResponse;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
@@ -501,6 +503,7 @@ export interface ThreadsArea {
   archive(args: ThreadActionArgs): Promise<ThreadArchiveResult>;
   archiveAll(args: ThreadActionArgs): Promise<ThreadArchiveAllResult>;
   childSummary(args: ThreadStatusArgs): Promise<ThreadChildSummaryResult>;
+  spendSummary(args: ThreadStatusArgs): Promise<ThreadSpendSummaryResult>;
   compact(args: ThreadActionArgs): Promise<ThreadCompactResult>;
   cancelPlan(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
   clearContext(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
@@ -1052,6 +1055,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     async childSummary(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"]["child-summary"].$get(
+          { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async spendSummary(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["spend-summary"].$get(
           { param: { id: input.threadId } },
           ...signalRequestArgs(input.signal),
         ),

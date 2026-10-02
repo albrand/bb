@@ -199,7 +199,7 @@ Sections:
 Inspecting:
 
   bb thread context [id]                   Show recorded context usage and available breakdown (--self, --json)
-  bb thread show [id]                      Show thread details and pull request status
+  bb thread show [id]                      Show thread details, token usage, child agents, and pull request status
     --self                                 Target current thread
     --work-status                          Include git working-tree status
     --git-diff                             Include git diff

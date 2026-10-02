@@ -338,9 +338,14 @@ describe("public thread parenting routes", () => {
       const summary = threadChildSummaryResponseSchema.parse(
         await readJson(response),
       );
-      expect(summary).toEqual({
+      expect(summary).toMatchObject({
         nonDeletedChildCount: 3,
         unarchivedDescendantCount: 1,
+        working: 0,
+        waiting: 0,
+        idle: 3,
+        failed: 0,
+        totalTokens: 0,
       });
     });
   });
@@ -367,9 +372,14 @@ describe("public thread parenting routes", () => {
       );
       expect(
         threadChildSummaryResponseSchema.parse(await readJson(response)),
-      ).toEqual({
+      ).toMatchObject({
         nonDeletedChildCount: 1,
         unarchivedDescendantCount: 1,
+        working: 0,
+        waiting: 0,
+        idle: 1,
+        failed: 0,
+        totalTokens: 0,
       });
     });
   });

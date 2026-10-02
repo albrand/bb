@@ -76,6 +76,14 @@ export {
   spendWeightedUnits,
   SPEND_WEIGHTS,
 } from "./thread-spend.js";
+export {
+  listThreadTurnSpend,
+  recordThreadTurnSpendContribution,
+} from "./thread-turn-spend.js";
+export type {
+  ThreadTurnSpendContribution,
+  ThreadTurnSpendRow,
+} from "./thread-turn-spend.js";
 export type {
   ListSpendRollupArgs,
   SpendAssessmentRow,

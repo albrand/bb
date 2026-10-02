@@ -23,6 +23,7 @@ import type {
   ThreadStorageLocationResponse,
   ThreadStoragePathListResponse,
   ThreadTimelineResponse,
+  ThreadSpendSummaryResponse,
   TimelineTurnSummaryDetailsResponse,
 } from "@bb/server-contract";
 import { useDebouncedValue } from "../useDebouncedValue";
@@ -1087,6 +1088,21 @@ export function useThreadTimelineTurnSummaryDetails(
     refetchOnMount: options?.refetchOnMount ?? true,
     staleTime: options?.staleTime ?? Infinity,
     ...HEAVY_PAYLOAD_QUERY_POLICY,
+  });
+}
+
+export function useThreadSpendSummary(threadId: string) {
+  return useQuery<ThreadSpendSummaryResponse>({
+    queryKey: ["threadSpendSummary", threadId],
+    queryFn: ({ signal }) =>
+      sdk.threads.spendSummary({
+        threadId: requireThreadId(threadId, "useThreadSpendSummary"),
+        signal,
+      }),
+    enabled: Boolean(threadId),
+    staleTime: 30_000,
+    retry: shouldRetryTransientReadQuery,
+    retryDelay: TRANSIENT_READ_RETRY_DELAY_MS,
   });
 }
 

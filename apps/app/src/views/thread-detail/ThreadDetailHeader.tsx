@@ -31,6 +31,7 @@ import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcut
 import { useSidebarRename } from "@/components/sidebar/SidebarInlineRename";
 import { useThreadActions } from "@/components/thread/ThreadActionsProvider";
 import { ThreadTitle } from "@/components/thread/ThreadTitleMentions";
+import { ThreadUsageAndAgents } from "@/components/thread/ThreadUsageSummary";
 import { SecondaryPanelHostLayoutContext } from "@/components/secondary-panel/SecondaryPanelHostLayoutContext";
 import { RIGHT_PANEL_TOGGLE_ICON_NAME } from "@/components/secondary-panel/panelToggleControlState";
 import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
@@ -159,7 +160,7 @@ export function ThreadDetailHeader({
           isSplitPaneHeader && isFocused ? "" : undefined
         }
         className={cn(
-          "relative min-w-0",
+          "relative flex min-w-0 flex-col items-start gap-0.5",
           isSplitPaneHeader && "-my-1 -ml-2 rounded-md px-2 py-1",
           isSplitPaneHeader && isFocused && CONTEXT_SELECTION_SURFACE_CLASS,
         )}
@@ -180,6 +181,7 @@ export function ThreadDetailHeader({
         >
           {isEditing ? editor : <ThreadTitle title={threadTitle} />}
         </p>
+        <ThreadUsageAndAgents threadId={threadId} />
       </div>
       {childPillLabel ? (
         <Pill variant="outline" size="sm">
