@@ -75,20 +75,23 @@ describe("assertElectronRuntime", () => {
     ).toThrow(/Electron runtime executable is truncated \(4096 bytes/);
   });
 
-  it("refuses a malformed runtime through the packaged npm smoke launcher", async () => {
-    const { executable, framework } = await createMacRuntimeFixture("bb");
-    await writeFile(framework, Buffer.alloc(4096));
-    const launcher = join(process.cwd(), "scripts/smoke-packaged-npm.mjs");
+  it.skipIf(process.platform !== "darwin")(
+    "refuses a malformed runtime through the packaged npm smoke launcher",
+    async () => {
+      const { executable, framework } = await createMacRuntimeFixture("bb");
+      await writeFile(framework, Buffer.alloc(4096));
+      const launcher = join(process.cwd(), "scripts/smoke-packaged-npm.mjs");
 
-    const result = spawnSync(process.execPath, [launcher, executable], {
-      encoding: "utf8",
-    });
+      const result = spawnSync(process.execPath, [launcher, executable], {
+        encoding: "utf8",
+      });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toMatch(
-      /Electron framework is truncated \(4096 bytes/,
-    );
-  });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(
+        /Electron framework is truncated \(4096 bytes/,
+      );
+    },
+  );
 
   it("accepts a macOS framework above the measured size floor", async () => {
     const { executable, framework } = await createMacRuntimeFixture();
