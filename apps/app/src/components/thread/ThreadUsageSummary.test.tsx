@@ -33,12 +33,20 @@ describe("thread usage summary", () => {
         },
         turns: [
           {
-            turnId: "turn-1",
-            inputTokens: 300,
-            cachedInputTokens: 20,
-            outputTokens: 80,
-            reasoningOutputTokens: 10,
-            totalTokens: 390,
+            turnId: "da385f7e5d-t1",
+            inputTokens: 30,
+            cachedInputTokens: 2_843_776,
+            outputTokens: 6_149,
+            reasoningOutputTokens: null,
+            totalTokens: 2_849_955,
+          },
+          {
+            turnId: "da385f7e5d-t2",
+            inputTokens: 8,
+            cachedInputTokens: 788_012,
+            outputTokens: 831,
+            reasoningOutputTokens: null,
+            totalTokens: 788_851,
           },
         ],
       },
@@ -63,7 +71,7 @@ describe("thread usage summary", () => {
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <ThreadTurnTokenSummary threadId="parent" turnId="turn-1" />
+          <ThreadTurnTokenSummary threadId="parent" turnId="da385f7e5d-t1" />
           <ThreadUsageAndAgents threadId="parent" />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -71,7 +79,7 @@ describe("thread usage summary", () => {
 
     expect(
       screen.getByText(
-        /Input \(uncached\) 300 · Out 80 · Reasoning included in output · Cached \(read \+ write\) 20/,
+        /Input \(uncached\) 30 · Out 6\.1K · Reasoning included in output · Cached \(read \+ write\) 2\.8M/,
       ),
     ).toBeTruthy();
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();

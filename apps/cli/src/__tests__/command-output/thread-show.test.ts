@@ -567,6 +567,14 @@ describe("bb thread show command output", () => {
             reasoningOutputTokens: null,
             totalTokens: 2_849_955,
           },
+          {
+            turnId: "da385f7e5d-t2",
+            inputTokens: 8,
+            cachedInputTokens: 788_012,
+            outputTokens: 831,
+            reasoningOutputTokens: null,
+            totalTokens: 788_851,
+          },
         ],
       })),
     });
@@ -575,6 +583,9 @@ describe("bb thread show command output", () => {
 
     expect(collectLogLines(vi.mocked(console.log))).toContain(
       "  Thread: Input (uncached) ≥ 6.4K (partial history) · Out ≥ 1.8M (partial history) · Reasoning included in output · Cached (read + write) ≥ 686.7M (partial history) · Σ ≥ 688.5M (partial history)",
+    );
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toMatch(
+      /Turn da385f7e5d-t2: Input \(uncached\) 8 · Out 831 · Reasoning included in output · Cached \(read \+ write\) 788K · Σ 788\.9K/,
     );
   });
 
