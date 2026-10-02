@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createConnection } from "../../src/connection.js";
 import { events, threadPruningCursors, threads } from "../../src/schema.js";
 import { noopNotifier } from "../../src/notifier.js";
@@ -891,6 +891,11 @@ describe("thread pruning", () => {
   it("retains the latest context snapshot boundary through pruning between estimates", () => {
     const f = setup();
     try {
+      f.db
+        .update(threads)
+        .set({ archivedAt: 1 })
+        .where(eq(threads.id, f.thread.id))
+        .run();
       const usage = (sequence: number, values: object) =>
         seed(f, sequence, {
           type: "thread/contextWindowUsage/updated",
@@ -908,12 +913,43 @@ describe("thread pruning", () => {
       });
       usage(2, { usedTokens: 140000, modelContextWindow: 1000000 });
       usage(3, { usedTokens: 150000, modelContextWindow: 1000000 });
+      for (let sequence = 4; sequence <= 123; sequence++)
+        seed(f, sequence, { type: "system/error", data: "{}" });
       cycle(f, "usage");
-      expect(sequences(f)).toEqual([1, 3]);
+      expect(
+        f.db
+          .select({ sequence: events.sequence })
+          .from(events)
+          .where(
+            and(
+              eq(events.threadId, f.thread.id),
+              eq(events.type, "thread/contextWindowUsage/updated"),
+            ),
+          )
+          .orderBy(events.sequence)
+          .all()
+          .map((row) => row.sequence),
+      ).toEqual([1, 3]);
+      f.db.delete(events).where(eq(events.type, "system/error")).run();
       usage(4, { usedTokens: null, modelContextWindow: null });
       usage(5, { usedTokens: 160000, modelContextWindow: 1000000 });
+      for (let sequence = 6; sequence <= 125; sequence++)
+        seed(f, sequence, { type: "system/error", data: "{}" });
       cycle(f, "usage");
-      expect(sequences(f)).toEqual([4, 5]);
+      expect(
+        f.db
+          .select({ sequence: events.sequence })
+          .from(events)
+          .where(
+            and(
+              eq(events.threadId, f.thread.id),
+              eq(events.type, "thread/contextWindowUsage/updated"),
+            ),
+          )
+          .orderBy(events.sequence)
+          .all()
+          .map((row) => row.sequence),
+      ).toEqual([4, 5]);
     } finally {
       f.db.$client.close();
     }
