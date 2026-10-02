@@ -39,8 +39,12 @@ describe("owned runtime recovery", () => {
     expect(recoverySetup).toContain("startSystemConfigSync,");
     expect(recoverySetup).toContain("refreshApplicationMenu,");
     expect(recoverySetup).toContain("onUnavailable: () =>");
+    expect(recoverySetup).toContain("onRestoreFailure: () =>");
     expect(recoverySetup).toContain(
       "bb-app restart did not reach a healthy server; retrying",
+    );
+    expect(recoverySetup).toContain(
+      "could not reload the restarted bb server; retrying the window load",
     );
   });
 
@@ -77,6 +81,34 @@ describe("owned runtime recovery", () => {
     ).toBe("ignore");
   });
 
+  it("preserves server-move handling for an owned process exit", async () => {
+    const clearRuntime = vi.fn();
+    const showServerMoving = vi.fn();
+    const recover = vi.fn(async () => {});
+    const showError = vi.fn();
+
+    await watchOwnedRuntimeExit({
+      exit: Promise.resolve("server moved"),
+      getState: () => ({
+        appLoaded: true,
+        hasRecoveryController: true,
+        isCurrentRuntime: true,
+        isQuitting: false,
+        isServerMoving: true,
+      }),
+      clearPidFile: vi.fn(),
+      clearCurrentRuntime: clearRuntime,
+      recover,
+      showError,
+      showServerMoving,
+    });
+
+    expect(clearRuntime).toHaveBeenCalledOnce();
+    expect(showServerMoving).toHaveBeenCalledOnce();
+    expect(recover).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+  });
+
   it("retries an unavailable server and restores the application after it recovers", async () => {
     let serverAvailable = false;
     let attempts = 0;
@@ -106,6 +138,7 @@ describe("owned runtime recovery", () => {
   it("routes the process exit promise through the desktop recovery flow", async () => {
     const events: string[] = [];
     let attempts = 0;
+    let loadAttempts = 0;
     let resolveExit: (exit: string) => void = () => {};
     const exit = new Promise<string>((resolve) => {
       resolveExit = resolve;
@@ -118,8 +151,13 @@ describe("owned runtime recovery", () => {
       },
       loadServer: async (serverUrl) => {
         events.push(`load server: ${serverUrl}`);
+        loadAttempts += 1;
+        if (loadAttempts === 1) {
+          throw new Error("renderer load failed");
+        }
       },
       onLoadFailure: (error) => events.push(`load failed: ${String(error)}`),
+      onRestoreFailure: () => events.push("retry window load"),
       onRecovered: () => {
         events.push("recovered");
       },
@@ -174,9 +212,13 @@ describe("owned runtime recovery", () => {
       "show loading view",
       "start owned runtime",
       "load server: http://127.0.0.1:38886",
-      "recovered",
+      "load failed: Error: renderer load failed",
+      "retry window load",
+      "wait before retry",
+      "load server: http://127.0.0.1:38886",
       "sync system config: http://127.0.0.1:38886",
       "refresh menu",
+      "recovered",
     ]);
   });
 

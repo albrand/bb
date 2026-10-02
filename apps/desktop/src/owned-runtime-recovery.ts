@@ -1,9 +1,11 @@
 interface CreateOwnedRuntimeRecoveryArgs {
   isCurrent: () => boolean;
   onUnavailable?: () => void;
+  onRestoreFailure?: () => void;
   onRecovered?: () => void;
   onRetry?: (error?: unknown) => void;
   restart: () => Promise<boolean>;
+  restore?: () => Promise<boolean>;
   wait?: (delayMs: number) => Promise<void>;
 }
 
@@ -13,6 +15,7 @@ interface CreateDesktopOwnedRuntimeRecoveryArgs {
   loadLoadingView: () => Promise<void>;
   loadServer: (serverUrl: string) => Promise<void>;
   onLoadFailure: (error: unknown) => void;
+  onRestoreFailure?: () => void;
   onRecovered?: () => void;
   onRetry?: (error?: unknown) => void;
   onUnavailable?: () => void;
@@ -131,9 +134,11 @@ function wait(delayMs: number): Promise<void> {
 export function createOwnedRuntimeRecovery({
   isCurrent,
   onUnavailable,
+  onRestoreFailure,
   onRecovered,
   onRetry,
   restart,
+  restore = async () => true,
   wait: waitForRetry = wait,
 }: CreateOwnedRuntimeRecoveryArgs): OwnedRuntimeRecovery {
   let running = false;
@@ -147,6 +152,7 @@ export function createOwnedRuntimeRecovery({
       }
       running = true;
       let delayMs = INITIAL_RETRY_DELAY_MS;
+      let runtimeStarted = false;
 
       try {
         while (isCurrent()) {
@@ -155,9 +161,20 @@ export function createOwnedRuntimeRecovery({
             return;
           }
 
+          if (restartRequested) {
+            runtimeStarted = false;
+          }
           restartRequested = false;
           try {
-            if (await restart()) {
+            if (!runtimeStarted) {
+              runtimeStarted = await restart();
+              if (!runtimeStarted) {
+                onUnavailable?.();
+                delayMs = Math.min(delayMs * 2, MAX_RETRY_DELAY_MS);
+                continue;
+              }
+            }
+            if (await restore()) {
               if (restartRequested) {
                 delayMs = INITIAL_RETRY_DELAY_MS;
                 continue;
@@ -165,7 +182,7 @@ export function createOwnedRuntimeRecovery({
               onRecovered?.();
               return;
             }
-            onUnavailable?.();
+            onRestoreFailure?.();
           } catch (error) {
             onRetry?.(error);
           }
@@ -185,6 +202,7 @@ export function createDesktopOwnedRuntimeRecovery({
   loadLoadingView,
   loadServer,
   onLoadFailure,
+  onRestoreFailure,
   onRecovered,
   onRetry,
   onUnavailable,
@@ -196,24 +214,28 @@ export function createDesktopOwnedRuntimeRecovery({
   return createOwnedRuntimeRecovery({
     isCurrent,
     onUnavailable,
+    onRestoreFailure,
     onRetry,
-    onRecovered: () => {
-      const runtime = getRuntime();
-      if (runtime === null) {
-        return;
-      }
-
-      void loadServer(runtime.serverUrl)
-        .then(() => {
-          startSystemConfigSync(runtime.serverUrl);
-          refreshApplicationMenu();
-        })
-        .catch(onLoadFailure);
-      onRecovered?.();
-    },
+    onRecovered,
     restart: async () => {
       await loadLoadingView();
       return restartRuntime();
+    },
+    restore: async () => {
+      const runtime = getRuntime();
+      if (runtime === null) {
+        return false;
+      }
+
+      try {
+        await loadServer(runtime.serverUrl);
+        startSystemConfigSync(runtime.serverUrl);
+        refreshApplicationMenu();
+        return true;
+      } catch (error) {
+        onLoadFailure(error);
+        return false;
+      }
     },
     wait: waitForRetry,
   });

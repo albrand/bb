@@ -2684,6 +2684,11 @@ async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
         "[desktop] bb-app restart did not reach a healthy server; retrying",
       );
     },
+    onRestoreFailure: () => {
+      desktopLogger.warn(
+        "[desktop] could not reload the restarted bb server; retrying the window load",
+      );
+    },
     onRecovered: () => {
       desktopLogger.info(
         "[desktop] reconnected the window to its restarted bb server",
