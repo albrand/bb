@@ -50,6 +50,7 @@ import type {
   DbQueryConnection,
   DbTransaction,
 } from "../connection.js";
+import { logDatabaseWriteBytes } from "../connection.js";
 import { alias, unionAll } from "drizzle-orm/sqlite-core";
 import type { DbNotifier } from "../notifier.js";
 import {
@@ -381,8 +382,10 @@ interface InsertStoredEventRowArgs {
 }
 
 interface InsertStoredEventRowResult {
+  eventDataBytes: number;
   id: string;
   inserted: boolean;
+  retainedOutputBytes: number;
 }
 
 function insertStoredEventRow(
@@ -416,7 +419,12 @@ function insertStoredEventRow(
       ${args.createdAt}
     )`);
   if (result.changes === 0) {
-    return { id, inserted: false };
+    return {
+      eventDataBytes: 0,
+      id,
+      inserted: false,
+      retainedOutputBytes: 0,
+    };
   }
   if (args.type === "client/turn/requested") {
     acquireProjectAttachmentOwnership(
@@ -432,7 +440,15 @@ function insertStoredEventRow(
       output: prepared.retainedOutput,
     });
   }
-  return { id, inserted: true };
+  return {
+    eventDataBytes: Buffer.byteLength(prepared.data, "utf8"),
+    id,
+    inserted: true,
+    retainedOutputBytes:
+      prepared.retainedOutput === null
+        ? 0
+        : Buffer.byteLength(JSON.stringify(prepared.retainedOutput.value), "utf8"),
+  };
 }
 
 export function insertEvents(
@@ -448,6 +464,8 @@ export function insertEvents(
   }
 
   const eventTypesByThreadId = new Map<string, Set<ThreadEventType>>();
+  let eventDataBytes = 0;
+  let retainedOutputBytes = 0;
   const result = db.transaction(
     (tx) => {
       let insertedCount = 0;
@@ -477,6 +495,8 @@ export function insertEvents(
         if (insertResult.inserted) {
           insertedCount += 1;
           insertedInputIndexes.push(index);
+          eventDataBytes += insertResult.eventDataBytes;
+          retainedOutputBytes += insertResult.retainedOutputBytes;
           const highWaterMark = highWaterMarks[input.threadId];
           if (highWaterMark !== undefined && input.sequence <= highWaterMark) {
             bumpThreadEventRewriteGeneration(input.threadId);
@@ -493,6 +513,13 @@ export function insertEvents(
     },
     { behavior: "immediate" },
   );
+
+  if (result.insertedCount > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: eventDataBytes + retainedOutputBytes,
+      source: "event-append",
+    });
+  }
 
   for (const [threadId, eventTypes] of eventTypesByThreadId) {
     notifier.notifyThread(threadId, ["events-appended"], {
@@ -764,6 +791,8 @@ export function appendDaemonEventsInTransaction(
   const acceptedEvents: AcceptedDaemonEvent[] = [];
   const insertedInputIndexes: number[] = [];
   const skippedTurnUnstartedInputIndexes: number[] = [];
+  let eventDataBytes = 0;
+  let retainedOutputBytes = 0;
 
   const startedTurnKeys = listStoredTurnStartedKeySet(
     db,
@@ -813,7 +842,7 @@ export function appendDaemonEventsInTransaction(
     if (sequence === undefined) {
       throw new Error(`Missing event sequence for thread: ${input.threadId}`);
     }
-    insertStoredEventRow(db, {
+    const insertResult = insertStoredEventRow(db, {
       attachmentOwnership: "required",
       conflict: "error",
       createdAt: now,
@@ -829,6 +858,8 @@ export function appendDaemonEventsInTransaction(
       turnId,
       type: input.type,
     });
+    eventDataBytes += insertResult.eventDataBytes;
+    retainedOutputBytes += insertResult.retainedOutputBytes;
     const event = parseDaemonThreadEvent(input);
     if (event !== null) {
       upsertThreadSearchSegments(db, {
@@ -858,6 +889,13 @@ export function appendDaemonEventsInTransaction(
     nextSequencesByThreadId.set(input.threadId, sequence + 1);
   }
 
+  if (eventDataBytes + retainedOutputBytes > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: eventDataBytes + retainedOutputBytes,
+      source: "event-append",
+    });
+  }
+
   return {
     acceptedEvents,
     insertedInputIndexes,
@@ -881,6 +919,8 @@ export function copyStoredThreadEventsInTransaction(
   const highWaterMarks = getHighWaterMarks(db, [args.targetThreadId]);
   let sequence = (highWaterMarks[args.targetThreadId] ?? 0) + 1;
   const now = Date.now();
+  let eventDataBytes = 0;
+  let retainedOutputBytes = 0;
   for (const row of args.rows) {
     const insertResult = insertStoredEventRow(db, {
       attachmentOwnership: "best-effort",
@@ -901,7 +941,9 @@ export function copyStoredThreadEventsInTransaction(
     if (!insertResult.inserted) {
       throw new Error("Expected copied event row to be inserted");
     }
-    copyRetainedEventOutput(db, {
+    eventDataBytes += insertResult.eventDataBytes;
+    retainedOutputBytes += insertResult.retainedOutputBytes;
+    retainedOutputBytes += copyRetainedEventOutput(db, {
       copiedAt: now,
       sourceEventId: row.id,
       targetEventId: insertResult.id,
@@ -930,6 +972,12 @@ export function copyStoredThreadEventsInTransaction(
       });
     }
     sequence += 1;
+  }
+  if (eventDataBytes + retainedOutputBytes > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: eventDataBytes + retainedOutputBytes,
+      source: "event-append",
+    });
   }
   return args.rows.length;
 }
@@ -967,6 +1015,8 @@ export function appendStoredThreadEventsInTransaction(
   );
 
   const sequences: number[] = [];
+  let eventDataBytes = 0;
+  let retainedOutputBytes = 0;
   for (const args of eventArgs) {
     const sequence = nextSequencesByThreadId.get(args.threadId);
     if (sequence === undefined) {
@@ -984,7 +1034,7 @@ export function appendStoredThreadEventsInTransaction(
     });
     const turnId = getThreadEventScopeTurnId(args.scope) ?? null;
 
-    insertStoredEventRow(db, {
+    const insertResult = insertStoredEventRow(db, {
       attachmentOwnership: "required",
       conflict: "error",
       createdAt: now,
@@ -1000,6 +1050,8 @@ export function appendStoredThreadEventsInTransaction(
       turnId,
       type: args.type,
     });
+    eventDataBytes += insertResult.eventDataBytes;
+    retainedOutputBytes += insertResult.retainedOutputBytes;
     upsertThreadSearchSegments(db, {
       updatedAt: now,
       segments: listThreadSearchSegmentsForStoredEventArgs({
@@ -1010,6 +1062,13 @@ export function appendStoredThreadEventsInTransaction(
 
     sequences.push(sequence);
     nextSequencesByThreadId.set(args.threadId, sequence + 1);
+  }
+
+  if (eventDataBytes + retainedOutputBytes > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: eventDataBytes + retainedOutputBytes,
+      source: "event-append",
+    });
   }
 
   return sequences;
@@ -3081,7 +3140,10 @@ export function findStoredTimelineWindowByteBudgetFloor(
 
 export function listStoredTimelineTurnEventRows(
   db: DbConnection,
-  args: ListStoredTimelineWindowEventRowsArgs & { turnIds: readonly string[] },
+  args: ListStoredTimelineWindowEventRowsArgs & {
+    sequenceSelective?: boolean;
+    turnIds: readonly string[];
+  },
 ): StoredEventRow[] {
   if (args.turnIds.length === 0) return [];
   return queryInSqliteVariableBatches({
@@ -3093,7 +3155,9 @@ export function listStoredTimelineTurnEventRows(
       db
         .select(storedEventRowSqlFields(args.maxInlineOutputChars))
         .from(
-          sql`${events} INDEXED BY events_thread_turn_type_item_sequence_idx`,
+          args.sequenceSelective === false
+            ? sql`${events} INDEXED BY events_thread_turn_type_item_sequence_idx`
+            : sql`${events} INDEXED BY events_thread_sequence_idx`,
         )
         .where(
           and(
@@ -3103,6 +3167,37 @@ export function listStoredTimelineTurnEventRows(
         )
         .all(),
   }).sort((left, right) => left.sequence - right.sequence);
+}
+
+export function listTimelineTurnIdsWithBoundedHistory(
+  db: DbConnection,
+  args: {
+    maxRows: number;
+    threadId: string;
+    turnIds: readonly string[];
+  },
+): string[] {
+  if (args.turnIds.length === 0) return [];
+  return db
+    .all<{ turnId: string }>(sql`
+      WITH selected(turn_id) AS (
+        VALUES ${sql.join(
+          args.turnIds.map((turnId) => sql`(${turnId})`),
+          sql`, `,
+        )}
+      )
+      SELECT selected.turn_id AS turnId
+      FROM selected
+      WHERE (
+        SELECT count(*) FROM (
+          SELECT 1 FROM events INDEXED BY events_thread_turn_type_item_sequence_idx
+          WHERE thread_id = ${args.threadId}
+            AND turn_id = selected.turn_id
+          LIMIT ${args.maxRows + 1}
+        ) AS bounded_history
+      ) <= ${args.maxRows}
+    `)
+    .map((row) => row.turnId);
 }
 
 export function listTimelineRootWindowTurnIds(

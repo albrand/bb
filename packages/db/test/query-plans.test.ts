@@ -317,10 +317,6 @@ describe("slow query index plans", () => {
     },
   );
 
-  // Both queue indexes are PARTIAL. A partial index is only usable when the
-  // query repeats its WHERE clause, so a refactor that drops one liveness
-  // predicate from the query — or adds one to the index — silently degrades
-  // the sweep to a full table scan. Nothing else would notice.
   it("finds due scheduled queued messages through the partial due index", () => {
     const { db } = setup();
 
@@ -386,8 +382,6 @@ describe("slow query index plans", () => {
   });
 
   it("finds the occupying threads through the archived/status index", () => {
-    // A dispatch gate calls this on every admission decision, so a plan that
-    // degraded to a table scan would put one on every send in the server.
     const { db } = setup();
 
     const captured = captureStatements(db, () => {
@@ -1299,7 +1293,7 @@ describe("slow query index plans", () => {
     const deletion = findOnlyDebugLog({
       logger,
       predicate: (fields) =>
-        fields.operation === "run" &&
+        fields.operation === "all" &&
         fields.sql.startsWith('delete from "retained_event_outputs"'),
     });
     assertEmittedQueryPlanUsesIndex({
@@ -1404,7 +1398,7 @@ describe("slow query index plans", () => {
     const pruneQuery = findOnlyDebugLog({
       logger,
       predicate: (fields) =>
-        fields.operation === "run" &&
+        fields.operation === "all" &&
         fields.sql.startsWith("DELETE FROM events"),
     });
     expect(pruneQuery.fields.sql).toContain("WHERE id IN");

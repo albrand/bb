@@ -33,6 +33,7 @@ import type {
   TimelinePaginationCursor,
 } from "@bb/server-contract";
 import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
+import { clearTimelineSelectionMemo } from "../../../src/services/threads/timeline-selection-memo.js";
 
 const LARGE_BUDGET = 1_000_000;
 
@@ -585,6 +586,247 @@ describe("timeline event budget", () => {
     expect(cursor).toBeNull();
     expect(rows).toEqual(canonical.rows);
     db.$client.close();
+  });
+
+  it("limits selected-turn context reads to the timeline window", () => {
+    const { db, thread } = setup();
+    try {
+      insertTurns(db, thread, 26, [
+        1_000,
+        ...Array.from({ length: 25 }, () => 2),
+      ]);
+      const latestSequence = db.$client
+        .prepare<[string], { sequence: number }>(
+          "SELECT MAX(sequence) AS sequence FROM events WHERE thread_id = ?",
+        )
+        .get(thread.id)!.sequence;
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: latestSequence + 1,
+          type: "item/completed",
+          scope: turnScope("turn-1"),
+          providerThreadId,
+          itemId: "turn-1-late-item",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({
+            item: {
+              type: "agentMessage",
+              id: "turn-1-late-item",
+              text: "Late output from the older turn",
+            },
+          }),
+        },
+      ]);
+
+      const firstSelectedRequest = db.$client
+        .prepare<[string], { sequence: number }>(
+          `SELECT sequence FROM events
+           WHERE thread_id = ? AND type = 'client/turn/requested'
+           ORDER BY sequence LIMIT 1 OFFSET 6`,
+        )
+        .get(thread.id)!.sequence;
+      const maxSequence = db.$client
+        .prepare<[string], { sequence: number }>(
+          "SELECT MAX(sequence) AS sequence FROM events WHERE thread_id = ?",
+        )
+        .get(thread.id)!.sequence;
+      const selectedTurnIds = [
+        "turn-1",
+        ...Array.from({ length: 20 }, (_, index) => `turn-${index + 7}`),
+      ];
+      const selectedTurnIdsJson = JSON.stringify(selectedTurnIds);
+      const broadRows = db.$client
+        .prepare<[string, string], { count: number }>(
+          `SELECT COUNT(*) AS count FROM events
+           WHERE thread_id = ? AND turn_id IN (
+             SELECT value FROM json_each(?)
+           )`,
+        )
+        .get(thread.id, selectedTurnIdsJson)!.count;
+      const windowRows = db.$client
+        .prepare<[string, string, number, number], { count: number }>(
+          `SELECT COUNT(*) AS count FROM events
+           WHERE thread_id = ? AND turn_id IN (
+             SELECT value FROM json_each(?)
+           ) AND sequence >= ? AND sequence < ?`,
+        )
+        .get(
+          thread.id,
+          selectedTurnIdsJson,
+          firstSelectedRequest,
+          maxSequence + 1,
+        )!.count;
+
+      let turnLookupRows = 0;
+      const turnLookupStatements: Array<{
+        params: unknown[];
+        source: string;
+      }> = [];
+      const prepareBeforeCapture = db.$client.prepare;
+      const prepareBeforeCaptureBound = prepareBeforeCapture.bind(db.$client);
+      Object.defineProperty(db.$client, "prepare", {
+        configurable: true,
+        value: (source: string) => {
+          const statement = prepareBeforeCaptureBound(source);
+          const normalizedSource = source.toLowerCase();
+          if (
+            normalizedSource.includes("turn_id") &&
+            normalizedSource.includes(" in (") &&
+            (normalizedSource.includes("events_thread_sequence_idx") ||
+              normalizedSource.includes(
+                "events_thread_turn_type_item_sequence_idx",
+              ))
+          ) {
+            const all = statement.all.bind(statement);
+            statement.all = (...params) => {
+              const rows = all(...params);
+              turnLookupRows += rows.length;
+              turnLookupStatements.push({ params, source });
+              return rows;
+            };
+          }
+          return statement;
+        },
+        writable: true,
+      });
+
+      let latestPage: ReturnType<typeof buildThreadTimelineWithProfile>;
+      try {
+        latestPage = buildThreadTimelineWithProfile(db, thread, {
+          completedTurnDisplay: "collapse",
+          eventBudget: LARGE_BUDGET,
+          includeDiagnosticOperations: false,
+          includeNestedRows: true,
+          maxInlineOutputChars: null,
+          maxSeq: 0,
+          page: { kind: "latest", segmentLimit: 20 },
+        });
+      } finally {
+        db.$client.prepare = prepareBeforeCapture;
+      }
+
+      expect(turnLookupRows).toBe(windowRows);
+      expect({ broadRows, selectedWindowRows: turnLookupRows }).toEqual({
+        broadRows: 1_083,
+        selectedWindowRows: 81,
+      });
+      const selectiveLookup = turnLookupStatements.find(({ source }) =>
+        source.includes("events_thread_sequence_idx"),
+      );
+      const boundedLookupPlan = prepareBeforeCaptureBound(
+        `EXPLAIN QUERY PLAN ${selectiveLookup!.source}`,
+      ).all(...selectiveLookup!.params) as Array<{ detail: string }>;
+      expect(boundedLookupPlan.map((row) => row.detail).join(" ")).toContain(
+        "USING INDEX events_thread_sequence_idx",
+      );
+      expect(
+        turnLookupStatements.some(({ source }) =>
+          source.includes("events_thread_turn_type_item_sequence_idx"),
+        ),
+      ).toBe(true);
+      expect(
+        latestPage.response.rows.flatMap((row) =>
+          row.kind === "conversation" && row.role === "user" ? [row.id] : [],
+        ),
+      ).toEqual(
+        Array.from(
+          { length: 20 },
+          (_, index) => `${thread.id}:user-seed:${1029 + index * 5}`,
+        ),
+      );
+      expect(walkAllPages(db, thread, LARGE_BUDGET).userMessages).toEqual([
+        `${thread.id}:user-seed:1`,
+        ...Array.from(
+          { length: 25 },
+          (_, index) => `${thread.id}:user-seed:${1004 + index * 5}`,
+        ),
+      ]);
+    } finally {
+      db.$client.close();
+    }
+  });
+
+  it("excludes item lifecycle events appended after the selected timeline snapshot", () => {
+    const { db, thread } = setup();
+    try {
+      insertTurns(db, thread, 26, [
+        1_000,
+        ...Array.from({ length: 25 }, () => 2),
+      ]);
+      const lastSequence = db.$client
+        .prepare<[string], { sequence: number }>(
+          "SELECT MAX(sequence) AS sequence FROM events WHERE thread_id = ?",
+        )
+        .get(thread.id)!.sequence;
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: lastSequence + 1,
+          type: "item/started",
+          scope: turnScope("turn-1"),
+          providerThreadId,
+          itemId: "turn-1-open-item",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({
+            item: {
+              type: "agentMessage",
+              id: "turn-1-open-item",
+              text: "Open before the selected snapshot",
+            },
+          }),
+        },
+      ]);
+      const beforeSequence = lastSequence + 1;
+      const beforeBuild = buildThreadTimelineWithProfile(db, thread, {
+        completedTurnDisplay: "collapse",
+        eventBudget: 100,
+        includeDiagnosticOperations: false,
+        includeNestedRows: true,
+        maxInlineOutputChars: 32_000,
+        maxSeq: beforeSequence,
+        page: { kind: "latest", segmentLimit: 20 },
+      });
+      expect(beforeBuild.profile.selectionStrategy).toBe("standard-window");
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: beforeSequence + 1,
+          type: "item/completed",
+          scope: turnScope("turn-1"),
+          providerThreadId,
+          itemId: "turn-1-open-item",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({
+            item: {
+              type: "agentMessage",
+              id: "turn-1-open-item",
+              text: "Appended after the selected snapshot",
+            },
+          }),
+        },
+      ]);
+      clearTimelineSelectionMemo(db);
+
+      const afterBuild = buildThreadTimelineWithProfile(db, thread, {
+        completedTurnDisplay: "collapse",
+        eventBudget: 100,
+        includeDiagnosticOperations: false,
+        includeNestedRows: true,
+        maxInlineOutputChars: 32_000,
+        maxSeq: beforeSequence,
+        page: { kind: "latest", segmentLimit: 20 },
+      });
+      expect(afterBuild.response).toEqual(beforeBuild.response);
+      expect(afterBuild.profile.eventRowCount).toBe(
+        beforeBuild.profile.eventRowCount,
+      );
+    } finally {
+      db.$client.close();
+    }
   });
 
   it("excludes later appends and continues endpoint pagination after an edit", async () => {

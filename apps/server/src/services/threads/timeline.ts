@@ -70,6 +70,8 @@ import {
   listStoredTurnInputAcceptedRowsByClientRequestIds,
   listStoredTurnRejectedRowsByClientRequestIds,
   listStoredTurnStartedRowsByTurnIdsUpToSequence,
+  listStoredTurnCompletedRowsByTurnIds,
+  listTimelineTurnIdsWithBoundedHistory,
   listTimelineWindowHintsDescending,
   scopedItemRefKey,
   upsertThreadConversationOutlineRecord,
@@ -157,6 +159,7 @@ interface BuildTimelineTurnSummaryDetailsOptions extends TimelineTurnSummarySele
 
 export const THREAD_TIMELINE_DEFAULT_SEGMENT_LIMIT = 20;
 const MAX_EMPTY_TIMELINE_WINDOWS = 8;
+const MAX_TIMELINE_TURN_CONTEXT_ROWS = 128;
 
 export const THREAD_TIMELINE_SEGMENT_LIMIT_MAX = 100;
 
@@ -722,6 +725,27 @@ function ensureTimelineWindowTurnStartedRows(
   return mergeStoredEventRowsById([...turnStartedRows, ...args.rows]);
 }
 
+function ensureTimelineSelectedItemLifecycleRows(
+  db: DbConnection,
+  args: TimelineWindowRowsArgs & {
+    maxInlineOutputChars: InlineOutputCharLimit;
+  },
+): StoredEventRow[] {
+  const items = new Map<string, ScopedItemRef>();
+  for (const row of args.rows) {
+    if (row.itemId === null) continue;
+    const item = storedEventRowItemRef(row);
+    items.set(scopedItemRefKey(item), item);
+  }
+  if (items.size === 0) return [...args.rows];
+  const lifecycleRows = listStoredItemLifecycleRowsByItems(db, {
+    items: [...items.values()],
+    maxInlineOutputChars: args.maxInlineOutputChars,
+    threadId: args.threadId,
+  });
+  return mergeStoredEventRowsById([...args.rows, ...lifecycleRows]);
+}
+
 function storedEventRowItemRef(row: StoredEventRow): ScopedItemRef {
   return {
     itemId: row.itemId ?? "",
@@ -1009,15 +1033,49 @@ function selectStandardTimelineEventRows(
       ].filter((turnId) => !fetchedTurns.has(turnId));
       if (turnIds.length === 0) break;
       for (const turnId of turnIds) fetchedTurns.add(turnId);
+      const boundedHistoryTurnIds = new Set(
+        listTimelineTurnIdsWithBoundedHistory(db, {
+          maxRows: MAX_TIMELINE_TURN_CONTEXT_ROWS,
+          threadId: thread.id,
+          turnIds,
+        }),
+      );
+      const fullHistoryTurnIds = turnIds.filter((turnId) =>
+        boundedHistoryTurnIds.has(turnId),
+      );
+      const selectiveHistoryTurnIds = turnIds.filter(
+        (turnId) => !boundedHistoryTurnIds.has(turnId),
+      );
       selectedRows = mergeStoredEventRowsById([
         ...selectedRows,
         ...listStoredTimelineTurnEventRows(db, {
           ...windowArgs,
           sequenceStart: epochSequenceStart,
           beforeSequence: maxSeq + 1,
-          turnIds,
+          sequenceSelective: false,
+          turnIds: fullHistoryTurnIds,
+        }),
+        ...listStoredTimelineTurnEventRows(db, {
+          ...windowArgs,
+          turnIds: selectiveHistoryTurnIds,
         }),
       ]);
+      selectedRows = ensureTimelineWindowTurnStartedRows(db, {
+        threadId: thread.id,
+        rows: selectedRows,
+      });
+      selectedRows = mergeStoredEventRowsById([
+        ...selectedRows,
+        ...listStoredTurnCompletedRowsByTurnIds(db, {
+          threadId: thread.id,
+          turnIds,
+        }).filter((row) => row.sequence <= maxSeq),
+      ]);
+      selectedRows = ensureTimelineSelectedItemLifecycleRows(db, {
+        maxInlineOutputChars,
+        threadId: thread.id,
+        rows: selectedRows,
+      });
       selectedRows = ensureTimelineWindowParentedRows(db, {
         threadId: thread.id,
         rows: selectedRows,
@@ -1029,6 +1087,19 @@ function selectStandardTimelineEventRows(
         },
       }).rows.filter((row) => row.sequence <= maxSeq);
     }
+    const selectedTurnIds = [...fetchedTurns];
+    selectedRows = mergeStoredEventRowsById([
+      ...selectedRows,
+      ...listStoredTurnStartedRowsByTurnIdsUpToSequence(db, {
+        threadId: thread.id,
+        sequenceCutoff: maxSeq,
+        turnIds: selectedTurnIds,
+      }),
+      ...listStoredTurnCompletedRowsByTurnIds(db, {
+        threadId: thread.id,
+        turnIds: selectedTurnIds,
+      }).filter((row) => row.sequence <= maxSeq),
+    ]);
     selectedRows = ensureTimelineWindowBackgroundTaskStateRows(db, {
       threadId: thread.id,
       rows: selectedRows,

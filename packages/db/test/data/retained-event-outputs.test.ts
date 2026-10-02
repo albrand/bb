@@ -477,6 +477,7 @@ describe("retained completed-event outputs", () => {
         (query) =>
           query.operation !== "run" &&
           query.sql.includes("retained_event_outputs") &&
+          query.sql.trimStart().toLowerCase().startsWith("select") &&
           query.sql.includes("value"),
       ),
     ).toBe(false);
@@ -526,7 +527,11 @@ describe("retained completed-event outputs", () => {
         expiredAtOrBefore: now + COMPLETED_EVENT_OUTPUT_RETENTION_MS,
         limit: 1,
       }),
-    ).toEqual({ deleted: 1, threadIds: [source.id] });
+    ).toEqual({
+      deleted: 1,
+      removedBytes: Buffer.byteLength(JSON.stringify(output), "utf8"),
+      threadIds: [source.id],
+    });
     expect(listStoredEventRows(db, { threadId: source.id })).toEqual(previews);
     const hydrated = hydrateRetainedEventOutputRows(db, previews, now);
     expect(

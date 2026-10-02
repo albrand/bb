@@ -6,6 +6,7 @@ import {
 } from "@bb/domain";
 import { sliceUtf16HeadAndTail } from "@bb/text-utils";
 import type { DbQueryConnection } from "../connection.js";
+import { logDatabaseWriteBytes } from "../connection.js";
 import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   getCompletedEventOutputTruncationLimits,
@@ -81,6 +82,7 @@ interface DeleteExpiredRetainedEventOutputsArgs {
 
 export interface DeleteExpiredRetainedEventOutputsResult {
   deleted: number;
+  removedBytes: number;
   threadIds: string[];
 }
 
@@ -271,8 +273,8 @@ export function insertPreparedRetainedEventOutput(
 export function copyRetainedEventOutput(
   db: DbQueryConnection,
   args: CopyRetainedEventOutputArgs,
-): void {
-  db.run(sql`INSERT INTO retained_event_outputs
+): number {
+  const copied = db.all<{ valueBytes: number }>(sql`INSERT INTO retained_event_outputs
     (event_id, output_path, value, expires_at)
     SELECT
       ${args.targetEventId},
@@ -281,7 +283,9 @@ export function copyRetainedEventOutput(
       expires_at
     FROM retained_event_outputs
     WHERE event_id = ${args.sourceEventId}
-      AND expires_at > ${args.copiedAt}`);
+      AND expires_at > ${args.copiedAt}
+    RETURNING length(CAST(value AS BLOB)) AS valueBytes`);
+  return copied.reduce((total, row) => total + row.valueBytes, 0);
 }
 
 function decodeRetainedOutputValue(encodedValue: string): string {
@@ -511,7 +515,7 @@ export function deleteExpiredRetainedEventOutputs(
   args: DeleteExpiredRetainedEventOutputsArgs,
 ): DeleteExpiredRetainedEventOutputsResult {
   if (args.limit <= 0) {
-    return { deleted: 0, threadIds: [] };
+    return { deleted: 0, removedBytes: 0, threadIds: [] };
   }
   const rows = db
     .select({
@@ -525,15 +529,29 @@ export function deleteExpiredRetainedEventOutputs(
     .limit(args.limit)
     .all();
   if (rows.length === 0) {
-    return { deleted: 0, threadIds: [] };
+    return { deleted: 0, removedBytes: 0, threadIds: [] };
   }
   const eventIds = rows.map((row) => row.eventId);
-  const result = db
+  const deletedRows = db
     .delete(retainedEventOutputs)
     .where(inArray(retainedEventOutputs.eventId, eventIds))
-    .run();
+    .returning({
+      valueBytes: sql<number>`length(CAST(${retainedEventOutputs.value} AS BLOB))`,
+    })
+    .all();
+  const removedBytes = deletedRows.reduce(
+    (total, row) => total + row.valueBytes,
+    0,
+  );
+  if (removedBytes > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: removedBytes,
+      source: "event-prune-delete",
+    });
+  }
   return {
-    deleted: result.changes,
+    deleted: deletedRows.length,
+    removedBytes,
     threadIds: [...new Set(rows.map((row) => row.threadId))],
   };
 }

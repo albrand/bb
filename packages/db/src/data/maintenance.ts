@@ -1,4 +1,5 @@
 import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { logDatabaseWriteBytes } from "../connection.js";
 import type { DbConnection } from "../connection.js";
 import {
   environments,
@@ -27,6 +28,12 @@ interface PageCountRow {
 
 interface PageSizeRow {
   page_size: number;
+}
+
+interface WalCheckpointRow {
+  busy: number;
+  log: number;
+  checkpointed: number;
 }
 
 interface FreelistCountRow {
@@ -198,6 +205,62 @@ function runWithMaintenanceBusyTimeout<TValue>(
   } finally {
     args.db.$client.exec(`PRAGMA busy_timeout = ${originalBusyTimeoutMs}`);
   }
+}
+
+function checkpointWal(
+  db: DbConnection,
+  mode: "PASSIVE" | "TRUNCATE",
+): void {
+  const previous = db.$client
+    .prepare<[], WalCheckpointRow>("PRAGMA wal_checkpoint(NOOP)")
+    .get();
+  const checkpoint = db.$client
+    .prepare<[], WalCheckpointRow>(`PRAGMA wal_checkpoint(${mode})`)
+    .get();
+  const pageSize = db.$client.pragma("page_size", { simple: true });
+  if (typeof pageSize !== "number" || pageSize <= 0) {
+    throw new Error("Invalid SQLite page size");
+  }
+  logDatabaseWriteBytes(db, {
+    bytes: getNewlyCheckpointedPages(mode, previous, checkpoint) * pageSize,
+    source: "wal-checkpoint",
+  });
+}
+
+export function getNewlyCheckpointedPages(
+  mode: "PASSIVE" | "TRUNCATE",
+  before: WalCheckpointRow | undefined,
+  after: WalCheckpointRow | undefined,
+): number {
+  if (
+    after === undefined ||
+    after.log < 0 ||
+    after.checkpointed < 0
+  ) {
+    return 0;
+  }
+  if (
+    before === undefined ||
+    before.log < 0 ||
+    before.checkpointed < 0
+  ) {
+    return Math.max(0, after.checkpointed);
+  }
+  if (
+    mode === "TRUNCATE" &&
+    after.busy === 0 &&
+    after.log === 0 &&
+    after.checkpointed === 0
+  ) {
+    return Math.max(0, before.log - before.checkpointed);
+  }
+  if (
+    after.log < before.log ||
+    after.checkpointed < before.checkpointed
+  ) {
+    return Math.max(0, after.checkpointed);
+  }
+  return Math.max(0, after.checkpointed - before.checkpointed);
 }
 
 export function getDatabaseMaintenanceActivity(
@@ -396,9 +459,9 @@ export function compactDatabase(db: DbConnection): CompactDatabaseResult {
       const before = getDatabaseCompactionStats(db);
 
       db.$client.exec("PRAGMA auto_vacuum = INCREMENTAL");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      checkpointWal(db, "TRUNCATE");
       db.$client.exec("VACUUM");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      checkpointWal(db, "TRUNCATE");
 
       return {
         after: getDatabaseCompactionStats(db),
@@ -417,9 +480,9 @@ export function runIncrementalVacuum(
     work: () => {
       const before = getDatabaseFreelistStats(db);
 
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      checkpointWal(db, "PASSIVE");
       db.$client.exec(`PRAGMA incremental_vacuum(${args.maxPages})`);
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      checkpointWal(db, "PASSIVE");
 
       return {
         after: getDatabaseFreelistStats(db),
