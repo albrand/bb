@@ -71,6 +71,10 @@
   reaches the sidebar as a clock on any thread that holds queued work and is not
   running (the failure glyph instead if a drain attempt failed); a thread list
   entry carries it as `queuedWork: "none" | "waiting" | "failed"`.
+- `bb thread list` prints a **Needs you** column for `Needs input`, `Working`,
+  automation `Woke`, and unread `Done`; JSON rows include `listIndicator`.
+  Automation `Woke` uses the Automations plugin's read-only overview RPC and
+  is omitted when that plugin is unavailable.
 - Use `bb thread count` when you need how many threads there are, never a list
   plus a row count: the count is a database aggregate, while `bb thread list`
   pages a bounded window and would miscount. Narrow with `--status

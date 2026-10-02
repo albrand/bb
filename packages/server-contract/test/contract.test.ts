@@ -1265,6 +1265,7 @@ describe("server-contract canonical schemas", () => {
             activeGoalCount: 0,
           },
           hasPendingInteraction: true,
+          listIndicator: "needs-input",
           environmentHostId: "host_123",
           environmentName: null,
           environmentBranchName: "bb/test",

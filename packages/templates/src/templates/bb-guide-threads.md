@@ -164,7 +164,9 @@ Listing:
     --unsectioned                          Show only threads outside sections
     --include-hidden                       Include hidden threads
 
-  The table prints ID, Title, Project, and Status. Title uses the thread
+  The table prints ID, Title, Project, Status, and Needs you. Needs you shows
+  Needs input, Working, automation Woke, or unread Done when applicable. Woke
+  is omitted when the Automations plugin RPC is unavailable. Title uses the thread
   title, then the fallback title from the first prompt, then "-". Long
   titles are cut at 60 characters. Project shows the project name; the
   personal project shows "-". Use --json for the full thread records.

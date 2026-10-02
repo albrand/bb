@@ -37,4 +37,9 @@ Modal connection and machine commands are documented in [modal-sandboxes](../plu
 `--new-machine` or the machine provider owned by a composed
 `--environment-provider`; a composition rejects separate machine selectors.
 
+`bb thread list` adds a **Needs you** column for `Needs input`, `Working`,
+automation `Woke`, and unread `Done` states. Automation labels come from the
+installed Automations plugin; when its read RPC is unavailable, the column
+still reports the thread-list states it can resolve locally.
+
 Modal image debugging uses `bb modal image build`, `bb modal sandbox run`, `bb modal sandbox exec ID [--json] -- COMMAND...`, and `bb modal sandbox stop ID`. Debug compute expires after 30 minutes and skips BB enrollment and project setup. See the plugin skill for output limits and typed RPC equivalents.

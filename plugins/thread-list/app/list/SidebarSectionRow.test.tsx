@@ -124,7 +124,7 @@ describe("SidebarSectionRow", () => {
     expect(slots[0]?.getAttribute("class")).toContain("fill-muted-foreground");
     expect(slots[1]?.getAttribute("class")).toContain("fill-none");
     expect(slots[2]?.getAttribute("class")).toContain("fill-primary");
-    expect(screen.queryByLabelText("Thread needs user input")).toBeNull();
+    expect(screen.queryByLabelText("Needs input")).toBeNull();
   });
 
   it("rolls a hidden plugin status up to the collapsed section row", () => {

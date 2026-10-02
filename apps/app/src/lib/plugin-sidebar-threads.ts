@@ -1,11 +1,6 @@
 import type { ThreadListEntry } from "@bb/domain";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
-import {
-  getThreadListIndicatorLabel,
-  resolveThreadListIndicator,
-  threadListIndicatorStateForThread,
-} from "@bb/client-core";
-import { isThreadRead } from "@bb/client-core";
+import { getThreadListIndicatorLabel, isThreadRead } from "@bb/client-core";
 import {
   EMPTY_TITLE_MENTION_RESOURCES,
   resolveThreadTitleDisplayText,
@@ -19,9 +14,7 @@ export function toPluginSidebarThread(
   hostNamesById: ReadonlyMap<string, string> = new Map(),
   titleResources: ThreadTitleMentionResources = EMPTY_TITLE_MENTION_RESOURCES,
 ): PluginSidebarThread {
-  const indicator = resolveThreadListIndicator(
-    threadListIndicatorStateForThread(entry, false),
-  );
+  const indicator = entry.listIndicator;
 
   return {
     id: entry.id,
@@ -58,7 +51,10 @@ export function toPluginSidebarThread(
     pinSortKey: entry.pinSortKey,
     isArchived: entry.archivedAt !== null,
     archivedAt: entry.archivedAt,
-    href: getThreadRoutePath({ projectId: entry.projectId, threadId: entry.id }),
+    href: getThreadRoutePath({
+      projectId: entry.projectId,
+      threadId: entry.id,
+    }),
     isHidden: entry.visibility === "hidden",
     environment:
       entry.environmentId === null

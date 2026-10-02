@@ -11,9 +11,8 @@ import {
 import type { BuiltInSidebarSectionOptionsById } from "./BuiltInSidebarSection.js";
 
 installTestPluginRuntime();
-const { renderBuiltInSidebarSection } = await import(
-  "./BuiltInSidebarSection.js"
-);
+const { renderBuiltInSidebarSection } =
+  await import("./BuiltInSidebarSection.js");
 
 const SECTIONS: BuiltInSidebarSectionOptionsById = {
   pinned: {
@@ -137,6 +136,6 @@ describe("built-in sidebar section renderer", () => {
     );
 
     expect(screen.queryByText("Threads content")).toBeNull();
-    expect(screen.getAllByLabelText("Goal active")).not.toHaveLength(0);
+    expect(screen.getAllByLabelText("Working")).not.toHaveLength(0);
   });
 });

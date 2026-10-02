@@ -10,6 +10,52 @@ type ThreadStatusShape = Pick<
 type ThreadRuntimeShape = Pick<PluginSidebarThread, "runtimeStatus">;
 type ThreadActivityStateShape = Pick<PluginSidebarThread, "activity">;
 
+export interface ThreadListIndicatorState {
+  hasPendingInteraction: boolean;
+  hasUnsubmittedDraft: boolean;
+  hasUnreadError: boolean;
+  hasUnreadSuccess: boolean;
+  isAutomationWoken: boolean;
+  isBackgroundAgentActive: boolean;
+  isBackgroundCommandActive: boolean;
+  isGoalActive: boolean;
+  isPlanModeActive: boolean;
+  isRuntimeActive: boolean;
+  isWorkflowActive: boolean;
+  queuedWork: PluginSidebarThread["queuedWork"];
+}
+
+export type ThreadListIndicatorKind = PluginSidebarThreadIndicator;
+
+const THREAD_LIST_INDICATOR_LABELS: Record<
+  Exclude<ThreadListIndicatorKind, "none">,
+  string
+> = {
+  "unread-error": "Unread thread failed",
+  "waiting-for-input": "Thread needs user input",
+  "needs-input": "Needs input",
+  working: "Working",
+  woke: "Woke",
+  "done-unread": "Done",
+  "working-draft": "Thread working with unsubmitted draft",
+  workflow: "Workflow running",
+  "background-agent": "Background agent running",
+  "background-command": "Background command running",
+  "plan-mode": "Plan mode active",
+  goal: "Goal active",
+  runtime: "Thread working",
+  "queued-failed": "Queued message failed to send",
+  "queued-waiting": "Thread has a message waiting to send",
+  draft: "Thread has unsubmitted draft",
+  "unread-success": "Unread thread succeeded",
+};
+
+export function getThreadListIndicatorLabel(
+  kind: ThreadListIndicatorKind,
+): string | null {
+  return kind === "none" ? null : THREAD_LIST_INDICATOR_LABELS[kind];
+}
+
 const RUNNING_RUNTIME_STATUSES: Record<
   PluginSidebarThread["runtimeStatus"],
   boolean
@@ -74,47 +120,6 @@ function isBusyThread(
   );
 }
 
-export interface ThreadListIndicatorState {
-  hasPendingInteraction: boolean;
-  hasUnsubmittedDraft: boolean;
-  hasUnreadError: boolean;
-  hasUnreadSuccess: boolean;
-  isBackgroundAgentActive: boolean;
-  isBackgroundCommandActive: boolean;
-  isGoalActive: boolean;
-  isPlanModeActive: boolean;
-  isRuntimeActive: boolean;
-  isWorkflowActive: boolean;
-  queuedWork: PluginSidebarThread["queuedWork"];
-}
-
-export type ThreadListIndicatorKind = PluginSidebarThreadIndicator;
-
-const THREAD_LIST_INDICATOR_LABELS: Record<
-  Exclude<ThreadListIndicatorKind, "none">,
-  string
-> = {
-  "unread-error": "Unread thread failed",
-  "waiting-for-input": "Thread needs user input",
-  "working-draft": "Thread working with unsubmitted draft",
-  workflow: "Workflow running",
-  "background-agent": "Background agent running",
-  "background-command": "Background command running",
-  "plan-mode": "Plan mode active",
-  goal: "Goal active",
-  runtime: "Thread working",
-  "queued-failed": "Queued message failed to send",
-  "queued-waiting": "Thread has a message waiting to send",
-  draft: "Thread has unsubmitted draft",
-  "unread-success": "Unread thread succeeded",
-};
-
-export function getThreadListIndicatorLabel(
-  kind: ThreadListIndicatorKind,
-): string | null {
-  return kind === "none" ? null : THREAD_LIST_INDICATOR_LABELS[kind];
-}
-
 export function hasThreadListWorkingActivity(
   state: ThreadListIndicatorState,
   hasRunningPluginStatus = false,
@@ -130,6 +135,20 @@ export function hasThreadListWorkingActivity(
   );
 }
 
+export function resolveThreadListIndicator(
+  state: ThreadListIndicatorState,
+): ThreadListIndicatorKind {
+  if (state.hasPendingInteraction) return "needs-input";
+  const hasActiveWork = hasThreadListWorkingActivity(state);
+  if (hasActiveWork) return "working";
+  if (state.isAutomationWoken) return "woke";
+  if (state.hasUnreadError || state.hasUnreadSuccess) return "done-unread";
+  if (state.queuedWork === "failed") return "queued-failed";
+  if (state.queuedWork === "waiting") return "queued-waiting";
+  if (state.hasUnsubmittedDraft) return "draft";
+  return "none";
+}
+
 export function threadListIndicatorStateForThread(
   thread: ThreadStatusShape &
     ThreadRuntimeShape &
@@ -143,6 +162,7 @@ export function threadListIndicatorStateForThread(
     hasUnsubmittedDraft,
     hasUnreadError: unreadDone && thread.status === "error",
     hasUnreadSuccess: unreadDone && thread.status !== "error",
+    isAutomationWoken: false,
     isBackgroundAgentActive: hasActiveBackgroundAgentActivity(thread),
     isBackgroundCommandActive: hasActiveBackgroundCommandActivity(thread),
     isGoalActive: hasActiveGoalActivity(thread),
@@ -151,27 +171,6 @@ export function threadListIndicatorStateForThread(
     isRuntimeActive: isRuntimeBusyThread(thread),
     isWorkflowActive: hasActiveWorkflowActivity(thread),
   };
-}
-
-export function resolveThreadListIndicator(
-  state: ThreadListIndicatorState,
-): ThreadListIndicatorKind {
-  if (state.hasUnreadError) return "unread-error";
-  if (state.hasPendingInteraction) return "waiting-for-input";
-
-  const hasActiveWork = hasThreadListWorkingActivity(state);
-  if (state.hasUnsubmittedDraft && hasActiveWork) return "working-draft";
-  if (state.isPlanModeActive) return "plan-mode";
-  if (state.isGoalActive) return "goal";
-  if (state.isRuntimeActive) return "runtime";
-  if (state.isWorkflowActive) return "workflow";
-  if (state.isBackgroundAgentActive) return "background-agent";
-  if (state.isBackgroundCommandActive) return "background-command";
-  if (state.queuedWork === "failed") return "queued-failed";
-  if (state.hasUnreadSuccess) return "unread-success";
-  if (state.queuedWork === "waiting") return "queued-waiting";
-  if (state.hasUnsubmittedDraft) return "draft";
-  return "none";
 }
 
 export interface CollapsedChildActivity {

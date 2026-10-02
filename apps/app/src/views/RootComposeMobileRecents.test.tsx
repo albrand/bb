@@ -321,7 +321,7 @@ describe("mobile recents hierarchy interaction", () => {
 
   it.each([
     {
-      label: "Thread needs user input",
+      label: "Needs input",
       child: makeIdleThread({
         id: "thr_child",
         parentThreadId: "thr_parent",
@@ -329,7 +329,7 @@ describe("mobile recents hierarchy interaction", () => {
       }),
     },
     {
-      label: "Plan mode active",
+      label: "Working",
       child: makeIdleThread({
         id: "thr_child",
         parentThreadId: "thr_parent",
@@ -340,7 +340,7 @@ describe("mobile recents hierarchy interaction", () => {
       }),
     },
     {
-      label: "Thread working",
+      label: "Working",
       child: makeThread({
         id: "thr_child",
         parentThreadId: "thr_parent",
@@ -657,7 +657,7 @@ describe("mobile recent thread rows", () => {
 });
 
 describe("RootComposeMobileRecents", () => {
-  it("shows concurrent Plan activity before the runtime spinner", () => {
+  it("shows Working for concurrent plan and runtime activity", () => {
     render(
       <TestProviders>
         <RootComposeMobileRecents
@@ -670,12 +670,12 @@ describe("RootComposeMobileRecents", () => {
       </TestProviders>,
     );
 
-    expect(screen.getByLabelText("Plan mode active")).not.toBeNull();
-    expect(screen.queryByLabelText("Thread working")).toBeNull();
+    expect(screen.getByLabelText("Working")).not.toBeNull();
+    expect(screen.queryByLabelText("Plan mode active")).toBeNull();
     expect(screen.queryByLabelText("Goal active")).toBeNull();
   });
 
-  it("keeps the mobile working draft state ahead of runtime activity", () => {
+  it("shows Working for a draft thread with runtime activity", () => {
     window.localStorage.setItem(
       "bb.promptbox.contents-proj_mobile-thr_mobile-3",
       JSON.stringify({ text: "Keep editing", attachments: [] }),
@@ -693,14 +693,14 @@ describe("RootComposeMobileRecents", () => {
       </TestProviders>,
     );
 
+    expect(screen.getByLabelText("Working")).not.toBeNull();
     expect(
-      screen.getByLabelText("Thread working with unsubmitted draft"),
-    ).not.toBeNull();
-    expect(screen.queryByLabelText("Thread working")).toBeNull();
+      screen.queryByLabelText("Thread working with unsubmitted draft"),
+    ).toBeNull();
     expect(screen.queryByLabelText("Plan mode active")).toBeNull();
   });
 
-  it("includes only the resolved unread-success indicator in the link label", () => {
+  it("includes the resolved Done indicator in the link label", () => {
     window.localStorage.setItem(
       "bb.promptbox.contents-proj_mobile-thr_mobile-3",
       JSON.stringify({ text: "Keep editing", attachments: [] }),
@@ -734,7 +734,7 @@ describe("RootComposeMobileRecents", () => {
 
     expect(
       screen.getByRole("link", {
-        name: "Open Mobile activity — Unread thread succeeded",
+        name: "Open Mobile activity — Done",
       }),
     ).not.toBeNull();
     expect(screen.queryByLabelText("Plan mode active")).toBeNull();

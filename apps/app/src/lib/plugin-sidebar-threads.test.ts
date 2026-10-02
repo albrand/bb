@@ -2,9 +2,13 @@ import type { ThreadListEntry } from "@bb/domain";
 import { describe, expect, it } from "vitest";
 import { toPluginSidebarThread } from "./plugin-sidebar-threads";
 import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import {
+  resolveThreadListIndicator,
+  threadListIndicatorStateForThread,
+} from "@bb/client-core";
 
 function makeThread(overrides: Partial<ThreadListEntry> = {}): ThreadListEntry {
-  return makeThreadListEntry({
+  const entry = makeThreadListEntry({
     id: "thr_1",
     projectId: "proj_1",
     title: "A thread",
@@ -15,14 +19,21 @@ function makeThread(overrides: Partial<ThreadListEntry> = {}): ThreadListEntry {
     updatedAt: 2,
     ...overrides,
   });
+  return {
+    ...entry,
+    listIndicator: resolveThreadListIndicator(
+      threadListIndicatorStateForThread(entry, false),
+    ),
+  };
 }
 
 describe("toPluginSidebarThread", () => {
   it("resolves the display title through the same rules bb's row uses", () => {
     expect(toPluginSidebarThread(makeThread()).displayTitle).toBe("A thread");
     expect(
-      toPluginSidebarThread(makeThread({ title: null, titleFallback: "Fallback" }))
-        .displayTitle,
+      toPluginSidebarThread(
+        makeThread({ title: null, titleFallback: "Fallback" }),
+      ).displayTitle,
     ).toBe("Fallback");
     expect(
       toPluginSidebarThread(
@@ -75,7 +86,7 @@ describe("toPluginSidebarThread", () => {
           },
         }),
       ).indicator,
-    ).toBe("waiting-for-input");
+    ).toBe("needs-input");
 
     expect(
       toPluginSidebarThread(
@@ -85,7 +96,7 @@ describe("toPluginSidebarThread", () => {
           },
         }),
       ).indicator,
-    ).toBe("runtime");
+    ).toBe("working");
 
     expect(
       toPluginSidebarThread(
@@ -99,24 +110,24 @@ describe("toPluginSidebarThread", () => {
           },
         }),
       ).indicator,
-    ).toBe("workflow");
+    ).toBe("working");
   });
 
   it("carries the host's accessible label, and null for none", () => {
     expect(
       toPluginSidebarThread(makeThread({ hasPendingInteraction: true }))
         .indicatorLabel,
-    ).toBe("Thread needs user input");
+    ).toBe("Needs input");
     const idle = toPluginSidebarThread(makeThread());
     expect(idle.indicator).toBe("none");
     expect(idle.indicatorLabel).toBeNull();
   });
 
-  it("reports an unread failure as an error indicator", () => {
+  it("reports an unread failure as a completed unread turn", () => {
     const mapped = toPluginSidebarThread(
       makeThread({ status: "error", lastReadAt: 1, latestAttentionAt: 9 }),
     );
-    expect(mapped.indicator).toBe("unread-error");
+    expect(mapped.indicator).toBe("done-unread");
     expect(mapped.isUnread).toBe(true);
   });
 
@@ -211,7 +222,7 @@ describe("toPluginSidebarThread", () => {
     const unreadAndFailed = toPluginSidebarThread(
       makeThread({ queuedWork: "failed", lastReadAt: 1, latestAttentionAt: 9 }),
     );
-    expect(unreadAndFailed.indicator).toBe("queued-failed");
+    expect(unreadAndFailed.indicator).toBe("done-unread");
   });
 
   it("reports no environment when the thread has none", () => {

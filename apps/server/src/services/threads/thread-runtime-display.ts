@@ -24,6 +24,10 @@ import type {
   ThreadWithRuntime,
 } from "@bb/domain";
 import {
+  resolveThreadListIndicator,
+  threadListIndicatorStateForThread,
+} from "@bb/client-core";
+import {
   extractThreadTimelineActivePlanTurn,
   extractThreadTimelineGoal,
   type ThreadEventWithMeta,
@@ -594,13 +598,20 @@ export function toThreadListEntryResponses(
       now: args.now,
       thread,
     });
-    return thread.environmentHostId === null &&
+    const withEnvironmentHost =
+      thread.environmentHostId === null &&
       (thread.status === "pending" || thread.status === "starting")
-      ? {
-          ...entry,
-          environmentHostId: intendedThreadHostId(deps, thread.id),
-        }
-      : entry;
+        ? {
+            ...entry,
+            environmentHostId: intendedThreadHostId(deps, thread.id),
+          }
+        : entry;
+    return {
+      ...withEnvironmentHost,
+      listIndicator: resolveThreadListIndicator(
+        threadListIndicatorStateForThread(withEnvironmentHost, false),
+      ),
+    };
   });
 }
 
@@ -624,6 +635,7 @@ function toThreadListEntryResponseFromLatestSession(
       isWorktree: args.thread.environmentIsWorktree,
     }),
     hasPendingInteraction: args.thread.hasPendingInteraction,
+    listIndicator: "none",
     runtime: resolveThreadRuntimeStateFromLatestSession({
       environmentHostId: args.thread.environmentHostId,
       hostConnected: args.hostConnected,

@@ -437,11 +437,34 @@ export const threadQueuedWorkValues = ["none", "waiting", "failed"] as const;
 export const threadQueuedWorkSchema = z.enum(threadQueuedWorkValues);
 export type ThreadQueuedWork = z.infer<typeof threadQueuedWorkSchema>;
 
+export const threadListIndicatorSchema = z.enum([
+  "unread-error",
+  "needs-input",
+  "working",
+  "woke",
+  "done-unread",
+  "waiting-for-input",
+  "working-draft",
+  "workflow",
+  "background-agent",
+  "background-command",
+  "plan-mode",
+  "goal",
+  "runtime",
+  "queued-failed",
+  "queued-waiting",
+  "draft",
+  "unread-success",
+  "none",
+]);
+export type ThreadListIndicator = z.infer<typeof threadListIndicatorSchema>;
+
 export const threadListEntrySchema = threadWithRuntimeSchema.extend({
   activity: threadActivityStateSchema,
   queuedWork: threadQueuedWorkSchema,
   pinSortKey: z.string().nullable(),
   hasPendingInteraction: z.boolean(),
+  listIndicator: threadListIndicatorSchema,
   environmentHostId: z.string().nullable(),
   environmentName: z.string().nullable(),
   environmentBranchName: z.string().nullable(),

@@ -123,7 +123,10 @@ export function resolveThreadStatus(
     pluginStatus !== null &&
     indicatorKind !== "runtime" &&
     indicatorKind !== "unread-error" &&
-    indicatorKind !== "waiting-for-input";
+    indicatorKind !== "waiting-for-input" &&
+    indicatorKind !== "needs-input" &&
+    indicatorKind !== "woke" &&
+    indicatorKind !== "done-unread";
 
   return {
     accessibleLabel: pluginStatusIsVisible
@@ -174,6 +177,7 @@ export function ThreadStatusGlyph({
       isPlanModeActive,
       isRuntimeActive,
       isWorkflowActive,
+      isAutomationWoken: false,
       queuedWork,
     },
     pluginStatus,
@@ -185,6 +189,42 @@ export function ThreadStatusGlyph({
   }
 
   switch (kind) {
+    case "needs-input":
+      return (
+        <Icon
+          name="CircleQuestion"
+          className={cn("text-warning", iconSizeClass)}
+          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        />
+      );
+    case "working":
+      return (
+        <Icon
+          name="Loading"
+          className={cn(
+            "animate-spin motion-reduce:animate-none",
+            SIDEBAR_WORKING_STATUS_COLOR_CLASS,
+            iconSizeClass,
+          )}
+          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        />
+      );
+    case "woke":
+      return (
+        <Icon
+          name="AlarmClock"
+          className={cn("text-attention", iconSizeClass)}
+          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        />
+      );
+    case "done-unread":
+      return (
+        <Icon
+          name="Check"
+          className={cn(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS, iconSizeClass)}
+          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        />
+      );
     case "archived":
       return (
         <Icon

@@ -17,7 +17,7 @@ export const SIDEBAR_STATUS_ICON_CLASS = "size-4";
 
 export const SIDEBAR_STATUS_GLYPH_BOX_CLASS = "h-4 w-4";
 
-export const SIDEBAR_WORKING_STATUS_COLOR_CLASS = "text-muted-foreground/50";
+export const SIDEBAR_WORKING_STATUS_COLOR_CLASS = "text-timeline-accent";
 
 export const SIDEBAR_SUCCESS_STATUS_COLOR_CLASS = "text-success-foreground";
 

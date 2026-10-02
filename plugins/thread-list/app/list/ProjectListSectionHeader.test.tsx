@@ -19,9 +19,8 @@ import { makeSidebarThread } from "../model/fixtures.js";
 installTestPluginRuntime();
 const { TopLevelSidebarSection } = await import("./TopLevelSidebarSection.js");
 const { SidebarControlButton } = await import("../rows/SidebarRowControls.js");
-const { SectionThreadDndProvider } = await import(
-  "../dnd/SectionThreadDndContext.js"
-);
+const { SectionThreadDndProvider } =
+  await import("../dnd/SectionThreadDndContext.js");
 
 function Slot({ children }: { children: ReactNode }) {
   return <TooltipProvider>{children}</TooltipProvider>;
@@ -282,7 +281,7 @@ describe("TopLevelSidebarSection", () => {
       </TopLevelSidebarSection>,
     );
 
-    const indicator = screen.getByLabelText("Thread working");
+    const indicator = screen.getByLabelText("Working");
     const activitySlot = indicator.closest(
       "[data-sidebar-collapsed-activity-edge]",
     );
