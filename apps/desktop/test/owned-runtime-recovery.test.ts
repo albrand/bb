@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createOwnedRuntimeRecovery,
-  handleOwnedRuntimeExit,
   resolveOwnedRuntimeExitAction,
+  watchOwnedRuntimeExit,
 } from "../src/owned-runtime-recovery.js";
 
 describe("owned runtime recovery", () => {
@@ -65,9 +65,13 @@ describe("owned runtime recovery", () => {
     expect(recovered).toHaveBeenCalledOnce();
   });
 
-  it("routes an unexpected owned-runtime exit through loading, retry, and renderer reload", async () => {
+  it("routes the process exit promise through loading, retry, and renderer reload", async () => {
     const events: string[] = [];
     let attempts = 0;
+    let resolveExit: (exit: string) => void = () => {};
+    const exit = new Promise<string>((resolve) => {
+      resolveExit = resolve;
+    });
     const recovery = createOwnedRuntimeRecovery({
       isCurrent: () => true,
       onRecovered: () => {
@@ -85,21 +89,34 @@ describe("owned runtime recovery", () => {
       },
     });
 
-    await handleOwnedRuntimeExit({
-      appLoaded: true,
-      hasRecoveryController: true,
-      isCurrentRuntime: true,
-      isRecovering: false,
-      isQuitting: false,
-      isServerMoving: false,
+    const watching = watchOwnedRuntimeExit({
+      exit,
+      getState: () => ({
+        appLoaded: true,
+        hasRecoveryController: true,
+        isCurrentRuntime: true,
+        isRecovering: false,
+        isQuitting: false,
+        isServerMoving: false,
+      }),
+      clearPidFile: (exitResult) => {
+        events.push(`clear pid file: ${exitResult}`);
+      },
       clearCurrentRuntime: () => events.push("clear current runtime"),
-      recover: () => recovery.start(),
+      recover: async (exitResult) => {
+        events.push(`recover after exit: ${exitResult}`);
+        await recovery.start();
+      },
       showError: () => events.push("show startup error"),
       showServerMoving: () => events.push("show server moving"),
     });
+    resolveExit("owned process stopped");
+    await watching;
 
     expect(events).toEqual([
+      "clear pid file: owned process stopped",
       "clear current runtime",
+      "recover after exit: owned process stopped",
       "wait before retry",
       "show loading view",
       "start owned runtime",

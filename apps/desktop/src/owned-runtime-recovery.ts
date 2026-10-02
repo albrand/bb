@@ -33,6 +33,16 @@ interface HandleOwnedRuntimeExitArgs extends ResolveOwnedRuntimeExitActionArgs {
   showServerMoving: () => void;
 }
 
+interface WatchOwnedRuntimeExitArgs<TExit> {
+  clearCurrentRuntime: () => void;
+  clearPidFile: (exit: TExit) => void;
+  exit: Promise<TExit>;
+  getState: () => ResolveOwnedRuntimeExitActionArgs;
+  recover: (exit: TExit) => Promise<void>;
+  showError: (exit: TExit) => void;
+  showServerMoving: (exit: TExit) => void;
+}
+
 const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 15_000;
 
@@ -81,6 +91,27 @@ export async function handleOwnedRuntimeExit({
     return;
   }
   showError();
+}
+
+export function watchOwnedRuntimeExit<TExit>({
+  clearCurrentRuntime,
+  clearPidFile,
+  exit,
+  getState,
+  recover,
+  showError,
+  showServerMoving,
+}: WatchOwnedRuntimeExitArgs<TExit>): Promise<void> {
+  return exit.then(async (exitResult) => {
+    clearPidFile(exitResult);
+    await handleOwnedRuntimeExit({
+      ...getState(),
+      clearCurrentRuntime,
+      recover: () => recover(exitResult),
+      showError: () => showError(exitResult),
+      showServerMoving: () => showServerMoving(exitResult),
+    });
+  });
 }
 
 function wait(delayMs: number): Promise<void> {
