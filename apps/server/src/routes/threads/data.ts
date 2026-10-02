@@ -462,16 +462,13 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
             totalTokens: null,
           }
         : {
-            cachedInputTokens: rows.some(
-              (row) =>
-                row.providerId !== "codex" && row.cachedInputTokens === 0,
-            )
+            cachedInputTokens: rows.some((row) => row.cachedInputTokens === 0)
               ? null
               : sumRows("cachedInputTokens"),
             inputTokens: sumRows("inputTokens"),
             outputTokens: sumRows("outputTokens"),
             reasoningOutputTokens: rows.some(
-              (row) => row.providerId !== "codex",
+              (row) => row.reasoningOutputTokens === 0,
             )
               ? null
               : sumRows("reasoningOutputTokens"),

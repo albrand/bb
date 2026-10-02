@@ -249,7 +249,7 @@ export function recordSpendForInsertedEvents(
           ? source.event.tokenUsage.last.cachedInputTokens
           : null,
       reasoningOutputTokens:
-        source.providerId === "codex"
+        source.event.tokenUsage.last.reasoningOutputTokens > 0
           ? source.event.tokenUsage.last.reasoningOutputTokens
           : null,
     },

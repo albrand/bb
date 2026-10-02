@@ -3,12 +3,13 @@
 import {
   cleanup,
   fireEvent,
-  render,
+  render as testingRender,
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ReactNode, Ref } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement, ReactNode, Ref } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadDetailHeader } from "./ThreadDetailHeader";
 import { PaneContext, type PaneContextValue } from "./PaneContext";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
@@ -55,6 +56,20 @@ vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
 
 const THREAD_ID = "thr_header";
 
+function render(element: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const withQueryClient = (child: ReactElement) => (
+    <QueryClientProvider client={queryClient}>{child}</QueryClientProvider>
+  );
+  const rendered = testingRender(withQueryClient(element));
+  return {
+    ...rendered,
+    rerender: (next: ReactElement) => rendered.rerender(withQueryClient(next)),
+  };
+}
+
 const PANE_CONTEXT: PaneContextValue = {
   paneId: "main",
   isFocused: true,
@@ -77,6 +92,29 @@ afterEach(() => {
   vi.restoreAllMocks();
   window.localStorage.clear();
   delete window.bbDesktop;
+});
+
+beforeEach(() => {
+  vi.spyOn(sdk.threads, "childSummary").mockResolvedValue({
+    nonDeletedChildCount: 0,
+    unarchivedDescendantCount: 0,
+    working: 0,
+    waiting: 0,
+    idle: 0,
+    failed: 0,
+    totalTokens: 0,
+    children: [],
+  });
+  vi.spyOn(sdk.threads, "spendSummary").mockResolvedValue({
+    total: {
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    },
+    turns: [],
+  });
 });
 
 describe("ThreadDetailHeader", () => {

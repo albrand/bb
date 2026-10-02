@@ -1,4 +1,4 @@
-CREATE TABLE `thread_turn_spend` (
+CREATE TABLE IF NOT EXISTS `thread_turn_spend` (
 	`thread_id` text NOT NULL,
 	`turn_id` text NOT NULL,
 	`provider_thread_id` text NOT NULL,
@@ -12,4 +12,4 @@ CREATE TABLE `thread_turn_spend` (
 	FOREIGN KEY (`thread_id`) REFERENCES `threads`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `thread_turn_spend_thread_idx` ON `thread_turn_spend` (`thread_id`,`turn_id`);
+CREATE INDEX IF NOT EXISTS `thread_turn_spend_thread_idx` ON `thread_turn_spend` (`thread_id`,`turn_id`);
