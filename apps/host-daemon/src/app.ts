@@ -318,7 +318,7 @@ export async function createHostDaemonApp(
 
     interactiveInterruptRetryTimeout = setTimeout(() => {
       interactiveInterruptRetryTimeout = null;
-      void flushPendingInteractiveInterrupts();
+      flushPendingInteractiveInterruptsSafely();
     }, INTERACTIVE_INTERRUPT_RETRY_DELAY_MS);
   }
 
@@ -366,6 +366,15 @@ export async function createHostDaemonApp(
     }
   }
 
+  function flushPendingInteractiveInterruptsSafely(): void {
+    void flushPendingInteractiveInterrupts().catch((error) => {
+      options.logger.warn(
+        runtimeErrorLogFields(error),
+        "Failed to flush pending interactive interrupt requests",
+      );
+    });
+  }
+
   function enqueueInteractiveInterrupt(
     request: PendingInteractiveInterruptRequest,
   ): void {
@@ -373,7 +382,7 @@ export async function createHostDaemonApp(
       buildInteractiveInterruptKey(request),
       request,
     );
-    void flushPendingInteractiveInterrupts();
+    flushPendingInteractiveInterruptsSafely();
   }
 
   eventSink = createEventSink({
@@ -881,7 +890,7 @@ export async function createHostDaemonApp(
           "Failed to flush pending daemon events after session opened",
         );
       });
-      void flushPendingInteractiveInterrupts();
+      flushPendingInteractiveInterruptsSafely();
     },
     setSession: (session) => {
       sessionState.value = session?.sessionId ?? null;
