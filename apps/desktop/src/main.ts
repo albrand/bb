@@ -95,7 +95,7 @@ import {
 } from "./owned-runtime-supervisor.js";
 import {
   createOwnedRuntimeRecovery,
-  resolveOwnedRuntimeExitAction,
+  handleOwnedRuntimeExit,
 } from "./owned-runtime-recovery.js";
 import {
   probeBbServer,
@@ -2459,38 +2459,35 @@ async function spawnOwnedRuntime(
 
   void bbProcess.exit.then((exit) => {
     void clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
-    const exitAction = resolveOwnedRuntimeExitAction({
+    void handleOwnedRuntimeExit({
       appLoaded: bbAppLoaded,
       hasRecoveryController: ownedRuntimeRecovery !== null,
       isCurrentRuntime: currentRuntime === runtime,
       isRecovering: ownedRuntimeRecovery?.isRecovering() ?? false,
       isQuitting: quitting,
       isServerMoving: localServerMove !== null,
-    });
-    if (exitAction === "ignore") {
-      return;
-    }
-    setCurrentRuntime(null);
-    if (exitAction === "server-moving") {
-      desktopLogger.warn(
-        `[desktop] the Electron-owned bb-app process that runs this computer as a machine stopped with ${formatExitResult(exit)}`,
-      );
-      return;
-    }
-    if (exitAction === "recover") {
-      desktopLogger.warn(
-        `[desktop] the Electron-owned bb-app process exited with ${formatExitResult(exit)}; restarting it`,
-      );
-      void ownedRuntimeRecovery?.start();
-      return;
-    }
-    void loadStartupError({
-      details: `The Electron-owned bb-app process stopped with ${formatExitResult(
-        exit,
-      )}.`,
-      logs: bbProcess.logs.text(),
-      actions: [],
-      title: "bb stopped",
+      clearCurrentRuntime: () => setCurrentRuntime(null),
+      recover: async () => {
+        desktopLogger.warn(
+          `[desktop] the Electron-owned bb-app process exited with ${formatExitResult(exit)}; restarting it`,
+        );
+        await ownedRuntimeRecovery?.start();
+      },
+      showServerMoving: () => {
+        desktopLogger.warn(
+          `[desktop] the Electron-owned bb-app process that runs this computer as a machine stopped with ${formatExitResult(exit)}`,
+        );
+      },
+      showError: () => {
+        void loadStartupError({
+          details: `The Electron-owned bb-app process stopped with ${formatExitResult(
+            exit,
+          )}.`,
+          logs: bbProcess.logs.text(),
+          actions: [],
+          title: "bb stopped",
+        });
+      },
     });
   });
   return { bbProcess, runtime };

@@ -26,6 +26,13 @@ export type OwnedRuntimeExitAction =
   | "show-error"
   | "server-moving";
 
+interface HandleOwnedRuntimeExitArgs extends ResolveOwnedRuntimeExitActionArgs {
+  clearCurrentRuntime: () => void;
+  recover: () => Promise<void>;
+  showError: () => void;
+  showServerMoving: () => void;
+}
+
 const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 15_000;
 
@@ -50,6 +57,30 @@ export function resolveOwnedRuntimeExitAction({
     return "recover";
   }
   return "show-error";
+}
+
+export async function handleOwnedRuntimeExit({
+  clearCurrentRuntime,
+  recover,
+  showError,
+  showServerMoving,
+  ...state
+}: HandleOwnedRuntimeExitArgs): Promise<void> {
+  const action = resolveOwnedRuntimeExitAction(state);
+  if (action === "ignore") {
+    return;
+  }
+
+  clearCurrentRuntime();
+  if (action === "server-moving") {
+    showServerMoving();
+    return;
+  }
+  if (action === "recover") {
+    await recover();
+    return;
+  }
+  showError();
 }
 
 function wait(delayMs: number): Promise<void> {

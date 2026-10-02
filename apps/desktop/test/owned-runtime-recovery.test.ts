@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createOwnedRuntimeRecovery,
+  handleOwnedRuntimeExit,
   resolveOwnedRuntimeExitAction,
 } from "../src/owned-runtime-recovery.js";
 
@@ -62,6 +63,52 @@ describe("owned runtime recovery", () => {
     expect(wait).toHaveBeenCalledTimes(2);
     expect(restart).toHaveBeenCalledTimes(2);
     expect(recovered).toHaveBeenCalledOnce();
+  });
+
+  it("routes an unexpected owned-runtime exit through loading, retry, and renderer reload", async () => {
+    const events: string[] = [];
+    let attempts = 0;
+    const recovery = createOwnedRuntimeRecovery({
+      isCurrent: () => true,
+      onRecovered: () => {
+        events.push("reload renderer");
+        events.push("refresh system config and menu");
+      },
+      restart: async () => {
+        events.push("show loading view");
+        events.push("start owned runtime");
+        return attempts === 2;
+      },
+      wait: async () => {
+        attempts += 1;
+        events.push("wait before retry");
+      },
+    });
+
+    await handleOwnedRuntimeExit({
+      appLoaded: true,
+      hasRecoveryController: true,
+      isCurrentRuntime: true,
+      isRecovering: false,
+      isQuitting: false,
+      isServerMoving: false,
+      clearCurrentRuntime: () => events.push("clear current runtime"),
+      recover: () => recovery.start(),
+      showError: () => events.push("show startup error"),
+      showServerMoving: () => events.push("show server moving"),
+    });
+
+    expect(events).toEqual([
+      "clear current runtime",
+      "wait before retry",
+      "show loading view",
+      "start owned runtime",
+      "wait before retry",
+      "show loading view",
+      "start owned runtime",
+      "reload renderer",
+      "refresh system config and menu",
+    ]);
   });
 
   it("stops retrying when the desktop runtime is no longer current", async () => {
