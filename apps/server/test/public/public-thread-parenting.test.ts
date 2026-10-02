@@ -345,7 +345,7 @@ describe("public thread parenting routes", () => {
         waiting: 0,
         idle: 3,
         failed: 0,
-        totalTokens: null,
+        totalTokens: 0,
       });
     });
   });
@@ -379,7 +379,7 @@ describe("public thread parenting routes", () => {
         waiting: 0,
         idle: 1,
         failed: 0,
-        totalTokens: null,
+        totalTokens: 0,
       });
     });
   });

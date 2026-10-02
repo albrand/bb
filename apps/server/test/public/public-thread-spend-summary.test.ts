@@ -55,11 +55,11 @@ describe("public thread spend summaries", () => {
         providerId: "codex",
         threadId: parent.id,
         usage: {
-          cachedInputTokens: 0,
-          inputTokens: 10,
-          outputTokens: 4,
-          reasoningOutputTokens: 2,
-          totalTokens: 16,
+          cachedInputTokens: 4,
+          inputTokens: 95,
+          outputTokens: 31,
+          reasoningOutputTokens: 10,
+          totalTokens: 140,
         },
         weightedUnits: 20,
       });
@@ -71,10 +71,10 @@ describe("public thread spend summaries", () => {
         threadId: parent.id,
         usage: {
           cachedInputTokens: 0,
-          inputTokens: 20,
-          outputTokens: 8,
+          inputTokens: 10,
+          outputTokens: 3,
           reasoningOutputTokens: 0,
-          totalTokens: 28,
+          totalTokens: 13,
         },
         weightedUnits: 40,
       });
@@ -125,7 +125,7 @@ describe("public thread spend summaries", () => {
         threadId: parent.id,
         turnId: "turn-a",
         usage: {
-          cachedInputTokens: null,
+          cachedInputTokens: 0,
           inputTokens: 10,
           outputTokens: 3,
           reasoningOutputTokens: null,
@@ -167,7 +167,7 @@ describe("public thread spend summaries", () => {
         await readJson(spendResponse),
       );
       expect(spend.total).toEqual({
-        cachedInputTokens: null,
+        cachedInputTokens: 4,
         inputTokens: 105,
         outputTokens: 34,
         reasoningOutputTokens: null,
@@ -185,7 +185,7 @@ describe("public thread spend summaries", () => {
         {
           turnId: "turn-a",
           inputTokens: 60,
-          cachedInputTokens: null,
+          cachedInputTokens: 4,
           outputTokens: 23,
           reasoningOutputTokens: null,
           totalTokens: 94,
@@ -205,7 +205,7 @@ describe("public thread spend summaries", () => {
         waiting: 1,
         idle: 1,
         failed: 1,
-        totalTokens: null,
+        totalTokens: 155,
       });
       expect((summary.children ?? []).map((child) => child.id)).toEqual(
         children.map((child) => child.id),

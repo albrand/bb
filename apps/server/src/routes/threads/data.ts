@@ -13,6 +13,7 @@ import {
   getThreadExecutionOverride,
   getThreadExecutionReport,
   listQueuedThreadMessages,
+  listSpendRollupRows,
   listThreadTurnSpend,
 } from "@bb/db";
 import type { Hono } from "hono";
@@ -442,24 +443,33 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
   get(routes.spendSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureSpendTables(deps.db);
+    const dailyRows = listSpendRollupRows(deps.db, { threadId: thread.id });
     const turns = listThreadTurnSpend(deps.db, { threadId: thread.id });
-    const sumTurns = (
-      field:
-        | "cachedInputTokens"
-        | "inputTokens"
-        | "outputTokens"
-        | "reasoningOutputTokens"
-        | "totalTokens",
+    const sumDaily = (
+      field: "inputTokens" | "outputTokens" | "totalTokens",
     ): number | null =>
-      turns.length === 0 || turns.some((turn) => turn[field] === null)
+      dailyRows.length === 0
+        ? null
+        : dailyRows.reduce((sum, row) => sum + row[field], 0);
+    const dailyTotalTokens = sumDaily("totalTokens");
+    const turnSpendIsComplete =
+      dailyTotalTokens !== null &&
+      turns.reduce((sum, turn) => sum + turn.totalTokens, 0) ===
+        dailyTotalTokens;
+    const sumTurnKind = (
+      field: "cachedInputTokens" | "reasoningOutputTokens",
+    ): number | null =>
+      !turnSpendIsComplete ||
+      turns.length === 0 ||
+      turns.some((turn) => turn[field] === null)
         ? null
         : turns.reduce((sum, turn) => sum + (turn[field] ?? 0), 0);
     const total = {
-      cachedInputTokens: sumTurns("cachedInputTokens"),
-      inputTokens: sumTurns("inputTokens"),
-      outputTokens: sumTurns("outputTokens"),
-      reasoningOutputTokens: sumTurns("reasoningOutputTokens"),
-      totalTokens: sumTurns("totalTokens"),
+      cachedInputTokens: sumTurnKind("cachedInputTokens"),
+      inputTokens: sumDaily("inputTokens"),
+      outputTokens: sumDaily("outputTokens"),
+      reasoningOutputTokens: sumTurnKind("reasoningOutputTokens"),
+      totalTokens: dailyTotalTokens,
     };
     const response: ThreadSpendSummaryResponse = {
       total,
