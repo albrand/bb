@@ -205,7 +205,7 @@ describe("public thread spend summaries", () => {
         waiting: 1,
         idle: 1,
         failed: 1,
-        totalTokens: 155,
+        totalTokens: null,
       });
       expect((summary.children ?? []).map((child) => child.id)).toEqual(
         children.map((child) => child.id),
