@@ -967,13 +967,6 @@
       "when": 1790900209592,
       "tag": "0137_stiff_prism",
       "breakpoints": true
-    },
-    {
-      "idx": 138,
-      "version": "6",
-      "when": 1790954489379,
-      "tag": "0138_reflective_lorna_dane",
-      "breakpoints": true
     }
   ]
 }

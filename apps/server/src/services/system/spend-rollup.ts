@@ -154,7 +154,7 @@ function resolveHistoryComplete(
 }
 
 function rollUpObservations(
-  db: DbQueryConnection,
+  db: DbConnection,
   observations: readonly TokenUsageObservation[],
 ): number {
   const tracked = new Map<string, TrackedCursorEntry>();

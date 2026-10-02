@@ -678,29 +678,6 @@ export const threads = sqliteTable(
   ],
 );
 
-export const threadTurnSpend = sqliteTable(
-  "thread_turn_spend",
-  {
-    threadId: text("thread_id")
-      .notNull()
-      .references(() => threads.id, { onDelete: "cascade" }),
-    turnId: text("turn_id").notNull(),
-    providerThreadId: text("provider_thread_id").notNull(),
-    inputTokens: integer("input_tokens"),
-    cachedInputTokens: integer("cached_input_tokens"),
-    outputTokens: integer("output_tokens"),
-    reasoningOutputTokens: integer("reasoning_output_tokens"),
-    totalTokens: integer("total_tokens").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.threadId, table.turnId, table.providerThreadId],
-    }),
-    index("thread_turn_spend_thread_idx").on(table.threadId, table.turnId),
-  ],
-);
-
 export const threadPluginMetadata = sqliteTable(
   "thread_plugin_metadata",
   {
