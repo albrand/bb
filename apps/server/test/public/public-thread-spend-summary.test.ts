@@ -53,6 +53,36 @@ describe("public thread spend summaries", () => {
         day: "2026-06-01",
         model: "gpt-test",
         providerId: "codex",
+        threadId: parent.id,
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 10,
+          outputTokens: 4,
+          reasoningOutputTokens: 2,
+          totalTokens: 16,
+        },
+        weightedUnits: 20,
+      });
+      applySpendContribution(harness.db, {
+        at: 1_780_000_000_100,
+        day: "2026-06-01",
+        model: "claude-test",
+        providerId: "claude-code",
+        threadId: parent.id,
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 20,
+          outputTokens: 8,
+          reasoningOutputTokens: 0,
+          totalTokens: 28,
+        },
+        weightedUnits: 40,
+      });
+      applySpendContribution(harness.db, {
+        at: 1_780_000_000_000,
+        day: "2026-06-01",
+        model: "gpt-test",
+        providerId: "codex",
         threadId: children[0]!.id,
         usage: {
           cachedInputTokens: 20,
@@ -99,10 +129,10 @@ describe("public thread spend summaries", () => {
       );
       expect(spend.total).toEqual({
         cachedInputTokens: null,
-        inputTokens: null,
-        outputTokens: null,
+        inputTokens: 30,
+        outputTokens: 12,
         reasoningOutputTokens: null,
-        totalTokens: null,
+        totalTokens: 44,
       });
       expect(spend.turns).toEqual([
         {

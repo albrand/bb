@@ -444,6 +444,14 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureSpendTables(deps.db);
     const rows = listSpendRollupRows(deps.db, { threadId: thread.id });
+    const sumRows = (
+      field:
+        | "cachedInputTokens"
+        | "inputTokens"
+        | "outputTokens"
+        | "reasoningOutputTokens"
+        | "totalTokens",
+    ) => rows.reduce((sum, row) => sum + row[field], 0);
     const total =
       rows.length === 0
         ? {
@@ -453,29 +461,22 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
             reasoningOutputTokens: null,
             totalTokens: null,
           }
-        : rows.reduce(
-            (summary, row) => ({
-              cachedInputTokens:
-                row.providerId !== "codex" && row.cachedInputTokens === 0
-                  ? null
-                  : (summary.cachedInputTokens ?? 0) + row.cachedInputTokens,
-              inputTokens: (summary.inputTokens ?? 0) + row.inputTokens,
-              outputTokens: (summary.outputTokens ?? 0) + row.outputTokens,
-              reasoningOutputTokens:
-                row.providerId !== "codex"
-                  ? null
-                  : (summary.reasoningOutputTokens ?? 0) +
-                    row.reasoningOutputTokens,
-              totalTokens: (summary.totalTokens ?? 0) + row.totalTokens,
-            }),
-            {
-              cachedInputTokens: null as number | null,
-              inputTokens: null as number | null,
-              outputTokens: null as number | null,
-              reasoningOutputTokens: null as number | null,
-              totalTokens: null as number | null,
-            },
-          );
+        : {
+            cachedInputTokens: rows.some(
+              (row) =>
+                row.providerId !== "codex" && row.cachedInputTokens === 0,
+            )
+              ? null
+              : sumRows("cachedInputTokens"),
+            inputTokens: sumRows("inputTokens"),
+            outputTokens: sumRows("outputTokens"),
+            reasoningOutputTokens: rows.some(
+              (row) => row.providerId !== "codex",
+            )
+              ? null
+              : sumRows("reasoningOutputTokens"),
+            totalTokens: sumRows("totalTokens"),
+          };
     const response: ThreadSpendSummaryResponse = {
       total,
       turns: listThreadTurnSpend(deps.db, { threadId: thread.id }),
