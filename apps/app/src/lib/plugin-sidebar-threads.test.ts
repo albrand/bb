@@ -110,7 +110,7 @@ describe("toPluginSidebarThread", () => {
           },
         }),
       ).indicator,
-    ).toBe("workflow");
+    ).toBe("working");
   });
 
   it("carries the host's accessible label, and null for none", () => {
@@ -123,11 +123,11 @@ describe("toPluginSidebarThread", () => {
     expect(idle.indicatorLabel).toBeNull();
   });
 
-  it("reports an unread failure as an error indicator", () => {
+  it("reports an unread failure as a completed unread turn", () => {
     const mapped = toPluginSidebarThread(
       makeThread({ status: "error", lastReadAt: 1, latestAttentionAt: 9 }),
     );
-    expect(mapped.indicator).toBe("unread-error");
+    expect(mapped.indicator).toBe("done-unread");
     expect(mapped.isUnread).toBe(true);
   });
 
@@ -222,7 +222,7 @@ describe("toPluginSidebarThread", () => {
     const unreadAndFailed = toPluginSidebarThread(
       makeThread({ queuedWork: "failed", lastReadAt: 1, latestAttentionAt: 9 }),
     );
-    expect(unreadAndFailed.indicator).toBe("queued-failed");
+    expect(unreadAndFailed.indicator).toBe("done-unread");
   });
 
   it("reports no environment when the thread has none", () => {
