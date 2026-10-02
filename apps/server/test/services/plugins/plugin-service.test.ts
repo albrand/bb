@@ -590,6 +590,10 @@ describe("plugin service", () => {
       await service.reload("stale-timer");
       warn.mockClear();
 
+      const serverError = new Error("unexpected server failure");
+      process.emit("uncaughtException", serverError);
+      expect(unclaimed).toEqual([serverError]);
+
       const globals = globalThis as Record<string, unknown>;
       let thrown: unknown;
       try {
@@ -600,7 +604,7 @@ describe("plugin service", () => {
       process.emit("uncaughtException", thrown as Error);
       process.emit("uncaughtException", thrown as Error);
 
-      expect(unclaimed).toEqual([]);
+      expect(unclaimed).toEqual([serverError]);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         expect.any(Object),
