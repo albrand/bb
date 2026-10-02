@@ -7,9 +7,11 @@ import {
   toDevProcessEnv,
 } from "@bb/config/runtime";
 import { forwardSignalsAndMirrorExit } from "./child-process-helpers.mjs";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 
 const require = createRequire(import.meta.url);
 const electronBinary = require("electron");
+assertElectronRuntime(electronBinary);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..", "..", "..");
 

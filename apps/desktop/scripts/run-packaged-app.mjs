@@ -7,6 +7,7 @@ import {
 } from "./desktop-release-channel.mjs";
 import { createPackagedAppLaunchArguments } from "./packaged-app-launch.mjs";
 import { resolvePackagedAppBinary } from "./packaged-app-paths.mjs";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 
 const packageRoot = process.cwd();
 const releaseDir = join(packageRoot, "release");
@@ -34,13 +35,16 @@ function createLaunchArguments(env) {
   });
 }
 
+const appBinary = await resolvePackagedAppBinary({
+  executableName: releaseConfig.linuxExecutableName,
+  platform: process.platform,
+  productName: releaseConfig.applicationName,
+  releaseDir,
+});
+assertElectronRuntime(appBinary);
+
 const child = spawn(
-  await resolvePackagedAppBinary({
-    executableName: releaseConfig.linuxExecutableName,
-    platform: process.platform,
-    productName: releaseConfig.applicationName,
-    releaseDir,
-  }),
+  appBinary,
   createLaunchArguments(process.env),
   {
     env: createElectronAppEnv(process.env),

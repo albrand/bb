@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { build } from "esbuild";
+import { assertElectronRuntime } from "./assert-electron-runtime.mjs";
 
 const require = createRequire(import.meta.url);
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,6 +33,7 @@ try {
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("This smoke pins the Linux x64 DevBrowser binary");
   console.log(`Browser broker smoke artifacts: ${artifacts}`);
+  assertElectronRuntime(require("electron"));
   const source = values["dev-browser"] === undefined ? "release" : "local";
   const bytes = await (async () => {
     if (values["dev-browser"] !== undefined)
