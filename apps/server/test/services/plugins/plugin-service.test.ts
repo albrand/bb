@@ -37,6 +37,7 @@ import { pluginInstalledTelemetryEvent } from "../../../src/services/plugins/plu
 import type { TelemetryEvent } from "../../../src/services/system/telemetry.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 import { createProviderRegistryService } from "../../../src/services/providers/provider-registry.js";
+import { getPluginContextStaleErrorDetails } from "../../../src/services/plugins/plugin-api.js";
 
 const logger = testLogger as unknown as Logger;
 
@@ -562,7 +563,88 @@ describe("plugin service", () => {
       onDispose(hook: () => void): void;
     };
     await service.reload("staler");
-    expect(() => captured.onDispose(() => {})).toThrowError(/stale API handle/);
+    let thrown: unknown;
+    try {
+      captured.onDispose(() => {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toHaveProperty(
+      "message",
+      expect.stringContaining("stale API handle"),
+    );
+    expect(getPluginContextStaleErrorDetails(thrown)?.apiMember).toContain(
+      "onDispose",
+    );
+  });
+
+  it("contains stale API use from a timer that survives plugin reload", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "bb-plugin-stale-timer",
+      serverSource: `
+        export default function plugin(bb: any) {
+          const g = globalThis as any;
+          if (g.__staleTimerCallback === undefined) {
+            g.__staleTimerCallback = () => bb.realtime.publish("stale", {});
+            g.__staleTimer = setTimeout(g.__staleTimerCallback, 60_000);
+          }
+        }
+      `,
+    });
+    const vitestListeners = process.listeners("uncaughtException");
+    process.removeAllListeners("uncaughtException");
+    const unclaimed: unknown[] = [];
+    const contained: unknown[] = [];
+    process.on("uncaughtException", (error) => {
+      if (service.handleUncaughtException(error)) contained.push(error);
+      else unclaimed.push(error);
+    });
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      await service.installPath(rootDir);
+      await service.reload("stale-timer");
+      warn.mockClear();
+
+      const serverError = new Error("unexpected server failure");
+      process.emit("uncaughtException", serverError);
+      expect(unclaimed).toEqual([serverError]);
+
+      const globals = globalThis as Record<string, unknown>;
+      let thrown: unknown;
+      try {
+        (globals.__staleTimerCallback as () => void)();
+      } catch (error) {
+        thrown = error;
+      }
+      process.emit("uncaughtException", thrown as Error);
+      process.emit("uncaughtException", thrown as Error);
+
+      expect(unclaimed).toEqual([serverError]);
+      expect(contained).toHaveLength(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.stringContaining(
+          "[plugin:stale-timer] detached callback used stale API member realtime.publish",
+        ),
+      );
+      expect(
+        service.list().find((plugin) => plugin.id === "stale-timer")?.status,
+      ).toBe("running");
+    } finally {
+      clearTimeout(
+        (globalThis as Record<string, unknown>).__staleTimer as ReturnType<
+          typeof setTimeout
+        >,
+      );
+      delete (globalThis as Record<string, unknown>).__staleTimer;
+      delete (globalThis as Record<string, unknown>).__staleTimerCallback;
+      process.removeAllListeners("uncaughtException");
+      for (const listener of vitestListeners) {
+        process.on("uncaughtException", listener);
+      }
+    }
   });
 
   it("marks initial engine mismatches incompatible and preserves a live plugin when reload finds its directory missing", async () => {
