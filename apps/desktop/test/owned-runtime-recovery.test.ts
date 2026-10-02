@@ -54,6 +54,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -66,6 +67,7 @@ describe("owned runtime recovery", () => {
         appLoaded: false,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -75,6 +77,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: true,
         isServerMoving: false,
       }),
@@ -93,6 +96,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: true,
       }),
@@ -182,6 +186,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -250,6 +255,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -266,6 +272,67 @@ describe("owned runtime recovery", () => {
     expect(recovered).toHaveBeenCalledOnce();
   });
 
+  it("restarts when a recovering process exits before the renderer loads", async () => {
+    let runtimeAvailable = false;
+    let continueRecovery = true;
+    let restartAttempts = 0;
+    let resolveExit: (exit: string) => void = () => {};
+    const recover = createDesktopOwnedRuntimeRecovery({
+      isCurrent: () => continueRecovery,
+      getRuntime: () =>
+        runtimeAvailable ? { serverUrl: "http://127.0.0.1:38886" } : null,
+      loadLoadingView: async () => {},
+      loadServer: async () => {},
+      onLoadFailure: vi.fn(),
+      restartRuntime: async () => {
+        restartAttempts += 1;
+        if (restartAttempts === 1) {
+          runtimeAvailable = true;
+          const exit = new Promise<string>((resolve) => {
+            resolveExit = resolve;
+          });
+          const watching = watchOwnedRuntimeExit({
+            exit,
+            getState: () => ({
+              appLoaded: false,
+              hasRecoveryController: true,
+              isCurrentRuntime: true,
+              isRecoveryActive: recover.isRunning(),
+              isQuitting: false,
+              isServerMoving: false,
+            }),
+            clearPidFile: vi.fn(),
+            clearCurrentRuntime: () => {
+              runtimeAvailable = false;
+            },
+            recover: () => recover.start(),
+            showError: () => {
+              events.push("show error");
+              continueRecovery = false;
+            },
+            showServerMoving: vi.fn(),
+          });
+          resolveExit("restarted process exited before renderer load");
+          await watching;
+          return true;
+        }
+        runtimeAvailable = true;
+        return true;
+      },
+      startSystemConfigSync: vi.fn(),
+      refreshApplicationMenu: vi.fn(),
+      wait: async () => {},
+      onRecovered: () => events.push("recovered"),
+    });
+    const events: string[] = [];
+
+    await recover.start();
+
+    expect(restartAttempts).toBe(2);
+    expect(events).not.toContain("show error");
+    expect(events).toContain("recovered");
+  });
+
   it("ignores a stale process exit while another recovery is active", async () => {
     const clearRuntime = vi.fn();
     const recover = vi.fn(async () => {});
@@ -275,6 +342,7 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: false,
+        isRecoveryActive: false,
         isQuitting: false,
         isServerMoving: false,
       }),
