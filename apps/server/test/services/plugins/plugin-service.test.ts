@@ -37,6 +37,7 @@ import { pluginInstalledTelemetryEvent } from "../../../src/services/plugins/plu
 import type { TelemetryEvent } from "../../../src/services/system/telemetry.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 import { createProviderRegistryService } from "../../../src/services/providers/provider-registry.js";
+import { getPluginContextStaleErrorDetails } from "../../../src/services/plugins/plugin-api.js";
 
 const logger = testLogger as unknown as Logger;
 
@@ -562,7 +563,20 @@ describe("plugin service", () => {
       onDispose(hook: () => void): void;
     };
     await service.reload("staler");
-    expect(() => captured.onDispose(() => {})).toThrowError(/stale API handle/);
+    let thrown: unknown;
+    try {
+      captured.onDispose(() => {});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toHaveProperty(
+      "message",
+      expect.stringContaining("stale API handle"),
+    );
+    expect(getPluginContextStaleErrorDetails(thrown)?.apiMember).toContain(
+      "onDispose",
+    );
   });
 
   it("contains stale API use from a timer that survives plugin reload", async () => {

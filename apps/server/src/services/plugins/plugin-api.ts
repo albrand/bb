@@ -169,7 +169,12 @@ export function getPluginContextStaleErrorDetails(
 }
 
 function inferPluginApiMember(): string {
-  const frame = new Error().stack?.split("\n")[3];
+  const frame = new Error().stack
+    ?.split("\n")
+    .slice(1)
+    .find(
+      (line) => !/\bat (?:inferPluginApiMember|assertLive)(?:\s|$)/.test(line),
+    );
   return frame?.match(/at (.+?)(?: \(|$)/)?.[1] ?? "unknown API member";
 }
 
