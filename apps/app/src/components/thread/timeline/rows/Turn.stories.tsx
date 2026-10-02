@@ -1,4 +1,6 @@
 import type { TimelineRow, TimelineTurnRow } from "@bb/server-contract";
+import { useQueryClient } from "@tanstack/react-query";
+import { ThreadUsageAndAgents } from "@/components/thread/ThreadUsageSummary";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
 import {
   commandRow,
@@ -189,6 +191,140 @@ const completedTurnRow = buildTurnRow({
   createdAt: 1777337131200,
 });
 
+const TOKEN_THREAD_ID = "thr_token_footer_story";
+const tokenTurnRows: TimelineTurnRow[] = [
+  {
+    ...turnRow({
+      id: `${TOKEN_THREAD_ID}:turn-1`,
+      threadId: TOKEN_THREAD_ID,
+      turnId: "token-turn-1",
+      sourceSeqStart: 1,
+      sourceSeqEnd: 2,
+      startedAt: 1777337120000,
+      status: "completed",
+      children: [
+        conversationRow({
+          id: `${TOKEN_THREAD_ID}:assistant-1`,
+          threadId: TOKEN_THREAD_ID,
+          turnId: "token-turn-1",
+          sourceSeqStart: 2,
+          sourceSeqEnd: 2,
+          startedAt: 1777337121000,
+          createdAt: 1777337121000,
+          role: "assistant",
+          text: "The first completed response has full token data.",
+          attachments: null,
+        }),
+      ],
+    }),
+  },
+  {
+    ...turnRow({
+      id: `${TOKEN_THREAD_ID}:turn-2`,
+      threadId: TOKEN_THREAD_ID,
+      turnId: "token-turn-2",
+      sourceSeqStart: 3,
+      sourceSeqEnd: 4,
+      startedAt: 1777337130000,
+      status: "completed",
+      children: [
+        conversationRow({
+          id: `${TOKEN_THREAD_ID}:assistant-2`,
+          threadId: TOKEN_THREAD_ID,
+          turnId: "token-turn-2",
+          sourceSeqStart: 4,
+          sourceSeqEnd: 4,
+          startedAt: 1777337131000,
+          createdAt: 1777337131000,
+          role: "assistant",
+          text: "The second completed response has partial token data and no reported reasoning.",
+          attachments: null,
+        }),
+      ],
+    }),
+  },
+  {
+    ...turnRow({
+      id: `${TOKEN_THREAD_ID}:turn-3`,
+      threadId: TOKEN_THREAD_ID,
+      turnId: "token-turn-3",
+      sourceSeqStart: 5,
+      sourceSeqEnd: 6,
+      startedAt: 1777337140000,
+      status: "completed",
+      children: [
+        conversationRow({
+          id: `${TOKEN_THREAD_ID}:assistant-3`,
+          threadId: TOKEN_THREAD_ID,
+          turnId: "token-turn-3",
+          sourceSeqStart: 6,
+          sourceSeqEnd: 6,
+          startedAt: 1777337141000,
+          createdAt: 1777337141000,
+          role: "assistant",
+          text: "The older completed response has no spend row, so its footer stays clear.",
+          attachments: null,
+        }),
+      ],
+    }),
+  },
+];
+
+function TokenFooterThread() {
+  const queryClient = useQueryClient();
+  queryClient.setQueryData(["threadChildSummary", TOKEN_THREAD_ID], {
+    nonDeletedChildCount: 3,
+    unarchivedDescendantCount: 3,
+    working: 1,
+    waiting: 1,
+    idle: 1,
+    failed: 0,
+    totalTokens: 64_400_000,
+    children: [],
+  });
+  queryClient.setQueryData(["threadSpendSummary", TOKEN_THREAD_ID], {
+    historyComplete: false,
+    total: {
+      inputTokens: 130,
+      cachedInputTokens: 2_843_796,
+      outputTokens: 6_349,
+      reasoningOutputTokens: null,
+      totalTokens: 2_850_275,
+    },
+    turns: [
+      {
+        turnId: "token-turn-1",
+        inputTokens: 30,
+        cachedInputTokens: 2_843_776,
+        outputTokens: 6_149,
+        reasoningOutputTokens: 500,
+        totalTokens: 2_850_455,
+      },
+      {
+        turnId: "token-turn-2",
+        inputTokens: 100,
+        cachedInputTokens: 20,
+        outputTokens: 200,
+        reasoningOutputTokens: null,
+        totalTokens: 320,
+      },
+    ],
+  });
+  return (
+    <div className="w-full">
+      <div className="mb-3 border-b border-border pb-2">
+        <ThreadUsageAndAgents threadId={TOKEN_THREAD_ID} />
+      </div>
+      <ThreadTimelineRows
+        {...baseProps}
+        initialExpanded={new Set(tokenTurnRows.map((row) => row.id))}
+        threadId={TOKEN_THREAD_ID}
+        timelineRows={tokenTurnRows}
+      />
+    </div>
+  );
+}
+
 export function Overview() {
   return (
     <StoryCard>
@@ -213,5 +349,16 @@ export function Overview() {
         </TimelineStage>
       </StoryRow>
     </StoryCard>
+  );
+}
+
+export function TokenFooterLayout() {
+  return (
+    <div className="w-full min-w-0 p-3">
+      <p className="mb-3 text-xs text-muted-foreground">
+        Three completed turns: full spend, partial spend, and no spend row.
+      </p>
+      <TokenFooterThread />
+    </div>
   );
 }

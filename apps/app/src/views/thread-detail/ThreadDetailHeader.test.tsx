@@ -119,6 +119,26 @@ beforeEach(() => {
 });
 
 describe("ThreadDetailHeader", () => {
+  it("does not render a thread token summary in the header", () => {
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          childPillLabel={null}
+          isSecondaryPanelOpen={false}
+          onOpenThreadGitAction={vi.fn()}
+          onToggleSecondaryPanel={vi.fn()}
+          threadHeaderGitActions={[]}
+          threadId={THREAD_ID}
+          threadTitle="Header tokens"
+        />
+      </PaneContext.Provider>,
+    );
+
+    expect(screen.queryByText(/Thread tokens/)).toBeNull();
+    expect(screen.queryByText(/Input \(uncached\)/)).toBeNull();
+  });
+
   it("leaves the open right-panel collapse control to the panel header", () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>

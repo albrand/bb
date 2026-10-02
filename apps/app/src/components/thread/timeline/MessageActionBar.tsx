@@ -1,4 +1,5 @@
 import { createContext, useCallback, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { CopyButton } from "../../ui/copy-button.js";
 import { Icon } from "@bb/shared-ui/icon";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
@@ -20,6 +21,7 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import type { PromptDraftAttachment } from "@bb/client-core";
 import { PluginItemIcon, pluginIconName } from "@/components/plugin/PluginIcon";
 import type { ThreadTimelinePluginMessageAction } from "./types.js";
+import "./message-action-bar.css";
 
 function PluginActionIcon({
   pluginId,
@@ -57,6 +59,7 @@ interface MessageActionBarProps {
   onSendToMain?: () => void;
   disabled?: boolean;
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
+  footerAdornment?: ReactNode;
 }
 
 interface MessageOverflowAction {
@@ -95,6 +98,7 @@ const DESKTOP_ACTION_WIDTH_PX = 20;
 const TOUCH_ACTION_WIDTH_PX = 28;
 const ACTION_ROW_GAP_PX = 8;
 const OVERFLOW_TRIGGER_GAP_PX = 4;
+const FOOTER_ADORNMENT_RESERVE_PX = 56;
 const OVERFLOW_TRIGGER_TIGHTEN_CLASS = "-ml-1";
 
 interface MessageActionRowLayout {
@@ -306,6 +310,7 @@ export function MessageActionBar({
   onSendToMain,
   disabled,
   pluginActions = [],
+  footerAdornment,
 }: MessageActionBarProps) {
   const isCompactViewport = useIsCompactViewport();
   const isPointerCoarse = usePointerCoarse();
@@ -406,7 +411,10 @@ export function MessageActionBar({
   ];
   const layout = computeMessageActionRowLayout({
     actionCount: inlineCandidates.length,
-    availableWidth,
+    availableWidth:
+      footerAdornment && availableWidth !== undefined
+        ? Math.max(0, availableWidth - FOOTER_ADORNMENT_RESERVE_PX)
+        : availableWidth,
     actionWidth: isCompactTouch
       ? TOUCH_ACTION_WIDTH_PX
       : DESKTOP_ACTION_WIDTH_PX,
@@ -435,9 +443,17 @@ export function MessageActionBar({
     <TooltipProvider delayDuration={300}>
       <div
         ref={slotRef}
-        className={cn(slotClass, "h-5 max-md:pointer-coarse:h-7")}
+        className={cn(
+          slotClass,
+          "@container/message-actions h-5 max-md:pointer-coarse:h-7",
+        )}
+        data-message-action-slot=""
       >
-        <div className={rowClass} data-menu-open={isMenuOpen ? "" : undefined}>
+        <div
+          className={rowClass}
+          data-menu-open={isMenuOpen ? "" : undefined}
+          data-message-action-row=""
+        >
           {isCompactTouch ? (
             <MobileInlineActions
               actions={inlineCandidates.slice(0, inlineCount)}
@@ -454,6 +470,7 @@ export function MessageActionBar({
                 />
               ))
           )}
+          {footerAdornment}
           <DropdownMenu onOpenChange={setIsMenuOpen}>
             <DropdownMenuTrigger asChild>
               <button

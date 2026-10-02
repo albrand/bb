@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ThreadTurnTokenSummary,
@@ -65,30 +66,32 @@ describe("thread usage summary", () => {
     });
   });
 
-  it("renders a turn breakdown and an expandable child agent summary", async () => {
+  it("renders compact per-turn tokens and an expandable child agent summary", async () => {
     const queryClient = new QueryClient();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <ThreadTurnTokenSummary threadId="parent" turnId="da385f7e5d-t1" />
-          <ThreadUsageAndAgents threadId="parent" />
-        </MemoryRouter>
-      </QueryClientProvider>,
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadTurnTokenSummary threadId="parent" turnId="da385f7e5d-t1" />
+            <ThreadUsageAndAgents threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
     );
 
+    expect(container.querySelector("[data-thread-turn-tokens]")).toBeTruthy();
+    expect(screen.getByText(/cached 2\.8M/)).toBeTruthy();
+    expect(screen.getByText("Σ 2.8M")).toBeTruthy();
+    expect(screen.queryByText(/Thread tokens/)).toBeNull();
+    fireEvent.pointerMove(
+      container.querySelector("[data-thread-turn-tokens]")!,
+    );
     expect(
-      screen.getByText(
-        /Input \(uncached\) 30 · Out 6\.1K · Reasoning included in output · Cached 2\.8M/,
-      ),
-    ).toBeTruthy();
+      (await screen.findAllByText("Cached (read + write)")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("Included in output").length).toBeGreaterThan(0);
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
     expect(screen.getByText(/Σ 64.4M/)).toBeTruthy();
-    expect(
-      screen.getByText(
-        /Input \(uncached\) ≥ 6\.4K \(partial history\) · Out ≥ 1\.8M \(partial history\) · Reasoning included in output · Cached ≥ 686\.7M \(partial history\)/,
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText(/Σ ≥ 688\.5M \(partial history\)/)).toBeTruthy();
 
     fireEvent.click(screen.getByText("View ▸"));
     await waitFor(() =>
@@ -97,7 +100,100 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Writer · idle")).toBeTruthy();
   });
 
-  it("renders unavailable when child token totals are missing", async () => {
+  it("shows reasoning in the footer only when a turn reports it", () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: true,
+        total: {
+          inputTokens: 100,
+          cachedInputTokens: 20,
+          outputTokens: 100,
+          reasoningOutputTokens: 10,
+          totalTokens: 220,
+        },
+        turns: [
+          {
+            turnId: "reasoning-turn",
+            inputTokens: 100,
+            cachedInputTokens: 20,
+            outputTokens: 100,
+            reasoningOutputTokens: 10,
+            totalTokens: 220,
+          },
+        ],
+      },
+    });
+    const queryClient = new QueryClient();
+    render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary threadId="parent" turnId="reasoning-turn" />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("reason 10")).toBeTruthy();
+    expect(screen.getByText("cached 20")).toBeTruthy();
+    expect(screen.getByText("Σ 220")).toBeTruthy();
+  });
+
+  it("keeps partial spend compact and marks missing reasoning in the tooltip", async () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: true,
+        total: {
+          inputTokens: 100,
+          cachedInputTokens: 20,
+          outputTokens: 100,
+          reasoningOutputTokens: null,
+          totalTokens: 220,
+        },
+        turns: [
+          {
+            turnId: "partial-turn",
+            inputTokens: 100,
+            cachedInputTokens: 20,
+            outputTokens: 100,
+            reasoningOutputTokens: null,
+            totalTokens: 220,
+          },
+        ],
+      },
+    });
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary threadId="parent" turnId="partial-turn" />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+    const tokenSummary = container.querySelector("[data-thread-turn-tokens]");
+
+    expect(
+      tokenSummary?.querySelector('[data-token-part="reasoning"]'),
+    ).toBeNull();
+    expect(tokenSummary?.textContent).toContain("cached 20");
+    expect(tokenSummary?.textContent).toContain("Σ 220");
+    fireEvent.pointerMove(tokenSummary!);
+    expect((await screen.findAllByText("Not reported")).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("shows nothing for a turn without recorded spend", () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <ThreadTurnTokenSummary threadId="parent" turnId="older-turn" />
+      </QueryClientProvider>,
+    );
+
+    expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
+    expect(container.textContent).toBe("");
+  });
+
+  it("omits unavailable token totals from the child agent rollup", async () => {
     childSummary.mockResolvedValue({
       nonDeletedChildCount: 1,
       unarchivedDescendantCount: 1,
@@ -118,10 +214,10 @@ describe("thread usage summary", () => {
     );
 
     expect(await screen.findByText(/Ran 1 agent/)).toBeTruthy();
-    expect(screen.getByText(/Σ unavailable/)).toBeTruthy();
+    expect(screen.queryByText(/Σ unavailable/)).toBeNull();
   });
 
-  it("labels Codex cached and reasoning tokens without overstating the sum", () => {
+  it("keeps only the per-agent rollup in the thread header row", async () => {
     useThreadSpendSummary.mockReturnValue({
       data: {
         historyComplete: true,
@@ -144,11 +240,8 @@ describe("thread usage summary", () => {
       </QueryClientProvider>,
     );
 
-    expect(
-      screen.getByText(
-        /Input \(uncached\) 70 · Out 20 · Reasoning \(within output\) 10 · Cached 30/,
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText(/Σ 120/)).toBeTruthy();
+    expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
+    expect(screen.queryByText(/Thread tokens/)).toBeNull();
+    expect(screen.queryByText(/Input \(uncached\) 70/)).toBeNull();
   });
 });

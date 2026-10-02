@@ -1,0 +1,23 @@
+@container message-actions (max-width: 25rem) {
+  [data-thread-turn-tokens] [data-token-part="reasoning"] {
+    display: none;
+  }
+}
+
+@container message-actions (max-width: 18rem) {
+  [data-thread-turn-tokens] [data-token-part="output"] {
+    display: none;
+  }
+}
+
+@container message-actions (max-width: 13rem) {
+  [data-thread-turn-tokens] [data-token-part="input"] {
+    display: none;
+  }
+}
+
+@container message-actions (max-width: 10rem) {
+  [data-thread-turn-tokens] [data-token-part="cached"] {
+    display: none;
+  }
+}
