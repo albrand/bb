@@ -1,4 +1,5 @@
 import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { logDatabaseWriteBytes } from "../connection.js";
 import type { DbConnection } from "../connection.js";
 import {
   environments,
@@ -27,6 +28,10 @@ interface PageCountRow {
 
 interface PageSizeRow {
   page_size: number;
+}
+
+interface WalCheckpointRow {
+  checkpointed: number;
 }
 
 interface FreelistCountRow {
@@ -198,6 +203,23 @@ function runWithMaintenanceBusyTimeout<TValue>(
   } finally {
     args.db.$client.exec(`PRAGMA busy_timeout = ${originalBusyTimeoutMs}`);
   }
+}
+
+function checkpointWal(
+  db: DbConnection,
+  mode: "PASSIVE" | "TRUNCATE",
+): void {
+  const checkpoint = db.$client
+    .prepare<[], WalCheckpointRow>(`PRAGMA wal_checkpoint(${mode})`)
+    .get();
+  const pageSize = db.$client.pragma("page_size", { simple: true });
+  if (typeof pageSize !== "number" || pageSize <= 0) {
+    throw new Error("Invalid SQLite page size");
+  }
+  logDatabaseWriteBytes(db, {
+    bytes: Math.max(0, checkpoint?.checkpointed ?? 0) * pageSize,
+    source: "wal-checkpoint",
+  });
 }
 
 export function getDatabaseMaintenanceActivity(
@@ -396,9 +418,9 @@ export function compactDatabase(db: DbConnection): CompactDatabaseResult {
       const before = getDatabaseCompactionStats(db);
 
       db.$client.exec("PRAGMA auto_vacuum = INCREMENTAL");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      checkpointWal(db, "TRUNCATE");
       db.$client.exec("VACUUM");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      checkpointWal(db, "TRUNCATE");
 
       return {
         after: getDatabaseCompactionStats(db),
@@ -417,9 +439,9 @@ export function runIncrementalVacuum(
     work: () => {
       const before = getDatabaseFreelistStats(db);
 
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      checkpointWal(db, "PASSIVE");
       db.$client.exec(`PRAGMA incremental_vacuum(${args.maxPages})`);
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      checkpointWal(db, "PASSIVE");
 
       return {
         after: getDatabaseFreelistStats(db),

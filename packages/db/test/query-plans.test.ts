@@ -1299,7 +1299,7 @@ describe("slow query index plans", () => {
     const deletion = findOnlyDebugLog({
       logger,
       predicate: (fields) =>
-        fields.operation === "run" &&
+        fields.operation === "all" &&
         fields.sql.startsWith('delete from "retained_event_outputs"'),
     });
     assertEmittedQueryPlanUsesIndex({
@@ -1404,7 +1404,7 @@ describe("slow query index plans", () => {
     const pruneQuery = findOnlyDebugLog({
       logger,
       predicate: (fields) =>
-        fields.operation === "run" &&
+        fields.operation === "all" &&
         fields.sql.startsWith("DELETE FROM events"),
     });
     expect(pruneQuery.fields.sql).toContain("WHERE id IN");

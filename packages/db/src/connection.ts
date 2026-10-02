@@ -15,7 +15,22 @@ export interface SlowDbQueryLogger {
   info(fields: SlowDbQueryLogFields, message: string): void;
 }
 
+export type DatabaseWriteByteSource =
+  | "event-append"
+  | "event-prune-delete"
+  | "wal-checkpoint";
+
+export interface DatabaseWriteBytesLogFields {
+  bytes: number;
+  source: DatabaseWriteByteSource;
+}
+
+export interface DatabaseWriteBytesLogger {
+  debug(fields: DatabaseWriteBytesLogFields, message: string): void;
+}
+
 export interface CreateConnectionOptions {
+  databaseWriteBytesLogger?: DatabaseWriteBytesLogger;
   slowQueryLogger?: SlowDbQueryLogger;
   slowQueryThresholdMs?: number;
 }
@@ -26,6 +41,11 @@ export type DbTransaction = Parameters<
 >[0];
 export type DbQueryConnection = DbConnection | DbTransaction;
 export type SlowDbQueryOperation = "all" | "get" | "run";
+
+const databaseWriteBytesLoggers = new WeakMap<
+  object,
+  DatabaseWriteBytesLogger
+>();
 
 interface SlowDbQueryConfig {
   logger: SlowDbQueryLogger;
@@ -169,5 +189,34 @@ export function createConnection(
 
   const db = drizzle({ client: sqlite, schema });
 
+  if (options.databaseWriteBytesLogger !== undefined) {
+    databaseWriteBytesLoggers.set(db, options.databaseWriteBytesLogger);
+    databaseWriteBytesLoggers.set(sqlite, options.databaseWriteBytesLogger);
+  }
+
   return db;
+}
+
+export function logDatabaseWriteBytes(
+  db: DbQueryConnection,
+  fields: DatabaseWriteBytesLogFields,
+): void {
+  let logger = databaseWriteBytesLoggers.get(db);
+  if (logger === undefined && "$client" in db) {
+    logger = databaseWriteBytesLoggers.get(db.$client);
+  }
+  if (logger === undefined && "session" in db) {
+    const session = db.session;
+    if (
+      typeof session === "object" &&
+      session !== null &&
+      "client" in session
+    ) {
+      const client = session.client;
+      if (typeof client === "object" && client !== null) {
+        logger = databaseWriteBytesLoggers.get(client);
+      }
+    }
+  }
+  logger?.debug(fields, "Database write payload bytes by source");
 }

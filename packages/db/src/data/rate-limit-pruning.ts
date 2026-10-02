@@ -17,21 +17,27 @@ export function pruneRateLimitSnapshotWindow(
       AND sequence > ${args.afterSequence} AND sequence <= ${args.throughSequence}
     ORDER BY sequence LIMIT ${args.limit}
   `);
-  const removed =
+  const deletedRows =
     rows.length === 0
-      ? 0
-      : db.run(sql`
-    DELETE FROM events WHERE id IN (${sql.join(
-      rows.map((row) => sql`${row.id}`),
-      sql`, `,
-    )})
-      AND ${isBeforeLatestThreadEvent(args.threadId)}
-      AND (EXISTS (SELECT 1 FROM threads WHERE id = ${args.threadId} AND archived_at IS NOT NULL)
-        OR sequence < (SELECT sequence FROM events WHERE thread_id = ${args.threadId}
-          AND type = 'provider/rateLimits/updated' ORDER BY sequence DESC LIMIT 1))
-  `).changes;
+      ? []
+      : db.all<{ dataBytes: number }>(sql`
+          DELETE FROM events WHERE id IN (${sql.join(
+            rows.map((row) => sql`${row.id}`),
+            sql`, `,
+          )})
+            AND ${isBeforeLatestThreadEvent(args.threadId)}
+            AND (EXISTS (SELECT 1 FROM threads WHERE id = ${args.threadId} AND archived_at IS NOT NULL)
+              OR sequence < (SELECT sequence FROM events WHERE thread_id = ${args.threadId}
+                AND type = 'provider/rateLimits/updated' ORDER BY sequence DESC LIMIT 1))
+          RETURNING length(CAST(data AS BLOB)) AS dataBytes
+        `);
+  const removedBytes = deletedRows.reduce(
+    (total, row) => total + row.dataBytes,
+    0,
+  );
   return {
-    removed,
+    removed: deletedRows.length,
+    removedBytes,
     scanned: rows.length,
     complete: rows.length < args.limit,
     nextSequence: rows.at(-1)?.sequence ?? args.afterSequence,

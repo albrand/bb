@@ -6,6 +6,7 @@ import {
 import { pruneRateLimitSnapshotWindow } from "./rate-limit-pruning.js";
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { DbConnection } from "../connection.js";
+import { logDatabaseWriteBytes } from "../connection.js";
 import { events, threadPruningCursors, threads } from "../schema.js";
 import { bumpThreadEventRewriteGeneration } from "./event-rewrite-generation.js";
 import {
@@ -197,6 +198,7 @@ function advanceThreadPruningTransaction(
           });
           scanned = batch.scanned;
           removed = batch.removed;
+          removedBytes = batch.removedBytes;
           cursor.sequence = batch.nextSequence;
           if (batch.complete || cursor.sequence >= cursor.upperSequence)
             action = "thread-complete";
@@ -208,6 +210,7 @@ function advanceThreadPruningTransaction(
           });
           scanned = batch.scanned;
           removed = batch.removed;
+          removedBytes = batch.removedBytes;
           if (batch.complete) {
             if (cursor.step === 0) cursor.step = 1;
             else action = "thread-complete";
@@ -238,7 +241,7 @@ function advanceThreadPruningTransaction(
             const relevantIds = rows.map((row) => row.id);
             const bytesQuery = sql`SELECT COALESCE(SUM(length(CAST(data AS BLOB))), 0) AS bytes FROM events WHERE ${inArray(events.id, relevantIds)} AND ${events.type} = ${type}`;
             const before =
-              threadScope !== undefined || relevantIds.length === 0
+              relevantIds.length === 0
                 ? 0
                 : (tx.get<{ bytes: number }>(bytesQuery)?.bytes ?? 0);
             if (policy === "turn-diffs") {
@@ -302,7 +305,7 @@ function advanceThreadPruningTransaction(
                   throw new Error("Invalid usage pruning step");
               }
             }
-            if (removed > 0 && threadScope === undefined) {
+            if (removed > 0) {
               const after = tx.get<{ bytes: number }>(bytesQuery)?.bytes ?? 0;
               removedBytes = before - after;
             }
@@ -355,6 +358,12 @@ function advanceThreadPruningTransaction(
   );
   if (result.removed > 0 && result.threadId !== null)
     bumpThreadEventRewriteGeneration(result.threadId);
+  if (result.removedBytes > 0) {
+    logDatabaseWriteBytes(db, {
+      bytes: result.removedBytes,
+      source: "event-prune-delete",
+    });
+  }
   return result;
 }
 

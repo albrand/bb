@@ -12,7 +12,7 @@ import {
 
 type InitDbLogger = MigrationWarningLogger &
   SlowDbQueryLogger &
-  Pick<Logger, "error" | "info">;
+  Pick<Logger, "debug" | "error" | "info">;
 
 interface InitDbOptions {
   dataDir?: string;
@@ -24,6 +24,7 @@ export function initDb(
   options: InitDbOptions = {},
 ): DbConnection {
   const db = createConnection(databasePath, {
+    databaseWriteBytesLogger: options.logger,
     slowQueryLogger: options.logger,
   });
   if (options.dataDir !== undefined && options.logger !== undefined) {

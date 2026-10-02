@@ -162,16 +162,26 @@ function pruneResolvedItemCandidates(
     processed += 1;
     reset();
   }
-  const removed =
+  const deletedRows =
     discarded.length === 0
-      ? 0
-      : db.run(
+      ? []
+      : db.all<{ dataBytes: number }>(
           sql`DELETE FROM events WHERE id IN (${sql.join(
             discarded.map((id) => sql`${id}`),
             sql`, `,
-          )}) AND ${isBeforeLatestThreadEvent(args.threadId)}`,
-        ).changes;
-  return { removed, sequence, complete: processed === rows.length };
+          )}) AND ${isBeforeLatestThreadEvent(args.threadId)}
+            RETURNING length(CAST(data AS BLOB)) AS dataBytes`,
+        );
+  const removedBytes = deletedRows.reduce(
+    (total, row) => total + row.dataBytes,
+    0,
+  );
+  return {
+    removed: deletedRows.length,
+    removedBytes,
+    sequence,
+    complete: processed === rows.length,
+  };
 }
 
 export function advanceLiveEventPruning(
@@ -187,7 +197,8 @@ export function advanceLiveEventPruning(
     const latest = db.get<{ sequence: number }>(
       sql`SELECT sequence FROM events WHERE thread_id = ${args.threadId} ORDER BY sequence DESC LIMIT 1`,
     );
-    if (!latest) return { removed: 0, scanned: 0, complete: true };
+    if (!latest)
+      return { removed: 0, removedBytes: 0, scanned: 0, complete: true };
     cursor = db
       .insert(threadPruningCursors)
       .values({
@@ -247,5 +258,10 @@ export function advanceLiveEventPruning(
       })
       .run();
   }
-  return { removed: result.removed, scanned: candidates.length, complete };
+  return {
+    removed: result.removed,
+    removedBytes: result.removedBytes,
+    scanned: candidates.length,
+    complete,
+  };
 }
