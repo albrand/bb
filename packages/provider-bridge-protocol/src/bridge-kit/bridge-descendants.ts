@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 
 export function listDescendantPids(
   psOutput: string,
@@ -26,20 +26,26 @@ export function listDescendantPids(
 }
 
 export interface DescendantPauser {
-  stop(): number[];
-  resume(): number[];
+  stop(): Promise<number[]>;
+  resume(): Promise<number[]>;
 }
 
 export interface DescendantPauserDeps {
-  listDescendants: () => number[];
+  listDescendants: () => Promise<number[]>;
   signal: (pid: number, signal: "SIGSTOP" | "SIGCONT") => boolean;
 }
 
-function listOwnDescendants(): number[] {
+async function listOwnDescendants(): Promise<number[]> {
   if (process.platform === "win32") return [];
   try {
-    const psOutput = execFileSync("ps", ["-A", "-o", "pid=,ppid="], {
-      encoding: "utf8",
+    const psOutput = await new Promise<string>((resolve, reject) => {
+      execFile("ps", ["-A", "-o", "pid=,ppid="], (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      });
     });
     return listDescendantPids(psOutput, process.pid);
   } catch {
@@ -63,18 +69,31 @@ export function createDescendantPauser(
   },
 ): DescendantPauser {
   const stopped = new Set<number>();
+  let pendingOperation = Promise.resolve();
+  function serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = pendingOperation.then(operation, operation);
+    pendingOperation = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
   return {
     stop() {
-      for (const pid of deps.listDescendants()) {
-        if (deps.signal(pid, "SIGSTOP")) stopped.add(pid);
-      }
-      return [...stopped];
+      return serialize(async () => {
+        for (const pid of await deps.listDescendants()) {
+          if (deps.signal(pid, "SIGSTOP")) stopped.add(pid);
+        }
+        return [...stopped];
+      });
     },
     resume() {
-      const pids = [...new Set([...stopped, ...deps.listDescendants()])];
-      stopped.clear();
-      for (const pid of pids) deps.signal(pid, "SIGCONT");
-      return pids;
+      return serialize(async () => {
+        const pids = [...new Set([...stopped, ...(await deps.listDescendants())])];
+        stopped.clear();
+        for (const pid of pids) deps.signal(pid, "SIGCONT");
+        return pids;
+      });
     },
   };
 }

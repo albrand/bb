@@ -21,20 +21,20 @@ it("finds every descendant of the worker, including re-parented grandchildren's 
   expect(listDescendantPids(ps, 999)).toEqual([]);
 });
 
-it("continues every process it stopped, even one that has since left the worker's tree", () => {
+it("continues every process it stopped, even one that has since left the worker's tree", async () => {
   let tree = [10, 11];
   const signals: string[] = [];
   const pauser = createDescendantPauser({
-    listDescendants: () => tree,
+    listDescendants: async () => tree,
     signal: (pid, signal) => {
       signals.push(`${signal}:${pid}`);
       return true;
     },
   });
 
-  expect(pauser.stop()).toEqual([10, 11]);
+  await expect(pauser.stop()).resolves.toEqual([10, 11]);
   tree = [12];
-  expect(pauser.resume().sort()).toEqual([10, 11, 12]);
+  await expect(pauser.resume()).resolves.toEqual([10, 11, 12]);
   expect(signals).toEqual([
     "SIGSTOP:10",
     "SIGSTOP:11",
@@ -44,13 +44,13 @@ it("continues every process it stopped, even one that has since left the worker'
   ]);
   signals.length = 0;
   tree = [];
-  pauser.resume();
+  await pauser.resume();
   expect(signals).toEqual([]);
 });
 
 it.skipIf(process.platform === "win32")(
   "continues a stopped grandchild whose parent exited while it was stopped",
-  () => {
+  async () => {
     const script = [
       "import { spawn, execFileSync } from 'node:child_process';",
       `import { createDescendantPauser } from ${JSON.stringify(new URL("./bridge-descendants.ts", import.meta.url).href)};`,
@@ -58,14 +58,14 @@ it.skipIf(process.platform === "win32")(
       "const grandchild = Number(await new Promise((resolve) => parent.stdout.once('data', (chunk) => resolve(String(chunk).trim()))));",
       "const state = (pid) => execFileSync('ps', ['-o', 'stat=,ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim();",
       "const pauser = createDescendantPauser();",
-      "pauser.stop();",
+      "await pauser.stop();",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const stopped = state(grandchild);",
       "parent.kill('SIGKILL');",
       "await new Promise((resolve) => parent.once('exit', resolve));",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const orphaned = state(grandchild);",
-      "pauser.resume();",
+      "await pauser.resume();",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const continued = state(grandchild);",
       "process.kill(grandchild, 'SIGKILL');",
@@ -97,7 +97,7 @@ it.skipIf(process.platform === "win32")(
 
 it.skipIf(process.platform === "win32")(
   "stops and continues the worker's provider processes, not the worker itself",
-  () => {
+  async () => {
     const script = [
       "import { spawn, execFileSync } from 'node:child_process';",
       `import { createDescendantPauser } from ${JSON.stringify(new URL("./bridge-descendants.ts", import.meta.url).href)};`,
@@ -105,10 +105,10 @@ it.skipIf(process.platform === "win32")(
       "const state = () => execFileSync('ps', ['-o', 'stat=', '-p', String(child.pid)], { encoding: 'utf8' }).trim();",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const pauser = createDescendantPauser();",
-      "pauser.stop();",
+      "await pauser.stop();",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const stopped = state();",
-      "pauser.resume();",
+      "await pauser.resume();",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
       "const continued = state();",
       "child.kill('SIGKILL');",

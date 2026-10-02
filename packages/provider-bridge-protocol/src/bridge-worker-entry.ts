@@ -88,9 +88,17 @@ const socketServer =
         hardCapBytes: BRIDGE_REPLAY_HARD_CAP_BYTES,
         onOverflow: reportOversizedLine,
         onBackpressure: (paused, retainedBytes) => {
-          const pids = paused ? providerPauser.stop() : providerPauser.resume();
-          process.stderr.write(
-            `${paused ? "Paused" : "Resumed"} provider processes [${pids.join(", ")}] with ${retainedBytes} unacknowledged bridge bytes.\n`,
+          void (paused ? providerPauser.stop() : providerPauser.resume()).then(
+            (pids) => {
+              process.stderr.write(
+                `${paused ? "Paused" : "Resumed"} provider processes [${pids.join(", ")}] with ${retainedBytes} unacknowledged bridge bytes.\n`,
+              );
+            },
+            (error: unknown) => {
+              process.stderr.write(
+                `Could not ${paused ? "pause" : "resume"} provider processes: ${error instanceof Error ? error.message : String(error)}\n`,
+              );
+            },
           );
         },
       });
@@ -153,8 +161,7 @@ entry.start?.({ pluginId, dataDir, tempDir });
 function resumeProviderBeforeSignal(handler: () => void): () => void {
   if (socketServer === null) return handler;
   return () => {
-    providerPauser.resume();
-    handler();
+    void providerPauser.resume().then(handler, handler);
   };
 }
 
