@@ -27,21 +27,26 @@ export function initDb(
     databaseWriteBytesLogger: options.logger,
     slowQueryLogger: options.logger,
   });
-  if (options.dataDir !== undefined && options.logger !== undefined) {
-    exportLegacyAutomationsForPluginImport({
-      dataDir: options.dataDir,
-      db,
+  try {
+    if (options.dataDir !== undefined && options.logger !== undefined) {
+      exportLegacyAutomationsForPluginImport({
+        dataDir: options.dataDir,
+        db,
+        logger: options.logger,
+      });
+    } else if (hasLegacyAutomationsToExport(db)) {
+      throw new Error(
+        "Cannot migrate legacy automations without dataDir and logger; refusing to drop kernel automation rows before exporting them for the automations plugin",
+      );
+    }
+    migrate(db, {
+      deferDestructiveLegacyCleanup: true,
       logger: options.logger,
     });
-  } else if (hasLegacyAutomationsToExport(db)) {
-    throw new Error(
-      "Cannot migrate legacy automations without dataDir and logger; refusing to drop kernel automation rows before exporting them for the automations plugin",
-    );
+    ensurePersonalProject(db);
+  } catch (error) {
+    db.$client.close();
+    throw error;
   }
-  migrate(db, {
-    deferDestructiveLegacyCleanup: true,
-    logger: options.logger,
-  });
-  ensurePersonalProject(db);
   return db;
 }

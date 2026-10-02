@@ -1,9 +1,6 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import type { ComposerView } from "@get-bb/plugin-sdk";
-import {
-  useAppCommandContext,
-  useAppCommandHandler,
-} from "@/components/commands/AppCommandProvider";
+import { useAppCommandContext } from "@/components/commands/AppCommandProvider";
 import {
   PluginComposerHostProvider,
   PluginComposerViewProvider,
@@ -13,43 +10,31 @@ import {
 interface ComposerExtensionController {
   host: PluginComposerHost | null;
   view: ComposerView;
-  focus(): boolean;
+  focus(): void;
 }
 
 interface UseComposerExtensionControllerOptions {
   host: PluginComposerHost | null;
   view: ComposerView;
-  isFocused: boolean;
-  isPrimary: boolean;
   collapseIfFocused?(): boolean;
-  focusDefault(): boolean;
-  openPromptHistorySearch?(): boolean;
+  focusDefault(): void;
 }
 
 export function useComposerExtensionController({
   host,
   view,
-  isFocused,
-  isPrimary,
   collapseIfFocused,
   focusDefault,
-  openPromptHistorySearch,
 }: UseComposerExtensionControllerOptions): ComposerExtensionController {
   const focus = useCallback(() => {
-    if (!isFocused || !isPrimary) return false;
-    if (collapseIfFocused?.()) return true;
+    if (collapseIfFocused?.()) return;
     if (host !== null) {
       host.focus();
-      return true;
+      return;
     }
-    return focusDefault();
-  }, [collapseIfFocused, focusDefault, host, isFocused, isPrimary]);
+    focusDefault();
+  }, [collapseIfFocused, focusDefault, host]);
   useAppCommandContext("promptAvailable", true);
-  useAppCommandHandler("composer.focus", focus);
-  useAppCommandHandler("composer.searchPromptHistory", () => {
-    if (!isFocused) return false;
-    return openPromptHistorySearch?.() ?? false;
-  });
 
   return useMemo(() => ({ host, view, focus }), [focus, host, view]);
 }

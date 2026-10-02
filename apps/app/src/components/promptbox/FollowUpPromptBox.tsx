@@ -57,7 +57,6 @@ import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
 import { ThreadTimelineScrollToBottomButton } from "@/views/thread-detail/ThreadTimelineScrollToBottomButton";
-import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
 import { ThreadContextWindowIndicator } from "@/components/thread/timeline";
 import {
   PROMPT_STACK_CARD_ROW_HEIGHT,
@@ -279,21 +278,10 @@ function FollowUpPromptBoxWithComposer({
     isSubmitting: composer.isFollowUpSubmitting,
   });
   const promptBoxRef = useRef<PromptBoxHandle>(null);
-  const paneContext = useOptionalPaneContext();
-  const isFocusedPane = paneContext?.isFocused ?? true;
   const focusDefault = useCallback(() => {
     promptBoxRef.current?.focusEnd();
     return promptBoxRef.current !== null;
   }, []);
-  const openPromptHistorySearch = useCallback(() => {
-    if (
-      !isPrimaryComposer &&
-      !composerInteractionRef.current?.contains(document.activeElement)
-    ) {
-      return false;
-    }
-    return promptBoxRef.current?.openPromptHistorySearch() ?? false;
-  }, [isPrimaryComposer]);
   const voice = usePromptVoice(
     promptBoxRef,
     voiceDraft ?? pluginComposerHost ?? undefined,
@@ -591,11 +579,8 @@ function FollowUpPromptBoxWithComposer({
   const extensionController = useComposerExtensionController({
     host: pluginComposerHost ?? null,
     view: composerView,
-    isFocused: isFocusedPane,
-    isPrimary: isPrimaryComposer,
     collapseIfFocused,
     focusDefault,
-    openPromptHistorySearch,
   });
   useEffect(
     () => () => {
@@ -717,6 +702,7 @@ function FollowUpPromptBoxWithComposer({
       <PromptBoxWithScrollAnchor
         id={id}
         promptBoxRef={promptBoxRef}
+        onFocusCommand={extensionController.focus}
         voice={voice}
         minHeight={elasticTextareaMinHeight}
         value={composer.message}

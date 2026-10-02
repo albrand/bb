@@ -202,6 +202,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginCommandContext`
 - `PluginCommandShortcut`
 - `PluginCommandRegistration`
+- `ExperimentalComposerCommandRegistration`
 - `PluginProviderIconRegistration`
 - `PluginTimelineRowPresentation`
 - `PluginTimelineRowStatus`

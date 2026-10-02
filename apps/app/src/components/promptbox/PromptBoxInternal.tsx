@@ -64,6 +64,17 @@ import {
   useResolvedComposerPopups,
 } from "@/components/plugin/composer-slot-hooks";
 import { PluginComposerPopup } from "@/components/plugin/PluginComposerPopup";
+import { PluginComposerCommands } from "@/components/plugin/PluginComposerCommands";
+import {
+  APP_COMPOSER_SELECTOR,
+  composerOwnsCommand,
+  resolveComposerCommandScope,
+} from "@/lib/composer-command-ownership";
+import {
+  ComposerCommand,
+  ComposerCommandOwnerProvider,
+} from "./composer-commands";
+import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
 import { ComposerPopupHost } from "./ComposerPopupHost";
 import {
   composerScopeIdentity,
@@ -510,6 +521,7 @@ interface PromptBoxInternalProps {
   attachments?: AttachmentsConfig;
   promptActions?: readonly PromptBoxAction[];
   suppressPluginComposerCustomizations?: boolean;
+  onFocusCommand?: () => void;
   editorLayout?: ComposerEditorLayout;
   onCollapse?: () => void;
   compact?: PromptBoxCompactConfig;
@@ -1129,6 +1141,7 @@ export function PromptBoxInternal({
   attachments: attachmentConfig = {},
   promptActions,
   suppressPluginComposerCustomizations = false,
+  onFocusCommand,
   editorLayout = "thread",
   onCollapse,
   compact,
@@ -2461,6 +2474,19 @@ export function PromptBoxInternal({
     [composerMenuOpen, dismissComposerMenu, popupOpen],
   );
 
+  const isFocusedPane = useOptionalPaneContext()?.isFocused ?? true;
+  const ownsCommandTarget = useCallback(
+    (target: EventTarget | null) =>
+      composerOwnsCommand(
+        resolveComposerCommandScope({
+          composer: formRef.current?.closest(APP_COMPOSER_SELECTOR) ?? null,
+          target,
+          isFocusedPane,
+        }),
+      ),
+    [isFocusedPane],
+  );
+
   const openPopupForPlugin = useCallback(
     (pluginId: string, popupId: string) => {
       const contribution = popups.find(
@@ -3407,6 +3433,24 @@ export function PromptBoxInternal({
           </div>
 
           <PluginComposerViewProvider value={composerView}>
+            <ComposerCommandOwnerProvider value={ownsCommandTarget}>
+              {onFocusCommand !== undefined ? (
+                <ComposerCommand
+                  command="composer.focus"
+                  run={onFocusCommand}
+                />
+              ) : null}
+              {canSearchPromptHistory ? (
+                <ComposerCommand
+                  command="composer.searchPromptHistory"
+                  run={openPromptHistorySearch}
+                />
+              ) : null}
+              {pluginComposerHost !== null &&
+              !suppressPluginComposerCustomizations ? (
+                <PluginComposerCommands />
+              ) : null}
+            </ComposerCommandOwnerProvider>
             <ComposerPopupHost
               open={composerMenuOpen}
               focusKey={popupContribution?.key ?? "promptbox-suggestions"}

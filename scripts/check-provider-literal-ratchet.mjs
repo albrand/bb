@@ -49,7 +49,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SCAN_ROOTS = ["apps", "packages", "plugins"];
 
@@ -409,4 +409,8 @@ function main() {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+)
+  process.exit(main());

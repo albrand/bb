@@ -2085,6 +2085,7 @@ describe("CommandPalette", () => {
       makePluginRegistrationSet({
         commandPaletteActions: [
           {
+            target: "app",
             id: "open-issue",
             title: "Open issue",
             defaultShortcut: null,
