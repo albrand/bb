@@ -413,15 +413,14 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
       else if (child.status === "pending") counts.waiting += 1;
       else counts.working += 1;
     }
-    const totalTokens = children.reduce(
-      (total, child) =>
+    const totalTokens = children.reduce((total: number | null, child) => {
+      const rows = listSpendRollupRows(deps.db, { threadId: child.id });
+      if (rows.length === 0 || total === null) return null;
+      return (
         total +
-        listSpendRollupRows(deps.db, { threadId: child.id }).reduce(
-          (childTotal, row) => childTotal + row.totalTokens,
-          0,
-        ),
-      0,
-    );
+        rows.reduce((childTotal, row) => childTotal + row.totalTokens, 0)
+      );
+    }, 0);
     const nonDeletedChildCount = countNonDeletedAssignedChildThreads(deps.db, {
       parentThreadId: thread.id,
     });
