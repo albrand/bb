@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +55,10 @@ export function assertElectronRuntime(
 }
 
 const scriptPath = fileURLToPath(import.meta.url);
-if (process.argv[1] === scriptPath) {
+if (
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === realpathSync(scriptPath)
+) {
   try {
     const electronExecutable = createRequire(import.meta.url)("electron");
     assertElectronRuntime(electronExecutable);
