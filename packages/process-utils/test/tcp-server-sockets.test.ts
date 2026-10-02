@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { superviseTcpServerSockets } from "../src/tcp-server-sockets.js";
 
 const execFileAsync = promisify(execFile);
 
