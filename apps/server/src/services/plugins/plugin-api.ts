@@ -638,8 +638,13 @@ export function createPluginApi(options: {
   const backgroundServices: PluginBackgroundServiceRecord[] = [];
   const schedules: PluginScheduleRecord[] = [];
 
-  function assertLive(apiMember = inferPluginApiMember()): void {
-    if (invalidated) throw new PluginContextStaleError(pluginId, apiMember);
+  function assertLive(apiMember?: string): void {
+    if (invalidated) {
+      throw new PluginContextStaleError(
+        pluginId,
+        apiMember ?? inferPluginApiMember(),
+      );
+    }
   }
 
   const prefix = `[plugin:${pluginId}]`;
