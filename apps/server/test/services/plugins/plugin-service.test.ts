@@ -581,8 +581,10 @@ describe("plugin service", () => {
     const vitestListeners = process.listeners("uncaughtException");
     process.removeAllListeners("uncaughtException");
     const unclaimed: unknown[] = [];
+    const contained: unknown[] = [];
     process.on("uncaughtException", (error) => {
-      if (!service.handleUncaughtException(error)) unclaimed.push(error);
+      if (service.handleUncaughtException(error)) contained.push(error);
+      else unclaimed.push(error);
     });
     const warn = vi.spyOn(logger, "warn");
     try {
@@ -605,6 +607,7 @@ describe("plugin service", () => {
       process.emit("uncaughtException", thrown as Error);
 
       expect(unclaimed).toEqual([serverError]);
+      expect(contained).toHaveLength(2);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         expect.any(Object),
