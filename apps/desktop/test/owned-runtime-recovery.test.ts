@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  createDesktopOwnedRuntimeRecovery,
   createOwnedRuntimeRecovery,
   resolveOwnedRuntimeExitAction,
   watchOwnedRuntimeExit,
@@ -16,7 +17,7 @@ describe("owned runtime recovery", () => {
       exitWatcherStart,
     );
     const recoveryStart = mainSource.indexOf(
-      "ownedRuntimeRecovery = createOwnedRuntimeRecovery({",
+      "ownedRuntimeRecovery = createDesktopOwnedRuntimeRecovery({",
     );
     const recoveryEnd = mainSource.indexOf(
       "const existingProbe",
@@ -29,17 +30,18 @@ describe("owned runtime recovery", () => {
     expect(exitWatcherEnd).toBeGreaterThan(exitWatcherStart);
     expect(exitWatcher).toContain("exit: bbProcess.exit");
     expect(exitWatcher).toContain("await ownedRuntimeRecovery?.start()");
-    expect(recoverySetup).toContain("await loadLoadingView()");
+    expect(recoverySetup).toContain("getRuntime: () => currentRuntime");
+    expect(recoverySetup).toContain("loadLoadingView,");
+    expect(recoverySetup).toContain("loadServer: loadBbApp");
     expect(recoverySetup).toContain(
       "startOwnedRuntime(args, { suppressStartupError: true })",
     );
+    expect(recoverySetup).toContain("startSystemConfigSync,");
+    expect(recoverySetup).toContain("refreshApplicationMenu,");
     expect(recoverySetup).toContain("onUnavailable: () =>");
     expect(recoverySetup).toContain(
       "bb-app restart did not reach a healthy server; retrying",
     );
-    expect(recoverySetup).toContain("loadBbApp(runtime.serverUrl)");
-    expect(recoverySetup).toContain("startSystemConfigSync(runtime.serverUrl)");
-    expect(recoverySetup).toContain("refreshApplicationMenu()");
   });
 
   it("restarts an owned server that exits after the application has loaded", () => {
@@ -101,24 +103,35 @@ describe("owned runtime recovery", () => {
     expect(recovered).toHaveBeenCalledOnce();
   });
 
-  it("routes the process exit promise through loading, retry, and renderer reload", async () => {
+  it("routes the process exit promise through the desktop recovery flow", async () => {
     const events: string[] = [];
     let attempts = 0;
     let resolveExit: (exit: string) => void = () => {};
     const exit = new Promise<string>((resolve) => {
       resolveExit = resolve;
     });
-    const recovery = createOwnedRuntimeRecovery({
+    const recovery = createDesktopOwnedRuntimeRecovery({
       isCurrent: () => true,
-      onRecovered: () => {
-        events.push("reload renderer");
-        events.push("refresh system config and menu");
-      },
-      restart: async () => {
+      getRuntime: () => ({ serverUrl: "http://127.0.0.1:38886" }),
+      loadLoadingView: async () => {
         events.push("show loading view");
+      },
+      loadServer: async (serverUrl) => {
+        events.push(`load server: ${serverUrl}`);
+      },
+      onLoadFailure: (error) => events.push(`load failed: ${String(error)}`),
+      onRecovered: () => {
+        events.push("recovered");
+      },
+      onUnavailable: () => events.push("startup unavailable"),
+      onRetry: (error) => events.push(`restart failed: ${String(error)}`),
+      refreshApplicationMenu: () => events.push("refresh menu"),
+      restartRuntime: async () => {
         events.push("start owned runtime");
         return attempts === 2;
       },
+      startSystemConfigSync: (serverUrl) =>
+        events.push(`sync system config: ${serverUrl}`),
       wait: async () => {
         attempts += 1;
         events.push("wait before retry");
@@ -147,6 +160,7 @@ describe("owned runtime recovery", () => {
     });
     resolveExit("owned process stopped");
     await watching;
+    await vi.waitFor(() => expect(events).toContain("refresh menu"));
 
     expect(events).toEqual([
       "clear pid file: owned process stopped",
@@ -155,11 +169,14 @@ describe("owned runtime recovery", () => {
       "wait before retry",
       "show loading view",
       "start owned runtime",
+      "startup unavailable",
       "wait before retry",
       "show loading view",
       "start owned runtime",
-      "reload renderer",
-      "refresh system config and menu",
+      "load server: http://127.0.0.1:38886",
+      "recovered",
+      "sync system config: http://127.0.0.1:38886",
+      "refresh menu",
     ]);
   });
 

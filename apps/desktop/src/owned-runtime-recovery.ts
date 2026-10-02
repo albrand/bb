@@ -7,6 +7,21 @@ interface CreateOwnedRuntimeRecoveryArgs {
   wait?: (delayMs: number) => Promise<void>;
 }
 
+interface CreateDesktopOwnedRuntimeRecoveryArgs {
+  getRuntime: () => { serverUrl: string } | null;
+  isCurrent: () => boolean;
+  loadLoadingView: () => Promise<void>;
+  loadServer: (serverUrl: string) => Promise<void>;
+  onLoadFailure: (error: unknown) => void;
+  onRecovered?: () => void;
+  onRetry?: (error?: unknown) => void;
+  onUnavailable?: () => void;
+  refreshApplicationMenu: () => void;
+  restartRuntime: () => Promise<boolean>;
+  startSystemConfigSync: (serverUrl: string) => void;
+  wait?: (delayMs: number) => Promise<void>;
+}
+
 interface OwnedRuntimeRecovery {
   start: () => Promise<void>;
 }
@@ -162,4 +177,44 @@ export function createOwnedRuntimeRecovery({
       }
     },
   };
+}
+
+export function createDesktopOwnedRuntimeRecovery({
+  getRuntime,
+  isCurrent,
+  loadLoadingView,
+  loadServer,
+  onLoadFailure,
+  onRecovered,
+  onRetry,
+  onUnavailable,
+  refreshApplicationMenu,
+  restartRuntime,
+  startSystemConfigSync,
+  wait: waitForRetry,
+}: CreateDesktopOwnedRuntimeRecoveryArgs): OwnedRuntimeRecovery {
+  return createOwnedRuntimeRecovery({
+    isCurrent,
+    onUnavailable,
+    onRetry,
+    onRecovered: () => {
+      const runtime = getRuntime();
+      if (runtime === null) {
+        return;
+      }
+
+      void loadServer(runtime.serverUrl)
+        .then(() => {
+          startSystemConfigSync(runtime.serverUrl);
+          refreshApplicationMenu();
+        })
+        .catch(onLoadFailure);
+      onRecovered?.();
+    },
+    restart: async () => {
+      await loadLoadingView();
+      return restartRuntime();
+    },
+    wait: waitForRetry,
+  });
 }

@@ -94,7 +94,7 @@ import {
   writeOwnedRuntimePidFile,
 } from "./owned-runtime-supervisor.js";
 import {
-  createOwnedRuntimeRecovery,
+  createDesktopOwnedRuntimeRecovery,
   watchOwnedRuntimeExit,
 } from "./owned-runtime-recovery.js";
 import {
@@ -402,8 +402,9 @@ let currentApplicationMenuAccelerators = DEFAULT_APPLICATION_MENU_ACCELERATORS;
 let desktopUpdateService: DesktopUpdateService | null = null;
 let desktopAutoUpdateService: DesktopAutoUpdateService | null = null;
 let currentRuntime: DesktopRuntime | null = null;
-let ownedRuntimeRecovery: ReturnType<typeof createOwnedRuntimeRecovery> | null =
-  null;
+let ownedRuntimeRecovery: ReturnType<
+  typeof createDesktopOwnedRuntimeRecovery
+> | null = null;
 let currentWindowUrl: string | null = null;
 let logViewerLineBuffer: LogLineBuffer | null = null;
 let logViewerPreloadPath: string | null = null;
@@ -2664,28 +2665,26 @@ async function decideOnExistingServer(
 }
 
 async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
-  ownedRuntimeRecovery = createOwnedRuntimeRecovery({
+  ownedRuntimeRecovery = createDesktopOwnedRuntimeRecovery({
+    getRuntime: () => currentRuntime,
     isCurrent: () => !quitting && localServerMove === null,
+    loadLoadingView,
+    loadServer: loadBbApp,
+    restartRuntime: async () =>
+      (await startOwnedRuntime(args, { suppressStartupError: true })) !== null,
+    startSystemConfigSync,
+    refreshApplicationMenu,
+    onLoadFailure: (error) => {
+      desktopLogger.error(
+        `[desktop] could not load the restarted bb server: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
     onUnavailable: () => {
       desktopLogger.warn(
         "[desktop] bb-app restart did not reach a healthy server; retrying",
       );
     },
     onRecovered: () => {
-      const runtime = currentRuntime;
-      if (runtime === null) {
-        return;
-      }
-      void loadBbApp(runtime.serverUrl)
-        .then(() => {
-          startSystemConfigSync(runtime.serverUrl);
-          refreshApplicationMenu();
-        })
-        .catch((error: unknown) => {
-          desktopLogger.error(
-            `[desktop] could not load the restarted bb server: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        });
       desktopLogger.info(
         "[desktop] reconnected the window to its restarted bb server",
       );
@@ -2693,12 +2692,6 @@ async function initializeRuntime(args: InitializeRuntimeArgs): Promise<void> {
     onRetry: (error) => {
       desktopLogger.warn(
         `[desktop] could not restart bb-app: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    },
-    restart: async () => {
-      await loadLoadingView();
-      return (
-        (await startOwnedRuntime(args, { suppressStartupError: true })) !== null
       );
     },
   });
