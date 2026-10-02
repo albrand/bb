@@ -5,6 +5,7 @@ import { cn } from "@bb/shared-ui/lib/utils";
 
 interface ComposerPopupHostProps {
   open: boolean;
+  focusKey: string;
   placement: "top" | "bottom";
   label: string;
   interactive: boolean;
@@ -54,6 +55,7 @@ export function ComposerPopupHost(props: ComposerPopupHostProps) {
 
 function ComposerPopupContent({
   open,
+  focusKey,
   drawer,
   placement,
   label,
@@ -70,7 +72,7 @@ function ComposerPopupContent({
       firstInput?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [interactive, open, popupRef]);
+  }, [focusKey, interactive, open, popupRef]);
   return (
     <div
       ref={popupRef}

@@ -3409,6 +3409,7 @@ export function PromptBoxInternal({
           <PluginComposerViewProvider value={composerView}>
             <ComposerPopupHost
               open={composerMenuOpen}
+              focusKey={popupContribution?.key ?? "promptbox-suggestions"}
               placement={mentionMenuPlacement}
               label={popupContribution?.popup.label ?? "Suggestions"}
               interactive={popupContribution !== null}
