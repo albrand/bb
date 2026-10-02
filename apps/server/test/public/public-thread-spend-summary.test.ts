@@ -95,6 +95,19 @@ describe("public thread spend summaries", () => {
       });
       recordThreadTurnSpendContribution(harness.db, {
         at: 1_780_000_000_000,
+        providerThreadId: "child-provider",
+        threadId: children[0]!.id,
+        turnId: "child-turn",
+        usage: {
+          cachedInputTokens: 20,
+          inputTokens: 100,
+          outputTokens: 30,
+          reasoningOutputTokens: 5,
+          totalTokens: 155,
+        },
+      });
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_780_000_000_000,
         providerThreadId: "provider-a",
         threadId: parent.id,
         turnId: "turn-a",
@@ -119,6 +132,32 @@ describe("public thread spend summaries", () => {
           totalTokens: 13,
         },
       });
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_780_000_000_200,
+        providerThreadId: "provider-c",
+        threadId: parent.id,
+        turnId: "turn-b",
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 40,
+          outputTokens: 9,
+          reasoningOutputTokens: 2,
+          totalTokens: 51,
+        },
+      });
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_780_000_000_300,
+        providerThreadId: "provider-c",
+        threadId: parent.id,
+        turnId: "turn-b",
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 5,
+          outputTokens: 2,
+          reasoningOutputTokens: 1,
+          totalTokens: 8,
+        },
+      });
 
       const spendResponse = await harness.app.request(
         `/api/v1/threads/${parent.id}/spend-summary`,
@@ -129,12 +168,20 @@ describe("public thread spend summaries", () => {
       );
       expect(spend.total).toEqual({
         cachedInputTokens: null,
-        inputTokens: 30,
-        outputTokens: 12,
+        inputTokens: 105,
+        outputTokens: 34,
         reasoningOutputTokens: null,
-        totalTokens: 44,
+        totalTokens: 153,
       });
       expect(spend.turns).toEqual([
+        {
+          turnId: "turn-b",
+          inputTokens: 45,
+          cachedInputTokens: 0,
+          outputTokens: 11,
+          reasoningOutputTokens: 3,
+          totalTokens: 59,
+        },
         {
           turnId: "turn-a",
           inputTokens: 60,
@@ -158,7 +205,7 @@ describe("public thread spend summaries", () => {
         waiting: 1,
         idle: 1,
         failed: 1,
-        totalTokens: 155,
+        totalTokens: null,
       });
       expect((summary.children ?? []).map((child) => child.id)).toEqual(
         children.map((child) => child.id),

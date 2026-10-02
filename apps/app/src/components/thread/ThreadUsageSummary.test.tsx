@@ -79,4 +79,28 @@ describe("thread usage summary", () => {
     );
     expect(screen.getByText("Writer · idle")).toBeTruthy();
   });
+
+  it("renders unavailable when child token totals are missing", async () => {
+    childSummary.mockResolvedValue({
+      nonDeletedChildCount: 1,
+      unarchivedDescendantCount: 1,
+      working: 0,
+      waiting: 0,
+      idle: 1,
+      failed: 0,
+      totalTokens: null,
+      children: [{ id: "child-1", title: "Scout", status: "idle" }],
+    });
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ThreadUsageAndAgents threadId="parent" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Ran 1 agent/)).toBeTruthy();
+    expect(screen.getByText(/Σ unavailable/)).toBeTruthy();
+  });
 });

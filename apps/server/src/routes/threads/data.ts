@@ -13,7 +13,6 @@ import {
   getThreadExecutionOverride,
   getThreadExecutionReport,
   listQueuedThreadMessages,
-  listSpendRollupRows,
   listThreadTurnSpend,
 } from "@bb/db";
 import type { Hono } from "hono";
@@ -443,40 +442,28 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
   get(routes.spendSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureSpendTables(deps.db);
-    const rows = listSpendRollupRows(deps.db, { threadId: thread.id });
-    const sumRows = (
+    const turns = listThreadTurnSpend(deps.db, { threadId: thread.id });
+    const sumTurns = (
       field:
         | "cachedInputTokens"
         | "inputTokens"
         | "outputTokens"
         | "reasoningOutputTokens"
         | "totalTokens",
-    ) => rows.reduce((sum, row) => sum + row[field], 0);
-    const total =
-      rows.length === 0
-        ? {
-            cachedInputTokens: null,
-            inputTokens: null,
-            outputTokens: null,
-            reasoningOutputTokens: null,
-            totalTokens: null,
-          }
-        : {
-            cachedInputTokens: rows.some((row) => row.cachedInputTokens === 0)
-              ? null
-              : sumRows("cachedInputTokens"),
-            inputTokens: sumRows("inputTokens"),
-            outputTokens: sumRows("outputTokens"),
-            reasoningOutputTokens: rows.some(
-              (row) => row.reasoningOutputTokens === 0,
-            )
-              ? null
-              : sumRows("reasoningOutputTokens"),
-            totalTokens: sumRows("totalTokens"),
-          };
+    ): number | null =>
+      turns.length === 0 || turns.some((turn) => turn[field] === null)
+        ? null
+        : turns.reduce((sum, turn) => sum + (turn[field] ?? 0), 0);
+    const total = {
+      cachedInputTokens: sumTurns("cachedInputTokens"),
+      inputTokens: sumTurns("inputTokens"),
+      outputTokens: sumTurns("outputTokens"),
+      reasoningOutputTokens: sumTurns("reasoningOutputTokens"),
+      totalTokens: sumTurns("totalTokens"),
+    };
     const response: ThreadSpendSummaryResponse = {
       total,
-      turns: listThreadTurnSpend(deps.db, { threadId: thread.id }),
+      turns,
     };
     return context.json(response);
   });

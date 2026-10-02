@@ -80,8 +80,8 @@ interface ThreadShowJsonPayload extends ThreadStatusPayload {
   environment: ThreadShowEnvironmentJsonPayload | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
   execution: ThreadExecutionProfileResult | null;
-  childSummary: ThreadChildSummaryResult;
-  spendSummary: ThreadSpendSummaryResult;
+  childSummary: ThreadChildSummaryResult | null;
+  spendSummary: ThreadSpendSummaryResult | null;
   workStatus?: WorkspaceStatus | null;
   gitDiff?: ThreadGitDiffResponse | null;
 }
@@ -263,7 +263,7 @@ function printChildSummary(summary: ThreadChildSummaryResult): void {
     `Ran ${summary.nonDeletedChildCount} ${summary.nonDeletedChildCount === 1 ? "agent" : "agents"}:`,
   );
   console.log(
-    `  ${summary.working ?? 0} working · ${summary.waiting ?? 0} waiting · ${summary.idle ?? 0} idle · ${summary.failed ?? 0} failed · Σ ${compactTokenCount(summary.totalTokens ?? 0)}`,
+    `  ${summary.working ?? 0} working · ${summary.waiting ?? 0} waiting · ${summary.idle ?? 0} idle · ${summary.failed ?? 0} failed · Σ ${compactTokenCount(summary.totalTokens)}`,
   );
 }
 
@@ -302,8 +302,8 @@ export function registerShowCommand(
         const statusPayload: ThreadStatusPayload =
           thread.status === "error" ? { lastError, thread } : { thread };
         const [childSummary, spendSummary] = await Promise.all([
-          sdk.threads.childSummary({ threadId }),
-          sdk.threads.spendSummary({ threadId }),
+          sdk.threads.childSummary({ threadId }).catch(() => null),
+          sdk.threads.spendSummary({ threadId }).catch(() => null),
         ]);
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {
@@ -440,8 +440,13 @@ export function registerShowCommand(
 
         printThreadStatus(statusPayload, environmentInfo, fetchedPullRequest);
         printExecutionProfile(execution);
-        printSpendSummary(spendSummary);
-        printChildSummary(childSummary);
+        if (spendSummary) {
+          printSpendSummary(spendSummary);
+        } else {
+          console.log("");
+          console.log("Token usage: unavailable");
+        }
+        if (childSummary) printChildSummary(childSummary);
 
         printPendingTodos(pendingTodos);
 

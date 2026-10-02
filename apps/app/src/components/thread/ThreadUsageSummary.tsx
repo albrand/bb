@@ -93,7 +93,7 @@ export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
               {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
               waiting · {childSummary.idle ?? 0} idle ·{" "}
               {childSummary.failed ?? 0} failed · Σ{" "}
-              {compactTokens(childSummary.totalTokens ?? 0)}
+              {compactTokens(childSummary.totalTokens)}
             </span>
             <span className="text-foreground">View ▸</span>
           </summary>

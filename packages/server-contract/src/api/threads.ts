@@ -577,7 +577,7 @@ export const threadChildSummaryResponseSchema = z.object({
   waiting: z.number().int().nonnegative().optional(),
   idle: z.number().int().nonnegative().optional(),
   failed: z.number().int().nonnegative().optional(),
-  totalTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().nullable().optional(),
   children: z
     .array(
       z.object({

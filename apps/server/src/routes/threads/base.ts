@@ -12,7 +12,7 @@ import {
   ensureSpendTables,
   listThreadMentionRowsByIds,
   listNonDeletedChildThreads,
-  listSpendRollupRows,
+  listThreadTurnSpend,
   listThreadsWithPendingInteractionState,
   markThreadDeleted,
   listLifecycleThreadTree,
@@ -414,12 +414,14 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
       else counts.working += 1;
     }
     const totalTokens = children.reduce(
-      (total, child) =>
-        total +
-        listSpendRollupRows(deps.db, { threadId: child.id }).reduce(
-          (childTotal, row) => childTotal + row.totalTokens,
-          0,
-        ),
+      (total: number | null, child) => {
+        const turns = listThreadTurnSpend(deps.db, { threadId: child.id });
+        if (turns.length === 0 || total === null) return null;
+        return (
+          total +
+          turns.reduce((childTotal, row) => childTotal + row.totalTokens, 0)
+        );
+      },
       0,
     );
     const nonDeletedChildCount = countNonDeletedAssignedChildThreads(deps.db, {

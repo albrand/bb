@@ -532,6 +532,34 @@ describe("bb thread show command output", () => {
     );
   });
 
+  it("keeps thread show available when spend summary routes fail", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-spend-unavailable",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => {
+        throw new Error("spend summary unavailable");
+      }),
+      "v1.threads.:id.child-summary.$get": vi.fn(async () => {
+        throw new Error("child summary unavailable");
+      }),
+    });
+
+    await runCommand(["thread", "show", thread.id], register);
+
+    const lines = collectLogLines(vi.mocked(console.log));
+    expect(lines).toContain("Token usage: unavailable");
+    expect(lines).not.toContain("Ran 0 agents:");
+    expect(lines.some((line) => line.includes("Status: idle"))).toBe(true);
+  });
+
   it("bb thread show --json includes pull request details", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-json-show-pr",
