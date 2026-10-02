@@ -8,7 +8,6 @@ interface CreateOwnedRuntimeRecoveryArgs {
 }
 
 interface OwnedRuntimeRecovery {
-  isRecovering: () => boolean;
   start: () => Promise<void>;
 }
 
@@ -16,7 +15,6 @@ interface ResolveOwnedRuntimeExitActionArgs {
   appLoaded: boolean;
   hasRecoveryController: boolean;
   isCurrentRuntime: boolean;
-  isRecovering: boolean;
   isServerMoving: boolean;
   isQuitting: boolean;
 }
@@ -51,7 +49,6 @@ export function resolveOwnedRuntimeExitAction({
   appLoaded,
   hasRecoveryController,
   isCurrentRuntime,
-  isRecovering,
   isServerMoving,
   isQuitting,
 }: ResolveOwnedRuntimeExitActionArgs): OwnedRuntimeExitAction {
@@ -60,9 +57,6 @@ export function resolveOwnedRuntimeExitAction({
   }
   if (isServerMoving) {
     return "server-moving";
-  }
-  if (isRecovering) {
-    return "ignore";
   }
   if (appLoaded && hasRecoveryController) {
     return "recover";
@@ -128,11 +122,12 @@ export function createOwnedRuntimeRecovery({
   wait: waitForRetry = wait,
 }: CreateOwnedRuntimeRecoveryArgs): OwnedRuntimeRecovery {
   let running = false;
+  let restartRequested = false;
 
   return {
-    isRecovering: () => running,
     async start() {
       if (running) {
+        restartRequested = true;
         return;
       }
       running = true;
@@ -145,8 +140,13 @@ export function createOwnedRuntimeRecovery({
             return;
           }
 
+          restartRequested = false;
           try {
             if (await restart()) {
+              if (restartRequested) {
+                delayMs = INITIAL_RETRY_DELAY_MS;
+                continue;
+              }
               onRecovered?.();
               return;
             }

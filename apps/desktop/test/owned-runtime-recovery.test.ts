@@ -48,7 +48,6 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
-        isRecovering: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -61,7 +60,6 @@ describe("owned runtime recovery", () => {
         appLoaded: false,
         hasRecoveryController: true,
         isCurrentRuntime: true,
-        isRecovering: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -71,7 +69,6 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
-        isRecovering: false,
         isQuitting: true,
         isServerMoving: false,
       }),
@@ -134,7 +131,6 @@ describe("owned runtime recovery", () => {
         appLoaded: true,
         hasRecoveryController: true,
         isCurrentRuntime: true,
-        isRecovering: false,
         isQuitting: false,
         isServerMoving: false,
       }),
@@ -167,7 +163,51 @@ describe("owned runtime recovery", () => {
     ]);
   });
 
-  it("ignores an owned-process exit while another recovery is already active", async () => {
+  it("queues a current-process exit that arrives during recovery", async () => {
+    let resolveFirstRestart: (started: boolean) => void = () => {};
+    let attempts = 0;
+    const restarted = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return await new Promise<boolean>((resolve) => {
+          resolveFirstRestart = resolve;
+        });
+      }
+      return true;
+    });
+    const recovered = vi.fn();
+    const recovery = createOwnedRuntimeRecovery({
+      isCurrent: () => true,
+      onRecovered: recovered,
+      restart: restarted,
+      wait: async () => {},
+    });
+    const runningRecovery = recovery.start();
+    await vi.waitFor(() => expect(restarted).toHaveBeenCalledOnce());
+
+    await watchOwnedRuntimeExit({
+      exit: Promise.resolve("restarted process exited"),
+      getState: () => ({
+        appLoaded: true,
+        hasRecoveryController: true,
+        isCurrentRuntime: true,
+        isQuitting: false,
+        isServerMoving: false,
+      }),
+      clearPidFile: vi.fn(),
+      clearCurrentRuntime: vi.fn(),
+      recover: () => recovery.start(),
+      showError: vi.fn(),
+      showServerMoving: vi.fn(),
+    });
+    resolveFirstRestart(true);
+    await runningRecovery;
+
+    expect(restarted).toHaveBeenCalledTimes(2);
+    expect(recovered).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a stale process exit while another recovery is active", async () => {
     const clearRuntime = vi.fn();
     const recover = vi.fn(async () => {});
     const watching = watchOwnedRuntimeExit({
@@ -175,8 +215,7 @@ describe("owned runtime recovery", () => {
       getState: () => ({
         appLoaded: true,
         hasRecoveryController: true,
-        isCurrentRuntime: true,
-        isRecovering: true,
+        isCurrentRuntime: false,
         isQuitting: false,
         isServerMoving: false,
       }),

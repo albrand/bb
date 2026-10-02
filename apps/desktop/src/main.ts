@@ -2466,7 +2466,6 @@ async function spawnOwnedRuntime(
       appLoaded: bbAppLoaded,
       hasRecoveryController: ownedRuntimeRecovery !== null,
       isCurrentRuntime: currentRuntime === runtime,
-      isRecovering: ownedRuntimeRecovery?.isRecovering() ?? false,
       isQuitting: quitting,
       isServerMoving: localServerMove !== null,
     }),
