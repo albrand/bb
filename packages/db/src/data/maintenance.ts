@@ -31,6 +31,8 @@ interface PageSizeRow {
 }
 
 interface WalCheckpointRow {
+  busy: number;
+  log: number;
   checkpointed: number;
 }
 
@@ -209,6 +211,9 @@ function checkpointWal(
   db: DbConnection,
   mode: "PASSIVE" | "TRUNCATE",
 ): void {
+  const previous = db.$client
+    .prepare<[], WalCheckpointRow>("PRAGMA wal_checkpoint(NOOP)")
+    .get();
   const checkpoint = db.$client
     .prepare<[], WalCheckpointRow>(`PRAGMA wal_checkpoint(${mode})`)
     .get();
@@ -217,9 +222,45 @@ function checkpointWal(
     throw new Error("Invalid SQLite page size");
   }
   logDatabaseWriteBytes(db, {
-    bytes: Math.max(0, checkpoint?.checkpointed ?? 0) * pageSize,
+    bytes: getNewlyCheckpointedPages(mode, previous, checkpoint) * pageSize,
     source: "wal-checkpoint",
   });
+}
+
+export function getNewlyCheckpointedPages(
+  mode: "PASSIVE" | "TRUNCATE",
+  before: WalCheckpointRow | undefined,
+  after: WalCheckpointRow | undefined,
+): number {
+  if (
+    after === undefined ||
+    after.log < 0 ||
+    after.checkpointed < 0
+  ) {
+    return 0;
+  }
+  if (
+    before === undefined ||
+    before.log < 0 ||
+    before.checkpointed < 0
+  ) {
+    return Math.max(0, after.checkpointed);
+  }
+  if (
+    mode === "TRUNCATE" &&
+    after.busy === 0 &&
+    after.log === 0 &&
+    after.checkpointed === 0
+  ) {
+    return Math.max(0, before.log - before.checkpointed);
+  }
+  if (
+    after.log < before.log ||
+    after.checkpointed < before.checkpointed
+  ) {
+    return Math.max(0, after.checkpointed);
+  }
+  return Math.max(0, after.checkpointed - before.checkpointed);
 }
 
 export function getDatabaseMaintenanceActivity(

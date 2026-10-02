@@ -15,6 +15,7 @@ import {
 } from "@bb/db";
 import type { DbConnection } from "@bb/db";
 import { threadScope } from "@bb/domain";
+import { getNewlyCheckpointedPages } from "../../src/data/maintenance.js";
 
 describe("database write byte instrumentation", () => {
   let db: DbConnection | undefined;
@@ -22,6 +23,38 @@ describe("database write byte instrumentation", () => {
   afterEach(() => {
     db?.$client.close();
     db = undefined;
+  });
+
+  it("counts only frames checkpointed by this invocation", () => {
+    const before = { busy: 0, log: 12, checkpointed: 8 };
+    expect(
+      getNewlyCheckpointedPages("PASSIVE", before, {
+        busy: 0,
+        log: 12,
+        checkpointed: 8,
+      }),
+    ).toBe(0);
+    expect(
+      getNewlyCheckpointedPages("PASSIVE", before, {
+        busy: 0,
+        log: 12,
+        checkpointed: 11,
+      }),
+    ).toBe(3);
+    expect(
+      getNewlyCheckpointedPages("PASSIVE", before, {
+        busy: 0,
+        log: 2,
+        checkpointed: 2,
+      }),
+    ).toBe(2);
+    expect(
+      getNewlyCheckpointedPages("TRUNCATE", before, {
+        busy: 0,
+        log: 0,
+        checkpointed: 0,
+      }),
+    ).toBe(4);
   });
 
   it("records event append, prune-delete, and WAL checkpoint bytes", () => {
@@ -180,8 +213,13 @@ describe("database write byte instrumentation", () => {
 
     writeMetrics.length = 0;
     runIncrementalVacuum(db, { maxPages: 0 });
-    expect(
-      writeMetrics.filter(({ fields }) => fields.source === "wal-checkpoint"),
-    ).toHaveLength(2);
+    const checkpointMetrics = writeMetrics.filter(
+      ({ fields }) => fields.source === "wal-checkpoint",
+    );
+    expect(checkpointMetrics).toHaveLength(2);
+    expect(checkpointMetrics.map(({ fields }) => fields.bytes)).toEqual([
+      0,
+      0,
+    ]);
   });
 });
