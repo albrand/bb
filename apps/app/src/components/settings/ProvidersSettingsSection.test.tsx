@@ -152,7 +152,7 @@ describe("ProvidersSettingsSection", () => {
     );
 
     const control = screen.getByRole("switch", {
-      name: "Allow fast service tier",
+      name: "Allow faster service tiers",
     });
     expect(control.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(control);
@@ -263,7 +263,7 @@ describe("ProvidersSettingsSection", () => {
     ).toBeTruthy();
     expect(
       within(configuration).getByRole("switch", {
-        name: "Allow fast service tier",
+        name: "Allow faster service tiers",
       }),
     ).toBeTruthy();
     expect(

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import {
   access,
   mkdir,
@@ -38,10 +39,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       if (newPath === `${lockRace.path}.reap`) lockRace.onReapLink?.();
       return actual.link(existingPath, newPath);
     },
-    unlink: async (path: string) => {
+    unlink: vi.fn(async (path: string) => {
       if (path === lockRace.path) await lockRace.onUnlink?.();
       return actual.unlink(path);
-    },
+    }),
   };
 });
 
@@ -115,12 +116,12 @@ const path = require("node:path");
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
 const counter = path.join(__dirname, "calls");
 fs.appendFileSync(counter, process.argv.slice(2).join(" ") + "\\n");
+async function main() {
 if (process.argv[2] === "install") {
   if (process.env.npm_config_ignore_scripts !== "true") { console.error("scripts not ignored"); process.exit(3); }
   if (!process.env.npm_config_registry) { console.error("no registry"); process.exit(3); }
   if (!process.env.npm_config_cache) { console.error("no cache"); process.exit(3); }
-  const wait = Date.now() + (config.installDelayMs ?? 0);
-  while (Date.now() < wait) {}
+  await new Promise((resolve) => setTimeout(resolve, config.installDelayMs ?? 0));
   if (config.installExit) { console.error("registry unreachable: ENOTFOUND registry.npmjs.org"); process.exit(config.installExit); }
   const dir = path.join(process.cwd(), "node_modules", "dev-browser", "bin");
   fs.mkdirSync(dir, { recursive: true });
@@ -131,6 +132,8 @@ if (process.argv[2] === "install") {
 }
 if (process.argv[2] === "audit") { process.stdout.write(JSON.stringify(config.audit)); process.exit(config.auditExit ?? 0); }
 process.exit(9);
+}
+void main().catch((error) => { console.error(error); process.exit(1); });
 `;
 
 let fixture: string;
@@ -364,11 +367,12 @@ describe("runtime installer", () => {
     const ours = join(installRoot(dir), `.staging-dev-browser@${version}-old`);
     await mkdir(foreign);
     await mkdir(ours);
-    const [a, b, c] = await Promise.all([
+    const installed = await Promise.all([
       install(dir),
       install(dir),
       install(dir),
     ]);
+    const [a, b, c] = installed;
     expect(b.binary).toBe(a.binary);
     expect(c.binary).toBe(a.binary);
     expect(
@@ -623,12 +627,27 @@ describe("runtime installer", () => {
   }, 30_000);
   it("cancels an in-progress install, cleans up, and allows a retry", async () => {
     const dir = await dataDir();
-    await configureNpm({ installDelayMs: 3_000 });
+    await configureNpm({ installDelayMs: 60_000 });
     const controller = new AbortController();
-    const pending = install(dir, { signal: controller.signal });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    controller.abort();
-    await expect(pending).rejects.toThrow("cancelled");
+    const pending = install(dir, { signal: controller.signal }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    try {
+      await vi.waitFor(
+        async () => {
+          expect(
+            (await npmCalls()).some((call) => call.startsWith("install")),
+          ).toBe(true);
+        },
+        { timeout: 5_000 },
+      );
+    } finally {
+      controller.abort();
+      await expect(pending).resolves.toMatchObject({
+        message: expect.stringContaining("cancelled"),
+      });
+    }
     expect(await entries(dir)).toEqual([]);
     await configureNpm({});
     await expect(install(dir)).resolves.toMatchObject({ version });

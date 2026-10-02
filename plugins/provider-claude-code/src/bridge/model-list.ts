@@ -16,6 +16,7 @@ function buildModelProbeOptions(env: NodeJS.ProcessEnv): Options {
   const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env });
   return {
     cwd: process.cwd(),
+    env,
     maxTurns: 0,
     persistSession: false,
     settingSources: ["user", "project", "local"],
@@ -56,7 +57,24 @@ export async function listClaudeCodeBridgeModels(
   models: AvailableModel[];
   selectedOnlyModels: AvailableModel[];
 }> {
-  return buildClaudeCodeModels(await probeClaudeCodeDiscoveredModels(env));
+  try {
+    return buildClaudeCodeModels(await probeClaudeCodeDiscoveredModels(env));
+  } catch (error) {
+    if (
+      env.ANTHROPIC_MODEL &&
+      error instanceof Error &&
+      error.message.includes("--client-data-url:") &&
+      error.message.includes("pass the matching --model")
+    ) {
+      return buildClaudeCodeModels(
+        await probeClaudeCodeDiscoveredModels({
+          ...env,
+          ANTHROPIC_MODEL: undefined,
+        }),
+      );
+    }
+    throw error;
+  }
 }
 
 type ClaudeCodeModelCatalog = Awaited<

@@ -233,7 +233,11 @@ export function registerInternalInteractiveRequestRoutes(
           );
           environmentHostId = environment.hostId;
         } catch (error) {
-          if (error instanceof ApiError && error.status === 404) {
+          if (
+            error instanceof ApiError &&
+            (error.status === 404 ||
+              error.body.code === "thread_environment_unavailable")
+          ) {
             continue;
           }
           throw error;

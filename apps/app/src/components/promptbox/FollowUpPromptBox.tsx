@@ -151,6 +151,7 @@ export interface FollowUpPromptBoxProps {
   activePromptMode?: ThreadTimelineActivePromptMode | null;
   composer: FollowUpComposerProps | null;
   environmentSummary: ReactNode | null;
+  compactEnvironmentSummary?: ReactNode;
   contextWindowUsage: ContextWindowUsage | null;
   execution: ExecutionControlsProps;
   permission: ExecutionPermissionConfig;
@@ -227,6 +228,7 @@ function FollowUpPromptBoxWithComposer({
   activePromptMode = null,
   composer,
   environmentSummary,
+  compactEnvironmentSummary = null,
   contextWindowUsage,
   execution,
   permission,
@@ -647,7 +649,7 @@ function FollowUpPromptBoxWithComposer({
         disabled={permissionPickerDisabled}
         showChevronWhenDisabled={permissionPickerDisabledByPlanMode}
         displayOverride={permissionDisplayOverride}
-        className="h-6"
+        className="h-6 max-md:h-11 max-md:px-2"
       />
     ),
     [
@@ -704,6 +706,9 @@ function FollowUpPromptBoxWithComposer({
       className="relative z-20"
       data-follow-up-composer=""
       data-follow-up-composer-expanded={isEditorExpanded ? "" : undefined}
+      data-follow-up-composer-footer-visible={
+        isCompactViewport && isEditorExpanded ? "" : undefined
+      }
       hidden={hasPendingInteraction}
       onBlurCapture={scheduleCollapseAfterFocusLoss}
       onFocusCapture={handleComposerFocus}
@@ -813,12 +818,12 @@ function FollowUpPromptBoxWithComposer({
       {!isPromptBoxCompact ? (
         <div
           data-follow-up-composer-footer=""
-          className="mt-1 flex min-h-6 max-h-6 select-none items-center justify-between gap-2 overflow-hidden pl-[15px] pr-3.5 opacity-100 transition-[max-height,min-height,margin-top,opacity] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+          className="mt-1 flex min-h-6 max-h-6 select-none max-md:mt-0 max-md:min-h-11 max-md:max-h-11 items-center justify-between gap-2 overflow-hidden pl-[15px] pr-3.5 opacity-100 transition-[max-height,min-height,margin-top,opacity] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
         >
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-            {environmentSummary}
+            {isCompactViewport ? compactEnvironmentSummary : environmentSummary}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 max-md:gap-0">
             {permissionControl}
             {contextWindowUsage ? (
               <ThreadContextWindowIndicator usage={contextWindowUsage} />

@@ -28,8 +28,17 @@ export interface BuildSessionOptionsArgs {
   workflowsEnabled: boolean;
   chromeEnabled: boolean;
   disable1MContext: boolean;
+  sandboxEnabled: boolean;
   memoryEnabled?: boolean;
 }
+
+type WorkspaceWriteSandboxArgs = Pick<
+  BuildSessionOptionsArgs,
+  | "additionalWorkspaceWriteRoots"
+  | "permissionMode"
+  | "permissionScope"
+  | "sandboxEnabled"
+>;
 
 export interface PermissionEscalationWorkContext {
   agentId?: string;
@@ -101,7 +110,7 @@ export function buildWorkspaceWriteDenialMessage(): string {
   return "bb's workspace sandbox allows work inside the current workspace only. Stay inside the workspace or explain why extra access is needed.";
 }
 
-function usesWorkspaceSandbox(params: BuildSessionOptionsArgs): boolean {
+function isWorkspaceWriteSession(params: WorkspaceWriteSandboxArgs): boolean {
   return (
     params.permissionScope === "workspace" &&
     (params.permissionMode === "acceptEdits" ||
@@ -109,10 +118,10 @@ function usesWorkspaceSandbox(params: BuildSessionOptionsArgs): boolean {
   );
 }
 
-function buildWorkspaceWriteSandbox(
-  params: BuildSessionOptionsArgs,
+export function buildWorkspaceWriteSandbox(
+  params: WorkspaceWriteSandboxArgs,
 ): Options["sandbox"] | undefined {
-  if (!usesWorkspaceSandbox(params)) {
+  if (!params.sandboxEnabled || !isWorkspaceWriteSession(params)) {
     return undefined;
   }
 
@@ -128,6 +137,8 @@ function buildWorkspaceWriteSandbox(
       : {}),
   };
 }
+
+const CLAUDE_WINDOWS_EXECUTABLE_NAME = "claude.exe";
 
 function isExecutableFile(candidatePath: string): boolean {
   try {
@@ -162,6 +173,12 @@ function wellKnownClaudeExecutablePaths(env: NodeJS.ProcessEnv): string[] {
   if (process.getuid?.() === 0) {
     return [];
   }
+  if (process.platform === "win32") {
+    const userProfile = env.USERPROFILE?.trim();
+    return userProfile
+      ? [join(userProfile, ".local", "bin", CLAUDE_WINDOWS_EXECUTABLE_NAME)]
+      : [];
+  }
   const candidatePaths: string[] = [];
   const home = env.HOME?.trim();
   if (home) {
@@ -191,8 +208,9 @@ export function resolveClaudeCodeExecutable(
   }
 
   const executableOnPath = resolveExecutableOnPath({
-    executableName: "claude",
-    pathEnv: args.env.PATH,
+    executableName:
+      process.platform === "win32" ? CLAUDE_WINDOWS_EXECUTABLE_NAME : "claude",
+    pathEnv: args.env.PATH ?? args.env.Path,
   });
   if (executableOnPath) {
     return executableOnPath;
@@ -223,7 +241,7 @@ export function buildSessionOptions(
         };
   const model = params.model;
   const sandbox = buildWorkspaceWriteSandbox(params);
-  const additionalDirectories = usesWorkspaceSandbox(params)
+  const additionalDirectories = isWorkspaceWriteSession(params)
     ? (params.additionalWorkspaceWriteRoots ?? [])
     : [];
   const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env });

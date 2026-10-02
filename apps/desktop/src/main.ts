@@ -228,6 +228,7 @@ import {
 import { removeLegacyAutomationPartitions } from "./desktop-browser-legacy-partitions.js";
 import { resolveDesktopBrowserAppCommand } from "./desktop-browser-shortcuts.js";
 import { registerDesktopBrowserIpc } from "./desktop-browser-main-ipc.js";
+import { resolveDesktopExternalUrl } from "./desktop-external-url.js";
 import {
   createDesktopFindViewManager,
   type DesktopFindViewManager,
@@ -2370,19 +2371,10 @@ function registerDesktopUpdateIpc(): void {
   ipcMain.on(
     BB_DESKTOP_OPEN_EXTERNAL_URL_CHANNEL,
     (_event, payload: unknown) => {
-      if (typeof payload !== "string") {
-        return;
+      const url = resolveDesktopExternalUrl(payload);
+      if (url !== null) {
+        void shell.openExternal(url);
       }
-      let parsed: URL;
-      try {
-        parsed = new URL(payload);
-      } catch {
-        return;
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return;
-      }
-      void shell.openExternal(parsed.toString());
     },
   );
 }

@@ -59,7 +59,12 @@ import {
   TooltipTrigger,
 } from "@bb/shared-ui/tooltip";
 import { ComposerActionsSlot } from "@/components/plugin/PluginComposerActions";
-import { useResolvedComposerEditor } from "@/components/plugin/composer-slot-hooks";
+import {
+  useResolvedComposerEditor,
+  useResolvedComposerPopups,
+} from "@/components/plugin/composer-slot-hooks";
+import { PluginComposerPopup } from "@/components/plugin/PluginComposerPopup";
+import { ComposerPopupHost } from "./ComposerPopupHost";
 import {
   composerScopeIdentity,
   PluginComposerViewProvider,
@@ -137,6 +142,7 @@ import {
   typeaheadSuggestionKey,
   type TypeaheadSuggestion,
 } from "./mentions/MentionMenu";
+import { useTypeaheadMenuMaxHeight } from "./useTypeaheadMenuMaxHeight";
 import { parsePromptMentionClipboardElement } from "./mentions/prompt-mention-clipboard";
 import {
   blurPromptEditor,
@@ -476,6 +482,11 @@ export interface PromptBoxHandle {
 export type { PromptBoxAction } from "./PromptBoxActionsMenu";
 
 export type MentionMenuPlacement = "top" | "bottom";
+
+type ComposerMenuState =
+  | { kind: "suggestions"; trigger: ActiveTrigger }
+  | { kind: "plugin"; key: string; open: boolean }
+  | null;
 
 interface PromptBoxInternalProps {
   id?: string;
@@ -1242,9 +1253,15 @@ export function PromptBoxInternal({
   const onAttachFilesRef = useRef(onAttachFiles);
   const dismissedTriggerRef = useRef<DismissedTriggerRange | null>(null);
   const isRestoringAppliedMentionRef = useRef(false);
-  const [activeTrigger, setActiveTrigger] = useState<ActiveTrigger | null>(
-    null,
-  );
+  const [composerMenu, setComposerMenuState] =
+    useState<ComposerMenuState>(null);
+  const composerMenuRef = useRef<ComposerMenuState>(null);
+  const setComposerMenu = useCallback((next: ComposerMenuState) => {
+    composerMenuRef.current = next;
+    setComposerMenuState(next);
+  }, []);
+  const activeTrigger =
+    composerMenu?.kind === "suggestions" ? composerMenu.trigger : null;
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<
     string | null
   >(null);
@@ -1543,8 +1560,40 @@ export function PromptBoxInternal({
     [onCommandQueryChange, onMentionQueryChange],
   );
 
+  const dismissComposerMenu = useCallback(
+    (restoreFocus = false) => {
+      const current = composerMenuRef.current;
+      triggerKeyRef.current = "";
+      if (current?.kind === "suggestions") {
+        dismissedTriggerRef.current = {
+          start: current.trigger.from,
+          end: current.trigger.to,
+          hasLeftRange: false,
+        };
+      }
+      setComposerMenu(
+        current?.kind === "plugin" ? { ...current, open: false } : null,
+      );
+      dispatchTriggerQuery(null);
+      const currentEditor = editorRef.current;
+      if (
+        restoreFocus &&
+        currentEditor &&
+        !currentEditor.isDestroyed &&
+        !currentEditor.isFocused
+      )
+        currentEditor.commands.focus();
+    },
+    [dispatchTriggerQuery, setComposerMenu],
+  );
+
   const syncTriggerState = useCallback(
     (editor: Editor) => {
+      if (
+        composerMenuRef.current?.kind === "plugin" &&
+        composerMenuRef.current.open
+      )
+        return;
       const caretPosition = editor.state.selection.from;
       let dismissedTrigger = dismissedTriggerRef.current;
       const isRestoringAppliedMention =
@@ -1591,11 +1640,17 @@ export function PromptBoxInternal({
         triggerKeyRef.current = nextKey;
         setSelectedSuggestionKey(null);
       }
-      setActiveTrigger(nextTrigger);
+      setComposerMenu(
+        nextTrigger
+          ? { kind: "suggestions", trigger: nextTrigger }
+          : composerMenuRef.current?.kind === "plugin"
+            ? composerMenuRef.current
+            : null,
+      );
 
       dispatchTriggerQuery(nextTrigger);
     },
-    [dispatchTriggerQuery, triggers],
+    [dispatchTriggerQuery, setComposerMenu, triggers],
   );
 
   useEffect(() => {
@@ -1658,20 +1713,20 @@ export function PromptBoxInternal({
             return suppressPromptEditorAnchorActivation(event);
           },
           focus: () => {
+            if (composerMenuRef.current?.kind === "plugin")
+              dismissComposerMenu();
             onCommandEditorFocusRef.current?.();
             return false;
           },
           blur: () => {
-            triggerKeyRef.current = "";
+            if (composerMenuRef.current?.kind === "suggestions")
+              dismissComposerMenu();
             if (dismissedTriggerRef.current) {
               dismissedTriggerRef.current = {
                 ...dismissedTriggerRef.current,
                 hasLeftRange: true,
               };
             }
-            setActiveTrigger(null);
-            onMentionQueryChange(null, null);
-            onCommandQueryChange(null, null);
             return false;
           },
           cut: () => {
@@ -2141,6 +2196,23 @@ export function PromptBoxInternal({
     !isCommandTriggerLiteral &&
     !isBareNonDefaultMentionTrigger;
 
+  useTypeaheadMenuMaxHeight(
+    typeaheadMenuRef,
+    showTypeaheadMenu && mentionMenuPlacement === "top",
+  );
+
+  const popups = useResolvedComposerPopups(
+    suppressPluginComposerCustomizations ? null : composerView.scope.kind,
+  );
+  const popupContribution =
+    composerMenu?.kind === "plugin"
+      ? (popups.find((popup) => popup.key === composerMenu.key) ?? null)
+      : null;
+  const popupOpen =
+    composerMenu?.kind === "plugin" &&
+    composerMenu.open &&
+    popupContribution !== null;
+  const composerMenuOpen = popupOpen || showTypeaheadMenu;
   const typeaheadMenuState: TypeaheadMenuState =
     activeTriggerKind === "command"
       ? { trigger: "command", state: commandMenuState }
@@ -2149,7 +2221,7 @@ export function PromptBoxInternal({
   useLayoutEffect(() => {
     if (reportQueuedEditorTypeaheadLayout === null) return;
     const menu = typeaheadMenuRef.current;
-    if (!showTypeaheadMenu || menu === null) {
+    if (!composerMenuOpen || menu === null) {
       reportQueuedEditorTypeaheadLayout({ height: 0, isOpen: false });
       return;
     }
@@ -2170,7 +2242,7 @@ export function PromptBoxInternal({
       resizeObserver?.disconnect();
       reportQueuedEditorTypeaheadLayout({ height: 0, isOpen: false });
     };
-  }, [reportQueuedEditorTypeaheadLayout, showTypeaheadMenu]);
+  }, [reportQueuedEditorTypeaheadLayout, composerMenuOpen]);
 
   useEffect(() => {
     if (selectedSuggestionKey !== null && selectedSuggestionIndex === -1) {
@@ -2240,7 +2312,7 @@ export function PromptBoxInternal({
       triggerKeyRef.current = "";
       dismissedTriggerRef.current = dismissedTrigger;
       isRestoringAppliedMentionRef.current = true;
-      setActiveTrigger(null);
+      setComposerMenu(null);
       setSelectedSuggestionKey(null);
       clearQuery();
 
@@ -2266,7 +2338,7 @@ export function PromptBoxInternal({
       }
       finishApply(targetEditor);
     },
-    [finishApply],
+    [finishApply, setComposerMenu],
   );
 
   useEffect(() => {
@@ -2367,19 +2439,57 @@ export function PromptBoxInternal({
     [applyCommandSuggestion, applyMentionSuggestion],
   );
 
-  const dismissActiveTrigger = useCallback(() => {
-    triggerKeyRef.current = "";
-    if (activeTrigger) {
-      dismissedTriggerRef.current = {
-        start: activeTrigger.from,
-        end: activeTrigger.to,
-        hasLeftRange: false,
-      };
-    }
-    setActiveTrigger(null);
-    onMentionQueryChange(null, null);
-    onCommandQueryChange(null, null);
-  }, [activeTrigger, onCommandQueryChange, onMentionQueryChange]);
+  const handleComposerMenuKeyDown = useCallback(
+    (event: KeyboardEvent): boolean => {
+      if (!composerMenuOpen || event.defaultPrevented) return false;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissComposerMenu(true);
+        return true;
+      }
+      if (
+        popupOpen &&
+        event.key === "Enter" &&
+        event.target instanceof HTMLInputElement
+      ) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    },
+    [composerMenuOpen, dismissComposerMenu, popupOpen],
+  );
+
+  const openPopupForPlugin = useCallback(
+    (pluginId: string, popupId: string) => {
+      const contribution = popups.find(
+        (popup) => popup.pluginId === pluginId && popup.popup.id === popupId,
+      );
+      if (!contribution) return false;
+      dismissComposerMenu();
+      setComposerMenu({ kind: "plugin", key: contribution.key, open: true });
+      return true;
+    },
+    [dismissComposerMenu, popups, setComposerMenu],
+  );
+
+  const closePopupForPlugin = useCallback(
+    (pluginId: string) => {
+      const current = composerMenuRef.current;
+      if (
+        current?.kind !== "plugin" ||
+        !current.open ||
+        !popups.some(
+          (popup) => popup.key === current.key && popup.pluginId === pluginId,
+        )
+      )
+        return false;
+      dismissComposerMenu(true);
+      return true;
+    },
+    [dismissComposerMenu, popups],
+  );
 
   const focusEnd = useCallback(() => {
     if (isPointerCoarse) {
@@ -2629,10 +2739,23 @@ export function PromptBoxInternal({
             pluginCustomizable: !suppressPluginComposerCustomizations,
             state: composerEditorState,
             insertAtCursor: insertAtCursorForPlugin,
+            openPopup: openPopupForPlugin,
+            closePopup: closePopupForPlugin,
+            isPopupOpen: () => {
+              const current = composerMenuRef.current;
+              return (
+                current?.kind === "plugin" &&
+                current.open &&
+                popups.some((popup) => popup.key === current.key)
+              );
+            },
           },
     [
       composerEditorState,
       insertAtCursorForPlugin,
+      openPopupForPlugin,
+      closePopupForPlugin,
+      popups,
       pluginComposerHost,
       suppressPluginComposerCustomizations,
     ],
@@ -2889,7 +3012,7 @@ export function PromptBoxInternal({
       ) {
         return false;
       }
-      if (dispatchAppCommandKey(event)) {
+      if (dispatchAppCommandKey(event) || handleComposerMenuKeyDown(event)) {
         return true;
       }
       const canSubmitWithEnterKey =
@@ -2980,11 +3103,6 @@ export function PromptBoxInternal({
               setPendingCommandSubmit(true);
             }
           }
-          return true;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          dismissActiveTrigger();
           return true;
         }
       }
@@ -3113,7 +3231,7 @@ export function PromptBoxInternal({
       commandHasMore,
       commandIsLoadingMore,
       dispatchAppCommandKey,
-      dismissActiveTrigger,
+      handleComposerMenuKeyDown,
       history,
       isPointerCoarse,
       loadMoreCommands,
@@ -3153,6 +3271,7 @@ export function PromptBoxInternal({
       data-promptbox-compact={showCompactLayout ? "" : undefined}
       data-promptbox-voice-active={showVoiceActionGroup ? "" : undefined}
       onSubmit={handleSubmit}
+      onKeyDown={(event) => handleComposerMenuKeyDown(event.nativeEvent)}
       onMouseDown={handlePromptBoxMouseDown}
       onDragOver={(event) => {
         if (!onAttachFiles) return;
@@ -3287,28 +3406,35 @@ export function PromptBoxInternal({
             />
           </div>
 
-          {showTypeaheadMenu ? (
-            <div
-              ref={typeaheadMenuRef}
-              data-promptbox-typeahead-menu=""
-              className={cn(
-                "absolute -left-px -right-px z-20",
-                mentionMenuPlacement === "top"
-                  ? "bottom-full mb-2"
-                  : "top-full mt-2",
-              )}
+          <PluginComposerViewProvider value={composerView}>
+            <ComposerPopupHost
+              open={composerMenuOpen}
+              placement={mentionMenuPlacement}
+              label={popupContribution?.popup.label ?? "Suggestions"}
+              interactive={popupContribution !== null}
+              popupRef={typeaheadMenuRef}
+              composerRef={formRef}
+              onClose={dismissComposerMenu}
             >
-              <MentionMenu
-                state={typeaheadMenuState}
-                selectedIndex={selectedIndex}
-                onApply={applyTrigger}
-                onDismiss={isPointerCoarse ? dismissActiveTrigger : undefined}
-                onCommandLoadMore={
-                  canLoadMoreCommands ? loadMoreCommands : undefined
-                }
-              />
-            </div>
-          ) : null}
+              {popupContribution !== null ? (
+                <PluginComposerPopup
+                  key={popupContribution.key}
+                  contribution={popupContribution}
+                  onClose={() => dismissComposerMenu(true)}
+                />
+              ) : (
+                <MentionMenu
+                  state={typeaheadMenuState}
+                  selectedIndex={selectedIndex}
+                  onApply={applyTrigger}
+                  onDismiss={isPointerCoarse ? dismissComposerMenu : undefined}
+                  onCommandLoadMore={
+                    canLoadMoreCommands ? loadMoreCommands : undefined
+                  }
+                />
+              )}
+            </ComposerPopupHost>
+          </PluginComposerViewProvider>
 
           {!showCompactLayout ? (
             <>
@@ -3338,7 +3464,7 @@ export function PromptBoxInternal({
             <div
               data-promptbox-action-row=""
               className={cn(
-                "relative flex shrink-0 select-none flex-row items-center gap-3 pb-2 pl-3.5 pr-[13px] pt-1.5",
+                "relative flex shrink-0 select-none flex-row flex-wrap items-center gap-3 pb-2 pl-3.5 pr-[13px] pt-1.5",
                 showCompactLayout && "absolute inset-y-0 right-2 gap-0 p-0",
                 showCompactLayout && showVoiceActionGroup && "inset-0",
               )}
@@ -3372,7 +3498,7 @@ export function PromptBoxInternal({
                   data-promptbox-expanded-only=""
                   data-promptbox-standard-actions=""
                   className={cn(
-                    "flex min-w-0 flex-1 flex-row items-center gap-1 transition-[opacity,transform] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                    "flex min-w-9 flex-1 flex-row items-center gap-1 transition-[opacity,transform] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
                     showVoiceActionGroup
                       ? "pointer-events-none translate-y-1 opacity-0"
                       : "translate-y-0 opacity-100",
@@ -3395,7 +3521,7 @@ export function PromptBoxInternal({
               <div
                 data-promptbox-standard-actions=""
                 className={cn(
-                  "flex shrink-0 flex-row items-center gap-1 transition-[opacity,transform] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                  "flex min-w-0 max-w-full shrink-0 flex-row flex-wrap items-center justify-end gap-1 transition-[opacity,transform] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
                   showVoiceActionGroup
                     ? "pointer-events-none translate-y-1 opacity-0"
                     : "translate-y-0 opacity-100",

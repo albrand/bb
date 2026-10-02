@@ -42,6 +42,7 @@ const CLAUDE_RENEWAL_REJECTED_MESSAGE =
   "Claude Code could not renew its sign-in and needs a new one.";
 const CLAUDE_USAGE_AFTER_RENEWAL_MESSAGE =
   "Claude usage appears after Claude Code renews its sign-in on next use.";
+const CLAUDE_POWERSHELL_INSTALL_SCRIPT_URL = "https://claude.ai/install.ps1";
 
 const claudeCredentialsSchema = z.object({
   claudeAiOauth: z.object({
@@ -63,8 +64,28 @@ const claudeAccountSchema = z.object({
     .nullish(),
 });
 
-function claudeExecutable(): string {
-  return process.env.BB_CLAUDE_CODE_EXECUTABLE?.trim() || "claude";
+async function claudeExecutable(): Promise<string> {
+  const explicit = process.env.BB_CLAUDE_CODE_EXECUTABLE?.trim();
+  if (explicit) return explicit;
+  if (
+    process.platform !== "win32" ||
+    (await resolveExecutablePath("claude")) !== null
+  ) {
+    return "claude";
+  }
+  const nativePath = path.join(os.homedir(), ".local", "bin", "claude.exe");
+  try {
+    await fs.access(nativePath);
+    return nativePath;
+  } catch {
+    return "claude";
+  }
+}
+
+function claudeInstallerCommand() {
+  return downloadedInstallerCommand(CLAUDE_INSTALL_SCRIPT_URL, {
+    powershellUrl: CLAUDE_POWERSHELL_INSTALL_SCRIPT_URL,
+  });
 }
 
 function claudeDistTags(value: string | null): {
@@ -135,7 +156,7 @@ function isDefaultNativeClaudePath(executablePath: string | null): boolean {
 export async function getClaudeProviderInstallationStatus(
   checkUpdates = true,
 ): Promise<ProviderInstallationStatus> {
-  const command = claudeExecutable();
+  const command = await claudeExecutable();
   const [
     resolvedExecutable,
     versionOutput,
@@ -198,7 +219,7 @@ export async function getClaudeProviderInstallationStatus(
       : null;
   const displayCommand =
     actionKind === "install"
-      ? downloadedInstallerCommand(CLAUDE_INSTALL_SCRIPT_URL).displayCommand
+      ? claudeInstallerCommand().displayCommand
       : formatCommand(command, ["update"]);
   return {
     executableName: command,
@@ -234,16 +255,16 @@ function buildClaudeProviderInstallationRun(
   status: ProviderInstallationStatus,
   action: "install" | "update",
 ): ProviderInstallationRunResult {
+  const command = status.executableName;
   if (status.installAction?.kind !== action) {
     return {
       available: false,
       message: `Claude Code ${action} is no longer available on this host.`,
     };
   }
-  const command = claudeExecutable();
   const execution =
     action === "install"
-      ? downloadedInstallerCommand(CLAUDE_INSTALL_SCRIPT_URL)
+      ? claudeInstallerCommand()
       : {
           command,
           args: ["update"],
@@ -437,7 +458,7 @@ function healthResult(
 }
 
 export async function getClaudeProviderHealth(): Promise<ProviderHealthResult> {
-  const command = claudeExecutable();
+  const command = await claudeExecutable();
   if ((await resolveExecutablePath(command)) === null) {
     return healthResult("not_installed");
   }
@@ -585,7 +606,7 @@ function normalizeUsage(
 }
 
 export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
-  const command = claudeExecutable();
+  const command = await claudeExecutable();
   if ((await resolveExecutablePath(command)) === null) {
     return { supported: true, usage: { status: "not_installed" } };
   }

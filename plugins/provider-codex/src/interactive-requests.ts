@@ -3,6 +3,8 @@ import {
   ProviderResponseEncodeError,
   USER_QUESTION_MAX_OPTIONS,
   USER_QUESTION_MAX_QUESTIONS,
+  isApprovalInteractionOutcome,
+  userQuestionInteractionOutcomeSchema,
   type ApprovalInteractionOutcome,
   type DecodedInteractiveRequest,
   type PendingInteractionUserQuestionQuestion,
@@ -36,7 +38,12 @@ import type {
 type CodexInteractiveResponse =
   | CommandExecutionRequestApprovalResponse
   | FileChangeRequestApprovalResponse
-  | PermissionsRequestApprovalResponse;
+  | PermissionsRequestApprovalResponse
+  | { answers: Record<string, { answers: string[] }> };
+
+type CodexInteractionOutcome =
+  | ApprovalInteractionOutcome
+  | UserQuestionInteractionOutcome;
 
 export interface CodexUserInputResponse {
   answers: Record<string, { answers: string[] }>;
@@ -232,6 +239,76 @@ function filterSessionDecisionWithoutGrant(
   return filtered;
 }
 
+function buildCodexUserQuestionId(
+  questionId: string,
+  optionIndex: number,
+): string {
+  return `${questionId}:option-${optionIndex + 1}`;
+}
+
+function buildCodexUserQuestionPayload(params: {
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isSecret: boolean;
+    options: Array<{ label: string; description: string }> | null;
+  }>;
+}): UserQuestionPendingInteractionPayload {
+  const payload = userQuestionInteractionOutcomeSchema.shape.payload.safeParse({
+    kind: "user_question",
+    questions: params.questions.map((question) => ({
+      id: question.id,
+      prompt: question.question,
+      shortLabel: question.header,
+      multiSelect: false,
+      options: question.options?.map((option, optionIndex) => ({
+        value: buildCodexUserQuestionId(question.id, optionIndex),
+        label: option.label,
+        description: option.description,
+      })),
+      allowFreeText: true,
+    })),
+  });
+  if (!payload.success) {
+    throw new ProviderRequestDecodeErrorValue(payload.error.message);
+  }
+  return payload.data;
+}
+
+function buildCodexUserQuestionResponse(args: UserQuestionInteractionOutcome): {
+  answers: Record<string, { answers: string[] }>;
+} {
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const question of args.payload.questions) {
+    const answer = args.resolution.answers[question.id];
+    if (!answer) {
+      throw new ProviderResponseEncodeError(
+        `Missing answer for user question '${question.id}'`,
+      );
+    }
+    const selected = answer.selected.map((value) => {
+      const option = question.options?.find(
+        (candidate) => candidate.value === value,
+      );
+      if (!option) {
+        throw new ProviderResponseEncodeError(
+          `Unknown selected option '${value}' for user question '${question.id}'`,
+        );
+      }
+      return option.label;
+    });
+    const values = answer.freeText ? [...selected, answer.freeText] : selected;
+    if (values.length === 0) {
+      throw new ProviderResponseEncodeError(
+        `Answer for user question '${question.id}' is empty`,
+      );
+    }
+    answers[question.id] = { answers: values };
+  }
+  return { answers };
+}
+
 export function decodeCodexInteractiveRequest(
   request: ProviderInboundRequest,
 ): DecodedInteractiveRequest | null {
@@ -372,8 +449,11 @@ export function decodeCodexInteractiveRequest(
 }
 
 export function buildCodexInteractiveResponse(
-  args: ApprovalInteractionOutcome,
+  args: CodexInteractionOutcome,
 ): CodexInteractiveResponse {
+  if (!isApprovalInteractionOutcome(args)) {
+    return buildCodexUserQuestionResponse(args);
+  }
   switch (args.payload.subject.kind) {
     case "command": {
       const response: CommandExecutionRequestApprovalResponse = {
