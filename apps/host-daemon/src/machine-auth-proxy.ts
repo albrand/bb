@@ -6,10 +6,13 @@ import http, {
 import https from "node:https";
 import type { AddressInfo, Socket } from "node:net";
 import type { Duplex } from "node:stream";
+import { superviseTcpServerSockets } from "@bb/process-utils";
+import type { HostDaemonLogger } from "./logger.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
 interface StartMachineAuthProxyOptions {
+  logger: Pick<HostDaemonLogger, "warn">;
   serverHeaders: Record<string, string>;
   serverUrl: string;
   port?: number;
@@ -235,6 +238,15 @@ export async function startMachineAuthProxy(
       target,
     }),
   );
+  superviseTcpServerSockets(server, (error, _socket, context) => {
+    options.logger.warn(
+      {
+        err: error,
+        ...context,
+      },
+      "Machine auth proxy TCP client socket failed",
+    );
+  });
   server.on("connect", (_request, socket) => writeRejectedSocket(socket, 405));
   server.on("upgrade", (request, socket, head) =>
     proxyUpgrade({

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { ServerConfig } from "@bb/config/server";
 import { isLoopbackHostname } from "@bb/config/loopback";
 import { toOptionalString } from "@bb/config/strings";
+import { superviseTcpServerSockets } from "@bb/process-utils";
 import { createLogger } from "@bb/logger";
 import {
   getAppSettings,
@@ -70,15 +71,26 @@ import {
 
 interface StartHttpListenerArgs {
   fetch: Parameters<typeof serve>[0]["fetch"];
+  logger: Pick<ServerLogger, "warn">;
   serverConfig: Pick<ServerConfig, "BB_SERVER_BIND_HOST" | "BB_SERVER_PORT">;
 }
 
 export function startHttpListener(args: StartHttpListenerArgs) {
-  return serve({
+  const server = serve({
     hostname: args.serverConfig.BB_SERVER_BIND_HOST,
     port: args.serverConfig.BB_SERVER_PORT,
     fetch: args.fetch,
   });
+  superviseTcpServerSockets(server, (error, _socket, context) => {
+    args.logger.warn(
+      {
+        err: error,
+        ...context,
+      },
+      "Server TCP client socket failed",
+    );
+  });
+  return server;
 }
 
 export interface StartServerPluginsArgs {
@@ -371,6 +383,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
 
   const server = startHttpListener({
     fetch: app.fetch,
+    logger,
     serverConfig,
   });
   injectWebSocket(server);

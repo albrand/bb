@@ -1,15 +1,22 @@
 import http from "node:http";
 import { once } from "node:events";
 import net, { type AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
-  startMachineAuthProxy,
+  startMachineAuthProxy as startMachineAuthProxyImpl,
   type MachineAuthProxy,
 } from "./machine-auth-proxy.js";
 
 const proxies: MachineAuthProxy[] = [];
 const servers: Array<http.Server | net.Server> = [];
+const logger = { warn: vi.fn() };
+
+function startMachineAuthProxy(
+  options: Omit<Parameters<typeof startMachineAuthProxyImpl>[0], "logger">,
+): Promise<MachineAuthProxy> {
+  return startMachineAuthProxyImpl({ ...options, logger });
+}
 
 async function listen(server: http.Server | net.Server): Promise<number> {
   await new Promise<void>((resolve, reject) => {
@@ -29,9 +36,36 @@ async function closeServer(server: http.Server | net.Server): Promise<void> {
 afterEach(async () => {
   await Promise.all(proxies.splice(0).map((proxy) => proxy.close()));
   await Promise.all(servers.splice(0).map(closeServer));
+  vi.clearAllMocks();
 });
 
 describe("startMachineAuthProxy", () => {
+  it("logs and closes a reset TCP client socket", async () => {
+    const upstream = net.createServer();
+    const upstreamPort = await listen(upstream);
+    const proxy = await startMachineAuthProxy({
+      serverHeaders: {},
+      serverUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxies.push(proxy);
+    const proxyUrl = new URL(proxy.serverUrl);
+    const client = net.connect(Number(proxyUrl.port), proxyUrl.hostname);
+    await once(client, "connect");
+    const closed = once(client, "close");
+
+    client.resetAndDestroy();
+    await closed;
+    await vi.waitFor(() => {
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({ code: "ECONNRESET" }),
+          localPort: expect.any(Number),
+        }),
+        "Machine auth proxy TCP client socket failed",
+      );
+    });
+  });
+
   it.each(["upstream", "client"])(
     "contains a %s connection reset after a WebSocket upgrade",
     async (resetSide) => {

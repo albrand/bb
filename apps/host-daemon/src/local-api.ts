@@ -37,6 +37,8 @@ import { isFsErrorWithCode } from "./fs-errors.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
+import { superviseTcpServerSockets } from "@bb/process-utils";
+import type { HostDaemonLogger } from "./logger.js";
 
 type WorkspaceOpenTargetListHandler = (
   query: WorkspaceOpenTargetsQuery,
@@ -46,6 +48,7 @@ type OpenInTargetHandler = (request: OpenPathInTargetArgs) => Promise<void>;
 interface StartLocalApiServerOptions {
   dataDir?: string;
   hostId: string;
+  logger: Pick<HostDaemonLogger, "warn">;
   localApiConfig: HostDaemonLocalApiConfig;
   serverUrl: string;
   serverPort: number;
@@ -339,6 +342,15 @@ export async function startLocalApiServer(
   }
 
   const { server, port: boundPort } = boundServer;
+  superviseTcpServerSockets(server, (error, _socket, context) => {
+    options.logger.warn(
+      {
+        err: error,
+        ...context,
+      },
+      "Host daemon local API TCP client socket failed",
+    );
+  });
 
   return {
     bindHost: options.localApiConfig.bindHost,

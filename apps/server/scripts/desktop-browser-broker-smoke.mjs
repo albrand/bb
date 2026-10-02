@@ -94,6 +94,7 @@ const pageUrl = `http://127.0.0.1:${pageAddress.port}/fixture`;
 const broker = await startDesktopBrowserBroker({
   dataDir: process.env.BB_DATA_DIR ?? join(config.artifacts, "bb-data"),
   hostId: seeded.host.id,
+  logger: console,
   serverUrl: server.baseUrl,
   onChanged(event) {
     onDaemonSocketMessage(server.deps, {

@@ -1,9 +1,10 @@
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadServerConfig } from "@bb/config/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { startHttpListener } from "../../src/start-server.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +60,7 @@ describe("server startup diagnostics", () => {
     });
     const server = startHttpListener({
       fetch: () => new Response("ok"),
+      logger: { warn: vi.fn() },
       serverConfig: { ...serverConfig, BB_SERVER_PORT: 0 },
     });
 
@@ -78,6 +80,53 @@ describe("server startup diagnostics", () => {
             return;
           }
           resolveClose();
+        });
+      });
+    }
+  });
+
+  it("logs and closes a reset TCP client socket", async () => {
+    const logger = { warn: vi.fn() };
+    const serverConfig = loadServerConfig({
+      env: {
+        BB_DATA_DIR: "/tmp/bb-server-listener-reset-test",
+        BB_HOST_DAEMON_PORT: "49162",
+        BB_SERVER_PORT: "49161",
+        NODE_ENV: "development",
+      },
+    });
+    const server = startHttpListener({
+      fetch: () => new Response("ok"),
+      logger,
+      serverConfig: { ...serverConfig, BB_SERVER_PORT: 0 },
+    });
+
+    try {
+      if (!server.listening) await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP server address");
+      }
+      const client = createConnection(address.port, "127.0.0.1");
+      await once(client, "connect");
+      const closed = once(client, "close");
+      client.resetAndDestroy();
+      await closed;
+
+      await vi.waitFor(() => {
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            err: expect.objectContaining({ code: "ECONNRESET" }),
+            localPort: expect.any(Number),
+          }),
+          "Server TCP client socket failed",
+        );
+      });
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => {
+          if (error) rejectClose(error);
+          else resolveClose();
         });
       });
     }

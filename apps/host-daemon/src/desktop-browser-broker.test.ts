@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
+import { createConnection } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -40,16 +41,18 @@ async function setup(timeoutMs = 1000) {
   const dataDir = await mkdtemp(join(tmpdir(), "bb-browser-broker-"));
   directories.push(dataDir);
   const onChanged = vi.fn();
+  const logger = { warn: vi.fn() };
   const broker = await startDesktopBrowserBroker({
     dataDir,
     hostId: "host-1",
+    logger,
     serverUrl: "https://bb.example",
     onChanged,
     requestTimeoutMs: timeoutMs,
   });
   brokers.push(broker);
   broker.setConnected(true);
-  return { broker, dataDir, onChanged };
+  return { broker, dataDir, logger, onChanged };
 }
 async function connect(
   broker: DesktopBrowserBroker,
@@ -85,6 +88,26 @@ async function registered(broker: DesktopBrowserBroker) {
 }
 
 describe("desktop browser broker", () => {
+  it("logs and closes a reset TCP client socket", async () => {
+    const { broker, logger } = await setup();
+    const address = new URL(broker.descriptor.url);
+    const client = createConnection(Number(address.port), address.hostname);
+    await once(client, "connect");
+    const closed = once(client, "close");
+
+    client.resetAndDestroy();
+    await closed;
+    await vi.waitFor(() => {
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({ code: "ECONNRESET" }),
+          localPort: expect.any(Number),
+        }),
+        "Desktop browser broker TCP client socket failed",
+      );
+    });
+  });
+
   it("writes a private bound descriptor and removes it at shutdown", async () => {
     const { broker, dataDir } = await setup();
     const path = join(dataDir, DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE);
