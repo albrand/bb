@@ -346,6 +346,19 @@ export function getSpendCursor(
   return row ?? null;
 }
 
+export function isSpendThreadHistoryComplete(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): boolean {
+  const row = db.get<{ cursorCount: number; partialCount: number }>(
+    sql`SELECT COUNT(*) AS cursorCount,
+               SUM(CASE WHEN history_complete = 0 THEN 1 ELSE 0 END) AS partialCount
+        FROM ${sql.raw(CURSOR_TABLE)}
+        WHERE thread_id = ${args.threadId}`,
+  );
+  return (row?.cursorCount ?? 0) > 0 && (row?.partialCount ?? 0) === 0;
+}
+
 export function saveSpendCursor(
   db: DbQueryConnection,
   args: {

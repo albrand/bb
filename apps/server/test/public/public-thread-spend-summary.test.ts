@@ -13,6 +13,7 @@ import {
   seedHostSession,
   seedProjectWithSource,
   seedThread,
+  seedThreadFixture,
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
@@ -170,9 +171,11 @@ describe("public thread spend summaries", () => {
         cachedInputTokens: 4,
         inputTokens: 105,
         outputTokens: 34,
-        reasoningOutputTokens: null,
+        reasoningOutputTokens: 10,
         totalTokens: 153,
       });
+      expect(spend.providerId).toBe("codex");
+      expect(spend.historyComplete).toBe(false);
       expect(spend.turns).toEqual([
         {
           turnId: "turn-b",
@@ -210,6 +213,72 @@ describe("public thread spend summaries", () => {
       expect((summary.children ?? []).map((child) => child.id)).toEqual(
         children.map((child) => child.id),
       );
+    });
+  });
+
+  it("uses durable Claude cache totals when only recent turns have turn rows", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { providerId: "claude-code" },
+      });
+      ensureSpendTables(harness.db);
+      applySpendContribution(harness.db, {
+        at: 1_790_000_000_000,
+        day: "2026-10-01",
+        model: "claude-opus-test",
+        providerId: "claude-code",
+        threadId: thread.id,
+        usage: {
+          cachedInputTokens: 9_000_000,
+          inputTokens: 1_000,
+          outputTokens: 40_000,
+          reasoningOutputTokens: 0,
+          totalTokens: 9_041_000,
+        },
+        weightedUnits: 903_000,
+      });
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_790_000_000_000,
+        providerThreadId: "claude-provider",
+        threadId: thread.id,
+        turnId: "recent-turn",
+        usage: {
+          cachedInputTokens: 2_000_000,
+          inputTokens: 50,
+          outputTokens: 2_000,
+          reasoningOutputTokens: null,
+          totalTokens: 2_002_050,
+        },
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      const spend = threadSpendSummaryResponseSchema.parse(
+        await readJson(response),
+      );
+
+      expect(spend).toEqual({
+        providerId: "claude-code",
+        historyComplete: false,
+        total: {
+          cachedInputTokens: 9_000_000,
+          inputTokens: 1_000,
+          outputTokens: 40_000,
+          reasoningOutputTokens: 0,
+          totalTokens: 9_041_000,
+        },
+        turns: [
+          {
+            turnId: "recent-turn",
+            inputTokens: 50,
+            cachedInputTokens: 2_000_000,
+            outputTokens: 2_000,
+            reasoningOutputTokens: null,
+            totalTokens: 2_002_050,
+          },
+        ],
+      });
     });
   });
 });

@@ -4,6 +4,7 @@ import type {
   ThreadChildSummaryResponse,
   ThreadSpendBreakdownResponse,
 } from "@bb/server-contract";
+import { tokenBreakdownLabels } from "@bb/domain";
 import { useThreadSpendSummary } from "@/hooks/queries/thread-queries";
 import { sdk } from "@/lib/sdk";
 import { useThreadRoutePath } from "./ThreadTitleMentions";
@@ -21,32 +22,69 @@ function exactTokens(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString("en");
 }
 
+function coverageTokens(
+  value: number | null,
+  historyComplete: boolean,
+): string {
+  const formatted = exactTokens(value);
+  return historyComplete || value === null
+    ? formatted
+    : `≥ ${formatted} (partial history)`;
+}
+
 function BreakdownDetails({
   breakdown,
   label,
+  providerId,
+  historyComplete = true,
 }: {
   breakdown: ThreadSpendBreakdownResponse;
   label: string;
+  providerId: string;
+  historyComplete?: boolean;
 }) {
+  const labels = tokenBreakdownLabels(providerId);
+  const partial = (value: number | null) =>
+    historyComplete || value === null
+      ? compactTokens(value)
+      : `≥ ${compactTokens(value)} (partial history)`;
+  const reasoning =
+    providerId === "claude-code"
+      ? labels.reasoning
+      : `${labels.reasoning} ${partial(breakdown.reasoningOutputTokens)}`;
   return (
     <details className="text-xs text-muted-foreground">
       <summary className="flex min-w-0 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded-sm px-1 py-0.5 hover:bg-state-hover">
         <span>{label}</span>
         <span className="font-mono tabular-nums">
-          Σ {compactTokens(breakdown.totalTokens)}
+          Σ {partial(breakdown.totalTokens)}
         </span>
         <span className="min-w-0 [overflow-wrap:anywhere]">
-          In {compactTokens(breakdown.inputTokens)} · Out{" "}
-          {compactTokens(breakdown.outputTokens)} · Reasoning{" "}
-          {compactTokens(breakdown.reasoningOutputTokens)} · Cached{" "}
-          {compactTokens(breakdown.cachedInputTokens)}
+          {labels.input} {partial(breakdown.inputTokens)} · Out{" "}
+          {partial(breakdown.outputTokens)} · {reasoning} · {labels.cache}{" "}
+          {partial(breakdown.cachedInputTokens)}
         </span>
       </summary>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 px-2 py-1 font-mono tabular-nums sm:grid-cols-4">
-        <span>Input: {exactTokens(breakdown.inputTokens)}</span>
-        <span>Output: {exactTokens(breakdown.outputTokens)}</span>
-        <span>Reasoning: {exactTokens(breakdown.reasoningOutputTokens)}</span>
-        <span>Cached: {exactTokens(breakdown.cachedInputTokens)}</span>
+        <span>
+          {labels.input}:{" "}
+          {coverageTokens(breakdown.inputTokens, historyComplete)}
+        </span>
+        <span>
+          Output: {coverageTokens(breakdown.outputTokens, historyComplete)}
+        </span>
+        {providerId === "claude-code" ? (
+          <span>{labels.reasoning}</span>
+        ) : (
+          <span>
+            {labels.reasoning}:{" "}
+            {coverageTokens(breakdown.reasoningOutputTokens, historyComplete)}
+          </span>
+        )}
+        <span>
+          {labels.cache}:{" "}
+          {coverageTokens(breakdown.cachedInputTokens, historyComplete)}
+        </span>
       </div>
     </details>
   );
@@ -62,7 +100,13 @@ export function ThreadTurnTokenSummary({
   const { data } = useThreadSpendSummary(threadId);
   const turn = data?.turns.find((item) => item.turnId === turnId);
   if (!turn) return null;
-  return <BreakdownDetails breakdown={turn} label="Tokens" />;
+  return (
+    <BreakdownDetails
+      breakdown={turn}
+      label="Tokens"
+      providerId={data?.providerId ?? ""}
+    />
+  );
 }
 
 export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
@@ -79,7 +123,12 @@ export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       {spend ? (
-        <BreakdownDetails breakdown={spend.total} label="Thread tokens" />
+        <BreakdownDetails
+          breakdown={spend.total}
+          label="Thread tokens"
+          providerId={spend.providerId}
+          historyComplete={spend.historyComplete}
+        />
       ) : null}
       {count > 0 && childSummary ? (
         <details className="min-w-0 text-muted-foreground">

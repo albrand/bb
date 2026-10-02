@@ -61,6 +61,7 @@ export {
   foldTokenUsageObservation,
   getSpendCoverage,
   getSpendCursor,
+  isSpendThreadHistoryComplete,
   getSpendThreadLatestSequence,
   hasThreadRewind,
   SPEND_PRUNE_SAFE_SEQUENCE,

@@ -601,6 +601,8 @@ export const threadSpendBreakdownSchema = z.object({
 });
 
 export const threadSpendSummaryResponseSchema = z.object({
+  providerId: z.string(),
+  historyComplete: z.boolean(),
   total: threadSpendBreakdownSchema,
   turns: z.array(threadSpendBreakdownSchema.extend({ turnId: z.string() })),
 });

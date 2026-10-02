@@ -22,12 +22,14 @@ describe("thread usage summary", () => {
     childSummary.mockReset();
     useThreadSpendSummary.mockReturnValue({
       data: {
+        providerId: "claude-code",
+        historyComplete: false,
         total: {
-          inputTokens: 900,
-          cachedInputTokens: null,
-          outputTokens: 120,
-          reasoningOutputTokens: 30,
-          totalTokens: 1050,
+          inputTokens: 6_442,
+          cachedInputTokens: 686_719_425,
+          outputTokens: 1_809_971,
+          reasoningOutputTokens: 0,
+          totalTokens: 688_535_838,
         },
         turns: [
           {
@@ -68,10 +70,18 @@ describe("thread usage summary", () => {
     );
 
     expect(
-      screen.getByText(/In 300 · Out 80 · Reasoning 10 · Cached 20/),
+      screen.getByText(
+        /Input \(uncached\) 300 · Out 80 · Reasoning included in output · Cached \(read \+ write\) 20/,
+      ),
     ).toBeTruthy();
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
     expect(screen.getByText(/Σ 64.4M/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Input \(uncached\) ≥ 6\.4K \(partial history\) · Out ≥ 1\.8M \(partial history\) · Reasoning included in output · Cached \(read \+ write\) ≥ 686\.7M \(partial history\)/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Σ ≥ 688\.5M \(partial history\)/)).toBeTruthy();
 
     fireEvent.click(screen.getByText("View ▸"));
     await waitFor(() =>
@@ -102,5 +112,37 @@ describe("thread usage summary", () => {
 
     expect(await screen.findByText(/Ran 1 agent/)).toBeTruthy();
     expect(screen.getByText(/Σ unavailable/)).toBeTruthy();
+  });
+
+  it("labels Codex cached and reasoning tokens without overstating the sum", () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        providerId: "codex",
+        historyComplete: true,
+        total: {
+          inputTokens: 70,
+          cachedInputTokens: 30,
+          outputTokens: 20,
+          reasoningOutputTokens: 10,
+          totalTokens: 120,
+        },
+        turns: [],
+      },
+    });
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ThreadUsageAndAgents threadId="codex-thread" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText(
+        /Input \(uncached\) 70 · Out 20 · Reasoning \(within output\) 10 · Cached 30/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Σ 120/)).toBeTruthy();
   });
 });
