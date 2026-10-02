@@ -56,10 +56,6 @@ export function assertElectronRuntime(
       `Electron framework is truncated (${frameworkSize} bytes; expected at least ${MINIMUM_MACOS_FRAMEWORK_BYTES}): ${framework}. Reinstall Electron with pnpm rebuild electron or rebuild the packaged app.`,
     );
   }
-
-  if (!existsSync(appBundle)) {
-    throw new Error(`Electron app bundle is missing: ${appBundle}`);
-  }
 }
 
 const scriptPath = fileURLToPath(import.meta.url);

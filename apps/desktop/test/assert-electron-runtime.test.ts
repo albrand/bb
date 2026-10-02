@@ -48,6 +48,15 @@ describe("assertElectronRuntime", () => {
     ).toThrow(/Electron framework is truncated \(4096 bytes/);
   });
 
+  it("rejects the measured crash artifact framework size", async () => {
+    const { executable, framework } = await createMacRuntimeFixture();
+    await truncate(framework, 66_384_886);
+
+    expect(() =>
+      assertElectronRuntime(executable, { platform: "darwin" }),
+    ).toThrow(/Electron framework is truncated \(66384886 bytes/);
+  });
+
   it("rejects a missing macOS Electron Framework", async () => {
     const { executable, framework } = await createMacRuntimeFixture();
     await rm(framework);
@@ -93,6 +102,15 @@ describe("assertElectronRuntime", () => {
   it("accepts the renamed framework binary in a packaged macOS app", async () => {
     const { executable, framework } = await createMacRuntimeFixture("bb");
     await truncate(framework, 128 * 1024 * 1024);
+
+    expect(() =>
+      assertElectronRuntime(executable, { platform: "darwin" }),
+    ).not.toThrow();
+  });
+
+  it("accepts the measured Electron 44.3.0 darwin-x64 framework size", async () => {
+    const { executable, framework } = await createMacRuntimeFixture("Electron");
+    await truncate(framework, 217_789_864);
 
     expect(() =>
       assertElectronRuntime(executable, { platform: "darwin" }),
