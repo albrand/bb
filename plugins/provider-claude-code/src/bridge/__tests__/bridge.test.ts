@@ -9119,6 +9119,66 @@ describe("canonical model context-window hint", () => {
     }
   });
 
+  it("does not rebuild when turn environment values are unchanged", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+
+    try {
+      const threadId = "thread-unchanged-env";
+      bridge.sendRequest(1, "thread/start", {
+        threadId,
+        cwd: "/tmp/worktree",
+        instructionMode: "append",
+        options: {
+          ...canonicalOptions,
+          envVars: { FIRST: "one", SECOND: "two" },
+        },
+      });
+      const providerThreadId = getProviderThreadIdFromResult(
+        await bridge.waitForResponse(1),
+      );
+
+      bridge.sendRequest(2, "turn/start", {
+        threadId,
+        providerThreadId,
+        clientRequestId: "creq_23456789ab",
+        input: [{ type: "text", text: "continue", mentions: [] }],
+        options: {
+          ...canonicalOptions,
+          envVars: { SECOND: "two", FIRST: "one" },
+        },
+      });
+      await readNextPromptText(getLatestQueryCall());
+      await bridge.waitForResponse(2);
+
+      expect(queries).toHaveLength(1);
+      expect(queries[0]?.close).not.toHaveBeenCalled();
+      expect(
+        bridge.messages.filter(
+          (message) => message.method === "session/replaced",
+        ),
+      ).toHaveLength(0);
+
+      bridge.sendRequest(3, "thread/stop", {
+        threadId,
+        providerThreadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      await bridge.flushWork();
+      queries[0]?.finish();
+      await bridge.waitForResponse(3);
+    } finally {
+      queries.forEach((query) => query.finish());
+      bridge.restore();
+    }
+  });
+
   it("uses Fable's Claude Code capacity through a custom API endpoint", async () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     const queries: ControlledClaudeQuery[] = [];
