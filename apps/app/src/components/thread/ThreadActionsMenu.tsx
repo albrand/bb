@@ -413,13 +413,8 @@ export function ThreadActionsMenu({
   onOpenChange,
   triggerClassName,
 }: ThreadActionsMenuProps) {
-  const {
-    compactStep,
-    menuOpen,
-    setCompactStep,
-    setMenuOpen,
-    handleOpenChange,
-  } = useThreadActionsMenuLifecycle(onOpenChange);
+  const { compactStep, menuOpen, setCompactStep, handleOpenChange } =
+    useThreadActionsMenuLifecycle(onOpenChange);
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={handleOpenChange}>

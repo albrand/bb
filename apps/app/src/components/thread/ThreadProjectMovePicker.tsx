@@ -26,41 +26,39 @@ export function ThreadProjectMovePicker({
   onBack,
 }: ThreadProjectMovePickerProps) {
   const [open, setOpen] = useState(false);
-  const [projects, setProjects] = useState<
-    Awaited<ReturnType<typeof sdk.projects.list>>
-  >([]);
+  const [projects, setProjects] = useState<Awaited<
+    ReturnType<typeof sdk.projects.list>
+  > | null>(null);
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const filteredProjects = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    return projects.filter((project) =>
+    return (projects ?? []).filter((project) =>
       project.name.toLocaleLowerCase().includes(normalizedQuery),
     );
   }, [projects, query]);
   const active = inline || open;
+  const loading = active && projects === null;
 
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     void sdk.projects
       .list({ includePersonal: true })
       .then((result) => {
         if (!cancelled) setProjects(result);
       })
       .catch(() => {
-        if (!cancelled) setError("Projects could not be loaded.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setProjects([]);
+          setError("Projects could not be loaded.");
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, setProjects]);
 
   const moveToProject = async (projectId: string) => {
     if (projectId === thread.projectId || moving) return;
@@ -166,6 +164,7 @@ export function ThreadProjectMovePicker({
           className="flex items-center gap-2"
           onSelect={(event) => {
             event.preventDefault();
+            setError(null);
             setOpen(true);
           }}
         >
