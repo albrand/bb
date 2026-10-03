@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
@@ -176,6 +177,17 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Writer · idle")).toBeTruthy();
     expect(screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/))
       .toBeTruthy();
+  });
+
+  it("keeps the full desktop rollup behind the roomy header container tier", () => {
+    const appCss = readFileSync("src/app.css", "utf8");
+
+    expect(appCss).toMatch(
+      /@container thread-header \(min-width: 58rem\)[\s\S]*?\[data-agent-summary-full\][\s\S]*?display: inline/,
+    );
+    expect(appCss).toMatch(
+      /@container thread-header \(max-width: 28rem\)[\s\S]*?\[data-agent-summary-count\][\s\S]*?display: inline/,
+    );
   });
 
   it("closes the drawer when leaving compact mode", async () => {
