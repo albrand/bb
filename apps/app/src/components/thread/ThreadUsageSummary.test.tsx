@@ -168,6 +168,9 @@ describe("thread usage summary", () => {
     expect(
       container.querySelector('[data-agent-summary-full]')?.textContent,
     ).toContain("Ran 2 agents");
+    expect(
+      container.querySelector('[data-agent-summary-count]')?.textContent,
+    ).toBe("2");
     fireEvent.click(screen.getByText("View ▸"));
     expect(await screen.findByText("Scout · active")).toBeTruthy();
     expect(screen.getByText("Writer · idle")).toBeTruthy();
