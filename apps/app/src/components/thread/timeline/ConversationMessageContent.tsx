@@ -1,4 +1,10 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import type {
   TimelineConversationAttachments,
   TimelineRowBase,
@@ -136,6 +142,7 @@ interface ConversationMessageContentAssistantProps
   showActions: boolean;
   mobileActionDisplay: "inline" | "overflow";
   streaming: boolean;
+  footerAdornment?: ReactNode;
   workspaceRootPath?: string;
 }
 
@@ -187,6 +194,7 @@ interface AssistantConversationMessageProps extends AssistantMessageRowIdentity 
   showActions: boolean;
   mobileActionDisplay: "inline" | "overflow";
   streaming: boolean;
+  footerAdornment?: ReactNode;
   text: string;
   timestamp: number;
   workspaceRootPath?: string;
@@ -478,6 +486,7 @@ function AssistantConversationMessage({
   showActions,
   mobileActionDisplay,
   streaming,
+  footerAdornment,
   text,
   timestamp,
   threadId,
@@ -613,6 +622,7 @@ function AssistantConversationMessage({
           onSendToMain={onSendToMain}
           disabled={forkDisabled}
           pluginActions={pluginActions}
+          footerAdornment={footerAdornment}
         />
       ) : null}
     </div>
@@ -694,6 +704,7 @@ export function ConversationMessageContent(
       showActions={props.showActions}
       mobileActionDisplay={props.mobileActionDisplay}
       streaming={props.streaming}
+      footerAdornment={props.footerAdornment}
       text={text}
       timestamp={props.timestamp}
       threadId={props.threadId}

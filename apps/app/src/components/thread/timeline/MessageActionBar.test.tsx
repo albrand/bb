@@ -85,6 +85,25 @@ function openDesktopMenu() {
 }
 
 describe("MessageActionBar", () => {
+  it("places the token summary in the message action row", () => {
+    const { container } = render(
+      <MessageActionBar
+        timestamp={TIMESTAMP}
+        messageText="An answer."
+        alignment="start"
+        mobileActionDisplay="inline"
+        footerAdornment={<span data-thread-turn-tokens>Σ 2.8M</span>}
+      />,
+    );
+    const tokenSummary = container.querySelector("[data-thread-turn-tokens]");
+    const actionButton = screen.getByRole("button", {
+      name: "Message actions",
+    });
+
+    expect(tokenSummary).toBeTruthy();
+    expect(tokenSummary?.parentElement).toBe(actionButton.parentElement);
+  });
+
   it("uses the nearest thread window as the tooltip collision boundary", () => {
     const threadWindow = document.createElement("div");
     threadWindow.setAttribute("data-thread-window", "");
