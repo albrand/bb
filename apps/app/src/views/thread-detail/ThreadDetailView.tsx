@@ -3067,6 +3067,7 @@ function ThreadDetailViewInternal(
               isStopping: thread.status === "stopping",
               stoppingAnchorAt: thread.updatedAt,
               threadId: thread.id,
+              threadIsActive: thread.status === "active",
               threadRuntimeDisplayStatus: thread.runtime.displayStatus,
               unreadDividerAutoScroll: unreadDividerState.autoScroll,
               unreadDividerPlacement: unreadDividerState.placement,

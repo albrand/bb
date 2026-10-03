@@ -711,13 +711,13 @@ function ActiveChildThreadsCard({
             }
             aria-hidden="true"
           />
-          <span className="min-w-0 flex-1 truncate text-left">
-            <span className="text-muted-foreground">
+          <span className="flex min-w-0 flex-1 items-center text-left">
+            <span className="shrink-0 text-muted-foreground">
               {needsApproval ? "Needs your input: " : "Active child thread: "}
             </span>
             <ThreadTitle
               title={primary.title}
-              className="font-medium text-foreground/80"
+              className="min-w-0 flex-1 truncate font-medium text-foreground/80"
               inline
             />
           </span>

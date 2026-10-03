@@ -173,6 +173,7 @@ export interface ThreadTimelineRowsProps {
   timelineRows: TimelineRow[];
   timelineNavigationTargetRowId?: string | null;
   threadId?: string;
+  threadIsActive?: boolean;
   threadRuntimeDisplayStatus: ThreadRuntimeDisplayStatus;
   unreadDividerAutoScroll?: boolean;
   unreadDividerPlacement?: ThreadTimelineUnreadDividerPlacement | null;
@@ -702,13 +703,22 @@ function findLastAssistantMessageIdsByTurnId(
   threadId: string,
   excludedTurnId: string | null | undefined,
 ): ReadonlyMap<string, { threadId: string; turnId: string }> {
+  const completedTurnIds = new Set(
+    rows.flatMap((row) =>
+      row.kind === "turn" && row.status === "completed" && row.turnId !== null
+        ? [row.turnId]
+        : [],
+    ),
+  );
+  const hasTurnRows = rows.some((row) => row.kind === "turn");
   const messageIdsByTurnId = new Map<string, string>();
   for (const row of rows) {
     if (
       row.kind === "conversation" &&
       row.role === "assistant" &&
       row.turnId !== null &&
-      row.turnId !== excludedTurnId
+      row.turnId !== excludedTurnId &&
+      (!hasTurnRows || completedTurnIds.has(row.turnId))
     ) {
       messageIdsByTurnId.set(row.turnId, row.id);
     }
@@ -2138,6 +2148,8 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
   const scopeActive = isRunningThreadRuntimeDisplayStatus(
     props.threadRuntimeDisplayStatus,
   );
+  const shouldExcludeActiveTurnTokenSummary =
+    scopeActive || props.threadIsActive === true;
   const streamingAssistantMessageId = useMemo(
     () => (scopeActive ? findStreamingAssistantMessageId(rows) : null),
     [rows, scopeActive],
@@ -2369,18 +2381,14 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                           }
                           onLoadOlderRows={props.onLoadOlderRows}
                           rows={rows}
-                          flatTurnTokenSummaryThreadId={
-                            rows.some((row) => row.kind === "turn")
-                              ? undefined
-                              : props.threadId
-                          }
+                          flatTurnTokenSummaryThreadId={props.threadId}
                           flatTurnTokenSummaryExcludedTurnId={
-                            scopeActive
+                            shouldExcludeActiveTurnTokenSummary
                               ? rows.some((row) => row.kind === "turn")
-                                ? findActiveTurnId(
+                                ? (findActiveTurnId(
                                     rows,
                                     streamingAssistantMessageId,
-                                  )
+                                  ) ?? findNewestTurnId(rows))
                                 : findNewestTurnId(rows)
                               : undefined
                           }

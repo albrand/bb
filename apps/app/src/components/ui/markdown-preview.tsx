@@ -1616,11 +1616,11 @@ function readMarkdownTableBreakoutLimit({
   }
   const clipLeft = clip.getBoundingClientRect().left + clip.clientLeft;
   const clipRight = clipLeft + clip.clientWidth;
-  const room = Math.max(
-    0,
-    Math.min(parentLeft - clipLeft, clipRight - parentRight),
-  );
-  return { kind: "set", value: `${parentWidth + 2 * room}px` };
+  const room = Math.min(parentLeft - clipLeft, clipRight - parentRight);
+  return {
+    kind: "set",
+    value: `${Math.max(0, parentWidth + 2 * room)}px`,
+  };
 }
 
 function applyMarkdownTableBreakoutLimit({
@@ -1918,7 +1918,7 @@ function MarkdownPreviewComponent({
       <div
         data-markdown-preview=""
         className={cn(
-          "max-w-none break-words text-sm leading-relaxed text-foreground",
+          "@container max-w-none break-words text-sm leading-relaxed text-foreground",
           className,
         )}
       >

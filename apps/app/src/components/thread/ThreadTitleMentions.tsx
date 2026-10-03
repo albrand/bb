@@ -936,7 +936,10 @@ function ThreadTitleMentionsContent({
         threadId={segment.unresolvedThreadId}
       />
     ) : segment.resource === null || segment.serializedText === null ? (
-      <span key={`${index}:text`} className="truncate whitespace-pre">
+      <span
+        key={`${index}:text`}
+        className="inline-block max-w-full truncate whitespace-pre"
+      >
         {highlightedText(segment.text, segmentOffset, highlightRanges)}
       </span>
     ) : (

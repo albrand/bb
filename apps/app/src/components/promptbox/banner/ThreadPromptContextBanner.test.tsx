@@ -514,6 +514,45 @@ describe("ThreadPromptContextBanner", () => {
     expect(markup).toContain("+1 more");
   });
 
+  it("constrains a long active child title inside the composer pane", () => {
+    const title = "Card 31: mobile thread header (agent rollup hides title)";
+
+    render(
+      <MemoryRouter>
+        <ThreadPromptContextBanner
+          gitSection={null}
+          gitSectionPending={false}
+          archivedSection={null}
+          environmentGoneSection={null}
+          parentThreadSection={null}
+          childThreadsSection={{
+            items: [
+              {
+                id: "thr_long_child",
+                title,
+                href: "/threads/thr_long_child",
+                hasPendingInteraction: false,
+              },
+            ],
+          }}
+          pullRequestSection={null}
+          expandedSection={null}
+          onToggleSection={noop}
+        />
+      </MemoryRouter>,
+    );
+
+    const childThreadToggle = screen.getByRole("button", {
+      name: /Card 31: mobile thread header/u,
+    });
+    expect(childThreadToggle.querySelector("span.font-medium")?.className).toContain(
+      "flex-1",
+    );
+    expect(
+      childThreadToggle.querySelector("span.font-medium > span")?.className,
+    ).toContain("inline-block");
+  });
+
   it("lets combined child and context cards shrink inside the composer stack", () => {
     render(
       <MemoryRouter>
