@@ -100,6 +100,52 @@ describe("ThreadTimelineRows token footer", () => {
     ).toBe("467K");
   });
 
+  it("renders captured reasoning tokens on a wide flat Claude response", () => {
+    const row = liveCapture.sample.timelineRow;
+    useThreadSpendSummary.mockReturnValueOnce({
+      data: {
+        ...liveCapture.sample.spendSummary,
+        total: {
+          ...liveCapture.sample.spendSummary.total,
+          reasoningOutputTokens: 37,
+        },
+        turns: liveCapture.sample.spendSummary.turns.map((turn) =>
+          turn.turnId === row.turnId
+            ? { ...turn, reasoningOutputTokens: 37 }
+            : turn,
+        ),
+      },
+    });
+    const assistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+      startedAt: row.startedAt,
+      createdAt: row.createdAt,
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <div style={{ width: 720 }}>
+          <ThreadTimelineRows
+            threadId={row.threadId}
+            timelineRows={[assistant]}
+            threadRuntimeDisplayStatus="idle"
+            workspaceRootPath={undefined}
+          />
+        </div>
+      </MemoryRouter>,
+    );
+
+    expect(
+      container.querySelector('[data-token-part="reasoning"]')?.textContent,
+    ).toBe("reason 37");
+  });
+
   it("keeps the footer on the last assistant message and hides the active turn", () => {
     const row = liveCapture.sample.timelineRow;
     const earlierAssistant = conversationRow({
