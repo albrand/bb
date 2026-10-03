@@ -11,10 +11,13 @@ import { useThreadRoutePath } from "./ThreadTitleMentions";
 import { useQuery } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
 
-function compactTokens(value: number | null | undefined): string {
+function compactTokens(
+  value: number | null | undefined,
+  maximumFractionDigits = 1,
+): string {
   if (value === null || value === undefined) return "unavailable";
   return new Intl.NumberFormat("en", {
-    maximumFractionDigits: 1,
+    maximumFractionDigits,
     notation: "compact",
   }).format(value);
 }
@@ -74,12 +77,13 @@ export function ThreadTurnTokenSummary({
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
   const compact = (value: number | null) =>
     value === null ? null : compactTokens(value);
+  const tightSummaryValue = turn.totalTokens ?? turn.cachedInputTokens;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           data-thread-turn-tokens=""
-          className="thread-turn-token-breakdown inline-flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground"
+          className="thread-turn-token-breakdown inline-flex min-w-0 flex-1 items-center gap-x-1 overflow-hidden whitespace-nowrap font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
           {turn.inputTokens === null ? null : (
             <span data-token-part="input">in {compact(turn.inputTokens)}</span>
@@ -99,7 +103,23 @@ export function ThreadTurnTokenSummary({
               cached {compact(turn.cachedInputTokens)}
             </span>
           )}
-          <span data-token-part="total">Σ {compact(turn.totalTokens)}</span>
+          {tightSummaryValue === null ? null : (
+            <span data-token-part="total">
+              {turn.totalTokens === null ? null : (
+                <span data-token-total-full>Σ {compact(turn.totalTokens)}</span>
+              )}
+              <span
+                data-token-total-tight
+                aria-label={
+                  turn.totalTokens === null
+                    ? `Cached ${exactTokens(tightSummaryValue)} tokens`
+                    : `Total ${exactTokens(tightSummaryValue)} tokens`
+                }
+              >
+                {compactTokens(tightSummaryValue, 0)}
+              </span>
+            </span>
+          )}
         </span>
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent

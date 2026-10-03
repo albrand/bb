@@ -302,11 +302,11 @@ function TokenFooterThread() {
     turns: [
       {
         turnId: "token-turn-1",
-        inputTokens: 30,
-        cachedInputTokens: 2_843_776,
-        outputTokens: 6_149,
+        inputTokens: 6_442,
+        cachedInputTokens: 686_719_425,
+        outputTokens: 1_809_971,
         reasoningOutputTokens: 500,
-        totalTokens: 2_850_455,
+        totalTokens: 688_535_838,
       },
       {
         turnId: "token-turn-2",
@@ -364,8 +364,17 @@ export function TokenFooterLayout() {
   return (
     <div className="w-full min-w-0 p-3">
       <p className="mb-3 text-xs text-muted-foreground">
-        Three completed turns: full spend, partial spend, and no spend row.
+        Three completed turns: large partial-history spend, partial spend, and
+        no spend row.
       </p>
+      <TokenFooterThread />
+    </div>
+  );
+}
+
+export function TokenFooterNarrowSplit() {
+  return (
+    <div className="w-[130px] min-w-0">
       <TokenFooterThread />
     </div>
   );
@@ -378,16 +387,16 @@ export function TokenFooterTooltip() {
         <Tooltip open>
           <TooltipTrigger asChild>
             <span className="font-mono text-xs text-muted-foreground">
-              in 30 · out 6.1K · reason 500 · cached 2.8M · Σ 2.9M
+              in 6.4K · out 1.8M · reason 500 · cached 686.7M · Σ 688.5M
             </span>
           </TooltipTrigger>
           <ThreadTurnTokenTooltipContent
             turn={{
-              inputTokens: 30,
-              outputTokens: 6_149,
+              inputTokens: 6_442,
+              outputTokens: 1_809_971,
               reasoningOutputTokens: 500,
-              cachedInputTokens: 2_843_776,
-              totalTokens: 2_850_455,
+              cachedInputTokens: 686_719_425,
+              totalTokens: 688_535_838,
             }}
             reasoningDisplayValue={500}
           />

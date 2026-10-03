@@ -82,6 +82,9 @@ describe("thread usage summary", () => {
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeTruthy();
     expect(screen.getByText(/cached 2\.8M/)).toBeTruthy();
     expect(screen.getByText("Σ 2.8M")).toBeTruthy();
+    expect(
+      container.querySelector("[data-token-total-tight]")?.textContent,
+    ).toBe("3M");
     expect(screen.queryByText(/Thread tokens/)).toBeNull();
     fireEvent.pointerMove(
       container.querySelector("[data-thread-turn-tokens]")!,
@@ -191,6 +194,47 @@ describe("thread usage summary", () => {
 
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
     expect(container.textContent).toBe("");
+  });
+
+  it("keeps a cached value for the tight footer when the total is missing", () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: false,
+        total: {
+          inputTokens: null,
+          cachedInputTokens: 686_719_425,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          totalTokens: null,
+        },
+        turns: [
+          {
+            turnId: "missing-total",
+            inputTokens: null,
+            cachedInputTokens: 686_719_425,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          },
+        ],
+      },
+    });
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary threadId="parent" turnId="missing-total" />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    expect(container.querySelector("[data-token-total-full]")).toBeNull();
+    expect(
+      container.querySelector("[data-token-total-tight]")?.textContent,
+    ).toBe("687M");
+    expect(
+      container.querySelector("[data-thread-turn-tokens]")?.textContent,
+    ).toContain("cached 686.7M");
   });
 
   it("omits unavailable token totals from the child agent rollup", async () => {
