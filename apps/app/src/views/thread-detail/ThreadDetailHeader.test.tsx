@@ -119,10 +119,21 @@ beforeEach(() => {
 });
 
 describe("ThreadDetailHeader", () => {
-  it("truncates long thread titles within a narrow pane", () => {
-    const title = "Seahaven QA intake status ledger - failed sweep 22";
+  it("keeps the title visible and collapses the agent rollup on compact widths", async () => {
+    viewportState.isCompactViewport = true;
+    vi.spyOn(sdk.threads, "childSummary").mockResolvedValue({
+      nonDeletedChildCount: 30,
+      unarchivedDescendantCount: 30,
+      working: 1,
+      waiting: 0,
+      idle: 29,
+      failed: 0,
+      totalTokens: 2_000_000_000,
+      children: [],
+    });
 
-    render(
+    const title = "Seahaven QA intake status ledger - failed sweep 22";
+    const { container } = render(
       <PaneContext.Provider value={PANE_CONTEXT}>
         <ThreadDetailHeader
           actionsMenu={null}
@@ -137,9 +148,12 @@ describe("ThreadDetailHeader", () => {
       </PaneContext.Provider>,
     );
 
-    expect(screen.getByText(title).closest("p")?.className).toContain(
-      "truncate",
-    );
+    const renderedTitle = await screen.findByText(title);
+    expect(renderedTitle.closest("p")?.classList).toContain("truncate");
+    expect(
+      await screen.findByRole("button", { name: /30 agents.*1 working/u }),
+    ).toBeTruthy();
+    expect(container.textContent).not.toContain("29 idle");
   });
 
   it("does not render a thread token summary in the header", () => {

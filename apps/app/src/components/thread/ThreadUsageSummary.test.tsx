@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ThreadTurnTokenSummary,
   ThreadUsageAndAgents,
@@ -18,6 +25,8 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
 vi.mock("@/lib/sdk", () => ({ sdk: { threads: { childSummary } } }));
 
 describe("thread usage summary", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     useThreadSpendSummary.mockReset();
     childSummary.mockReset();
@@ -261,6 +270,56 @@ describe("thread usage summary", () => {
     expect(screen.queryByText(/Σ unavailable/)).toBeNull();
   });
 
+  it("keeps the compact agent chip short and opens the full breakdown in a drawer", async () => {
+    childSummary.mockResolvedValue({
+      nonDeletedChildCount: 2,
+      unarchivedDescendantCount: 2,
+      working: 1,
+      waiting: 0,
+      idle: 1,
+      failed: 0,
+      totalTokens: 64_400_000,
+      children: [
+        {
+          id: "child-long",
+          title: "A long child thread title that ends with complete",
+          status: "idle",
+        },
+      ],
+    });
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ThreadUsageAndAgents compact threadId="parent" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const chip = await screen.findByRole("button", {
+      name: "View 2 agents: 1 working",
+    });
+    expect(chip.textContent).toContain("2 agents2");
+    expect(chip.textContent).not.toContain("working");
+    expect(chip.textContent).not.toContain("waiting");
+    fireEvent.click(chip);
+
+    const drawer = await screen.findByRole("dialog", {
+      name: "Agent activity",
+    });
+    await waitFor(() =>
+      expect(drawer.querySelector("p")?.textContent).toContain(
+        "Ran 2 agents · 1 working · 0 waiting",
+      ),
+    );
+    const child = await within(drawer).findByRole("link", {
+      name: "A long child thread title that ends with complete · idle",
+    });
+    expect(drawer.contains(child)).toBe(true);
+    expect(child.classList).toContain("whitespace-normal");
+    expect(child.classList).toContain("break-words");
+  });
+
   it("keeps only the per-agent rollup in the thread header row", async () => {
     useThreadSpendSummary.mockReturnValue({
       data: {
@@ -284,7 +343,7 @@ describe("thread usage summary", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
+    expect(await screen.findByText("View ▸")).toBeTruthy();
     expect(screen.queryByText(/Thread tokens/)).toBeNull();
     expect(screen.queryByText(/Input \(uncached\) 70/)).toBeNull();
   });
