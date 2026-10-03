@@ -39,6 +39,15 @@ import {
 } from "@/lib/plugin-slots";
 import { makePluginRegistrationSet as emptyRegistrationSet } from "@/test/fixtures/plugins";
 
+vi.mock("@/hooks/queries/thread-queries", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/queries/thread-queries")>();
+  return {
+    ...actual,
+    useThreadSpendSummary: () => ({ data: undefined }),
+  };
+});
+
 function InlineVis(props: PluginMessageDirectiveProps) {
   return (
     <div
