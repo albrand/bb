@@ -9,6 +9,7 @@ import {
   hasThreadRewind,
   listCompletedTurnsByThreadIds,
   listSpendBackfillThreads,
+  listSpendRollupRows,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listStoredTokenUsageEvents,
   listThreadTurnSpend,
@@ -261,6 +262,7 @@ export function recordSpendForInsertedEvents(
 }
 
 const TURN_SPEND_REPAIR_TABLE = "fork_thread_turn_spend_repair";
+const THREAD_SPEND_REPAIR_TABLE = "fork_thread_spend_rollup_repair";
 
 function repairThreadTurnSpendFromStoredEventsInTransaction(
   db: DbConnection,
@@ -288,12 +290,19 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
         !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
     ),
   );
-  if (turnsToRepair.size === 0) return;
+  const dailyRepairRecorded = db.$client
+    .prepare<[string], { threadId: string }>(
+      `SELECT thread_id AS threadId FROM ${THREAD_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+    )
+    .get(args.threadId);
+  const repairDailyRollup =
+    dailyRepairRecorded === undefined &&
+    listSpendRollupRows(db, { threadId: args.threadId }).length === 0 &&
+    resolveHistoryComplete(db, { threadId: args.threadId });
+  if (turnsToRepair.size === 0 && !repairDailyRollup) return;
   const states = new Map<string, SpendCursorState>();
+  const dailyContributions: SpendContribution[] = [];
   for (const row of listStoredTokenUsageEvents(db, { threadId: args.threadId })) {
-    if (row.turnId === null) {
-      continue;
-    }
     const record = JSON.parse(row.data) as Record<string, unknown>;
     const usage = (record.tokenUsage ?? {}) as Record<string, unknown>;
     const providerThreadId =
@@ -329,7 +338,14 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
     const model = modelForObservation(db, state, observation);
     const folded = foldTokenUsageObservation(state, observation, model);
     states.set(providerThreadId, folded.next);
-    if (folded.contribution !== null && turnsToRepair.has(row.turnId)) {
+    if (folded.contribution !== null && repairDailyRollup) {
+      dailyContributions.push(folded.contribution);
+    }
+    if (
+      folded.contribution !== null &&
+      row.turnId !== null &&
+      turnsToRepair.has(row.turnId)
+    ) {
       recordThreadTurnSpendContribution(db, {
         at: row.createdAt,
         providerThreadId,
@@ -347,11 +363,21 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
       });
     }
   }
+  for (const merged of mergeContributions(dailyContributions)) {
+    applySpendContribution(db, merged.contribution, merged.turns);
+  }
   const markRepaired = db.$client.prepare<[string, string, number]>(
     `INSERT OR IGNORE INTO ${TURN_SPEND_REPAIR_TABLE} (thread_id, turn_id, repaired_at) VALUES (?, ?, ?)`,
   );
   for (const turnId of turnsToRepair) {
     markRepaired.run(args.threadId, turnId, Date.now());
+  }
+  if (repairDailyRollup) {
+    db.$client
+      .prepare<[string, number]>(
+        `INSERT OR IGNORE INTO ${THREAD_SPEND_REPAIR_TABLE} (thread_id, repaired_at) VALUES (?, ?)`,
+      )
+      .run(args.threadId, Date.now());
   }
 }
 

@@ -357,21 +357,6 @@ describe("public thread spend summaries", () => {
         data: { providerThreadId, status: "completed" },
       });
       ensureSpendTables(harness.db);
-      applySpendContribution(harness.db, {
-        at: 1_780_000_000_200,
-        day: "2026-06-01",
-        model: "gpt-test",
-        providerId: "codex",
-        threadId: thread.id,
-        usage: {
-          cachedInputTokens: 10,
-          inputTokens: 20,
-          outputTokens: 15,
-          reasoningOutputTokens: 0,
-          totalTokens: 45,
-        },
-        weightedUnits: 95,
-      });
 
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/spend-summary`,
@@ -402,6 +387,7 @@ describe("public thread spend summaries", () => {
       const repeatedSpend = threadSpendSummaryResponseSchema.parse(
         await readJson(repeatedResponse),
       );
+      expect(repeatedSpend.total).toEqual(spend.total);
       expect(
         repeatedSpend.turns.filter((turn) => turn.turnId === turnId),
       ).toEqual([
