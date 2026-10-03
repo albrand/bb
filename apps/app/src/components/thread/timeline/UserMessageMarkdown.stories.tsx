@@ -21,7 +21,7 @@ function TimelineStage({
 }) {
   return (
     <div
-      className={`w-full max-w-[760px] ${
+      className={`w-full ${
         revealMessageActions ? "[&_button]:opacity-100" : ""
       }`}
     >

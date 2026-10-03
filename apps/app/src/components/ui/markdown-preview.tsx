@@ -120,6 +120,7 @@ interface MarkdownPreviewProps {
   allowHtml?: boolean;
   className?: string;
   content: string;
+  containerQuery?: boolean;
   sourcePrefix?: string;
   imagePolicy?: MarkdownImagePolicy;
   incrementalBlocks?: boolean;
@@ -428,6 +429,7 @@ const areMarkdownPreviewPropsEqual: MarkdownPreviewPropsEqual = (
   (previous.allowHtml ?? false) === (next.allowHtml ?? false) &&
   previous.className === next.className &&
   previous.content === next.content &&
+  (previous.containerQuery ?? true) === (next.containerQuery ?? true) &&
   (previous.sourcePrefix ?? "") === (next.sourcePrefix ?? "") &&
   (previous.imagePolicy ?? "render") === (next.imagePolicy ?? "render") &&
   (previous.incrementalBlocks ?? false) === (next.incrementalBlocks ?? false) &&
@@ -1697,6 +1699,7 @@ function MarkdownPreviewComponent({
   allowHtml = false,
   className,
   content,
+  containerQuery = true,
   sourcePrefix = "",
   imagePolicy = "render",
   incrementalBlocks = false,
@@ -1918,7 +1921,8 @@ function MarkdownPreviewComponent({
       <div
         data-markdown-preview=""
         className={cn(
-          "@container max-w-none break-words text-sm leading-relaxed text-foreground",
+          containerQuery && "@container",
+          "max-w-none break-words text-sm leading-relaxed text-foreground",
           className,
         )}
       >

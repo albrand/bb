@@ -145,6 +145,79 @@ describe("ConversationMessageContent user HTML", () => {
   });
 });
 
+describe("ConversationMessageContent user sizing", () => {
+  it("keeps the markdown intrinsic width inside an outer query container", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ConversationMessageContent
+            role="user"
+            attachments={null}
+            initiator="user"
+            mentions={[]}
+            originKind={null}
+            senderThreadId={null}
+            senderThreadTitle={null}
+            senderIsPluginSideChat={false}
+            systemMessageKind="unlabeled"
+            systemMessageSubject={null}
+            text="Expose the browser window so I can login for you wherever you need."
+            timestamp={0}
+            turnRequest={{
+              isGrouped: false,
+              kind: "message",
+              status: "accepted",
+            }}
+          />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      container
+        .querySelector("[data-message-column]")
+        ?.classList.contains("@container"),
+    ).toBe(true);
+    expect(
+      container
+        .querySelector("[data-markdown-preview]")
+        ?.classList.contains("@container"),
+    ).toBe(false);
+  });
+});
+
+describe("ConversationMessageContent assistant sizing", () => {
+  it("keeps a query container on assistant markdown tables", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ConversationMessageContent
+            role="assistant"
+            attachments={null}
+            id="msg_table"
+            threadId="thr_table"
+            turnId="turn_table"
+            showActions={false}
+            mobileActionDisplay="overflow"
+            streaming={false}
+            timestamp={0}
+            text={
+              "| Name | Description |\n| --- | --- |\n| Item | A wide table row |"
+            }
+          />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(
+      container
+        .querySelector("[data-markdown-preview]")
+        ?.classList.contains("@container"),
+    ).toBe(true);
+  });
+});
+
 describe("ConversationMessageContent assistant thread mentions", () => {
   it("renders an agent-authored thread token with the referenced thread title", () => {
     const mentionedThread = threadListEntry({
