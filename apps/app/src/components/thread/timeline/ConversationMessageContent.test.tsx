@@ -186,6 +186,38 @@ describe("ConversationMessageContent user sizing", () => {
   });
 });
 
+describe("ConversationMessageContent assistant sizing", () => {
+  it("keeps a query container on assistant markdown tables", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ConversationMessageContent
+            role="assistant"
+            attachments={null}
+            id="msg_table"
+            threadId="thr_table"
+            turnId="turn_table"
+            showActions={false}
+            mobileActionDisplay="overflow"
+            streaming={false}
+            timestamp={0}
+            text={
+              "| Name | Description |\n| --- | --- |\n| Item | A wide table row |"
+            }
+          />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(
+      container
+        .querySelector("[data-markdown-preview]")
+        ?.classList.contains("@container"),
+    ).toBe(true);
+  });
+});
+
 describe("ConversationMessageContent assistant thread mentions", () => {
   it("renders an agent-authored thread token with the referenced thread title", () => {
     const mentionedThread = threadListEntry({
