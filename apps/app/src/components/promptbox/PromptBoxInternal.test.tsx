@@ -2945,6 +2945,52 @@ describe("PromptBoxInternal compact layout", () => {
     expect(compactContent).toBeTruthy();
   });
 
+  it.each([
+    {
+      state: "send",
+      label: "Submit (Enter)",
+      value: "A typed prompt",
+      submission: {},
+    },
+    {
+      state: "steer",
+      label: "Submit (Enter)",
+      value: "A typed prompt",
+      submission: {
+        isRunning: true,
+        onStop: vi.fn(),
+        onModifierSubmit: vi.fn(),
+        showModifierSubmitAction: true,
+      },
+    },
+    {
+      state: "stop",
+      label: "Stop run",
+      value: "",
+      submission: { isRunning: true, onStop: vi.fn() },
+    },
+  ])(
+    "keeps the $state action square and centered in a tall composer row",
+    ({ label, value, submission }) => {
+      render(
+        <PromptBoxInternal {...createPromptBoxProps({ value, submission })} />,
+      );
+
+      const row = document.querySelector<HTMLElement>(
+        "[data-promptbox-action-row]",
+      );
+      if (!row) throw new Error("Expected the composer action row");
+      row.style.height = "5rem";
+
+      const button = screen.getByRole("button", { name: label });
+      expect(button.className).toContain("aspect-square");
+      expect(button.className).toContain("min-w-8");
+      expect(button.className).toContain("max-md:pointer-coarse:min-w-10");
+      expect(button.className).toContain("shrink-0");
+      expect(button.className).toContain("self-center");
+    },
+  );
+
   it("uses voice as the primary action for an empty coarse-pointer prompt", () => {
     const restoreMatchMedia = mockPointerCoarse(true);
     try {
