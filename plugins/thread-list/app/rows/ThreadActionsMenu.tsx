@@ -28,7 +28,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { cn } from "@/lib/utils";
@@ -36,7 +40,10 @@ import {
   experimental_useSidebarThreadActions,
   useSdk,
 } from "@get-bb/plugin-sdk/app";
-import { ActionMenuItem, ActionMenuSeparator } from "../ui/action-menu-items.js";
+import {
+  ActionMenuItem,
+  ActionMenuSeparator,
+} from "../ui/action-menu-items.js";
 import { CompactLongPressMenu } from "../ui/compact-long-press-menu.js";
 import { copyToClipboardWithToast } from "../ui/clipboard.js";
 import type { SidebarThread } from "../model/sidebar-thread.js";
@@ -49,6 +56,7 @@ import {
   type ThreadSectionMoveContextValue,
 } from "./ThreadSectionMoveProvider.js";
 import { THREAD_ROW_ACTIONS } from "./threadRowActions.js";
+import { ThreadProjectMovePicker } from "./ThreadProjectMovePicker.js";
 import { useCustomizeThreadRowActions } from "../list/customizeRowActionsContext.js";
 
 interface ThreadActionsMenuBaseProps {
@@ -92,6 +100,7 @@ interface ThreadActionsMenuItemsProps extends ThreadActionsMenuBaseProps {
   compactStep?: ThreadActionsCompactStep;
   onCompactStepChange?: (step: ThreadActionsCompactStep) => void;
   responsiveActions?: readonly ThreadActionsMenuResponsiveAction[];
+  onCloseMenu: () => void;
   surface: ThreadActionsMenuSurface;
 }
 
@@ -247,6 +256,7 @@ function ThreadActionsMenuItems({
   compactStep = "actions",
   onCompactStepChange,
   responsiveActions = [],
+  onCloseMenu,
   surface,
 }: ThreadActionsMenuItemsProps) {
   const customizeRowActions = useCustomizeThreadRowActions();
@@ -327,6 +337,12 @@ function ThreadActionsMenuItems({
           {id === "split" && onOpenInSplit ? separator : null}
         </Fragment>
       ))}
+      {separator}
+      <ThreadProjectMovePicker
+        thread={thread}
+        surface={surface}
+        onCloseMenu={onCloseMenu}
+      />
       <ActionMenuItem
         surface={surface}
         icon="Trash2"
@@ -721,6 +737,7 @@ export function ThreadActionsMenu({
           onCompactStepChange={setCompactStep}
           responsiveActions={responsiveActions}
           surface="dropdown"
+          onCloseMenu={() => handleOpenChange(false)}
         />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -761,6 +778,7 @@ function ThreadActionsCompactLongPressMenu({
           compactStep={compactStep}
           onCompactStepChange={setCompactStep}
           surface="dropdown"
+          onCloseMenu={() => handleOpenChange(false)}
         />
       }
     >
@@ -806,6 +824,7 @@ function ThreadActionsDesktopContextMenu({
           onOpenInSplit={onOpenInSplit}
           onRename={onRename}
           surface="context"
+          onCloseMenu={() => handleOpenChange(false)}
         />
       </ContextMenuContent>
     </ContextMenu>

@@ -127,6 +127,21 @@ describe("bindSdkToPlugin", () => {
     expect(threadSections.create).toHaveBeenCalledWith({ name: "Later" });
   });
 
+  it("moves a thread through the experimental plugin SDK method", async () => {
+    const { sdk, queryClient, threads } = makeSdk();
+    const bound = bindSdkToPlugin(sdk, "thread-list", queryClient);
+
+    await bound.threads.experimental_moveToProject({
+      threadId: "thr_1",
+      projectId: "proj_target",
+    });
+
+    expect(threads.update).toHaveBeenCalledWith({
+      threadId: "thr_1",
+      projectId: "proj_target",
+    });
+  });
+
   it("batches synchronous plugin thread metadata updates into one optimistic transaction", async () => {
     const { sdk, queryClient, threads } = makeSdk();
     const pending = new Map<

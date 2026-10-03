@@ -851,6 +851,8 @@ describe("ThreadRow", () => {
       "Customize row actions",
       "---",
       "Archive",
+      "---",
+      "Move to project…",
       "Delete",
     ]);
     fireEvent.click(
@@ -932,12 +934,10 @@ describe("ThreadRow", () => {
     expect(current.getAttribute("aria-current")).toBe("true");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Building" }));
     await waitFor(() =>
-      expect(slot.inspection.sdkCalls).toEqual([
-        {
-          method: "threads.update",
-          args: [{ threadId: "thr_test", sectionId: "sec_building" }],
-        },
-      ]),
+      expect(slot.inspection.sdkCalls).toContainEqual({
+        method: "threads.update",
+        args: [{ threadId: "thr_test", sectionId: "sec_building" }],
+      }),
     );
   });
 
@@ -964,7 +964,11 @@ describe("ThreadRow", () => {
     );
     fireEvent.click(await screen.findByRole("menuitem", { name: "Threads" }));
     await waitFor(() =>
-      expect(slot.inspection.sdkCalls).toEqual([
+      expect(
+        slot.inspection.sdkCalls.filter(({ method }) =>
+          ["threads.unpin", "threads.update"].includes(method),
+        ),
+      ).toEqual([
         { method: "threads.unpin", args: [{ threadId: "thr_test" }] },
         {
           method: "threads.update",

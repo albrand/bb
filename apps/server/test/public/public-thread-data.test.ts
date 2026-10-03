@@ -277,6 +277,242 @@ describe("public thread data routes", () => {
     });
   });
 
+  it("moves an unmanaged thread, clears its section, and preserves its history and parent", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+      const source = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        name: "Source project",
+        path: "/tmp/project-move-source",
+      }).project;
+      const target = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        name: "Target project",
+        path: "/tmp/project-move-target",
+      }).project;
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: source.id,
+        path: "/tmp/project-move-workspace",
+        isGitRepo: true,
+        branchName: "feature/task",
+      });
+      const parent = seedThread(harness.deps, { projectId: source.id });
+      const section = createThreadSection(harness.db, harness.deps.hub, {
+        name: "Source section",
+      });
+      if (section.status !== "created") {
+        throw new Error("Expected section fixture to be created");
+      }
+      const thread = seedThread(harness.deps, {
+        projectId: source.id,
+        environmentId: environment.id,
+        parentThreadId: parent.id,
+      });
+      harness.db
+        .update(threadRows)
+        .set({ sectionId: section.section.id })
+        .where(eq(threadRows.id, thread.id))
+        .run();
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        providerThreadId: "provider-thread-history",
+        sequence: 1,
+        type: "thread/identity",
+        scope: threadScope(),
+        data: {},
+      });
+      const previousEvents = harness.db
+        .select({ id: events.id })
+        .from(events)
+        .where(eq(events.threadId, thread.id))
+        .all();
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ projectId: target.id }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const moved = threadSchema.parse(await readJson(response));
+      const movedEnvironment = getEnvironment(harness.db, moved.environmentId!);
+      expect(moved).toMatchObject({
+        id: thread.id,
+        projectId: target.id,
+        sectionId: null,
+        parentThreadId: parent.id,
+      });
+      expect(movedEnvironment).toMatchObject({
+        projectId: target.id,
+        hostId: host.id,
+        path: environment.path,
+        providerOwnsPath: false,
+        branchName: environment.branchName,
+      });
+      expect(movedEnvironment?.id).not.toBe(environment.id);
+      expect(
+        harness.db
+          .select({ id: events.id })
+          .from(events)
+          .where(eq(events.threadId, thread.id))
+          .all(),
+      ).toEqual(previousEvents);
+    });
+  });
+
+  it("reuses an unmanaged target environment with the same host and path", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+      const source = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-reuse-source",
+      }).project;
+      const target = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-reuse-target",
+      }).project;
+      const sourceEnvironment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: source.id,
+        path: "/tmp/project-reuse-workspace",
+      });
+      const targetEnvironment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: target.id,
+        path: sourceEnvironment.path,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: source.id,
+        environmentId: sourceEnvironment.id,
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ projectId: target.id }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(getThread(harness.db, thread.id)).toMatchObject({
+        projectId: target.id,
+        environmentId: targetEnvironment.id,
+      });
+    });
+  });
+
+  it("transfers an exclusive managed worktree and refuses a shared one", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+      const source = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-managed-source",
+      }).project;
+      const target = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-managed-target",
+      }).project;
+      const exclusiveEnvironment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: source.id,
+        path: "/tmp/project-managed-exclusive",
+        providerOwnsPath: true,
+      });
+      const exclusiveThread = seedThread(harness.deps, {
+        projectId: source.id,
+        environmentId: exclusiveEnvironment.id,
+      });
+      const exclusiveResponse = await harness.app.request(
+        `/api/v1/threads/${exclusiveThread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ projectId: target.id }),
+        },
+      );
+      expect(exclusiveResponse.status).toBe(200);
+      expect(
+        getEnvironment(harness.db, exclusiveEnvironment.id)?.projectId,
+      ).toBe(target.id);
+      expect(getThread(harness.db, exclusiveThread.id)?.environmentId).toBe(
+        exclusiveEnvironment.id,
+      );
+
+      const sharedEnvironment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: source.id,
+        path: "/tmp/project-managed-shared",
+        providerOwnsPath: true,
+      });
+      const movingThread = seedThread(harness.deps, {
+        projectId: source.id,
+        environmentId: sharedEnvironment.id,
+      });
+      seedThread(harness.deps, {
+        projectId: source.id,
+        environmentId: sharedEnvironment.id,
+      });
+
+      const sharedResponse = await harness.app.request(
+        `/api/v1/threads/${movingThread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ projectId: target.id }),
+        },
+      );
+      expect(sharedResponse.status).toBe(409);
+      await expect(readJson(sharedResponse)).resolves.toMatchObject({
+        message: expect.stringContaining(
+          "another thread in the source project",
+        ),
+      });
+      expect(getThread(harness.db, movingThread.id)?.projectId).toBe(source.id);
+      expect(getEnvironment(harness.db, sharedEnvironment.id)?.projectId).toBe(
+        source.id,
+      );
+    });
+  });
+
+  it("refuses to move a running thread", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+      const source = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-running-source",
+      }).project;
+      const target = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/project-running-target",
+      }).project;
+      const thread = seedThread(harness.deps, {
+        projectId: source.id,
+        status: "active",
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ projectId: target.id }),
+        },
+      );
+
+      expect(response.status).toBe(409);
+      await expect(readJson(response)).resolves.toMatchObject({
+        message: expect.stringContaining("Wait for its turn to finish"),
+      });
+      expect(getThread(harness.db, thread.id)?.projectId).toBe(source.id);
+    });
+  });
+
   it("lists only the threads on one environment", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);

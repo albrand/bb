@@ -150,6 +150,12 @@ export function bindSdkToPlugin(
     threads: {
       ...sdk.threads,
       update: updateThread,
+      experimental_moveToProject(args) {
+        return sdk.threads.update({
+          threadId: args.threadId,
+          projectId: args.projectId,
+        });
+      },
       getPluginMetadata(
         args: Omit<ThreadPluginMetadataArgs, "pluginId"> & {
           pluginId?: string;

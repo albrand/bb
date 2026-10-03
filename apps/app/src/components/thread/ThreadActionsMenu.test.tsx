@@ -27,6 +27,7 @@ import {
 
 const moveThreadToSection = vi.hoisted(() => vi.fn());
 const copyToClipboardWithToast = vi.hoisted(() => vi.fn());
+const listProjects = vi.hoisted(() => vi.fn());
 const threadActions = vi.hoisted(() => ({
   requestArchive: vi.fn(),
   requestDelete: vi.fn(),
@@ -38,6 +39,10 @@ const threadActions = vi.hoisted(() => ({
 
 vi.mock("@/lib/clipboard", () => ({
   copyToClipboardWithToast,
+}));
+
+vi.mock("@/lib/sdk", () => ({
+  sdk: { projects: { list: listProjects } },
 }));
 
 vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
@@ -101,6 +106,7 @@ afterEach(() => {
   cleanup();
   moveThreadToSection.mockReset();
   copyToClipboardWithToast.mockReset();
+  listProjects.mockReset();
   for (const action of Object.values(threadActions)) {
     action.mockReset();
   }
@@ -118,6 +124,41 @@ describe("ThreadActionsMenu", () => {
 
     await waitFor(() => {
       expect(threadActions.requestRename).toHaveBeenCalledWith(thread);
+    });
+  });
+
+  it("opens the project picker from the compact thread actions menu", async () => {
+    listProjects.mockResolvedValue([
+      { id: thread.projectId, name: "Current project" },
+      { id: "proj_target", name: "Target project" },
+    ]);
+    const onMoveToProject = vi.fn().mockResolvedValue(undefined);
+    renderCompact(
+      <ThreadActionsMenu thread={thread} onMoveToProject={onMoveToProject} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Thread actions" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Move to project…" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Move to project" }),
+    ).not.toBeNull();
+    expect(listProjects).toHaveBeenCalledWith({ includePersonal: true });
+    const drawers = document.querySelectorAll(
+      "[data-persistent-drawer-content]",
+    );
+    expect(drawers).toHaveLength(1);
+    const drawer = drawers[0];
+    expect(drawer).not.toBeNull();
+    expect(drawer?.textContent).toContain("Target project");
+
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Target project" }),
+    );
+    await waitFor(() => {
+      expect(onMoveToProject).toHaveBeenCalledWith("proj_target");
     });
   });
 

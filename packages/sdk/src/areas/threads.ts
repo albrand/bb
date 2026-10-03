@@ -631,6 +631,7 @@ function countQuery(args: ThreadCountArgs | undefined): ThreadCountQuery {
 function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
   return {
     title: args.title,
+    projectId: args.projectId,
     sectionId: args.sectionId,
     parentThreadId: args.parentThreadId,
     model: args.model,

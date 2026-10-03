@@ -5,6 +5,8 @@ import {
   THREAD_SEARCH_LIMIT_PER_GROUP_MAX,
   countNonDeletedAssignedChildThreads,
   countThreads,
+  createEnvironment,
+  findProjectEnvironmentByHostPath,
   getEnvironment,
   getHost,
   getThread,
@@ -17,6 +19,7 @@ import {
   markThreadDeleted,
   listLifecycleThreadTree,
   searchThreadsWithPendingInteractionState,
+  transferManagedEnvironmentProject,
   updateThread,
   type ThreadSearchResultGroup as DbThreadSearchResultGroup,
   type UpdateThreadInput,
@@ -73,6 +76,8 @@ import { assertValidParentThread } from "../../services/threads/thread-parent.js
 import { handleThreadOwnershipChange } from "../../services/threads/thread-ownership.js";
 import { applyThreadExecutionOverride } from "../../services/threads/thread-execution-override.js";
 import { emitPluginThreadDeleted } from "../../services/plugins/plugin-thread-events.js";
+import { NotificationBuffer } from "../../services/lib/notification-buffer.js";
+import { getActiveTurnId } from "../../services/threads/thread-events.js";
 
 function parseThreadIncludes(query: ThreadGetQuery): Set<ThreadIncludeOption> {
   const includes = new Set<ThreadIncludeOption>();
@@ -447,6 +452,135 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
 
   patch(routes.update, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    if (payload.projectId !== undefined) {
+      if (Object.keys(payload).length !== 1) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Move a thread to a project in a separate update.",
+        );
+      }
+      const targetProject = requirePublicProject(deps.db, payload.projectId);
+      if (targetProject.id === thread.projectId) {
+        return context.json(toThreadResponseFromThread(deps, { thread }));
+      }
+      const notifications = new NotificationBuffer();
+      const movedThread = deps.db.transaction(
+        (tx) => {
+          const current = getThread(tx, thread.id);
+          if (!current || current.deletedAt !== null) {
+            throw new ApiError(404, "thread_not_found", "Thread not found");
+          }
+          if (current.projectId === targetProject.id) return current;
+          if (
+            current.status === "starting" ||
+            current.status === "active" ||
+            current.status === "stopping" ||
+            getActiveTurnId({ db: tx }, current.id) !== null
+          ) {
+            throw new ApiError(
+              409,
+              "invalid_request",
+              "Cannot move a running thread. Wait for its turn to finish or stop it, then move it again.",
+            );
+          }
+
+          let environmentId = current.environmentId;
+          if (environmentId !== null) {
+            const environment = getEnvironment(tx, environmentId);
+            if (!environment) {
+              throw new ApiError(
+                409,
+                "invalid_request",
+                "Cannot move this thread because its environment no longer exists.",
+              );
+            }
+            if (environment.providerOwnsPath) {
+              if (environment.projectId === current.projectId) {
+                const result = transferManagedEnvironmentProject(
+                  tx,
+                  notifications,
+                  {
+                    environmentId: environment.id,
+                    movingThreadId: current.id,
+                    sourceProjectId: current.projectId,
+                    targetProjectId: targetProject.id,
+                  },
+                );
+                if (result === "shared") {
+                  throw new ApiError(
+                    409,
+                    "invalid_request",
+                    "Cannot move this thread because another thread in the source project uses its managed worktree. Move those threads first or detach this thread from the worktree.",
+                  );
+                }
+                if (result === "changed") {
+                  throw new ApiError(
+                    409,
+                    "invalid_request",
+                    "Cannot move this thread because its managed environment ownership changed. Refresh the thread and try again.",
+                  );
+                }
+              } else if (environment.projectId !== targetProject.id) {
+                throw new ApiError(
+                  409,
+                  "invalid_request",
+                  "Cannot move this thread because its managed worktree belongs to another project.",
+                );
+              }
+            } else {
+              if (environment.path === null) {
+                throw new ApiError(
+                  409,
+                  "invalid_request",
+                  "Cannot move this thread because its unmanaged environment has no path. Restore or detach the environment first.",
+                );
+              }
+              const targetEnvironment = findProjectEnvironmentByHostPath(
+                tx,
+                targetProject.id,
+                environment.hostId,
+                environment.path,
+              );
+              if (targetEnvironment) {
+                environmentId = targetEnvironment.id;
+              } else {
+                const created = createEnvironment(tx, notifications, {
+                  projectId: targetProject.id,
+                  hostId: environment.hostId,
+                  path: environment.path,
+                  isGitRepo: environment.isGitRepo,
+                  branchName: environment.branchName,
+                  baseBranch: environment.baseBranch,
+                  defaultBranch: environment.defaultBranch,
+                  mergeBaseBranch: environment.mergeBaseBranch,
+                  providerOwnsPath: false,
+                  status: "ready",
+                });
+                environmentId = created.id;
+              }
+            }
+          }
+
+          const updated = updateThread(tx, notifications, current.id, {
+            environmentId,
+            projectId: targetProject.id,
+            sectionId: null,
+          });
+          if (!updated) {
+            throw new ApiError(404, "thread_not_found", "Thread not found");
+          }
+          notifications.notifyProject(current.projectId, ["threads-changed"]);
+          notifications.notifyProject(targetProject.id, ["threads-changed"]);
+          return updated;
+        },
+        { behavior: "immediate" },
+      );
+      notifications.flushInto(deps.hub);
+      return context.json(
+        toThreadResponseFromThread(deps, { thread: movedThread }),
+      );
+    }
     if (payload.parentThreadId) {
       assertValidParentThread(deps, {
         childThreadId: thread.id,

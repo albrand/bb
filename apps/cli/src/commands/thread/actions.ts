@@ -44,6 +44,7 @@ interface ThreadUpdateCommandOptions {
   self?: boolean;
   json?: boolean;
   title?: string;
+  project?: string;
   parentThread?: string;
   clearParentThread?: boolean;
   section?: string;
@@ -138,6 +139,7 @@ type PostThreadMessageResult = ThreadSendResult & {
 
 interface ThreadUpdateBody {
   title?: string;
+  projectId?: string;
   sectionId?: string | null;
   parentThreadId?: string | null;
   model?: string;
@@ -155,6 +157,7 @@ export function registerActionsCommands(
     .option("--self", "Target the current thread (from BB_THREAD_ID)")
     .option("--json", "Print machine-readable JSON output")
     .option("--title <title>", "Set the thread title")
+    .option("--project <id-or-name>", "Move the thread to a project")
     .option("--parent-thread <id>", "Set the parent thread id")
     .option("--clear-parent-thread", "Clear the parent thread id")
     .option("--section <id>", "Move the thread into a section")
@@ -179,6 +182,19 @@ export function registerActionsCommands(
           if (opts.section && opts.clearSection) {
             throw new Error("Cannot combine --section with --clear-section.");
           }
+          if (
+            opts.project &&
+            (opts.title ||
+              opts.parentThread ||
+              opts.clearParentThread ||
+              opts.section ||
+              opts.clearSection ||
+              opts.model ||
+              opts.reasoningLevel ||
+              opts.visibility)
+          ) {
+            throw new Error("Move a thread to a project in a separate update.");
+          }
           const reasoningLevel = parseReasoningLevel(opts.reasoningLevel);
           const visibility =
             opts.visibility === undefined
@@ -190,12 +206,13 @@ export function registerActionsCommands(
             !opts.section &&
             !opts.clearSection &&
             !opts.title &&
+            !opts.project &&
             !opts.model &&
             !reasoningLevel &&
             !visibility
           ) {
             throw new Error(
-              "No changes requested. Provide --title, --parent-thread, --clear-parent-thread, --section, --clear-section, --model, --reasoning-level, or --visibility.",
+              "No changes requested. Provide --project, --title, --parent-thread, --clear-parent-thread, --section, --clear-section, --model, --reasoning-level, or --visibility.",
             );
           }
 
@@ -232,11 +249,33 @@ export function registerActionsCommands(
           }
 
           const sdk = createCliBbSdk(getUrl());
+          if (opts.project) {
+            const projects = await sdk.projects.list({ includePersonal: true });
+            const matches = projects.filter(
+              (project) =>
+                project.id === opts.project ||
+                project.name.localeCompare(opts.project!, undefined, {
+                  sensitivity: "base",
+                }) === 0,
+            );
+            if (matches.length === 0) {
+              throw new Error(`Project not found: ${opts.project}`);
+            }
+            if (matches.length > 1) {
+              throw new Error(
+                `More than one project is named "${opts.project}". Use a project ID.`,
+              );
+            }
+            body.projectId = matches[0]!.id;
+          }
           const thread = await sdk.threads.update({ threadId, ...body });
           if (outputJson(opts, thread)) return;
           console.log(`Thread ${thread.id} updated`);
           if (opts.title) {
             console.log(`Title: ${thread.title ?? "<untitled>"}`);
+          }
+          if (opts.project) {
+            console.log(`Project: ${thread.projectId}`);
           }
           if (opts.parentThread || opts.clearParentThread) {
             console.log(
