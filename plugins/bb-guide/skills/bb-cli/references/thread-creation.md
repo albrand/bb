@@ -58,7 +58,10 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
   source environment. Anchor with
   `--source-seq-end` on a completed source turn (the clone and inherited
   timeline both end with the turn containing that sequence). Permission mode
-  inherits the source thread unless explicitly overridden.
+  inherits the source thread unless explicitly overridden. A visible idle fork
+  without `--title` is named after its source with a numbered prefix (`foo` →
+  `(1) foo`, `(1) foo` → `(2) foo`); a fork with a first prompt is titled from
+  that prompt.
 - Pass `--visibility hidden` for background/plugin workers that should remain
   out of sidebar organization without contributing unread/pending favicon
   attention. `bb thread list` excludes them by

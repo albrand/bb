@@ -26,6 +26,7 @@ import { SdkSession, type SdkSessionOptions } from "../sdk-session.js";
 const defaultOptions: SdkSessionOptions = {
   cwd: "/tmp/test",
   systemPrompt: "You are a test assistant.",
+  allowBypassPermissions: false,
 };
 
 interface ClaudeQueryPromptCall {
@@ -223,6 +224,7 @@ describe("SdkSession", () => {
       {
         ...defaultOptions,
         permissionMode: "bypassPermissions",
+        allowBypassPermissions: true,
       },
       onMessage,
       onDone,
@@ -240,6 +242,30 @@ describe("SdkSession", () => {
     );
   });
 
+  it("launches full access sessions that start in plan mode able to switch to bypass mode", () => {
+    if (process.platform !== "win32") mockProcessUid(1000);
+    const session = new SdkSession(
+      {
+        ...defaultOptions,
+        permissionMode: "plan",
+        allowBypassPermissions: true,
+      },
+      vi.fn(),
+      vi.fn(),
+    );
+
+    session.start();
+
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          permissionMode: "plan",
+          allowDangerouslySkipPermissions: true,
+        }),
+      }),
+    );
+  });
+
   it("does not send root-forbidden bypass flags when running as root", ({
     skip,
   }) => {
@@ -251,6 +277,7 @@ describe("SdkSession", () => {
       {
         ...defaultOptions,
         permissionMode: "bypassPermissions",
+        allowBypassPermissions: true,
       },
       onMessage,
       onDone,

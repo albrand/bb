@@ -525,8 +525,13 @@ function ThreadDetailViewInternal(
   props: ThreadRoutePathArgs & { timelineEnabled: boolean },
 ) {
   const { projectId, threadId, timelineEnabled } = props;
-  const { isFocused, navigateInPane, onRequestClose, isBoundedPane } =
-    usePaneContext();
+  const {
+    isFocused,
+    isMaximized: isPaneMaximized,
+    navigateInPane,
+    onRequestClose,
+    isBoundedPane,
+  } = usePaneContext();
   const navigate = useImmediateRouteNavigate();
   useFixedPanelTabsStorageMaintenance();
   const systemConfigQuery = useSystemConfig();
@@ -972,6 +977,7 @@ function ThreadDetailViewInternal(
     [thread, threadEnvironmentHost],
   );
   const forkThreadFromMessage = useForkThreadFromMessage({
+    navigateInPane,
     sourceThread: thread ?? null,
   });
   const handleForkMessage = useCallback<ThreadTimelineForkMessageHandler>(
@@ -1734,6 +1740,18 @@ function ThreadDetailViewInternal(
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused) return false;
     toggleSecondaryPanel();
+    return true;
+  });
+  useAppCommandHandler("panel.fullScreen.toggle", () => {
+    if (
+      !isFocused ||
+      !isSecondaryPanelOpen ||
+      renderSecondaryPanelAsDrawer ||
+      isPaneMaximized
+    ) {
+      return false;
+    }
+    toggleConversationCollapse();
     return true;
   });
   useAppCommandHandler("panel.close", () => {
@@ -2996,6 +3014,7 @@ function ThreadDetailViewInternal(
                 : undefined,
               renderBrowserDeck,
               isOpen: isSecondaryPanelOpen,
+              showFullScreenShortcut: true,
               onClose: closeSecondaryPanel,
               onCollapse: closeSecondaryPanel,
               onClearPendingGitDiffIntent: clearPendingGitDiffIntent,

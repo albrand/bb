@@ -62,6 +62,15 @@ With `--server-bind-host 0.0.0.0`, the startup listener and `app` rows show
 through loopback; this does not narrow the IPv4 wildcard listener. Containers
 must also publish the port to the host.
 
+BB accepts request hosts that are `localhost`, IP addresses (including LAN and
+Tailscale IPs), or the hostname in `BB_APP_URL`. For a custom DNS name or reverse
+proxy, set `npx bb-app config set BB_APP_URL https://bb.example.com` before
+connecting, including from the CLI or SDK. A matching `Host` and `Origin`, or
+`X-Forwarded-Host`, cannot authorize an unconfigured DNS name. A proxy can
+preserve the configured host or forward to localhost. BB Connect rewrites
+requests to the local server address and needs no additional configuration.
+`BB_SERVER_BIND_HOST=0.0.0.0` remains supported for direct remote access.
+
 Thread titles, commit messages, and voice transcripts come from AI services
 that plugins register, chosen per task with `bb settings ai-services` (see
 Server-backed General settings below). `BB_INFERENCE`,
@@ -235,6 +244,9 @@ On the selected New tab page, `panel.previousNewTabItem` /
 move through search, enabled actions, and recent items in displayed order.
 Search results replace actions and recents while searching. Enter activates
 the focused item.
+The initially unassigned `panel.fullScreen.toggle` command runs the right
+panel's Full Screen / Exit Full Screen control while the panel is open. In a
+split right panel it maximizes the focused group.
 Chat splits use `pane.focus.left` / `right` / `up` / `down` with
 `Command+Control+Shift+ArrowLeft` / `ArrowRight` / `ArrowUp` / `ArrowDown` on macOS. These move
 spatially to the adjacent chat pane, including stacked splits, and stop at the

@@ -271,6 +271,25 @@ export interface PromptBoxSubmissionConfig {
   showModifierSubmitAction?: boolean;
 }
 
+function suppressTouchCompatibilityClick(ownerDocument: Document) {
+  const clear = () => {
+    window.clearTimeout(timeout);
+    ownerDocument.removeEventListener("click", handleClick, true);
+    ownerDocument.removeEventListener("pointerdown", clear, true);
+    ownerDocument.removeEventListener("keydown", clear, true);
+  };
+  const handleClick = (event: MouseEvent) => {
+    if (event.detail === 0) return;
+    clear();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  const timeout = window.setTimeout(clear, 1000);
+  ownerDocument.addEventListener("click", handleClick, true);
+  ownerDocument.addEventListener("pointerdown", clear, true);
+  ownerDocument.addEventListener("keydown", clear, true);
+}
+
 interface PromptSubmitButtonProps {
   canSubmit: boolean;
   className: string;
@@ -350,6 +369,7 @@ function PromptSubmitButton({
         ) {
           return;
         }
+        suppressTouchCompatibilityClick(event.currentTarget.ownerDocument);
         onTouchSubmit();
       }}
       onMouseDown={(event) => event.preventDefault()}
@@ -3459,6 +3479,7 @@ export function PromptBoxInternal({
               placement={mentionMenuPlacement}
               label={popupContribution?.popup.label ?? "Suggestions"}
               interactive={popupContribution !== null}
+              popupKey={popupContribution?.key ?? null}
               popupRef={typeaheadMenuRef}
               composerRef={formRef}
               onClose={dismissComposerMenu}
@@ -3647,7 +3668,7 @@ export function PromptBoxInternal({
                         variant="default"
                         aria-label="Start voice input"
                         onPointerDown={handleVoicePointerDown}
-                        onClick={handleVoiceClick}
+                        onClick={startVoiceInput}
                         className={cn(
                           showCompactLayout
                             ? COMPACT_PROMPT_ACTION_BUTTON_CLASS

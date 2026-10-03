@@ -88,6 +88,7 @@ describe("claude-code interactive requests", () => {
           network: { enabled: true },
           fileSystem: null,
         },
+        suggestedRules: [],
       }),
     ).toEqual({
       kind: "approval",
@@ -122,6 +123,7 @@ describe("claude-code interactive requests", () => {
             write: ["/tmp/project"],
           },
         },
+        suggestedRules: [],
       }),
     ).toMatchObject({
       kind: "approval",
@@ -142,6 +144,48 @@ describe("claude-code interactive requests", () => {
     });
   });
 
+  it("offers a session approval for Bash commands when Claude Code suggests a rule", () => {
+    expect(
+      decodeApproval({
+        threadId: "thr_1",
+        providerThreadId: "claude-session-1",
+        turnId: "turn-bash-rule",
+        itemId: "toolu_bash_rule",
+        toolName: "Bash",
+        input: { command: "npm --version" },
+        reason: "This command requires approval",
+        permissions: { network: null, fileSystem: null },
+        suggestedRules: [{ toolName: "Bash", ruleContent: "npm --version" }],
+      }),
+    ).toMatchObject({
+      kind: "approval",
+      subject: {
+        kind: "command",
+        sessionGrant: { network: null, fileSystem: null },
+      },
+      availableDecisions: ["allow_once", "allow_for_session", "deny"],
+    });
+  });
+
+  it("offers only allow once for Bash commands without a suggested rule or folder", () => {
+    expect(
+      decodeApproval({
+        threadId: "thr_1",
+        providerThreadId: "claude-session-1",
+        turnId: "turn-bash-plain",
+        itemId: "toolu_bash_plain",
+        toolName: "Bash",
+        input: { command: "git push origin main" },
+        reason: "Push the branch to origin",
+        permissions: { network: null, fileSystem: null },
+        suggestedRules: [],
+      }),
+    ).toMatchObject({
+      kind: "approval",
+      availableDecisions: ["allow_once", "deny"],
+    });
+  });
+
   it("decodes ExitPlanMode approvals into a plan review the user can judge", () => {
     expect(
       decodeApproval({
@@ -156,6 +200,7 @@ describe("claude-code interactive requests", () => {
         },
         reason: null,
         permissions: { network: null, fileSystem: null },
+        suggestedRules: [],
       }),
     ).toMatchObject({
       kind: "approval",
@@ -170,20 +215,23 @@ describe("claude-code interactive requests", () => {
   });
 
   it("tells the model to gather feedback when the user rejects a plan", () => {
-    const response = buildClaudeInteractiveResponse({
-      payload: {
-        kind: "approval",
-        reason: null,
-        availableDecisions: ["allow_once", "deny"],
-        subject: {
-          kind: "plan",
-          itemId: "toolu_plan",
-          plan: "# Plan",
-          planFilePath: null,
+    const response = buildClaudeInteractiveResponse(
+      {
+        payload: {
+          kind: "approval",
+          reason: null,
+          availableDecisions: ["allow_once", "deny"],
+          subject: {
+            kind: "plan",
+            itemId: "toolu_plan",
+            plan: "# Plan",
+            planFilePath: null,
+          },
         },
+        resolution: { decision: "deny" },
       },
-      resolution: { decision: "deny" },
-    });
+      [],
+    );
 
     expect(response).toMatchObject({
       behavior: "deny",
@@ -212,6 +260,7 @@ describe("claude-code interactive requests", () => {
             write: ["/tmp/project"],
           },
         },
+        suggestedRules: [],
       }),
     ).toMatchObject({
       kind: "approval",
@@ -323,29 +372,32 @@ describe("claude-code interactive requests", () => {
 
   it("builds Claude permission approval responses", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "approval",
-          subject: {
-            kind: "permission_grant",
-            itemId: "toolu_3",
-            toolName: "WebFetch",
-            permissions: {
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "permission_grant",
+              itemId: "toolu_3",
+              toolName: "WebFetch",
+              permissions: {
+                network: { enabled: true },
+                fileSystem: null,
+              },
+            },
+            reason: "Needs network",
+            availableDecisions: ["allow_once", "allow_for_session", "deny"],
+          },
+          resolution: {
+            decision: "allow_for_session",
+            grantedPermissions: {
               network: { enabled: true },
               fileSystem: null,
             },
           },
-          reason: "Needs network",
-          availableDecisions: ["allow_once", "allow_for_session", "deny"],
         },
-        resolution: {
-          decision: "allow_for_session",
-          grantedPermissions: {
-            network: { enabled: true },
-            fileSystem: null,
-          },
-        },
-      }),
+        [],
+      ),
     ).toEqual({
       kind: "permission_request",
       behavior: "allow",
@@ -363,41 +415,44 @@ describe("claude-code interactive requests", () => {
 
   it("builds Claude AskUserQuestion answer responses", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "user_question",
-          questions: [
-            {
-              id: "toolu_question:question-1",
-              prompt: "Which deployment target should I use?",
-              shortLabel: "Target",
-              multiSelect: false,
-              options: [
-                {
-                  value: "toolu_question:question-1:option-1",
-                  label: "Staging",
-                  description: "Deploy to the staging environment.",
-                },
-                {
-                  value: "toolu_question:question-1:option-2",
-                  label: "Production",
-                  description: "Deploy to production.",
-                },
-              ],
-              allowFreeText: true,
-            },
-          ],
-        },
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: ["toolu_question:question-1:option-1"],
-              freeText: "Use staging until QA signs off.",
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "user_question",
+            questions: [
+              {
+                id: "toolu_question:question-1",
+                prompt: "Which deployment target should I use?",
+                shortLabel: "Target",
+                multiSelect: false,
+                options: [
+                  {
+                    value: "toolu_question:question-1:option-1",
+                    label: "Staging",
+                    description: "Deploy to the staging environment.",
+                  },
+                  {
+                    value: "toolu_question:question-1:option-2",
+                    label: "Production",
+                    description: "Deploy to production.",
+                  },
+                ],
+                allowFreeText: true,
+              },
+            ],
+          },
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: ["toolu_question:question-1:option-1"],
+                freeText: "Use staging until QA signs off.",
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toEqual({
       kind: "user_question",
       behavior: "allow",
@@ -440,10 +495,13 @@ describe("claude-code interactive requests", () => {
     ],
   ])("reports when the user %s", (_reason, answers) => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: createClaudeUserQuestionPayload(),
-        resolution: { kind: "user_answer", answers },
-      }),
+      buildClaudeInteractiveResponse(
+        {
+          payload: createClaudeUserQuestionPayload(),
+          resolution: { kind: "user_answer", answers },
+        },
+        [],
+      ),
     ).toMatchObject({
       kind: "user_question",
       behavior: "allow",
@@ -458,36 +516,39 @@ describe("claude-code interactive requests", () => {
 
   it("keeps free-text-only Claude AskUserQuestion answers in the primary answer text", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "user_question",
-          questions: [
-            {
-              id: "toolu_question:question-1",
-              prompt: "Which deployment target should I use?",
-              shortLabel: "Target",
-              multiSelect: false,
-              options: [
-                {
-                  value: "toolu_question:question-1:option-1",
-                  label: "Staging",
-                  description: "Deploy to the staging environment.",
-                },
-              ],
-              allowFreeText: true,
-            },
-          ],
-        },
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: [],
-              freeText: "Use the target from the release ticket.",
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "user_question",
+            questions: [
+              {
+                id: "toolu_question:question-1",
+                prompt: "Which deployment target should I use?",
+                shortLabel: "Target",
+                multiSelect: false,
+                options: [
+                  {
+                    value: "toolu_question:question-1:option-1",
+                    label: "Staging",
+                    description: "Deploy to the staging environment.",
+                  },
+                ],
+                allowFreeText: true,
+              },
+            ],
+          },
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: [],
+                freeText: "Use the target from the release ticket.",
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toMatchObject({
       updatedInput: {
         answers: {
@@ -500,44 +561,47 @@ describe("claude-code interactive requests", () => {
 
   it("combines multi-select and free-text Claude AskUserQuestion answers", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "user_question",
-          questions: [
-            {
-              id: "toolu_question:question-1",
-              prompt: "Which deployment targets should I use?",
-              shortLabel: "Targets",
-              multiSelect: true,
-              options: [
-                {
-                  value: "toolu_question:question-1:option-1",
-                  label: "Staging",
-                  description: "Deploy to the staging environment.",
-                },
-                {
-                  value: "toolu_question:question-1:option-2",
-                  label: "Production",
-                  description: "Deploy to production.",
-                },
-              ],
-              allowFreeText: true,
-            },
-          ],
-        },
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: [
-                "toolu_question:question-1:option-1",
-                "toolu_question:question-1:option-2",
-              ],
-              freeText: "Use staging first.",
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "user_question",
+            questions: [
+              {
+                id: "toolu_question:question-1",
+                prompt: "Which deployment targets should I use?",
+                shortLabel: "Targets",
+                multiSelect: true,
+                options: [
+                  {
+                    value: "toolu_question:question-1:option-1",
+                    label: "Staging",
+                    description: "Deploy to the staging environment.",
+                  },
+                  {
+                    value: "toolu_question:question-1:option-2",
+                    label: "Production",
+                    description: "Deploy to production.",
+                  },
+                ],
+                allowFreeText: true,
+              },
+            ],
+          },
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: [
+                  "toolu_question:question-1:option-1",
+                  "toolu_question:question-1:option-2",
+                ],
+                freeText: "Use staging first.",
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toMatchObject({
       updatedInput: {
         answers: {
@@ -571,20 +635,23 @@ describe("claude-code interactive requests", () => {
     };
 
     expect(() =>
-      buildClaudeInteractiveResponse({
-        payload: duplicatePromptPayload,
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: ["toolu_question:question-1:option-1"],
-            },
-            "toolu_question:question-2": {
-              selected: ["toolu_question:question-1:option-2"],
+      buildClaudeInteractiveResponse(
+        {
+          payload: duplicatePromptPayload,
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: ["toolu_question:question-1:option-1"],
+              },
+              "toolu_question:question-2": {
+                selected: ["toolu_question:question-1:option-2"],
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toThrow(
       "Claude user-question prompts must be unique; duplicate prompt 'Which deployment target should I use?'",
     );
@@ -594,10 +661,13 @@ describe("claude-code interactive requests", () => {
     "rejects invalid Claude AskUserQuestion answers: $name",
     (testCase) => {
       expect(() =>
-        buildClaudeInteractiveResponse({
-          payload: createClaudeUserQuestionPayload(),
-          resolution: testCase.resolution,
-        }),
+        buildClaudeInteractiveResponse(
+          {
+            payload: createClaudeUserQuestionPayload(),
+            resolution: testCase.resolution,
+          },
+          [],
+        ),
       ).toThrow(testCase.expectedMessage);
     },
   );
@@ -630,18 +700,21 @@ describe("claude-code interactive requests", () => {
     };
 
     expect(() =>
-      buildClaudeInteractiveResponse({
-        payload,
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: [],
-              freeText: "Use the target from the release ticket.",
+      buildClaudeInteractiveResponse(
+        {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: [],
+                freeText: "Use the target from the release ticket.",
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toThrow("has no options to return to Claude");
   });
 
@@ -670,17 +743,20 @@ describe("claude-code interactive requests", () => {
     };
 
     expect(
-      buildClaudeInteractiveResponse({
-        payload,
-        resolution: {
-          kind: "user_answer",
-          answers: {
-            "toolu_question:question-1": {
-              selected: ["toolu_question:question-1:option-1"],
+      buildClaudeInteractiveResponse(
+        {
+          payload,
+          resolution: {
+            kind: "user_answer",
+            answers: {
+              "toolu_question:question-1": {
+                selected: ["toolu_question:question-1:option-1"],
+              },
             },
           },
         },
-      }),
+        [],
+      ),
     ).toMatchObject({
       kind: "user_question",
       updatedInput: {
@@ -704,16 +780,30 @@ describe("claude-code interactive requests", () => {
 
   it("builds Claude session permission updates for command approvals", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "approval",
-          subject: {
-            kind: "command",
-            itemId: "toolu_3b",
-            command: "pwd",
-            cwd: null,
-            actions: [],
-            sessionGrant: {
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "command",
+              itemId: "toolu_3b",
+              command: "pwd",
+              cwd: null,
+              actions: [],
+              sessionGrant: {
+                network: null,
+                fileSystem: {
+                  read: ["/tmp/project"],
+                  write: ["/tmp/project"],
+                },
+              },
+            },
+            reason: "Needs approval",
+            availableDecisions: ["allow_once", "allow_for_session", "deny"],
+          },
+          resolution: {
+            decision: "allow_for_session",
+            grantedPermissions: {
               network: null,
               fileSystem: {
                 read: ["/tmp/project"],
@@ -721,20 +811,9 @@ describe("claude-code interactive requests", () => {
               },
             },
           },
-          reason: "Needs approval",
-          availableDecisions: ["allow_once", "allow_for_session", "deny"],
         },
-        resolution: {
-          decision: "allow_for_session",
-          grantedPermissions: {
-            network: null,
-            fileSystem: {
-              read: ["/tmp/project"],
-              write: ["/tmp/project"],
-            },
-          },
-        },
-      }),
+        [],
+      ),
     ).toEqual({
       kind: "permission_request",
       behavior: "allow",
@@ -749,16 +828,69 @@ describe("claude-code interactive requests", () => {
     });
   });
 
+  it("returns Claude Code's suggested rules for Bash session approvals", () => {
+    expect(
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "command",
+              itemId: "toolu_bash_rule",
+              command: "npm --version",
+              cwd: null,
+              actions: [],
+              sessionGrant: { network: null, fileSystem: null },
+            },
+            reason: "This command requires approval",
+            availableDecisions: ["allow_once", "allow_for_session", "deny"],
+          },
+          resolution: {
+            decision: "allow_for_session",
+            grantedPermissions: { network: null, fileSystem: null },
+          },
+        },
+        [{ toolName: "Bash", ruleContent: "npm --version" }],
+      ),
+    ).toEqual({
+      kind: "permission_request",
+      behavior: "allow",
+      decisionClassification: "user_permanent",
+      updatedPermissions: [
+        {
+          type: "addRules",
+          rules: [{ toolName: "Bash", ruleContent: "npm --version" }],
+          behavior: "allow",
+          destination: "session",
+        },
+      ],
+    });
+  });
+
   it("builds Claude session directory updates for file-change approvals", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "approval",
-          subject: {
-            kind: "file_change",
-            itemId: "toolu_3d",
-            writeScope: null,
-            sessionGrant: {
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "file_change",
+              itemId: "toolu_3d",
+              writeScope: null,
+              sessionGrant: {
+                network: null,
+                fileSystem: {
+                  read: [],
+                  write: ["/tmp/project"],
+                },
+              },
+            },
+            reason: "Needs file access",
+            availableDecisions: ["allow_once", "allow_for_session", "deny"],
+          },
+          resolution: {
+            decision: "allow_for_session",
+            grantedPermissions: {
               network: null,
               fileSystem: {
                 read: [],
@@ -766,20 +898,9 @@ describe("claude-code interactive requests", () => {
               },
             },
           },
-          reason: "Needs file access",
-          availableDecisions: ["allow_once", "allow_for_session", "deny"],
         },
-        resolution: {
-          decision: "allow_for_session",
-          grantedPermissions: {
-            network: null,
-            fileSystem: {
-              read: [],
-              write: ["/tmp/project"],
-            },
-          },
-        },
-      }),
+        [],
+      ),
     ).toEqual({
       kind: "permission_request",
       behavior: "allow",
@@ -796,47 +917,53 @@ describe("claude-code interactive requests", () => {
 
   it("rejects session-scoped Claude approvals without an explicit resolution grant", () => {
     expect(() =>
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "approval",
-          subject: {
-            kind: "file_change",
-            itemId: "toolu_3e",
-            writeScope: null,
-            sessionGrant: null,
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "file_change",
+              itemId: "toolu_3e",
+              writeScope: null,
+              sessionGrant: null,
+            },
+            reason: "Needs file access",
+            availableDecisions: ["allow_once", "allow_for_session", "deny"],
           },
-          reason: "Needs file access",
-          availableDecisions: ["allow_once", "allow_for_session", "deny"],
+          resolution: {
+            decision: "allow_for_session",
+            grantedPermissions: null,
+          },
         },
-        resolution: {
-          decision: "allow_for_session",
-          grantedPermissions: null,
-        },
-      }),
+        [],
+      ),
     ).toThrow("Session approval resolution must include granted permissions");
   });
 
   it("keeps turn-scoped Claude permission approvals scoped to the current tool request", () => {
     expect(
-      buildClaudeInteractiveResponse({
-        payload: {
-          kind: "approval",
-          subject: {
-            kind: "command",
-            itemId: "toolu_3c",
-            command: "pwd",
-            cwd: null,
-            actions: [],
-            sessionGrant: null,
+      buildClaudeInteractiveResponse(
+        {
+          payload: {
+            kind: "approval",
+            subject: {
+              kind: "command",
+              itemId: "toolu_3c",
+              command: "pwd",
+              cwd: null,
+              actions: [],
+              sessionGrant: null,
+            },
+            reason: "Needs approval",
+            availableDecisions: ["allow_once", "deny"],
           },
-          reason: "Needs approval",
-          availableDecisions: ["allow_once", "deny"],
+          resolution: {
+            decision: "allow_once",
+            grantedPermissions: null,
+          },
         },
-        resolution: {
-          decision: "allow_once",
-          grantedPermissions: null,
-        },
-      }),
+        [],
+      ),
     ).toEqual({
       kind: "permission_request",
       behavior: "allow",

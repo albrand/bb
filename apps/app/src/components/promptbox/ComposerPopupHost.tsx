@@ -9,6 +9,7 @@ interface ComposerPopupHostProps {
   placement: "top" | "bottom";
   label: string;
   interactive: boolean;
+  popupKey: string | null;
   popupRef: RefObject<HTMLDivElement | null>;
   composerRef: RefObject<HTMLFormElement | null>;
   onClose(restoreFocus: boolean): void;
@@ -60,6 +61,7 @@ function ComposerPopupContent({
   placement,
   label,
   interactive,
+  popupKey,
   popupRef,
   children,
 }: ComposerPopupHostProps & { drawer: boolean }) {

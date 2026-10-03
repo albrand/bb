@@ -182,6 +182,7 @@ export interface ThreadSecondaryPanelProps {
   splitPanelStateId?: string;
   isOpen: boolean;
   showConversationCollapseControl?: boolean;
+  showFullScreenShortcut?: boolean;
   showNewTabButton?: boolean;
   inlinePanelToggle?: "button" | "hidden";
   resizablePanelId?: string;
@@ -222,6 +223,7 @@ function ThreadSecondaryPanelContent({
   splitPanelStateId,
   isOpen,
   showConversationCollapseControl = true,
+  showFullScreenShortcut = false,
   showNewTabButton = true,
   inlinePanelToggle = "button",
   resizablePanelId = "thread-detail-secondary-panel",
@@ -245,6 +247,12 @@ function ThreadSecondaryPanelContent({
     gitDiffTabStatus ?? (canUseGitUi ? "eligible" : "ineligible");
   const newTabShortcut = useAppCommandShortcut("panel.newTab");
   const togglePanelShortcut = useAppCommandShortcut("panel.toggle");
+  const boundFullScreenShortcut = useAppCommandShortcut(
+    "panel.fullScreen.toggle",
+  );
+  const fullScreenShortcut = showFullScreenShortcut
+    ? boundFullScreenShortcut
+    : null;
   const diffShortcut = useAppCommandShortcut("diff.toggle");
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => tab.isHidden !== true),
@@ -545,6 +553,7 @@ function ThreadSecondaryPanelContent({
           onMoveToSide={onMoveActiveTabToSide}
           onSplitWithNewTerminal={onSplitWithNewTerminal}
           onToggleFullScreen={onToggleFullScreen}
+          shortcut={fullScreenShortcut ?? undefined}
         />
       );
     }
@@ -565,13 +574,21 @@ function ThreadSecondaryPanelContent({
               usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
             )}
             onClick={conversationCollapseControl.onClick}
-            aria-label={conversationCollapseControl.label}
+            aria-label={
+              fullScreenShortcut
+                ? `${conversationCollapseControl.label} (${fullScreenShortcut.label})`
+                : conversationCollapseControl.label
+            }
+            aria-keyshortcuts={fullScreenShortcut?.ariaKeyshortcuts}
             aria-pressed={conversationCollapseControl.isFullScreen}
           >
             <Icon name={conversationCollapseControl.iconName} />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{conversationCollapseControl.label}</TooltipContent>
+        <TooltipContent>
+          <span>{conversationCollapseControl.label}</span>
+          {fullScreenShortcut ? ` (${fullScreenShortcut.label})` : ""}
+        </TooltipContent>
       </Tooltip>
     );
   };
