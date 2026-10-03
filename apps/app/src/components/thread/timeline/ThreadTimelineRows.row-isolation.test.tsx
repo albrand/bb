@@ -23,14 +23,19 @@ vi.mock("./ConversationMessageContent.js", async (importOriginal) => {
   };
 });
 
-function assistantRow(index: number) {
+function assistantRow(
+  index: number,
+  text = `Assistant answer number ${index}.`,
+  turnId: string | null = null,
+) {
   return conversationRow({
     id: `assistant_message_${index}`,
     role: "assistant",
-    text: `Assistant answer number ${index}.`,
+    text,
     sourceSeqStart: 10 + index,
     sourceSeqEnd: 10 + index,
     threadId: "thr_main",
+    turnId,
   });
 }
 
@@ -63,6 +68,39 @@ describe("ThreadTimelineRows row isolation", () => {
     expect([...renderedMessageTexts].sort()).toEqual([
       "Assistant answer number 11.",
       "Assistant answer number 12.",
+    ]);
+  });
+
+  it("keeps earlier flat rows memoized when a streaming assistant row is appended", () => {
+    const queryClient = new QueryClient();
+    const rows = Array.from({ length: 12 }, (_, index) =>
+      assistantRow(index, `Assistant answer number ${index}.`, `turn_${index}`),
+    );
+    const streamingRow = assistantRow(
+      12,
+      "Assistant response, token one.",
+      "turn_stream",
+    );
+    const renderTimeline = (timelineRows: typeof rows) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTimelineRows
+            threadId="thr_main"
+            timelineRows={timelineRows}
+            threadRuntimeDisplayStatus="active"
+            workspaceRootPath={undefined}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const view = render(renderTimeline(rows));
+    expect(renderedMessageTexts).toHaveLength(12);
+    renderedMessageTexts.length = 0;
+
+    view.rerender(renderTimeline([...rows, streamingRow]));
+    expect([...renderedMessageTexts].sort()).toEqual([
+      "Assistant answer number 11.",
+      "Assistant response, token one.",
     ]);
   });
 });
