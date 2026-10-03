@@ -218,6 +218,54 @@ describe("ThreadTimelineRows token footer", () => {
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
   });
 
+  it("omits unavailable and zero token parts when a turn has partial usage", () => {
+    const row = liveCapture.sample.timelineRow;
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        ...liveCapture.sample.spendSummary,
+        turns: [
+          {
+            turnId: row.turnId,
+            inputTokens: null,
+            cachedInputTokens: 0,
+            outputTokens: 23,
+            reasoningOutputTokens: 0,
+            totalTokens: null,
+          },
+        ],
+      },
+    });
+    const assistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={row.threadId}
+          timelineRows={[assistant]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    const footer = container.querySelector("[data-thread-turn-tokens]");
+    expect(footer).not.toBeNull();
+    expect(footer?.textContent).toContain("out 23");
+    expect(footer?.textContent).not.toContain("unavailable");
+    expect(footer?.querySelector('[data-token-part="input"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="cached"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="reasoning"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="total"]')).toBeNull();
+  });
+
   it("keeps token parts visible and allows them to wrap in narrow action rows", () => {
     const actionBarStyles = readFileSync(
       join(

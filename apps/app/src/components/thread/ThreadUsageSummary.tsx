@@ -79,20 +79,25 @@ export function ThreadTurnTokenSummary({
   const { data } = useThreadSpendSummary(threadId);
   const turn = data?.turns.find((item) => item.turnId === turnId);
   if (!turn) return null;
+  const hasTokens = (value: number | null): value is number =>
+    value !== null && value > 0;
   if (
-    turn.inputTokens === null &&
-    turn.cachedInputTokens === null &&
-    turn.outputTokens === null &&
-    turn.reasoningOutputTokens === null &&
-    turn.totalTokens === null
+    ![
+      turn.inputTokens,
+      turn.cachedInputTokens,
+      turn.outputTokens,
+      turn.reasoningOutputTokens,
+      turn.totalTokens,
+    ].some(hasTokens)
   ) {
     return null;
   }
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
-  const compact = (value: number | null) =>
-    compactTokens(value);
-  const tightSummaryValue = turn.totalTokens ?? turn.cachedInputTokens;
+  const compact = (value: number) => compactTokens(value);
+  const tightSummaryValue = hasTokens(turn.totalTokens)
+    ? turn.totalTokens
+    : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -100,39 +105,39 @@ export function ThreadTurnTokenSummary({
           data-thread-turn-tokens=""
           className="thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
-          <span data-token-part="input">in {compact(turn.inputTokens)}</span>
-          <span data-token-part="output">out {compact(turn.outputTokens)}</span>
+          {hasTokens(turn.inputTokens) ? (
+            <span data-token-part="input">in {compact(turn.inputTokens)}</span>
+          ) : null}
+          {hasTokens(turn.outputTokens) ? (
+            <span data-token-part="output">out {compact(turn.outputTokens)}</span>
+          ) : null}
           {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
             <span data-token-part="reasoning">
               reason {compact(reasoningDisplayValue)}
             </span>
           ) : null}
-          <span data-token-trailing-group="">
-            <span data-token-part="cached">
-              cached {compact(turn.cachedInputTokens)}
-            </span>
-            {tightSummaryValue === null ? (
-              <span data-token-part="total">Σ unavailable</span>
-            ) : (
-              <span data-token-part="total">
-                {turn.totalTokens === null ? null : (
-                  <span data-token-total-full>
-                    Σ {compact(turn.totalTokens)}
-                  </span>
-                )}
-                <span
-                  data-token-total-tight
-                  aria-label={
-                    turn.totalTokens === null
-                      ? `Cached ${exactTokens(tightSummaryValue)} tokens`
-                      : `Total ${exactTokens(tightSummaryValue)} tokens`
-                  }
-                >
-                  {compactTokens(tightSummaryValue, 0)}
+          {hasTokens(turn.cachedInputTokens) || tightSummaryValue !== null ? (
+            <span data-token-trailing-group="">
+              {hasTokens(turn.cachedInputTokens) ? (
+                <span data-token-part="cached">
+                  cached {compact(turn.cachedInputTokens)}
                 </span>
-              </span>
-            )}
-          </span>
+              ) : null}
+              {tightSummaryValue !== null ? (
+                <span data-token-part="total">
+                  <span data-token-total-full>
+                    Σ {compact(tightSummaryValue)}
+                  </span>
+                  <span
+                    data-token-total-tight
+                    aria-label={`Total ${exactTokens(tightSummaryValue)} tokens`}
+                  >
+                    {compactTokens(tightSummaryValue, 0)}
+                  </span>
+                </span>
+              ) : null}
+            </span>
+          ) : null}
         </span>
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent
