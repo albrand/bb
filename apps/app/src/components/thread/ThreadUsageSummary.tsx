@@ -83,7 +83,7 @@ export function ThreadTurnTokenSummary({
       <TooltipTrigger asChild>
         <span
           data-thread-turn-tokens=""
-          className="thread-turn-token-breakdown inline-flex min-w-0 flex-1 items-center gap-x-1 overflow-hidden whitespace-nowrap font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
+          className="thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
           {turn.inputTokens === null ? null : (
             <span data-token-part="input">in {compact(turn.inputTokens)}</span>
@@ -98,26 +98,32 @@ export function ThreadTurnTokenSummary({
               reason {compact(reasoningDisplayValue)}
             </span>
           ) : null}
-          {turn.cachedInputTokens === null ? null : (
-            <span data-token-part="cached">
-              cached {compact(turn.cachedInputTokens)}
-            </span>
-          )}
-          {tightSummaryValue === null ? null : (
-            <span data-token-part="total">
-              {turn.totalTokens === null ? null : (
-                <span data-token-total-full>Σ {compact(turn.totalTokens)}</span>
+          {turn.cachedInputTokens === null && tightSummaryValue === null ? null : (
+            <span data-token-trailing-group="">
+              {turn.cachedInputTokens === null ? null : (
+                <span data-token-part="cached">
+                  cached {compact(turn.cachedInputTokens)}
+                </span>
               )}
-              <span
-                data-token-total-tight
-                aria-label={
-                  turn.totalTokens === null
-                    ? `Cached ${exactTokens(tightSummaryValue)} tokens`
-                    : `Total ${exactTokens(tightSummaryValue)} tokens`
-                }
-              >
-                {compactTokens(tightSummaryValue, 0)}
-              </span>
+              {tightSummaryValue === null ? null : (
+                <span data-token-part="total">
+                  {turn.totalTokens === null ? null : (
+                    <span data-token-total-full>
+                      Σ {compact(turn.totalTokens)}
+                    </span>
+                  )}
+                  <span
+                    data-token-total-tight
+                    aria-label={
+                      turn.totalTokens === null
+                        ? `Cached ${exactTokens(tightSummaryValue)} tokens`
+                        : `Total ${exactTokens(tightSummaryValue)} tokens`
+                    }
+                  >
+                    {compactTokens(tightSummaryValue, 0)}
+                  </span>
+                </span>
+              )}
             </span>
           )}
         </span>

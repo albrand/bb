@@ -70,6 +70,7 @@ export interface ThreadTimelineSurfaceProps {
   timelineRows: TimelineRow[];
   timelineNavigationTargetRowId?: string | null;
   threadId: string;
+  threadIsActive?: boolean;
   threadRuntimeDisplayStatus: ThreadRuntimeDisplayStatus;
   unreadDividerAutoScroll?: boolean;
   unreadDividerPlacement?: ThreadTimelineUnreadDividerPlacement | null;
@@ -172,6 +173,7 @@ export function ThreadTimelineSurface({
   timelineRows,
   timelineNavigationTargetRowId,
   threadId,
+  threadIsActive,
   threadRuntimeDisplayStatus,
   unreadDividerAutoScroll,
   unreadDividerPlacement,
@@ -244,6 +246,7 @@ export function ThreadTimelineSurface({
             timelineRows={timelineRowsWithPendingStop}
             timelineNavigationTargetRowId={timelineNavigationTargetRowId}
             threadId={threadId}
+            threadIsActive={threadIsActive}
             threadRuntimeDisplayStatus={threadRuntimeDisplayStatus}
             unreadDividerAutoScroll={unreadDividerAutoScroll}
             unreadDividerPlacement={unreadDividerPlacement}

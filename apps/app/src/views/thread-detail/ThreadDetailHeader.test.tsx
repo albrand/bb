@@ -119,6 +119,29 @@ beforeEach(() => {
 });
 
 describe("ThreadDetailHeader", () => {
+  it("truncates long thread titles within a narrow pane", () => {
+    const title = "Seahaven QA intake status ledger - failed sweep 22";
+
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          childPillLabel={null}
+          isSecondaryPanelOpen={false}
+          onOpenThreadGitAction={vi.fn()}
+          onToggleSecondaryPanel={vi.fn()}
+          threadHeaderGitActions={[]}
+          threadId={THREAD_ID}
+          threadTitle={title}
+        />
+      </PaneContext.Provider>,
+    );
+
+    expect(screen.getByText(title).closest("p")?.className).toContain(
+      "truncate",
+    );
+  });
+
   it("does not render a thread token summary in the header", () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>

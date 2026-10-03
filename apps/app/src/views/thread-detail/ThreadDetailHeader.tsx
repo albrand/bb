@@ -167,7 +167,7 @@ export function ThreadDetailHeader({
       >
         <p
           className={cn(
-            "relative min-w-0 text-sm font-normal transition-colors",
+            "relative min-w-0 max-w-full truncate text-sm font-normal transition-colors",
             isEditing && "overflow-visible",
             isSplitPaneHeader &&
               !isFocused &&

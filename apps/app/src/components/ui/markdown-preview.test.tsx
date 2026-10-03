@@ -106,6 +106,18 @@ function requireElement(container: ParentNode, selector: string): Element {
 }
 
 describe("MarkdownPreview", () => {
+  it("contains table breakouts to the markdown content width", () => {
+    const { container } = render(
+      <MarkdownPreview content={"| A |\n| - |\n| B |"} />,
+    );
+
+    expect(
+      container
+        .querySelector("[data-markdown-preview]")
+        ?.classList.contains("@container"),
+    ).toBe(true);
+  });
+
   it("shares one observer and observes content width only for table previews", () => {
     const { notifyResize, observed, observerCount } =
       mockResizeObserverDeliveries();
@@ -229,6 +241,49 @@ describe("MarkdownPreview", () => {
       rootedBreakout?.style.getPropertyValue("--md-table-breakout-max"),
     ).toBe("300px");
     sheet.remove();
+  });
+
+  it("shrinks a table breakout when its parent already overflows the clip", () => {
+    const { notifyResize } = mockResizeObserverDeliveries();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const left = Number(this.dataset.left ?? 17);
+        const width = Number(this.dataset.width ?? 427);
+        return {
+          bottom: 10,
+          height: 10,
+          left,
+          right: left + width,
+          top: 0,
+          width,
+          x: left,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      },
+    );
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(
+      function (this: Element) {
+        return Number((this as HTMLElement).dataset.width ?? 427);
+      },
+    );
+
+    const { container } = render(
+      <div
+        data-left="0"
+        data-width="390"
+        style={{ overflowX: "hidden" }}
+      >
+        <MarkdownPreview content={"| A |\n| - |\n| B |"} />
+      </div>,
+    );
+    const breakout = container.querySelector("table")?.parentElement
+      ?.parentElement;
+    notifyResize();
+
+    expect(
+      breakout?.style.getPropertyValue("--md-table-breakout-max"),
+    ).toBe("319px");
   });
 
   it("skips height-only resize events for tables", () => {
