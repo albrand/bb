@@ -165,6 +165,9 @@ describe("thread usage summary", () => {
         '[data-thread-agent-rollup][data-compact-summary="true"]',
       ),
     ).toBeTruthy();
+    expect(
+      container.querySelector('[data-agent-summary-full]')?.textContent,
+    ).toContain("Ran 2 agents");
     fireEvent.click(screen.getByText("View ▸"));
     expect(await screen.findByText("Scout · active")).toBeTruthy();
     expect(screen.getByText("Writer · idle")).toBeTruthy();

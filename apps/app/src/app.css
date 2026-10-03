@@ -902,3 +902,20 @@
     transform: scaleX(1);
   }
 }
+[data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full] {
+  display: none;
+}
+
+[data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-compact] {
+  display: inline;
+}
+
+@container thread-header (min-width: 60rem) {
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full] {
+    display: inline;
+  }
+
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-compact] {
+    display: none;
+  }
+}

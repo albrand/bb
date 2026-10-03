@@ -187,6 +187,7 @@ export function ThreadUsageAndAgents({
     <div
       data-thread-agent-rollup=""
       data-compact-summary={compactSummary ? "true" : "false"}
+      data-adaptive-summary={compactSummary ? "true" : "false"}
       className="relative min-w-0 shrink-0 text-xs"
     >
       {childSummary ? (
@@ -195,9 +196,24 @@ export function ThreadUsageAndAgents({
             <Icon name="Circle" className="size-2 fill-current" />
             <Icon name="Bot" className="size-3.5" />
             {compactSummary ? (
-              <span className="tabular-nums">
-                {count} {count === 1 ? "agent" : "agents"} · {working} working
-              </span>
+              <>
+                <span data-agent-summary-compact="" className="tabular-nums">
+                  {count} {count === 1 ? "agent" : "agents"} · {working} working
+                </span>
+                <span data-agent-summary-full="" className="tabular-nums">
+                  <span>
+                    Ran {count} {count === 1 ? "agent" : "agents"}
+                  </span>
+                  <span className="tabular-nums">
+                    {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
+                    waiting · {childSummary.idle ?? 0} idle ·{" "}
+                    {childSummary.failed ?? 0} failed
+                    {childSummary.totalTokens === null
+                      ? null
+                      : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+                  </span>
+                </span>
+              </>
             ) : (
               <>
                 <span>

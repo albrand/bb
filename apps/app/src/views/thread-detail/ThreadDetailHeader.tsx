@@ -156,7 +156,7 @@ export function ThreadDetailHeader({
           isSplitPaneHeader && isFocused ? "" : undefined
         }
         className={cn(
-          "relative flex min-w-0 flex-1 items-center gap-2",
+          "@container/thread-header relative flex min-w-0 flex-1 items-center gap-2",
           isSplitPaneHeader && "-my-1 -ml-2 rounded-md px-2 py-1",
           isSplitPaneHeader && isFocused && CONTEXT_SELECTION_SURFACE_CLASS,
         )}
