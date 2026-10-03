@@ -1516,7 +1516,9 @@ function buildTrackedSessionOptions(
   return sessionOptions;
 }
 
-function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
+async function replaceThreadSession(
+  args: ReplaceThreadSessionArgs,
+): Promise<ThreadSession> {
   args.threadSession.closing = true;
   resolvePendingSessionWork(args.threadSession, args.restart.reason);
   emitSessionReplacement({
@@ -1526,7 +1528,7 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
     threadId: args.threadId,
     threadSession: args.threadSession,
   });
-  args.threadSession.session.stop();
+  await args.threadSession.session.stopAndDrain(THREAD_STOP_CLOSE_TIMEOUT_MS);
 
   const replacementSession = createThreadSession(args.attachment);
   args.attachment.residentSession = replacementSession;
@@ -1536,9 +1538,9 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
   return replacementSession;
 }
 
-function replaceThreadSessionBeforeNextTurn(
+async function replaceThreadSessionBeforeNextTurn(
   args: ReplaceThreadSessionBeforeNextTurnArgs,
-): ThreadSession | undefined {
+): Promise<ThreadSession | undefined> {
   const providerThreadId =
     args.attachment.providerThreadId ??
     args.threadSession.session.getSessionId();
@@ -1547,7 +1549,7 @@ function replaceThreadSessionBeforeNextTurn(
   }
 
   args.attachment.providerThreadId = providerThreadId;
-  return replaceThreadSession({
+  return await replaceThreadSession({
     attachment: args.attachment,
     providerThreadId,
     restart: args.restart,
