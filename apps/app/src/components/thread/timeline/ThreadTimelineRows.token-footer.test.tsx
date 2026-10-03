@@ -177,7 +177,7 @@ describe("ThreadTimelineRows token footer", () => {
       .toBe("reason 567");
   });
 
-  it("labels unavailable per-turn token fields without inventing reasoning tokens", () => {
+  it("omits the token footer when every per-turn usage field is unavailable", () => {
     const row = liveCapture.sample.timelineRow;
     useThreadSpendSummary.mockReturnValue({
       data: {
@@ -215,15 +215,7 @@ describe("ThreadTimelineRows token footer", () => {
       </MemoryRouter>,
     );
 
-    expect(container.querySelector('[data-token-part="input"]')?.textContent)
-      .toBe("in unavailable");
-    expect(container.querySelector('[data-token-part="cached"]')?.textContent)
-      .toBe("cached unavailable");
-    expect(container.querySelector('[data-token-part="output"]')?.textContent)
-      .toBe("out unavailable");
-    expect(container.querySelector('[data-token-part="total"]')?.textContent)
-      .toBe("Σ unavailable");
-    expect(container.querySelector('[data-token-part="reasoning"]')).toBeNull();
+    expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
   });
 
   it("keeps token parts visible and allows them to wrap in narrow action rows", () => {

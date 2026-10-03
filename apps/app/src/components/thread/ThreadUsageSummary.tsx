@@ -79,6 +79,15 @@ export function ThreadTurnTokenSummary({
   const { data } = useThreadSpendSummary(threadId);
   const turn = data?.turns.find((item) => item.turnId === turnId);
   if (!turn) return null;
+  if (
+    turn.inputTokens === null &&
+    turn.cachedInputTokens === null &&
+    turn.outputTokens === null &&
+    turn.reasoningOutputTokens === null &&
+    turn.totalTokens === null
+  ) {
+    return null;
+  }
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
   const compact = (value: number | null) =>
