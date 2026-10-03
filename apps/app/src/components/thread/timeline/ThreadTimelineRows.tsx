@@ -703,11 +703,9 @@ function findLastAssistantMessageIdsByTurnId(
   threadId: string,
   excludedTurnId: string | null | undefined,
 ): ReadonlyMap<string, { threadId: string; turnId: string }> {
-  const completedTurnIds = new Set(
+  const turnIds = new Set(
     rows.flatMap((row) =>
-      row.kind === "turn" && row.status === "completed" && row.turnId !== null
-        ? [row.turnId]
-        : [],
+      row.kind === "turn" && row.turnId !== null ? [row.turnId] : [],
     ),
   );
   const hasTurnRows = rows.some((row) => row.kind === "turn");
@@ -718,7 +716,7 @@ function findLastAssistantMessageIdsByTurnId(
       row.role === "assistant" &&
       row.turnId !== null &&
       row.turnId !== excludedTurnId &&
-      (!hasTurnRows || completedTurnIds.has(row.turnId))
+      (!hasTurnRows || turnIds.has(row.turnId))
     ) {
       messageIdsByTurnId.set(row.turnId, row.id);
     }

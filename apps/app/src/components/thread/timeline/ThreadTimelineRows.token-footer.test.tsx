@@ -104,7 +104,9 @@ describe("ThreadTimelineRows token footer", () => {
     const breakdown = container.querySelector("[data-thread-turn-tokens]");
     expect(breakdown?.getAttribute("class")).toContain("flex-wrap");
     expect(breakdown?.getAttribute("class")).toContain("whitespace-normal");
-    const trailingGroup = container.querySelector("[data-token-trailing-group]");
+    const trailingGroup = container.querySelector(
+      "[data-token-trailing-group]",
+    );
     expect(
       trailingGroup?.querySelector('[data-token-part="cached"]'),
     ).toBeTruthy();
@@ -168,9 +170,9 @@ describe("ThreadTimelineRows token footer", () => {
       </MemoryRouter>,
     );
 
-    expect(container.querySelectorAll("[data-thread-turn-tokens]")).toHaveLength(
-      1,
-    );
+    expect(
+      container.querySelectorAll("[data-thread-turn-tokens]"),
+    ).toHaveLength(1);
     expect(
       container.querySelector('[data-token-part="reasoning"]')?.textContent,
     ).toBe("reason 37");
@@ -402,6 +404,64 @@ describe("ThreadTimelineRows token footer", () => {
       [firstTurn.threadId],
     ]);
   });
+
+  it.each([
+    { eventStatus: "failed", timelineStatus: "error" },
+    { eventStatus: "interrupted", timelineStatus: "interrupted" },
+  ] as const)(
+    "shows the $eventStatus terminal turn footer in flat and grouped idle timelines",
+    ({ timelineStatus }) => {
+      const row = liveCapture.sample.timelineRow;
+      const assistant = conversationRow({
+        id: row.id,
+        threadId: row.threadId,
+        turnId: row.turnId,
+        role: "assistant",
+        text: row.text,
+        sourceSeqStart: row.sourceSeqStart,
+        sourceSeqEnd: row.sourceSeqEnd,
+      });
+
+      const flat = render(
+        <MemoryRouter>
+          <ThreadTimelineRows
+            threadId={row.threadId}
+            timelineRows={[assistant]}
+            threadRuntimeDisplayStatus="idle"
+            workspaceRootPath={undefined}
+          />
+        </MemoryRouter>,
+      );
+      expect(
+        flat.container.querySelectorAll("[data-thread-turn-tokens]"),
+      ).toHaveLength(1);
+      flat.unmount();
+
+      const grouped = render(
+        <MemoryRouter>
+          <ThreadTimelineRows
+            threadId={row.threadId}
+            timelineRows={[
+              turnRow({
+                id: `terminal-turn-${timelineStatus}`,
+                threadId: row.threadId,
+                turnId: row.turnId,
+                sourceSeqStart: row.sourceSeqStart,
+                sourceSeqEnd: row.sourceSeqEnd,
+                status: timelineStatus,
+              }),
+              assistant,
+            ]}
+            threadRuntimeDisplayStatus="idle"
+            workspaceRootPath={undefined}
+          />
+        </MemoryRouter>,
+      );
+      expect(
+        grouped.container.querySelectorAll("[data-thread-turn-tokens]"),
+      ).toHaveLength(1);
+    },
+  );
 
   it("shows every completed grouped response while excluding the active turn", () => {
     const sample = liveCapture.sample;
