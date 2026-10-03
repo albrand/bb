@@ -244,10 +244,7 @@ interface TimelineRowViewProps {
   row: ThreadTimelineViewRow;
   turnTokenSummary?: { threadId: string; turnId: string };
   turnTokenSummaryMessageId?: string | null;
-  flatTurnTokenSummaryByMessageId?: ReadonlyMap<
-    string,
-    { threadId: string; turnId: string }
-  >;
+  flatTurnTokenSummary?: { threadId: string; turnId: string };
   scopeActive: boolean;
   showAssistantMessageActions: boolean;
   spacing: TimelineRowsListSpacing;
@@ -469,8 +466,10 @@ function areTimelineRowViewPropsEqual(
     previous.scopeActive === next.scopeActive &&
     previous.showAssistantMessageActions === next.showAssistantMessageActions &&
     previous.turnTokenSummaryMessageId === next.turnTokenSummaryMessageId &&
-    previous.flatTurnTokenSummaryByMessageId ===
-      next.flatTurnTokenSummaryByMessageId &&
+    previous.flatTurnTokenSummary?.threadId ===
+      next.flatTurnTokenSummary?.threadId &&
+    previous.flatTurnTokenSummary?.turnId ===
+      next.flatTurnTokenSummary?.turnId &&
     previous.turnTokenSummary?.threadId === next.turnTokenSummary?.threadId &&
     previous.turnTokenSummary?.turnId === next.turnTokenSummary?.turnId &&
     previous.spacing === next.spacing &&
@@ -1540,7 +1539,7 @@ function TimelineRowView({
   row,
   turnTokenSummary,
   turnTokenSummaryMessageId,
-  flatTurnTokenSummaryByMessageId,
+  flatTurnTokenSummary,
   scopeActive,
   showAssistantMessageActions,
   spacing,
@@ -1567,7 +1566,7 @@ function TimelineRowView({
           row.role === "assistant" && row.id === turnTokenSummaryMessageId
             ? turnTokenSummary
             : row.role === "assistant"
-              ? flatTurnTokenSummaryByMessageId?.get(row.id)
+              ? flatTurnTokenSummary
               : undefined
         }
       />
@@ -2020,9 +2019,9 @@ function TimelineRowsList({
                       row={item.row}
                       turnTokenSummary={turnTokenSummary}
                       turnTokenSummaryMessageId={turnTokenSummaryMessageId}
-                      flatTurnTokenSummaryByMessageId={
-                        flatTurnTokenSummaryByMessageId
-                      }
+                      flatTurnTokenSummary={flatTurnTokenSummaryByMessageId?.get(
+                        item.row.id,
+                      )}
                       scopeActive={scopeActive}
                       showAssistantMessageActions={showAssistantMessageActions}
                       spacing={spacing}
