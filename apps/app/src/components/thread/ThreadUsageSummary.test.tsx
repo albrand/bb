@@ -80,9 +80,7 @@ describe("thread usage summary", () => {
     );
 
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeTruthy();
-    expect(
-      container.querySelector('[data-token-part="cached"]')?.getAttribute("aria-label"),
-    ).toBe("Cached 2,843,776 tokens");
+    expect(screen.getByText(/cached 2\.8M/)).toBeTruthy();
     expect(screen.getByText("Σ 2.8M")).toBeTruthy();
     expect(
       container.querySelector("[data-token-total-tight]")?.textContent,
@@ -129,7 +127,7 @@ describe("thread usage summary", () => {
       },
     });
     const queryClient = new QueryClient();
-    const { container } = render(
+    render(
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <ThreadTurnTokenSummary threadId="parent" turnId="reasoning-turn" />
@@ -137,16 +135,8 @@ describe("thread usage summary", () => {
       </TooltipProvider>,
     );
 
-    expect(
-      container
-        .querySelector('[data-token-part="reasoning"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Reasoning 10 tokens");
-    expect(
-      container
-        .querySelector('[data-token-part="cached"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Cached 20 tokens");
+    expect(screen.getByText("reason 10")).toBeTruthy();
+    expect(screen.getByText("cached 20")).toBeTruthy();
     expect(screen.getByText("Σ 220")).toBeTruthy();
   });
 
@@ -186,10 +176,7 @@ describe("thread usage summary", () => {
     expect(
       tokenSummary?.querySelector('[data-token-part="reasoning"]'),
     ).toBeNull();
-    expect(
-      tokenSummary?.querySelector('[data-token-part="cached"] [data-token-value]')
-        ?.textContent,
-    ).toBe("20");
+    expect(tokenSummary?.textContent).toContain("cached 20");
     expect(tokenSummary?.textContent).toContain("Σ 220");
     fireEvent.pointerMove(tokenSummary!);
     expect((await screen.findAllByText("Not reported")).length).toBeGreaterThan(
@@ -246,10 +233,8 @@ describe("thread usage summary", () => {
       container.querySelector("[data-token-total-tight]")?.textContent,
     ).toBe("687M");
     expect(
-      container
-        .querySelector('[data-token-part="cached"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Cached 686,719,425 tokens");
+      container.querySelector("[data-thread-turn-tokens]")?.textContent,
+    ).toContain("cached 686.7M");
   });
 
   it("omits unavailable token totals from the child agent rollup", async () => {

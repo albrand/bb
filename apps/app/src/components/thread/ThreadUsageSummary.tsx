@@ -86,55 +86,21 @@ export function ThreadTurnTokenSummary({
           className="thread-turn-token-breakdown inline-flex min-w-0 flex-1 items-center gap-x-1 overflow-hidden whitespace-nowrap font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
           {turn.inputTokens === null ? null : (
-            <span
-              aria-label={`Input ${exactTokens(turn.inputTokens)} tokens`}
-              data-token-part="input"
-              role="group"
-            >
-              <span data-token-label-full>in </span>
-              <span aria-hidden="true" data-token-label-short>
-                i{" "}
-              </span>
-              <span data-token-value>{compact(turn.inputTokens)}</span>
-            </span>
+            <span data-token-part="input">in {compact(turn.inputTokens)}</span>
           )}
           {turn.outputTokens === null ? null : (
-            <span
-              aria-label={`Output ${exactTokens(turn.outputTokens)} tokens`}
-              data-token-part="output"
-              role="group"
-            >
-              <span data-token-label-full>out </span>
-              <span aria-hidden="true" data-token-label-short>
-                o{" "}
-              </span>
-              <span data-token-value>{compact(turn.outputTokens)}</span>
+            <span data-token-part="output">
+              out {compact(turn.outputTokens)}
             </span>
           )}
           {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
-            <span
-              aria-label={`Reasoning ${exactTokens(reasoningDisplayValue)} tokens`}
-              data-token-part="reasoning"
-              role="group"
-            >
-              <span data-token-label-full>reason </span>
-              <span aria-hidden="true" data-token-label-short>
-                r{" "}
-              </span>
-              <span data-token-value>{compact(reasoningDisplayValue)}</span>
+            <span data-token-part="reasoning">
+              reason {compact(reasoningDisplayValue)}
             </span>
           ) : null}
           {turn.cachedInputTokens === null ? null : (
-            <span
-              aria-label={`Cached ${exactTokens(turn.cachedInputTokens)} tokens`}
-              data-token-part="cached"
-              role="group"
-            >
-              <span data-token-label-full>cached </span>
-              <span aria-hidden="true" data-token-label-short>
-                c{" "}
-              </span>
-              <span data-token-value>{compact(turn.cachedInputTokens)}</span>
+            <span data-token-part="cached">
+              cached {compact(turn.cachedInputTokens)}
             </span>
           )}
           {tightSummaryValue === null ? null : (

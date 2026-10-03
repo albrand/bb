@@ -21,6 +21,37 @@ vi.mock("@/hooks/queries/thread-queries", async (importOriginal) => {
   };
 });
 
+function flatRowsWithCapturedTurns(toolStatus: "completed" | "pending") {
+  const firstTurn = liveCapture.sample.timelineRow;
+  const activeTurn = liveCapture.sample.secondTimelineRow;
+  const assistants = [firstTurn, activeTurn].map((row) =>
+    conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+    }),
+  );
+  return {
+    firstTurn,
+    activeTurn,
+    rows: [
+      ...assistants,
+      commandRow({
+        id: `tool-call-${toolStatus}`,
+        command: "node scripts/check.js",
+        threadId: activeTurn.threadId,
+        turnId: null,
+        status: toolStatus,
+        seq: activeTurn.sourceSeqEnd + 1,
+      }),
+    ],
+  };
+}
+
 describe("ThreadTimelineRows token footer", () => {
   beforeEach(() => {
     useThreadSpendSummary.mockReset();
@@ -55,20 +86,14 @@ describe("ThreadTimelineRows token footer", () => {
     );
 
     expect(
-      container
-        .querySelector('[data-token-part="input"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Input 4 tokens");
+      container.querySelector('[data-token-part="input"]')?.textContent,
+    ).toContain("in 4");
     expect(
-      container
-        .querySelector('[data-token-part="output"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Output 435 tokens");
+      container.querySelector('[data-token-part="output"]')?.textContent,
+    ).toContain("out 435");
     expect(
-      container
-        .querySelector('[data-token-part="cached"]')
-        ?.getAttribute("aria-label"),
-    ).toBe("Cached 466,193 tokens");
+      container.querySelector('[data-token-part="cached"]')?.textContent,
+    ).toContain("cached 466.2K");
     expect(screen.getByText("Σ 466.6K")).toBeTruthy();
     expect(
       container.querySelector("[data-token-total-tight]")?.textContent,
@@ -133,7 +158,7 @@ describe("ThreadTimelineRows token footer", () => {
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
   });
 
-  it("keeps completed token summaries when an active flat row has no turn ID", () => {
+  it("hides the newest flat turn while active when the streaming row lacks an ID", () => {
     const row = liveCapture.sample.timelineRow;
     const completedAssistant = conversationRow({
       id: row.id,
@@ -167,49 +192,16 @@ describe("ThreadTimelineRows token footer", () => {
       </MemoryRouter>,
     );
 
-    expect(
-      container
-        .querySelector("[data-thread-turn-tokens]")
-        ?.closest("[data-timeline-row-id]")
-        ?.getAttribute("data-timeline-row-id"),
-    ).toBe(row.id);
+    expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
   });
 
-  it("hides an active turn with spend while paused in a tool call", () => {
-    const firstTurn = liveCapture.sample.timelineRow;
-    const activeTurn = liveCapture.sample.secondTimelineRow;
-    const completedAssistant = conversationRow({
-      id: firstTurn.id,
-      threadId: firstTurn.threadId,
-      turnId: firstTurn.turnId,
-      role: "assistant",
-      text: firstTurn.text,
-      sourceSeqStart: firstTurn.sourceSeqStart,
-      sourceSeqEnd: firstTurn.sourceSeqEnd,
-    });
-    const activeAssistant = conversationRow({
-      id: activeTurn.id,
-      threadId: activeTurn.threadId,
-      turnId: activeTurn.turnId,
-      role: "assistant",
-      text: activeTurn.text,
-      sourceSeqStart: activeTurn.sourceSeqStart,
-      sourceSeqEnd: activeTurn.sourceSeqEnd,
-    });
-    const pendingToolCall = commandRow({
-      id: "active-tool-call",
-      command: "node scripts/check.js",
-      threadId: activeTurn.threadId,
-      turnId: activeTurn.turnId,
-      status: "pending",
-      seq: activeTurn.sourceSeqEnd + 1,
-    });
-
-    const { container, rerender } = render(
+  it("excludes an active flat turn after a completed response and pending command", () => {
+    const { firstTurn, rows } = flatRowsWithCapturedTurns("pending");
+    const { container } = render(
       <MemoryRouter>
         <ThreadTimelineRows
           threadId={firstTurn.threadId}
-          timelineRows={[completedAssistant, activeAssistant, pendingToolCall]}
+          timelineRows={rows}
           threadRuntimeDisplayStatus="active"
           workspaceRootPath={undefined}
         />
@@ -223,12 +215,52 @@ describe("ThreadTimelineRows token footer", () => {
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(firstTurn.id);
+  });
+
+  it("excludes the active flat turn between steps with no pending work", () => {
+    const { firstTurn, rows } = flatRowsWithCapturedTurns("completed");
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={firstTurn.threadId}
+          timelineRows={rows}
+          threadRuntimeDisplayStatus="active"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    const summaries = container.querySelectorAll("[data-thread-turn-tokens]");
+    expect(summaries).toHaveLength(1);
+    expect(
+      summaries[0]
+        ?.closest("[data-timeline-row-id]")
+        ?.getAttribute("data-timeline-row-id"),
+    ).toBe(firstTurn.id);
+  });
+
+  it("restores all flat turn footers when the thread returns to idle", () => {
+    const { firstTurn, rows } = flatRowsWithCapturedTurns("completed");
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={firstTurn.threadId}
+          timelineRows={rows}
+          threadRuntimeDisplayStatus="active"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      container.querySelectorAll("[data-thread-turn-tokens]"),
+    ).toHaveLength(1);
 
     rerender(
       <MemoryRouter>
         <ThreadTimelineRows
           threadId={firstTurn.threadId}
-          timelineRows={[completedAssistant, activeAssistant, pendingToolCall]}
+          timelineRows={rows}
           threadRuntimeDisplayStatus="idle"
           workspaceRootPath={undefined}
         />
@@ -279,20 +311,16 @@ describe("ThreadTimelineRows token footer", () => {
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(firstTurn.id);
     expect(
-      summaries[0]?.querySelector(
-        '[data-token-part="output"] [data-token-value]',
-      )?.textContent,
-    ).toBe("435");
+      summaries[0]?.querySelector('[data-token-part="output"]')?.textContent,
+    ).toContain("out 435");
     expect(
       summaries[1]
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(secondTurn.id);
     expect(
-      summaries[1]?.querySelector(
-        '[data-token-part="output"] [data-token-value]',
-      )?.textContent,
-    ).toBe("3.2K");
+      summaries[1]?.querySelector('[data-token-part="output"]')?.textContent,
+    ).toContain("out 3.2K");
     expect(useThreadSpendSummary.mock.calls).toEqual([
       [firstTurn.threadId],
       [firstTurn.threadId],

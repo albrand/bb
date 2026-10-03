@@ -767,6 +767,37 @@ function findActiveTurnId(
   return null;
 }
 
+function findNewestTurnId(
+  rows: readonly ThreadTimelineViewRow[],
+): string | null {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row === undefined) continue;
+    if (row.turnId !== null) return row.turnId;
+    if (row.kind === "turn" && row.children !== null) {
+      const childTurnId = findNewestTurnId(row.children);
+      if (childTurnId !== null) return childTurnId;
+    }
+    if (row.kind === "work" && row.workKind === "delegation") {
+      const childTurnId = findNewestTurnId(row.childRows);
+      if (childTurnId !== null) return childTurnId;
+    }
+    if (row.kind === "step-summary" || row.kind === "bundle-summary") {
+      for (
+        let childIndex = row.children.length - 1;
+        childIndex >= 0;
+        childIndex -= 1
+      ) {
+        const child = row.children[childIndex];
+        if (child?.turnId !== null && child !== undefined) {
+          return child.turnId;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function findStreamingAssistantMessageId(
   rows: readonly ThreadTimelineViewRow[],
 ): string | null {
@@ -2345,10 +2376,12 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                           }
                           flatTurnTokenSummaryExcludedTurnId={
                             scopeActive
-                              ? findActiveTurnId(
-                                  rows,
-                                  streamingAssistantMessageId,
-                                )
+                              ? rows.some((row) => row.kind === "turn")
+                                ? findActiveTurnId(
+                                    rows,
+                                    streamingAssistantMessageId,
+                                  )
+                                : findNewestTurnId(rows)
                               : undefined
                           }
                           scopeActive={scopeActive}
