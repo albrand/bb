@@ -394,37 +394,40 @@ describe("public thread spend summaries", () => {
     });
   });
 
-  it("returns an unavailable breakdown for finished turns without retained usage", async () => {
-    await withTestHarness(async (harness) => {
-      const { environment, thread } = seedThreadFixture(harness, {
-        thread: { providerId: "acp-hermes-agent" },
-      });
-      const turnId = "turn-without-usage";
-      seedEvent(harness.deps, {
-        threadId: thread.id,
-        environmentId: environment.id,
-        providerThreadId: "hermes-provider",
-        sequence: 1,
-        type: "turn/completed",
-        scope: turnScope(turnId),
-        data: { providerThreadId: "hermes-provider", status: "completed" },
-      });
+  it.each(["completed", "failed", "interrupted"] as const)(
+    "returns an unavailable breakdown for a $status turn without retained usage",
+    async (status) => {
+      await withTestHarness(async (harness) => {
+        const { environment, thread } = seedThreadFixture(harness, {
+          thread: { providerId: "acp-hermes-agent" },
+        });
+        const turnId = `turn-without-usage-${status}`;
+        seedEvent(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "hermes-provider",
+          sequence: 1,
+          type: "turn/completed",
+          scope: turnScope(turnId),
+          data: { providerThreadId: "hermes-provider", status },
+        });
 
-      const response = await harness.app.request(
-        `/api/v1/threads/${thread.id}/spend-summary`,
-      );
-      const spend = threadSpendSummaryResponseSchema.parse(
-        await readJson(response),
-      );
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/spend-summary`,
+        );
+        const spend = threadSpendSummaryResponseSchema.parse(
+          await readJson(response),
+        );
 
-      expect(spend.turns).toContainEqual({
-        turnId,
-        inputTokens: null,
-        cachedInputTokens: null,
-        outputTokens: null,
-        reasoningOutputTokens: null,
-        totalTokens: null,
+        expect(spend.turns).toContainEqual({
+          turnId,
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+          reasoningOutputTokens: null,
+          totalTokens: null,
+        });
       });
-    });
-  });
+    },
+  );
 });
