@@ -15,6 +15,7 @@ import {
   listQueuedThreadMessages,
   listSpendRollupRows,
   listThreadTurnSpend,
+  listCompletedTurnsByThreadIds,
   isSpendThreadHistoryComplete,
 } from "@bb/db";
 import type { Hono } from "hono";
@@ -89,6 +90,7 @@ import {
   THREAD_STORAGE_PATH_LIST_INCLUDE_HIDDEN,
 } from "../path-list-policy.js";
 import { parseFileListLimit } from "../file-list-query.js";
+import { repairThreadTurnSpendFromStoredEvents } from "../../services/system/spend-rollup.js";
 
 function resolveThreadProviderDisplayName(
   deps: Pick<AppDeps, "providerRegistry">,
@@ -444,8 +446,29 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
   get(routes.spendSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureSpendTables(deps.db);
+    repairThreadTurnSpendFromStoredEvents(deps.db, {
+      providerId: thread.providerId,
+      threadId: thread.id,
+    });
     const dailyRows = listSpendRollupRows(deps.db, { threadId: thread.id });
-    const turns = listThreadTurnSpend(deps.db, { threadId: thread.id });
+    const recordedTurns = listThreadTurnSpend(deps.db, { threadId: thread.id });
+    const recordedTurnIds = new Set(recordedTurns.map((turn) => turn.turnId));
+    const unavailableTurns = new Map(
+      listCompletedTurnsByThreadIds(deps.db, [thread.id])
+        .filter((turn) => !recordedTurnIds.has(turn.turnId))
+        .map((turn) => [
+          turn.turnId,
+          {
+            turnId: turn.turnId,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          },
+        ]),
+    );
+    const turns = [...recordedTurns, ...unavailableTurns.values()];
     const sumDaily = (
       field:
         | "inputTokens"

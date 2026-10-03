@@ -43,6 +43,7 @@ import {
   type TimelineViewWorkRow,
 } from "@bb/thread-view";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import {
   collectTimelineAutoExpansionRowIds,
   isNonExpandableSummary,
@@ -703,20 +704,15 @@ function findLastAssistantMessageIdsByTurnId(
   threadId: string,
   excludedTurnId: string | null | undefined,
 ): ReadonlyMap<string, { threadId: string; turnId: string }> {
-  const turnIds = new Set(
-    rows.flatMap((row) =>
-      row.kind === "turn" && row.turnId !== null ? [row.turnId] : [],
-    ),
-  );
   const hasTurnRows = rows.some((row) => row.kind === "turn");
+  if (hasTurnRows) return new Map();
   const messageIdsByTurnId = new Map<string, string>();
   for (const row of rows) {
     if (
       row.kind === "conversation" &&
       row.role === "assistant" &&
       row.turnId !== null &&
-      row.turnId !== excludedTurnId &&
-      (!hasTurnRows || turnIds.has(row.turnId))
+      row.turnId !== excludedTurnId
     ) {
       messageIdsByTurnId.set(row.turnId, row.id);
     }
@@ -1418,7 +1414,7 @@ function TurnRowBody({
     <TimelineRowsList
       rows={row.children}
       turnTokenSummary={
-        row.status === "completed"
+        row.status !== "pending"
           ? { threadId: row.threadId, turnId: row.turnId }
           : undefined
       }
@@ -1488,7 +1484,7 @@ function LazyTurnRowBody({
         <TimelineRowsList
           rows={rows}
           turnTokenSummary={
-            status === "completed"
+            status !== "pending"
               ? { threadId: identity.threadId, turnId }
               : undefined
           }
@@ -1789,6 +1785,16 @@ function TimelineExpandableRowView({
       }
       forceExpanded={searchExpandedRowIds.has(row.id)}
       terminalAutoExpanded={terminalAutoExpandedRowIds.has(row.id)}
+      collapsedPreview={
+        row.kind === "turn" && row.status !== "pending" ? (
+          <TooltipProvider>
+            <ThreadTurnTokenSummary
+              threadId={row.threadId}
+              turnId={row.turnId}
+            />
+          </TooltipProvider>
+        ) : undefined
+      }
       onTitleAction={onTitleAction}
       renderBody={renderBody}
     />

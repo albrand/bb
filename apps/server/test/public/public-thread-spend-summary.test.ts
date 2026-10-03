@@ -7,9 +7,11 @@ import {
   threadChildSummaryResponseSchema,
   threadSpendSummaryResponseSchema,
 } from "@bb/server-contract";
+import { turnScope } from "@bb/domain";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
+  seedEvent,
   seedHostSession,
   seedProjectWithSource,
   seedThread,
@@ -276,6 +278,133 @@ describe("public thread spend summaries", () => {
             totalTokens: 2_002_050,
           },
         ],
+      });
+    });
+  });
+
+  it("backfills retained usage for finished turns before returning the summary", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { providerId: "codex" },
+      });
+      const providerThreadId = "provider-backfill";
+      const turnId = "turn-backfill";
+      const scope = turnScope(turnId);
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId,
+        sequence: 1,
+        type: "turn/started",
+        scope,
+        data: { providerThreadId },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId,
+        sequence: 2,
+        type: "thread/tokenUsage/updated",
+        scope,
+        data: {
+          providerThreadId,
+          tokenUsage: {
+            total: {
+              totalTokens: 45,
+              inputTokens: 20,
+              cachedInputTokens: 10,
+              cacheReadInputTokens: 10,
+              cacheWriteInputTokens: 0,
+              outputTokens: 15,
+              reasoningOutputTokens: 0,
+            },
+            last: {
+              totalTokens: 45,
+              inputTokens: 20,
+              cachedInputTokens: 10,
+              cacheReadInputTokens: 10,
+              cacheWriteInputTokens: 0,
+              outputTokens: 15,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: 200_000,
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId,
+        sequence: 3,
+        type: "item/completed",
+        scope,
+        data: {
+          providerThreadId,
+          item: {
+            type: "agentMessage",
+            id: "assistant-backfill",
+            text: "Finished response",
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId,
+        sequence: 4,
+        type: "turn/completed",
+        scope,
+        data: { providerThreadId, status: "completed" },
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      const spend = threadSpendSummaryResponseSchema.parse(
+        await readJson(response),
+      );
+
+      expect(spend.turns).toContainEqual({
+        turnId,
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        outputTokens: 15,
+        reasoningOutputTokens: null,
+        totalTokens: 45,
+      });
+    });
+  });
+
+  it("returns an unavailable breakdown for finished turns without retained usage", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { providerId: "acp-hermes-agent" },
+      });
+      const turnId = "turn-without-usage";
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "hermes-provider",
+        sequence: 1,
+        type: "turn/completed",
+        scope: turnScope(turnId),
+        data: { providerThreadId: "hermes-provider", status: "completed" },
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      const spend = threadSpendSummaryResponseSchema.parse(
+        await readJson(response),
+      );
+
+      expect(spend.turns).toContainEqual({
+        turnId,
+        inputTokens: null,
+        cachedInputTokens: null,
+        outputTokens: null,
+        reasoningOutputTokens: null,
+        totalTokens: null,
       });
     });
   });

@@ -82,7 +82,7 @@ export function ThreadTurnTokenSummary({
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
   const compact = (value: number | null) =>
-    value === null ? null : compactTokens(value);
+    compactTokens(value);
   const tightSummaryValue = turn.totalTokens ?? turn.cachedInputTokens;
   return (
     <Tooltip>
@@ -91,47 +91,39 @@ export function ThreadTurnTokenSummary({
           data-thread-turn-tokens=""
           className="thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
-          {turn.inputTokens === null ? null : (
-            <span data-token-part="input">in {compact(turn.inputTokens)}</span>
-          )}
-          {turn.outputTokens === null ? null : (
-            <span data-token-part="output">
-              out {compact(turn.outputTokens)}
-            </span>
-          )}
+          <span data-token-part="input">in {compact(turn.inputTokens)}</span>
+          <span data-token-part="output">out {compact(turn.outputTokens)}</span>
           {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
             <span data-token-part="reasoning">
               reason {compact(reasoningDisplayValue)}
             </span>
           ) : null}
-          {turn.cachedInputTokens === null && tightSummaryValue === null ? null : (
-            <span data-token-trailing-group="">
-              {turn.cachedInputTokens === null ? null : (
-                <span data-token-part="cached">
-                  cached {compact(turn.cachedInputTokens)}
-                </span>
-              )}
-              {tightSummaryValue === null ? null : (
-                <span data-token-part="total">
-                  {turn.totalTokens === null ? null : (
-                    <span data-token-total-full>
-                      Σ {compact(turn.totalTokens)}
-                    </span>
-                  )}
-                  <span
-                    data-token-total-tight
-                    aria-label={
-                      turn.totalTokens === null
-                        ? `Cached ${exactTokens(tightSummaryValue)} tokens`
-                        : `Total ${exactTokens(tightSummaryValue)} tokens`
-                    }
-                  >
-                    {compactTokens(tightSummaryValue, 0)}
-                  </span>
-                </span>
-              )}
+          <span data-token-trailing-group="">
+            <span data-token-part="cached">
+              cached {compact(turn.cachedInputTokens)}
             </span>
-          )}
+            {tightSummaryValue === null ? (
+              <span data-token-part="total">Σ unavailable</span>
+            ) : (
+              <span data-token-part="total">
+                {turn.totalTokens === null ? null : (
+                  <span data-token-total-full>
+                    Σ {compact(turn.totalTokens)}
+                  </span>
+                )}
+                <span
+                  data-token-total-tight
+                  aria-label={
+                    turn.totalTokens === null
+                      ? `Cached ${exactTokens(tightSummaryValue)} tokens`
+                      : `Total ${exactTokens(tightSummaryValue)} tokens`
+                  }
+                >
+                  {compactTokens(tightSummaryValue, 0)}
+                </span>
+              </span>
+            )}
+          </span>
         </span>
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent
