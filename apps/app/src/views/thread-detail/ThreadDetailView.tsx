@@ -2392,6 +2392,18 @@ function ThreadDetailViewInternal(
     projectId,
     threadId,
   });
+  const moveThreadToProject = useCallback(
+    async (targetProjectId: string) => {
+      await updateThread.mutateAsync({
+        id: threadId,
+        projectId: targetProjectId,
+      });
+      navigate(getThreadRoutePath({ projectId: targetProjectId, threadId }), {
+        replace: true,
+      });
+    },
+    [navigate, threadId, updateThread],
+  );
 
   if (threadQueryState.status === "loading") {
     return <RouteLoadingSkeleton isBoundedPane={isBoundedPane} />;
@@ -2523,6 +2535,7 @@ function ThreadDetailViewInternal(
       actionsMenu={(includeResponsiveActions) => (
         <ThreadActionsMenu
           thread={thread}
+          onMoveToProject={moveThreadToProject}
           triggerClassName={HEADER_ICON_BUTTON_CLASS}
           onOpenInSplit={openThisThreadInSplit}
           responsiveActions={

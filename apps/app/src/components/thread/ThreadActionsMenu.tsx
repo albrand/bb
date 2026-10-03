@@ -28,6 +28,7 @@ import { getThreadRoutePath } from "@/lib/route-paths";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { useThreadActions } from "./ThreadActionsProvider";
 import { useThreadSectionMove } from "./ThreadSectionMoveProvider";
+import { ThreadProjectMovePicker } from "./ThreadProjectMovePicker";
 import { useAtomValue } from "jotai";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import {
@@ -53,13 +54,16 @@ export interface ThreadActionsMenuResponsiveAction {
 
 interface ThreadActionsMenuProps extends ThreadActionsMenuBaseProps {
   onOpenChange?: (open: boolean) => void;
+  onMoveToProject?: (projectId: string) => Promise<void>;
   triggerClassName?: string;
   responsiveActions?: readonly ThreadActionsMenuResponsiveAction[];
 }
 
-type ThreadActionsCompactStep = "actions" | "move";
+type ThreadActionsCompactStep = "actions" | "move" | "project";
 
 interface ThreadActionsMenuItemsProps extends ThreadActionsMenuBaseProps {
+  onCloseMenu: () => void;
+  onMoveToProject?: (projectId: string) => Promise<void>;
   compactStep?: ThreadActionsCompactStep;
   onCompactStepChange?: (step: ThreadActionsCompactStep) => void;
   responsiveActions?: readonly ThreadActionsMenuResponsiveAction[];
@@ -160,6 +164,8 @@ function ThreadSectionMoveMenu({
 
 function ThreadActionsMenuItems({
   thread,
+  onCloseMenu,
+  onMoveToProject,
   onOpenInSplit,
   compactStep = "actions",
   onCompactStepChange,
@@ -190,6 +196,18 @@ function ThreadActionsMenuItems({
     window.location.origin,
   ).toString();
 
+  if (isDrawer && compactStep === "project" && onMoveToProject) {
+    return (
+      <ThreadProjectMovePicker
+        inline
+        thread={thread}
+        onBack={() => onCompactStepChange?.("actions")}
+        onCloseMenu={onCloseMenu}
+        onMoveToProject={onMoveToProject}
+      />
+    );
+  }
+
   if (isDrawer && compactStep === "move") {
     return (
       <ThreadSectionMoveMenu
@@ -219,6 +237,25 @@ function ThreadActionsMenuItems({
           ))}
           {showSeparators ? <ActionMenuSeparator surface="dropdown" /> : null}
         </>
+      ) : null}
+      {onMoveToProject ? (
+        isDrawer ? (
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              onCompactStepChange?.("project");
+            }}
+          >
+            <Icon name="FolderOpen" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">Move to project…</span>
+          </DropdownMenuItem>
+        ) : (
+          <ThreadProjectMovePicker
+            thread={thread}
+            onCloseMenu={onCloseMenu}
+            onMoveToProject={onMoveToProject}
+          />
+        )
       ) : null}
       {onOpenInSplit ? (
         <>
@@ -346,6 +383,7 @@ function ThreadActionsMenuItems({
 }
 
 function useThreadActionsMenuLifecycle(onOpenChange?: (open: boolean) => void) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [compactStep, setCompactStep] =
     useState<ThreadActionsCompactStep>("actions");
   const handleOpenChange = useCallback(
@@ -353,26 +391,38 @@ function useThreadActionsMenuLifecycle(onOpenChange?: (open: boolean) => void) {
       if (!open) {
         setCompactStep("actions");
       }
+      setMenuOpen(open);
       onOpenChange?.(open);
     },
     [onOpenChange],
   );
 
-  return { compactStep, setCompactStep, handleOpenChange };
+  return {
+    compactStep,
+    menuOpen,
+    setCompactStep,
+    handleOpenChange,
+  };
 }
 
 export function ThreadActionsMenu({
   thread,
   onOpenInSplit,
+  onMoveToProject,
   responsiveActions,
   onOpenChange,
   triggerClassName,
 }: ThreadActionsMenuProps) {
-  const { compactStep, setCompactStep, handleOpenChange } =
-    useThreadActionsMenuLifecycle(onOpenChange);
+  const {
+    compactStep,
+    menuOpen,
+    setCompactStep,
+    setMenuOpen,
+    handleOpenChange,
+  } = useThreadActionsMenuLifecycle(onOpenChange);
 
   return (
-    <DropdownMenu onOpenChange={handleOpenChange}>
+    <DropdownMenu open={menuOpen} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
@@ -397,6 +447,8 @@ export function ThreadActionsMenu({
       <DropdownMenuContent align="end">
         <ThreadActionsMenuItems
           thread={thread}
+          onCloseMenu={() => handleOpenChange(false)}
+          onMoveToProject={onMoveToProject}
           onOpenInSplit={onOpenInSplit}
           compactStep={compactStep}
           onCompactStepChange={setCompactStep}
