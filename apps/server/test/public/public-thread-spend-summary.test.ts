@@ -356,6 +356,22 @@ describe("public thread spend summaries", () => {
         scope,
         data: { providerThreadId, status: "completed" },
       });
+      ensureSpendTables(harness.db);
+      applySpendContribution(harness.db, {
+        at: 1_780_000_000_200,
+        day: "2026-06-01",
+        model: "gpt-test",
+        providerId: "codex",
+        threadId: thread.id,
+        usage: {
+          cachedInputTokens: 10,
+          inputTokens: 20,
+          outputTokens: 15,
+          reasoningOutputTokens: 0,
+          totalTokens: 45,
+        },
+        weightedUnits: 95,
+      });
 
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/spend-summary`,
@@ -370,6 +386,13 @@ describe("public thread spend summaries", () => {
         cachedInputTokens: 10,
         outputTokens: 15,
         reasoningOutputTokens: null,
+        totalTokens: 45,
+      });
+      expect(spend.total).toEqual({
+        cachedInputTokens: 10,
+        inputTokens: 20,
+        outputTokens: 15,
+        reasoningOutputTokens: 0,
         totalTokens: 45,
       });
 
@@ -391,6 +414,44 @@ describe("public thread spend summaries", () => {
           totalTokens: 45,
         },
       ]);
+    });
+  });
+
+  it("serves a spend summary without opening a write transaction when no turn needs repair", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { providerId: "codex" },
+      });
+      ensureSpendTables(harness.db);
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_780_000_000_200,
+        providerThreadId: "provider-no-repair",
+        threadId: thread.id,
+        turnId: "turn-already-recorded",
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 20,
+          outputTokens: 15,
+          reasoningOutputTokens: 0,
+          totalTokens: 35,
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-no-repair",
+        sequence: 1,
+        type: "turn/completed",
+        scope: turnScope("turn-already-recorded"),
+        data: { providerThreadId: "provider-no-repair", status: "completed" },
+      });
+      harness.db.$client.exec("PRAGMA query_only = ON");
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+
+      expect(response.status).toBe(200);
     });
   });
 

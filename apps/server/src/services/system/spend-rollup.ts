@@ -266,14 +266,6 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   db: DbConnection,
   args: { providerId: string; threadId: string },
 ): void {
-  db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS ${TURN_SPEND_REPAIR_TABLE} (
-      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-      turn_id TEXT NOT NULL,
-      repaired_at INTEGER NOT NULL,
-      PRIMARY KEY (thread_id, turn_id)
-    )
-  `);
   const completedTurnIds = new Set(
     listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
   );
@@ -367,6 +359,26 @@ export function repairThreadTurnSpendFromStoredEvents(
   db: DbConnection,
   args: { providerId: string; threadId: string },
 ): void {
+  const completedTurnIds = new Set(
+    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
+  );
+  const repairedTurnIds = new Set(
+    db.$client
+      .prepare<[string], { turnId: string }>(
+        `SELECT turn_id AS turnId FROM ${TURN_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+      )
+      .all(args.threadId)
+      .map((row) => row.turnId),
+  );
+  const existingTurnIds = new Set(
+    listThreadTurnSpend(db, { threadId: args.threadId }).map(
+      (row) => row.turnId,
+    ),
+  );
+  const needsRepair = [...completedTurnIds].some(
+    (turnId) => !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
+  );
+  if (!needsRepair) return;
   db.$client.transaction(() =>
     repairThreadTurnSpendFromStoredEventsInTransaction(db, args),
   )();

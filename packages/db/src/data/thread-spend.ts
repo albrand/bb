@@ -272,6 +272,14 @@ export function ensureSpendTables(db: DbConnection): void {
       thread_id TEXT NOT NULL
     )
   `);
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS fork_thread_turn_spend_repair (
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL,
+      repaired_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, turn_id)
+    )
+  `);
   spendTablesReady.add(db.$client);
 }
 
