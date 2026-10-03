@@ -149,6 +149,51 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Σ 220")).toBeTruthy();
   });
 
+  it("closes the drawer when leaving compact mode", async () => {
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadUsageAndAgents compact threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View 2 agents: 1 working" }),
+    );
+    await waitFor(() => expect(screen.getByText("Agent activity")).toBeTruthy());
+
+    rerender(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadUsageAndAgents compact={false} threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+    rerender(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadUsageAndAgents compact threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector("[data-persistent-drawer-backdrop]")
+          ?.getAttribute("data-state"),
+      ).toBe("closed"),
+    );
+  });
+
   it("keeps partial spend compact and marks missing reasoning in the tooltip", async () => {
     useThreadSpendSummary.mockReturnValue({
       data: {

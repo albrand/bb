@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@bb/shared-ui/icon";
 import type {
@@ -149,10 +150,6 @@ export function ThreadUsageAndAgents({
   threadId: string;
 }) {
   const routeForThread = useThreadRoutePath();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const { isContentRealized } = useResponsiveDrawerRealization({
-    open: isDrawerOpen,
-  });
   const { data: childSummary } = useQuery<ThreadChildSummaryResponse>({
     queryKey: ["threadChildSummary", threadId],
     queryFn: () => sdk.threads.childSummary({ threadId }),
@@ -174,59 +171,14 @@ export function ThreadUsageAndAgents({
   ));
 
   if (compact) {
-    return (
-      <>
-        <button
-          type="button"
-          data-thread-agent-rollup-compact=""
-          aria-label={`View ${count} agents: ${working} working`}
-          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-full border border-border/70 bg-background px-1 py-1 text-xs font-normal leading-none text-muted-foreground sm:px-2"
-          onClick={() => setIsDrawerOpen(true)}
-        >
-          <Icon name="Bot" className="size-3.5" />
-          <span className="hidden whitespace-nowrap sm:inline">
-            {count} {count === 1 ? "agent" : "agents"}
-          </span>
-          <span className="whitespace-nowrap sm:hidden">{count}</span>
-        </button>
-        <PersistentResponsiveDrawerShell
-          open={isDrawerOpen}
-          onOpenChange={setIsDrawerOpen}
-          srLabel="Agent activity"
-          contentClassName="max-h-[min(80dvh,36rem)]"
-        >
-          {isContentRealized ? (
-            <div className="flex min-h-0 flex-col gap-3 overflow-hidden px-4 pb-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-medium">Agent activity</h2>
-                <button
-                  type="button"
-                  className="min-h-11 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-state-hover"
-                  onClick={() => setIsDrawerOpen(false)}
-                >
-                  Close
-                </button>
-              </div>
-              <p className="shrink-0 text-sm text-muted-foreground">
-                Ran {count} {count === 1 ? "agent" : "agents"} · {working}{" "}
-                working · {childSummary?.waiting ?? 0} waiting ·{" "}
-                {childSummary?.idle ?? 0} idle · {childSummary?.failed ?? 0}{" "}
-                failed
-                {childSummary?.totalTokens === null ||
-                childSummary?.totalTokens === undefined
-                  ? null
-                  : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
-              </p>
-              {childRows.length > 0 ? (
-                <ul className="min-h-0 overflow-y-auto rounded-md border border-border/70 p-3 text-sm">
-                  {childRows}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-        </PersistentResponsiveDrawerShell>
-      </>
-    );
+    return childSummary ? (
+      <CompactThreadUsageDrawer
+        childRows={childRows}
+        count={count}
+        working={working}
+        childSummary={childSummary}
+      />
+    ) : null;
   }
 
   return (
@@ -257,5 +209,73 @@ export function ThreadUsageAndAgents({
         </details>
       ) : null}
     </div>
+  );
+}
+
+function CompactThreadUsageDrawer({
+  childRows,
+  count,
+  working,
+  childSummary,
+}: {
+  childRows: ReactNode[];
+  count: number;
+  working: number;
+  childSummary: ThreadChildSummaryResponse;
+}) {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { isContentRealized } = useResponsiveDrawerRealization({
+    open: isDrawerOpen,
+  });
+  return (
+    <>
+      <button
+        type="button"
+        data-thread-agent-rollup-compact=""
+        aria-label={`View ${count} agents: ${working} working`}
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-full border border-border/70 bg-background px-1 py-1 text-xs font-normal leading-none text-muted-foreground sm:px-2"
+        onClick={() => setIsDrawerOpen(true)}
+      >
+        <Icon name="Bot" className="size-3.5" />
+        <span className="hidden whitespace-nowrap sm:inline">
+          {count} {count === 1 ? "agent" : "agents"}
+        </span>
+        <span className="whitespace-nowrap sm:hidden">{count}</span>
+      </button>
+      <PersistentResponsiveDrawerShell
+        open={isDrawerOpen}
+        onOpenChange={setIsDrawerOpen}
+        srLabel="Agent activity"
+        contentClassName="max-h-[min(80dvh,36rem)]"
+      >
+        {isContentRealized ? (
+          <div className="flex min-h-0 flex-col gap-3 overflow-hidden px-4 pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-medium">Agent activity</h2>
+              <button
+                type="button"
+                className="min-h-11 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-state-hover"
+                onClick={() => setIsDrawerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="shrink-0 text-sm text-muted-foreground">
+              Ran {count} {count === 1 ? "agent" : "agents"} · {working} working
+              · {childSummary.waiting} waiting · {childSummary.idle} idle
+              · {childSummary.failed} failed
+              {childSummary.totalTokens === null
+                ? null
+                : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+            </p>
+            {childRows.length > 0 ? (
+              <ul className="min-h-0 overflow-y-auto rounded-md border border-border/70 p-3 text-sm">
+                {childRows}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </PersistentResponsiveDrawerShell>
+    </>
   );
 }
