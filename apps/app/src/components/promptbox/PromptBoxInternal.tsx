@@ -171,6 +171,8 @@ import { ComposerSendMenu } from "./ComposerSendMenu";
 
 const PROMPTBOX_MIN_HEIGHT = 68;
 const PROMPTBOX_SELECTION_REVEAL_MARGIN = 12;
+const PROMPT_ACTION_LAYOUT_CLASS =
+  "aspect-square min-w-8 shrink-0 self-center max-md:pointer-coarse:min-w-10";
 const COMPACT_PROMPT_ACTION_BUTTON_CLASS =
   "size-8 p-0 transition-all [&_[data-icon-root]]:size-4 max-md:pointer-coarse:size-10";
 const RICH_PASTE_BLOCK_TAGS = new Set([
@@ -3600,11 +3602,12 @@ export function PromptBoxInternal({
                           disabled={!canStartVoiceInput}
                           onPointerDown={handleVoicePointerDown}
                           onClick={handleVoiceClick}
-                          className={
+                          className={cn(
                             showCompactLayout
                               ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
-                              : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS
-                          }
+                              : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+                            PROMPT_ACTION_LAYOUT_CLASS,
+                          )}
                         >
                           <Icon name="Mic" className="size-4" />
                         </Button>
@@ -3624,11 +3627,12 @@ export function PromptBoxInternal({
                         aria-label="Stop run"
                         onPointerDown={handleStopPointerDown}
                         onClick={handleStopClick}
-                        className={
+                        className={cn(
                           showCompactLayout
                             ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
-                            : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS
-                        }
+                            : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+                          PROMPT_ACTION_LAYOUT_CLASS,
+                        )}
                       >
                         <Icon
                           name="Square"
@@ -3652,6 +3656,7 @@ export function PromptBoxInternal({
                                 COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
                               ],
                           "transition-colors",
+                          PROMPT_ACTION_LAYOUT_CLASS,
                         )}
                       >
                         <Icon name="Mic" className="size-4" />
@@ -3683,6 +3688,7 @@ export function PromptBoxInternal({
                                   COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
                                 ],
                             "transition-colors",
+                            PROMPT_ACTION_LAYOUT_CLASS,
                           )}
                           disabledReason={
                             !canSubmit
