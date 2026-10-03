@@ -156,6 +156,54 @@ describe("ThreadDetailHeader", () => {
     expect(container.textContent).not.toContain("29 idle");
   });
 
+  it("uses the responsive drawer when a desktop header pane is narrow", async () => {
+    vi.spyOn(sdk.threads, "childSummary").mockResolvedValue({
+      nonDeletedChildCount: 30,
+      unarchivedDescendantCount: 30,
+      working: 1,
+      waiting: 0,
+      idle: 29,
+      failed: 0,
+      totalTokens: 2_000_000_000,
+      children: [],
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          right: this.tagName === "HEADER" ? 480 : 0,
+          bottom: 48,
+          left: 0,
+          width: this.tagName === "HEADER" ? 480 : 0,
+          height: 48,
+          toJSON: () => ({}),
+        };
+      },
+    );
+
+    const { container } = render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          childPillLabel={null}
+          isSecondaryPanelOpen={false}
+          onOpenThreadGitAction={vi.fn()}
+          onToggleSecondaryPanel={vi.fn()}
+          threadHeaderGitActions={[]}
+          threadId={THREAD_ID}
+          threadTitle="Narrow desktop pane"
+        />
+      </PaneContext.Provider>,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "View 30 agents: 1 working" }),
+    ).toBeTruthy();
+    expect(container.querySelector("[data-agent-summary-trigger]")).toBeNull();
+  });
+
   it("does not render a thread token summary in the header", () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>

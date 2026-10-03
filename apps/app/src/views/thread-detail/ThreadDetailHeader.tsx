@@ -113,6 +113,10 @@ export function ThreadDetailHeader({
     (isSplitPaneHeader || isCompactViewport) &&
     measuredPaneWidth > 0 &&
     measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH;
+  const usesCompactAgentDrawer =
+    isCompactViewport ||
+    (measuredPaneWidth > 0 &&
+      measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH);
   useLayoutEffect(() => {
     const header = headerRef.current;
     const pane = header.closest<HTMLElement>("[data-split-pane-id]");
@@ -179,7 +183,7 @@ export function ThreadDetailHeader({
           {isEditing ? editor : <ThreadTitle title={threadTitle} />}
         </p>
         <ThreadUsageAndAgents
-          compact={isCompactViewport}
+          compact={usesCompactAgentDrawer}
           compactSummary={!isCompactViewport}
           threadId={threadId}
         />
