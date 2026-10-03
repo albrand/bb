@@ -247,13 +247,19 @@ describe("thread-list plugin", () => {
     renderList({ organizationMode: "machine" });
 
     await screen.findByText("Pinned thread");
-    expect(sectionHeaders()).toEqual(["Pinned", "Laptop", "No machine"]);
-    const laptop = screen
-      .getByTitle("Laptop")
+    expect(sectionHeaders()).toEqual([
+      "Pinned",
+      "Laptop",
+      "No machine",
+      "Later",
+      "Review",
+    ]);
+    const later = screen
+      .getByTitle("Later")
       .closest("[data-sidebar-sticky-group]");
-    expect(laptop).not.toBeNull();
+    expect(later).not.toBeNull();
     expect(
-      within(laptop as HTMLElement).getByText("Later thread"),
+      within(later as HTMLElement).getByText("Later thread"),
     ).not.toBeNull();
     const noMachine = screen
       .getByTitle("No machine")
@@ -305,6 +311,8 @@ describe("thread-list plugin", () => {
       "Laptop",
       "Studio Mac",
       "No machine",
+      "Later",
+      "Review",
     ]);
   });
 
@@ -316,16 +324,23 @@ describe("thread-list plugin", () => {
     expect(threadIds().filter((id) => id === "thr_personal")).toEqual([
       "thr_personal",
     ]);
-    expect(sectionHeaders()).toEqual(["Pinned", "App", "Web", "Threads"]);
+    expect(sectionHeaders()).toEqual([
+      "Pinned",
+      "App",
+      "Web",
+      "Threads",
+      "Later",
+      "Review",
+    ]);
     const appGroup = screen
       .getByTitle("App")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
     expect(within(appGroup).getByText("Parent thread")).not.toBeNull();
     expect(within(appGroup).getByText("Child thread")).not.toBeNull();
-    const webGroup = screen
-      .getByTitle("Web")
+    const laterSection = screen
+      .getByTitle("Later")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
-    expect(within(webGroup).getByText("Later thread")).not.toBeNull();
+    expect(within(laterSection).getByText("Later thread")).not.toBeNull();
     const threadsGroup = screen
       .getByTitle("Threads")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;

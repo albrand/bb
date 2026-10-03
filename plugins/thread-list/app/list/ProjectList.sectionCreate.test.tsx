@@ -15,6 +15,7 @@ import {
   sdkResult,
 } from "../model/fixtures.js";
 import { preferencesReadyAtom } from "../preferences/preferences-sync.js";
+import type { OrganizationMode } from "../../shared/preferences.js";
 import {
   sidebarManualSectionOrderAtom,
   sidebarOrganizationModeAtom,
@@ -48,10 +49,14 @@ function makeSection(id: string, name: string) {
   return { id, name, createdAt: 1, updatedAt: 1 };
 }
 
-function renderCustomSections(pinned = false) {
+function renderCustomSections(
+  pinned = false,
+  mode: OrganizationMode = "chronological",
+  looseThread = false,
+) {
   const store = createStore();
   store.set(preferencesReadyAtom(), true);
-  store.set(sidebarOrganizationModeAtom, "chronological");
+  store.set(sidebarOrganizationModeAtom, mode);
   const rendered = renderSlot(
     { component: Harness },
     { children: <ProjectList activeThreadId={null} />, store },
@@ -63,6 +68,9 @@ function renderCustomSections(pinned = false) {
             sectionId: "sec_a",
             pinnedAt: pinned ? 1 : null,
           }),
+          ...(looseThread
+            ? [makeSidebarThread({ id: "thr_loose", title: "Project thread" })]
+            : []),
         ],
         projects: [makePluginProject()],
         sections: [makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")],
@@ -92,6 +100,31 @@ async function createSectionFrom(actionsLabel: string) {
 }
 
 describe("creating a sidebar section", () => {
+  it.each(["project", "machine"] as const)(
+    "keeps custom sections visible while creating from %s mode",
+    async (mode) => {
+      const { inspection } = renderCustomSections(false, mode, true);
+      expect(
+        await screen.findByRole("button", {
+          name: "New thread in Alpha section",
+        }),
+      ).toBeTruthy();
+      await createSectionFrom(
+        mode === "project" ? "Test project actions" : "No machine actions",
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("textbox", { name: "Section name" }),
+        ).toBeNull(),
+      );
+      expect(inspection.sdkCalls).toContainEqual({
+        method: "threadSections.create",
+        args: [{ name: "Gamma" }],
+      });
+    },
+  );
+
   it("pins new threads from the Pinned header", async () => {
     const { inspection } = renderCustomSections(true);
     fireEvent.click(
