@@ -1,0 +1,39 @@
+{
+  "captureDate": "2026-10-03",
+  "source": "read-only live API backed by fork_thread_turn_spend",
+  "sample": {
+    "timelineRow": {
+      "kind": "conversation",
+      "role": "assistant",
+      "id": "assistant-live-sample",
+      "threadId": "thread-live-sample",
+      "turnId": "da938e7217-t2",
+      "sourceSeqStart": 37215,
+      "sourceSeqEnd": 37218,
+      "startedAt": 1790979734878,
+      "createdAt": 1790979734878,
+      "turnRequest": null,
+      "text": "redacted"
+    },
+    "spendSummary": {
+      "historyComplete": false,
+      "total": {
+        "cachedInputTokens": 740327955,
+        "inputTokens": 6870,
+        "outputTokens": 1896420,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 742231245
+      },
+      "turns": [
+        {
+          "turnId": "da938e7217-t2",
+          "inputTokens": 4,
+          "cachedInputTokens": 466193,
+          "outputTokens": 435,
+          "reasoningOutputTokens": null,
+          "totalTokens": 466632
+        }
+      ]
+    }
+  }
+}

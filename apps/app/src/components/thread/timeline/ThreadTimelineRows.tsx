@@ -224,6 +224,8 @@ interface TimelineRowsListProps {
   onLoadOlderRows?: () => Promise<void> | void;
   rows: readonly ThreadTimelineViewRow[];
   turnTokenSummary?: { threadId: string; turnId: string };
+  flatTurnTokenSummaryThreadId?: string;
+  flatTurnTokenSummaryExcludedTurnId?: string | null;
   scopeActive: boolean;
   showAssistantMessageActions: boolean;
   spacing: TimelineRowsListSpacing;
@@ -242,6 +244,10 @@ interface TimelineRowViewProps {
   row: ThreadTimelineViewRow;
   turnTokenSummary?: { threadId: string; turnId: string };
   turnTokenSummaryMessageId?: string | null;
+  flatTurnTokenSummaryByMessageId?: ReadonlyMap<
+    string,
+    { threadId: string; turnId: string }
+  >;
   scopeActive: boolean;
   showAssistantMessageActions: boolean;
   spacing: TimelineRowsListSpacing;
@@ -463,6 +469,8 @@ function areTimelineRowViewPropsEqual(
     previous.scopeActive === next.scopeActive &&
     previous.showAssistantMessageActions === next.showAssistantMessageActions &&
     previous.turnTokenSummaryMessageId === next.turnTokenSummaryMessageId &&
+    previous.flatTurnTokenSummaryByMessageId ===
+      next.flatTurnTokenSummaryByMessageId &&
     previous.turnTokenSummary?.threadId === next.turnTokenSummary?.threadId &&
     previous.turnTokenSummary?.turnId === next.turnTokenSummary?.turnId &&
     previous.spacing === next.spacing &&
@@ -688,6 +696,40 @@ function findLastAssistantMessageId(
     }
   }
   return lastMessageId;
+}
+
+function findLastAssistantMessageIdsByTurnId(
+  rows: readonly ThreadTimelineViewRow[],
+  threadId: string,
+  excludedTurnId: string | null | undefined,
+): ReadonlyMap<string, { threadId: string; turnId: string }> {
+  const messageIdsByTurnId = new Map<string, string>();
+  for (const row of rows) {
+    if (
+      row.kind === "conversation" &&
+      row.role === "assistant" &&
+      row.turnId !== null &&
+      row.turnId !== excludedTurnId
+    ) {
+      messageIdsByTurnId.set(row.turnId, row.id);
+    }
+  }
+  const summariesByMessageId = new Map<
+    string,
+    { threadId: string; turnId: string }
+  >();
+  for (const [turnId, messageId] of messageIdsByTurnId) {
+    summariesByMessageId.set(messageId, { threadId, turnId });
+  }
+  return summariesByMessageId;
+}
+
+function findLastTurnId(rows: readonly ThreadTimelineViewRow[]): string | null {
+  let turnId: string | null = null;
+  for (const row of rows) {
+    if (row.turnId !== null) turnId = row.turnId;
+  }
+  return turnId;
 }
 
 export function findStreamingAssistantMessageId(
@@ -1498,6 +1540,7 @@ function TimelineRowView({
   row,
   turnTokenSummary,
   turnTokenSummaryMessageId,
+  flatTurnTokenSummaryByMessageId,
   scopeActive,
   showAssistantMessageActions,
   spacing,
@@ -1523,7 +1566,9 @@ function TimelineRowView({
         turnTokenSummary={
           row.role === "assistant" && row.id === turnTokenSummaryMessageId
             ? turnTokenSummary
-            : undefined
+            : row.role === "assistant"
+              ? flatTurnTokenSummaryByMessageId?.get(row.id)
+              : undefined
         }
       />
     );
@@ -1814,6 +1859,8 @@ function TimelineRowsList({
   onLoadOlderRows,
   rows,
   turnTokenSummary,
+  flatTurnTokenSummaryThreadId,
+  flatTurnTokenSummaryExcludedTurnId,
   scopeActive,
   showAssistantMessageActions,
   spacing,
@@ -1844,6 +1891,17 @@ function TimelineRowsList({
   const turnTokenSummaryMessageId = useMemo(
     () => (turnTokenSummary ? findLastAssistantMessageId(rows) : null),
     [rows, turnTokenSummary],
+  );
+  const flatTurnTokenSummaryByMessageId = useMemo(
+    () =>
+      flatTurnTokenSummaryThreadId
+        ? findLastAssistantMessageIdsByTurnId(
+            rows,
+            flatTurnTokenSummaryThreadId,
+            flatTurnTokenSummaryExcludedTurnId,
+          )
+        : undefined,
+    [flatTurnTokenSummaryExcludedTurnId, flatTurnTokenSummaryThreadId, rows],
   );
   const items = useMemo(
     () => buildTimelineRowsListItems({ rows, unreadDividerPlacement }),
@@ -1962,6 +2020,9 @@ function TimelineRowsList({
                       row={item.row}
                       turnTokenSummary={turnTokenSummary}
                       turnTokenSummaryMessageId={turnTokenSummaryMessageId}
+                      flatTurnTokenSummaryByMessageId={
+                        flatTurnTokenSummaryByMessageId
+                      }
                       scopeActive={scopeActive}
                       showAssistantMessageActions={showAssistantMessageActions}
                       spacing={spacing}
@@ -2242,6 +2303,14 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                           }
                           onLoadOlderRows={props.onLoadOlderRows}
                           rows={rows}
+                          flatTurnTokenSummaryThreadId={
+                            rows.some((row) => row.kind === "turn")
+                              ? undefined
+                              : props.threadId
+                          }
+                          flatTurnTokenSummaryExcludedTurnId={
+                            scopeActive ? findLastTurnId(rows) : undefined
+                          }
                           scopeActive={scopeActive}
                           showAssistantMessageActions={true}
                           compactActivityIntents={false}
