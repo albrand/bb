@@ -1301,7 +1301,11 @@ function TurnRowBody({
   return (
     <TimelineRowsList
       rows={row.children}
-      turnTokenSummary={{ threadId: row.threadId, turnId: row.turnId }}
+      turnTokenSummary={
+        row.status === "completed"
+          ? { threadId: row.threadId, turnId: row.turnId }
+          : undefined
+      }
       scopeActive={false}
       showAssistantMessageActions={showAssistantMessageActions}
       compactActivityIntents={compactActivityIntents}
@@ -1319,7 +1323,13 @@ function LazyTurnRowBody({
   showAssistantMessageActions,
 }: TurnRowBodyProps) {
   const { getViewRows, threadId } = useTimelineRendererStaticContext();
-  const { sourceSeqEnd, sourceSeqStart, threadId: rowThreadId, turnId } = row;
+  const {
+    sourceSeqEnd,
+    sourceSeqStart,
+    status,
+    threadId: rowThreadId,
+    turnId,
+  } = row;
   const identity = useMemo<ThreadTimelineTurnSummaryDetailsQueryIdentity>(
     () => ({
       sourceSeqEnd,
@@ -1361,7 +1371,11 @@ function LazyTurnRowBody({
       <div className="grid gap-1">
         <TimelineRowsList
           rows={rows}
-          turnTokenSummary={{ threadId: identity.threadId, turnId }}
+          turnTokenSummary={
+            status === "completed"
+              ? { threadId: identity.threadId, turnId }
+              : undefined
+          }
           scopeActive={false}
           showAssistantMessageActions={showAssistantMessageActions}
           compactActivityIntents={compactActivityIntents}

@@ -28,6 +28,15 @@ import {
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 
+vi.mock("@/hooks/queries/thread-queries", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/queries/thread-queries")>();
+  return {
+    ...actual,
+    useThreadSpendSummary: () => ({ data: undefined }),
+  };
+});
+
 function messageActionRegistrationSet(
   messageActions: readonly PluginMessageActionRegistration[],
 ): PluginRegistrationSet {
@@ -556,7 +565,7 @@ describe("ThreadTimelineRows actions", () => {
     expect(markup).toContain('aria-label="Send to main thread"');
   });
 
-  it("hides assistant message actions inside completed turn summaries", () => {
+  it("shows a footer action row for completed assistant responses", () => {
     const markup = toMarkup(
       <ThreadTimelineRows
         initialExpanded={new Set(["turn_completed"])}
@@ -581,7 +590,8 @@ describe("ThreadTimelineRows actions", () => {
 
     expect(markup).toContain("Worked for");
     expect(markup).toContain("Archived assistant response.");
-    expect(markup).not.toContain('aria-label="Copy message"');
+    expect(markup).toContain('aria-label="Copy message"');
+    expect(markup).toContain('aria-label="Message actions"');
   });
 
   it("keeps assistant message actions visible inside pending turn rows", () => {
