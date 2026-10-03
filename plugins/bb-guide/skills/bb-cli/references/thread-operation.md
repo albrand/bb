@@ -220,3 +220,5 @@ For review or fix pipelines, get the environment ID from
   same scope, size, and title. It does not replay the original launch command.
 
 Clearing a thread's parent with `bb thread update --clear-parent-thread` inherits the former parent's section unless the update explicitly supplies a section. Children released by environment archiving also inherit their former parent's section.
+
+Move a thread to another project with `bb thread update <id> --project <id-or-name>`; `--self` targets the current thread from `BB_THREAD_ID`. Project names match case-insensitively and must be unique; use the ID when names collide. A project move clears the thread's section and preserves its parent link and history. It refuses while the thread is starting, active, stopping, or has an active turn. Unmanaged environments are reused by matching host and path in the target project or re-homed there. A managed worktree transfers to the target project only when no other source-project thread uses it; otherwise move those threads first or detach the moving thread from that worktree. Project moves must be run separately from other `thread update` changes.

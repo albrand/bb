@@ -90,6 +90,20 @@ Before stabilization, audit schema export fidelity (especially refinements and t
 
 Before stabilization, audit whether official store plugins should count as included, whether a plugin calling `experimental_setSafeMode` should be allowed to stop itself and others, whether the toggle should run asynchronously for installs with many slow plugins, and whether startup needs an out-of-band override (env var or flag) for a plugin that breaks the server before the toggle is reachable.
 
+## `PluginBoundThreadsArea.experimental_moveToProject`
+
+`experimental_moveToProject({ threadId, projectId })` moves a thread and its
+sidebar placement to another project while preserving its history and parent
+link. The server clears the project-local section and refuses while the thread
+is starting, active, stopping, or has an active turn. An unmanaged environment
+is reused in the target project when the same host and path already exist, or
+re-homed there otherwise. A managed worktree transfers project ownership only
+when no other source-project thread uses it; shared worktrees are refused.
+
+Before stabilization, audit cross-project parent and child operations, managed
+environment lifecycle and cleanup, thread-list cache refresh in both projects,
+and moving threads between projects with identical project names.
+
 ## RPC caller identity (`ExperimentalPluginRpcHandlerContext.experimental_caller`)
 
 Every `bb.rpc.register` handler receives a second argument, an
@@ -3756,6 +3770,7 @@ Deleted threads and projects are excluded.
 Backs Ctrl+R in the composer and `bb thread prompt-search`. Audit non-ASCII case
 folding, ranking beyond recency, pagination, and whether hidden or archived
 threads belong in results before stabilizing.
+
 ### Provider discovery metadata
 
 `package.json` → `bb.experimental_providers` statically declares

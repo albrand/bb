@@ -23,6 +23,7 @@ import type {
 } from "@bb/server-contract";
 import type {
   BbSdkAreas,
+  ThreadMutationResult,
   ThreadPluginMetadataArgs,
   ThreadPluginMetadataResult,
   ThreadPluginMetadataUpdateArgs,
@@ -1364,6 +1365,10 @@ export type PluginBoundThreadsArea = Omit<
       pluginId?: string;
     },
   ): Promise<ThreadPluginMetadataResult>;
+  experimental_moveToProject(args: {
+    threadId: string;
+    projectId: string;
+  }): Promise<ThreadMutationResult>;
 };
 
 /**

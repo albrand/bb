@@ -186,6 +186,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginEnvironmentProvidersState",
           "useSdk",
           "PluginBrowserBbSdk",
+          "PluginBoundThreadsArea.experimental_moveToProject",
           "experimental_usePluginId",
         ],
         experimental: true,

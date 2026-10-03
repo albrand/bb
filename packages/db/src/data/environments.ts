@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type {
   DiscoveredWorkspaceProperties,
   EnvironmentChangeKind,
@@ -133,7 +133,7 @@ export function reviveDestroyedEnvironment(
 }
 
 export function findProjectEnvironmentByHostPath(
-  db: DbConnection,
+  db: EnvironmentReadConnection,
   projectId: string,
   hostId: string,
   path: string,
@@ -151,6 +151,48 @@ export function findProjectEnvironmentByHostPath(
       )
       .get() ?? null
   );
+}
+
+export function transferManagedEnvironmentProject(
+  db: EnvironmentWriteConnection,
+  notifier: DbNotifier,
+  args: {
+    environmentId: string;
+    movingThreadId: string;
+    sourceProjectId: string;
+    targetProjectId: string;
+  },
+): "transferred" | "shared" | "changed" {
+  const environment = getEnvironment(db, args.environmentId);
+  if (!environment || environment.projectId !== args.sourceProjectId) {
+    return "changed";
+  }
+  const sourceProjectUsers = db
+    .select({ value: count() })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.environmentId, args.environmentId),
+        eq(threads.projectId, args.sourceProjectId),
+        ne(threads.id, args.movingThreadId),
+      ),
+    )
+    .get()?.value;
+  if (sourceProjectUsers !== 0) return "shared";
+  const updated = db
+    .update(environments)
+    .set({ projectId: args.targetProjectId, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(environments.id, args.environmentId),
+        eq(environments.projectId, args.sourceProjectId),
+      ),
+    )
+    .returning({ id: environments.id })
+    .get();
+  if (!updated) return "changed";
+  notifier.notifyEnvironment(args.environmentId, ["metadata-changed"]);
+  return "transferred";
 }
 
 export interface FindForeignManagedEnvironmentAtHostPathArgs {

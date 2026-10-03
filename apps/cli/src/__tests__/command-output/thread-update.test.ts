@@ -164,6 +164,33 @@ describe("bb thread update command output", () => {
     });
   });
 
+  it("bb thread update moves --self to a project by name", async () => {
+    vi.stubEnv("BB_THREAD_ID", "thread-self-move");
+    const thread = fixtures.makeThread({
+      id: "thread-self-move",
+      projectId: "project-target",
+      providerId: "codex",
+    });
+    const projects = vi.fn(async () => [
+      { id: "project-target", name: "Target project" },
+    ]);
+    const patch = vi.fn(async () => thread);
+    stubServerApi({
+      "v1.projects.$get": projects,
+      "v1.threads.:id.$patch": patch,
+    });
+
+    await runCommand(
+      ["thread", "update", "--self", "--project", "Target project"],
+      register,
+    );
+
+    expect(patch).toHaveBeenCalledWith({
+      param: { id: "thread-self-move" },
+      json: { projectId: "project-target" },
+    });
+  });
+
   it("bb thread update sets a sticky model and reasoning level override", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-update-3",

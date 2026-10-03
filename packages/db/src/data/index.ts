@@ -343,6 +343,7 @@ export {
   getEnvironment,
   reviveDestroyedEnvironment,
   findProjectEnvironmentByHostPath,
+  transferManagedEnvironmentProject,
   listEnvironments,
   findForeignManagedEnvironmentAtHostPath,
   findProviderEnvironmentContainingPath,

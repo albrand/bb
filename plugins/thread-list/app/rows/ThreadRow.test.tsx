@@ -751,6 +751,8 @@ describe("ThreadRow", () => {
       "Customize row actions",
       "---",
       "Archive",
+      "---",
+      "Move to project…",
       "Delete",
     ]);
     fireEvent.click(
