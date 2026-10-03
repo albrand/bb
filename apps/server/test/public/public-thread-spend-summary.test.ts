@@ -372,6 +372,25 @@ describe("public thread spend summaries", () => {
         reasoningOutputTokens: null,
         totalTokens: 45,
       });
+
+      const repeatedResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      const repeatedSpend = threadSpendSummaryResponseSchema.parse(
+        await readJson(repeatedResponse),
+      );
+      expect(
+        repeatedSpend.turns.filter((turn) => turn.turnId === turnId),
+      ).toEqual([
+        {
+          turnId,
+          inputTokens: 20,
+          cachedInputTokens: 10,
+          outputTokens: 15,
+          reasoningOutputTokens: null,
+          totalTokens: 45,
+        },
+      ]);
     });
   });
 
