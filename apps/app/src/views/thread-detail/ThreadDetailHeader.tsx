@@ -50,7 +50,6 @@ const THREAD_HEADER_ACTION_BUTTON_CLASS = cn(
   "border-border/70 bg-transparent font-normal hover:bg-state-hover",
 );
 const NARROW_SPLIT_HEADER_MAX_WIDTH = 560;
-const NARROW_AGENT_ROLLUP_MAX_WIDTH = 960;
 
 interface ThreadDetailHeaderProps {
   actionsMenu: ((includeResponsiveActions: boolean) => ReactNode) | null;
@@ -114,10 +113,6 @@ export function ThreadDetailHeader({
     (isSplitPaneHeader || isCompactViewport) &&
     measuredPaneWidth > 0 &&
     measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH;
-  const usesCompactAgentRollup =
-    isCompactViewport ||
-    measuredPaneWidth === 0 ||
-    measuredPaneWidth < NARROW_AGENT_ROLLUP_MAX_WIDTH;
   useLayoutEffect(() => {
     const header = headerRef.current;
     const pane = header.closest<HTMLElement>("[data-split-pane-id]");
@@ -184,7 +179,8 @@ export function ThreadDetailHeader({
           {isEditing ? editor : <ThreadTitle title={threadTitle} />}
         </p>
         <ThreadUsageAndAgents
-          compact={usesCompactAgentRollup}
+          compact={isCompactViewport}
+          compactSummary={!isCompactViewport}
           threadId={threadId}
         />
       </div>
@@ -304,6 +300,7 @@ export function ThreadDetailHeader({
     <AppPageHeader
       headerRef={headerRef}
       center={center}
+      centerClassName="flex-1"
       actions={actions}
       isWindowDragRegion={isTopRow}
       ownsWindowTopLeft={ownsWindowTopLeft}

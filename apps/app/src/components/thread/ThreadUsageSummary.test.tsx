@@ -149,6 +149,29 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Σ 220")).toBeTruthy();
   });
 
+  it("keeps a compact desktop summary while preserving the full details popup", async () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ThreadUsageAndAgents compactSummary threadId="parent" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("2 agents · 1 working")).toBeTruthy();
+    expect(
+      container.querySelector(
+        '[data-thread-agent-rollup][data-compact-summary="true"]',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText("View ▸"));
+    expect(await screen.findByText("Scout · active")).toBeTruthy();
+    expect(screen.getByText("Writer · idle")).toBeTruthy();
+    expect(screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/))
+      .toBeTruthy();
+  });
+
   it("closes the drawer when leaving compact mode", async () => {
     const queryClient = new QueryClient();
     const { rerender } = render(

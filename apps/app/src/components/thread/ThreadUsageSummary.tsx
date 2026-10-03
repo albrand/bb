@@ -144,9 +144,11 @@ export function ThreadTurnTokenSummary({
 
 export function ThreadUsageAndAgents({
   compact = false,
+  compactSummary = false,
   threadId,
 }: {
   compact?: boolean;
+  compactSummary?: boolean;
   threadId: string;
 }) {
   const routeForThread = useThreadRoutePath();
@@ -182,27 +184,49 @@ export function ThreadUsageAndAgents({
   }
 
   return (
-    <div data-thread-agent-rollup="" className="min-w-0 shrink-0 text-xs">
+    <div
+      data-thread-agent-rollup=""
+      data-compact-summary={compactSummary ? "true" : "false"}
+      className="relative min-w-0 shrink-0 text-xs"
+    >
       {childSummary ? (
         <details className="relative min-w-0 text-muted-foreground">
           <summary className="flex min-w-0 cursor-pointer list-none items-center gap-x-2 whitespace-nowrap rounded-sm px-1 py-0.5 hover:bg-state-hover">
             <Icon name="Circle" className="size-2 fill-current" />
             <Icon name="Bot" className="size-3.5" />
-            <span>
-              Ran {count} {count === 1 ? "agent" : "agents"}
-            </span>
-            <span className="tabular-nums">
-              {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
-              waiting · {childSummary.idle ?? 0} idle ·{" "}
-              {childSummary.failed ?? 0} failed
-              {childSummary.totalTokens === null
-                ? null
-                : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
-            </span>
+            {compactSummary ? (
+              <span className="tabular-nums">
+                {count} {count === 1 ? "agent" : "agents"} · {working} working
+              </span>
+            ) : (
+              <>
+                <span>
+                  Ran {count} {count === 1 ? "agent" : "agents"}
+                </span>
+                <span className="tabular-nums">
+                  {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
+                  waiting · {childSummary.idle ?? 0} idle ·{" "}
+                  {childSummary.failed ?? 0} failed
+                  {childSummary.totalTokens === null
+                    ? null
+                    : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+                </span>
+              </>
+            )}
             <span className="text-foreground">View ▸</span>
           </summary>
           {(childSummary.children?.length ?? 0) > 0 ? (
             <ul className="absolute right-0 top-full z-30 mt-1 grid max-h-[min(60dvh,24rem)] w-[min(24rem,calc(100vw-1rem))] gap-1 overflow-y-auto rounded-md border border-border bg-background p-3 text-foreground shadow-lg">
+              {compactSummary ? (
+                <li className="border-b border-border/70 pb-2 text-muted-foreground">
+                  Ran {count} {count === 1 ? "agent" : "agents"} · {working}{" "}
+                  working · {childSummary.waiting ?? 0} waiting ·{" "}
+                  {childSummary.idle ?? 0} idle · {childSummary.failed ?? 0} failed
+                  {childSummary.totalTokens === null
+                    ? null
+                    : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+                </li>
+              ) : null}
               {childRows}
             </ul>
           ) : null}
