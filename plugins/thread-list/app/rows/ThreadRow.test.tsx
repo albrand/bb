@@ -29,6 +29,7 @@ import {
   type RenderedSlot,
 } from "@get-bb/plugin-sdk/testing/app";
 import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
+import { useAutomationWokeAt } from "../model/automation-woke.js";
 import { makeSidebarThread } from "../model/fixtures.js";
 import { sidebarShowProviderIconsAtom } from "../preferences/atoms.js";
 import {
@@ -301,6 +302,7 @@ function deferred() {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   resetSidebarTitleDoubleClickForTest();
   resetPreferencesSyncForTest();
@@ -373,6 +375,63 @@ describe("ThreadRow", () => {
     expect(
       statusSlot?.parentElement?.parentElement?.getAttribute("style"),
     ).toContain("overflow: hidden");
+  });
+
+  it("updates only rows whose automation status or elapsed minute changed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 30_000);
+    const startedAt = Date.now() - 60_000;
+    const callRpc = vi.fn().mockResolvedValue({
+      automations: [
+        {
+          automation: {
+            lastRunStatus: "running",
+            lastRunThreadId: "thr_automation_active",
+            lastRunAt: startedAt,
+          },
+        },
+      ],
+    }) as PluginBrowserBbSdk["plugins"]["callRpc"];
+    const renders: Record<string, number> = {};
+    const Probe = ({ threadId }: { threadId: string }) => {
+      const snapshot = useAutomationWokeAt(threadId);
+      renders[threadId] = (renders[threadId] ?? 0) + 1;
+      return <span>{snapshot.elapsedMinutes ?? "none"}</span>;
+    };
+    const Probes = () => (
+      <>
+        <Probe threadId="thr_automation_active" />
+        <Probe threadId="thr_automation_idle" />
+      </>
+    );
+    renderSlot(
+      { component: Probes },
+      {},
+      { sdk: { plugins: { callRpc } } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(callRpc).toHaveBeenCalledTimes(1);
+    const beforeRefresh = { ...renders };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+    expect(renders).toEqual(beforeRefresh);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(renders["thr_automation_active"]).toBe(
+      beforeRefresh["thr_automation_active"] + 1,
+    );
+    expect(renders["thr_automation_idle"]).toBe(
+      beforeRefresh["thr_automation_idle"],
+    );
   });
 
   it("renders open, draft, merged, and closed PR rows together", () => {
