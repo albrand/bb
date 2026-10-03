@@ -51,11 +51,21 @@ describe("ThreadTimelineRows token footer", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("in 4")).toBeTruthy();
-    expect(screen.getByText("out 435")).toBeTruthy();
     expect(
-      container.querySelector('[data-token-part="cached"]')?.textContent,
-    ).toBe("cached 466.2K");
+      container
+        .querySelector('[data-token-part="input"]')
+        ?.getAttribute("aria-label"),
+    ).toBe("Input 4 tokens");
+    expect(
+      container
+        .querySelector('[data-token-part="output"]')
+        ?.getAttribute("aria-label"),
+    ).toBe("Output 435 tokens");
+    expect(
+      container
+        .querySelector('[data-token-part="cached"]')
+        ?.getAttribute("aria-label"),
+    ).toBe("Cached 466,193 tokens");
     expect(screen.getByText("Σ 466.6K")).toBeTruthy();
     expect(
       container.querySelector("[data-token-total-tight]")?.textContent,
@@ -200,15 +210,21 @@ describe("ThreadTimelineRows token footer", () => {
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(firstTurn.id);
-    expect(summaries[0]?.querySelector('[data-token-part="output"]')?.textContent)
-      .toBe("out 435");
+    expect(
+      summaries[0]
+        ?.querySelector('[data-token-part="output"] [data-token-value]')
+        ?.textContent,
+    ).toBe("435");
     expect(
       summaries[1]
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(secondTurn.id);
-    expect(summaries[1]?.querySelector('[data-token-part="output"]')?.textContent)
-      .toBe("out 3.2K");
+    expect(
+      summaries[1]
+        ?.querySelector('[data-token-part="output"] [data-token-value]')
+        ?.textContent,
+    ).toBe("3.2K");
     expect(useThreadSpendSummary.mock.calls).toEqual([
       [firstTurn.threadId],
       [firstTurn.threadId],
