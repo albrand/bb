@@ -33,6 +33,7 @@ export const APP_PAGE_HEADER_SURFACE_CLASS = "bg-surface-scrim";
 
 interface AppPageHeaderProps {
   center?: ReactNode;
+  centerClassName?: string;
   actions?: ReactNode;
   className?: string;
   headerRef?: Ref<HTMLElement>;
@@ -42,6 +43,7 @@ interface AppPageHeaderProps {
 
 export function AppPageHeader({
   center,
+  centerClassName,
   actions,
   className,
   headerRef,
@@ -116,7 +118,12 @@ export function AppPageHeader({
       >
         {center ? (
           <div className="flex min-w-0 flex-1 items-center">
-            <div className="pointer-events-auto flex min-w-0 max-w-full items-center gap-2">
+            <div
+              className={cn(
+                "pointer-events-auto flex min-w-0 max-w-full items-center gap-2",
+                centerClassName,
+              )}
+            >
               {center}
             </div>
           </div>

@@ -110,17 +110,17 @@ export function ThreadDetailHeader({
   const isSplitPaneHeader = beginPaneDrag !== undefined;
   const [measuredPaneWidth, setMeasuredPaneWidth] = useState(0);
   const usesResponsiveActionOverflow =
-    isSplitPaneHeader &&
+    (isSplitPaneHeader || isCompactViewport) &&
     measuredPaneWidth > 0 &&
     measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH;
+  const usesCompactAgentDrawer =
+    isCompactViewport ||
+    (measuredPaneWidth > 0 &&
+      measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH);
   useLayoutEffect(() => {
-    if (!isSplitPaneHeader) {
-      return;
-    }
-
     const header = headerRef.current;
     const pane = header.closest<HTMLElement>("[data-split-pane-id]");
-    const measuredElement = pane ?? header;
+    const measuredElement = isSplitPaneHeader ? (pane ?? header) : header;
     const measure = () => {
       const width = measuredElement.getBoundingClientRect().width;
       if (width > 0) {
@@ -160,14 +160,15 @@ export function ThreadDetailHeader({
           isSplitPaneHeader && isFocused ? "" : undefined
         }
         className={cn(
-          "relative flex min-w-0 flex-col items-start gap-0.5",
+          "@container/thread-header relative flex min-w-0 flex-1 items-center gap-2",
           isSplitPaneHeader && "-my-1 -ml-2 rounded-md px-2 py-1",
           isSplitPaneHeader && isFocused && CONTEXT_SELECTION_SURFACE_CLASS,
         )}
       >
         <p
+          data-thread-detail-header-title=""
           className={cn(
-            "relative min-w-0 max-w-full truncate text-sm font-normal transition-colors",
+            "relative min-w-0 max-w-full flex-1 truncate text-sm font-normal transition-colors",
             isEditing && "overflow-visible",
             isSplitPaneHeader &&
               !isFocused &&
@@ -181,7 +182,11 @@ export function ThreadDetailHeader({
         >
           {isEditing ? editor : <ThreadTitle title={threadTitle} />}
         </p>
-        <ThreadUsageAndAgents threadId={threadId} />
+        <ThreadUsageAndAgents
+          compact={usesCompactAgentDrawer}
+          compactSummary={!isCompactViewport}
+          threadId={threadId}
+        />
       </div>
       {childPillLabel ? (
         <Pill variant="outline" size="sm">
@@ -299,6 +304,7 @@ export function ThreadDetailHeader({
     <AppPageHeader
       headerRef={headerRef}
       center={center}
+      centerClassName="flex-1"
       actions={actions}
       isWindowDragRegion={isTopRow}
       ownsWindowTopLeft={ownsWindowTopLeft}

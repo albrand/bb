@@ -1,3 +1,5 @@
+import { useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@bb/shared-ui/icon";
 import type {
@@ -10,6 +12,10 @@ import { sdk } from "@/lib/sdk";
 import { useThreadRoutePath } from "./ThreadTitleMentions";
 import { useQuery } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import {
+  PersistentResponsiveDrawerShell,
+  useResponsiveDrawerRealization,
+} from "@bb/shared-ui/responsive-overlay";
 
 function compactTokens(
   value: number | null | undefined,
@@ -136,7 +142,15 @@ export function ThreadTurnTokenSummary({
   );
 }
 
-export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
+export function ThreadUsageAndAgents({
+  compact = false,
+  compactSummary = false,
+  threadId,
+}: {
+  compact?: boolean;
+  compactSummary?: boolean;
+  threadId: string;
+}) {
   const routeForThread = useThreadRoutePath();
   const { data: childSummary } = useQuery<ThreadChildSummaryResponse>({
     queryKey: ["threadChildSummary", threadId],
@@ -146,42 +160,171 @@ export function ThreadUsageAndAgents({ threadId }: { threadId: string }) {
   });
   const count = childSummary?.nonDeletedChildCount ?? 0;
   if (count === 0) return null;
+  const working = childSummary?.working ?? 0;
+  const childRows = (childSummary?.children ?? []).map((child) => (
+    <li key={child.id} className="min-w-0">
+      <Link
+        className="block min-w-0 whitespace-normal break-words hover:underline"
+        to={routeForThread(child.id, undefined)}
+      >
+        {child.title ?? child.id} · {child.status}
+      </Link>
+    </li>
+  ));
+
+  if (compact) {
+    return childSummary ? (
+      <CompactThreadUsageDrawer
+        childRows={childRows}
+        count={count}
+        working={working}
+        childSummary={childSummary}
+      />
+    ) : null;
+  }
+
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+    <div
+      data-thread-agent-rollup=""
+      data-compact-summary={compactSummary ? "true" : "false"}
+      data-adaptive-summary={compactSummary ? "true" : "false"}
+      className="relative min-w-0 shrink-0 text-xs"
+    >
       {childSummary ? (
-        <details className="min-w-0 text-muted-foreground">
-          <summary className="flex min-w-0 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded-sm px-1 py-0.5 hover:bg-state-hover">
+        <details className="relative min-w-0 text-muted-foreground">
+          <summary
+            aria-label={`${count} ${count === 1 ? "agent" : "agents"}: ${working} working. View agent breakdown`}
+            data-agent-summary-trigger=""
+            className="flex min-w-0 cursor-pointer list-none items-center gap-x-2 whitespace-nowrap rounded-sm px-1 py-0.5 hover:bg-state-hover"
+          >
             <Icon name="Circle" className="size-2 fill-current" />
             <Icon name="Bot" className="size-3.5" />
-            <span>
-              Ran {count} {count === 1 ? "agent" : "agents"}
+            <span data-agent-summary-count="" className="tabular-nums">
+              {count}
             </span>
-            <span className="font-mono tabular-nums">
-              {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
-              waiting · {childSummary.idle ?? 0} idle ·{" "}
-              {childSummary.failed ?? 0} failed
-              {childSummary.totalTokens === null
-                ? null
-                : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+            {compactSummary ? (
+              <>
+                <span data-agent-summary-compact="" className="tabular-nums">
+                  {count} {count === 1 ? "agent" : "agents"} · {working} working
+                </span>
+                <span data-agent-summary-full="" className="tabular-nums">
+                  <span>
+                    Ran {count} {count === 1 ? "agent" : "agents"}
+                  </span>
+                  <span className="tabular-nums">
+                    {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
+                    waiting · {childSummary.idle ?? 0} idle ·{" "}
+                    {childSummary.failed ?? 0} failed
+                    {childSummary.totalTokens === null
+                      ? null
+                      : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  Ran {count} {count === 1 ? "agent" : "agents"}
+                </span>
+                <span className="tabular-nums">
+                  {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
+                  waiting · {childSummary.idle ?? 0} idle ·{" "}
+                  {childSummary.failed ?? 0} failed
+                  {childSummary.totalTokens === null
+                    ? null
+                    : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+                </span>
+              </>
+            )}
+            <span data-agent-summary-view="" className="text-foreground">
+              View ▸
             </span>
-            <span className="text-foreground">View ▸</span>
           </summary>
           {(childSummary.children?.length ?? 0) > 0 ? (
-            <ul className="mt-1 grid gap-1 pl-5">
-              {(childSummary.children ?? []).map((child) => (
-                <li key={child.id}>
-                  <Link
-                    className="hover:underline"
-                    to={routeForThread(child.id, undefined)}
-                  >
-                    {child.title ?? child.id} · {child.status}
-                  </Link>
+            <ul className="absolute right-0 top-full z-30 mt-1 grid max-h-[min(60dvh,24rem)] w-[min(24rem,calc(100vw-1rem))] gap-1 overflow-y-auto rounded-md border border-border bg-background p-3 text-foreground shadow-lg">
+              {compactSummary ? (
+                <li className="border-b border-border/70 pb-2 text-muted-foreground">
+                  Ran {count} {count === 1 ? "agent" : "agents"} · {working}{" "}
+                  working · {childSummary.waiting ?? 0} waiting ·{" "}
+                  {childSummary.idle ?? 0} idle · {childSummary.failed ?? 0} failed
+                  {childSummary.totalTokens === null
+                    ? null
+                    : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
                 </li>
-              ))}
+              ) : null}
+              {childRows}
             </ul>
           ) : null}
         </details>
       ) : null}
     </div>
+  );
+}
+
+function CompactThreadUsageDrawer({
+  childRows,
+  count,
+  working,
+  childSummary,
+}: {
+  childRows: ReactNode[];
+  count: number;
+  working: number;
+  childSummary: ThreadChildSummaryResponse;
+}) {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { isContentRealized } = useResponsiveDrawerRealization({
+    open: isDrawerOpen,
+  });
+  return (
+    <>
+      <button
+        type="button"
+        data-thread-agent-rollup-compact=""
+        aria-label={`View ${count} agents: ${working} working`}
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-full border border-border/70 bg-background px-1 py-1 text-xs font-normal leading-none text-muted-foreground sm:px-2"
+        onClick={() => setIsDrawerOpen(true)}
+      >
+        <Icon name="Bot" className="size-3.5" />
+        <span className="hidden whitespace-nowrap sm:inline">
+          {count} {count === 1 ? "agent" : "agents"}
+        </span>
+        <span className="whitespace-nowrap sm:hidden">{count}</span>
+      </button>
+      <PersistentResponsiveDrawerShell
+        open={isDrawerOpen}
+        onOpenChange={setIsDrawerOpen}
+        srLabel="Agent activity"
+        contentClassName="max-h-[min(80dvh,36rem)]"
+      >
+        {isContentRealized ? (
+          <div className="flex min-h-0 flex-col gap-3 overflow-hidden px-4 pb-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-medium">Agent activity</h2>
+              <button
+                type="button"
+                className="min-h-11 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-state-hover"
+                onClick={() => setIsDrawerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="shrink-0 text-sm text-muted-foreground">
+              Ran {count} {count === 1 ? "agent" : "agents"} · {working} working
+              · {childSummary.waiting} waiting · {childSummary.idle} idle
+              · {childSummary.failed} failed
+              {childSummary.totalTokens === null
+                ? null
+                : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
+            </p>
+            {childRows.length > 0 ? (
+              <ul className="min-h-0 overflow-y-auto rounded-md border border-border/70 p-3 text-sm">
+                {childRows}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </PersistentResponsiveDrawerShell>
+    </>
   );
 }

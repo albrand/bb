@@ -902,3 +902,43 @@
     transform: scaleX(1);
   }
 }
+[data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full] {
+  display: none;
+}
+
+[data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-compact] {
+  display: inline;
+}
+
+[data-agent-summary-count] {
+  display: none;
+}
+
+@container thread-header (min-width: 50rem) {
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full] {
+    display: inline;
+  }
+
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-compact] {
+    display: none;
+  }
+}
+
+@container thread-header (max-width: 28rem) {
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-compact],
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full],
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-view] {
+    display: none;
+  }
+
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-count] {
+    display: inline;
+  }
+
+  [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-trigger] {
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--background);
+    padding-inline: 0.5rem;
+  }
+}
