@@ -199,7 +199,7 @@ export function ThreadStatusGlyph({
       return (
         <Icon
           name="CircleQuestion"
-          className={cn("text-warning", iconSizeClass)}
+          className={cn("text-destructive-text", iconSizeClass)}
           aria-label={
             hideAccessibleLabel
               ? undefined
@@ -229,7 +229,7 @@ export function ThreadStatusGlyph({
       return (
         <Icon
           name="AlarmClock"
-          className={cn("text-attention", iconSizeClass)}
+          className={cn("text-warning", iconSizeClass)}
           aria-label={
             hideAccessibleLabel
               ? undefined

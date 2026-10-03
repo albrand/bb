@@ -371,9 +371,11 @@ function ProjectListNavigationLoadingRow({
 export function ProjectListShell({ children }: ProjectListShellProps) {
   return (
     <SidebarContentElementProvider>
-      <SidebarStickyStack data-sidebar-sticky-density="compact-actions">
-        <SidebarGroupContent>{children}</SidebarGroupContent>
-      </SidebarStickyStack>
+      <div className="w-full min-w-0 overflow-x-clip">
+        <SidebarStickyStack data-sidebar-sticky-density="compact-actions">
+          <SidebarGroupContent>{children}</SidebarGroupContent>
+        </SidebarStickyStack>
+      </div>
     </SidebarContentElementProvider>
   );
 }

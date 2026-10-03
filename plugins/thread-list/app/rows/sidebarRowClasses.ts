@@ -8,7 +8,7 @@ import { CONTEXT_SELECTION_SURFACE_CLASS } from "../ui/context-selection.js";
 import { SIDEBAR_HOVER_ACTIONS_GAP_CLASS } from "../ui/sidebar-hover-actions.js";
 
 export const SIDEBAR_ROW_BASE_CLASS =
-  "flex w-full items-center gap-2 rounded-md pr-0 text-sm transition-colors";
+  "flex min-w-0 w-full items-center gap-2 rounded-md pr-0 text-sm transition-colors";
 
 export const SIDEBAR_ROW_GLYPH_SLOT_CLASS =
   "inline-flex shrink-0 items-center justify-center text-subtle-foreground";
@@ -25,7 +25,7 @@ export const SIDEBAR_SUCCESS_STATUS_DOT_CLASS =
   "size-[5px] rounded-full bg-muted-foreground/60 max-md:pointer-coarse:size-1.5";
 
 const SIDEBAR_THREAD_ROW_BASE_PADDING_PX = 8;
-const SIDEBAR_THREAD_ROW_DEPTH_STEP_PX = 24;
+const SIDEBAR_THREAD_ROW_DEPTH_STEP_PX = 14;
 const SIDEBAR_THREAD_ROW_GLYPH_CENTER_OFFSET_PX = 8;
 
 export const SIDEBAR_STANDARD_ROW_PADDING_CLASS = "pl-2";
