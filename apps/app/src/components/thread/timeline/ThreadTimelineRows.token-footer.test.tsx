@@ -141,6 +141,9 @@ describe("ThreadTimelineRows token footer", () => {
       </MemoryRouter>,
     );
 
+    expect(container.querySelectorAll("[data-thread-turn-tokens]")).toHaveLength(
+      1,
+    );
     expect(
       container.querySelector('[data-token-part="reasoning"]')?.textContent,
     ).toBe("reason 37");
