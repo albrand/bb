@@ -914,7 +914,7 @@
   display: none;
 }
 
-@container thread-header (min-width: 58rem) {
+@container thread-header (min-width: 50rem) {
   [data-thread-agent-rollup][data-adaptive-summary="true"] [data-agent-summary-full] {
     display: inline;
   }

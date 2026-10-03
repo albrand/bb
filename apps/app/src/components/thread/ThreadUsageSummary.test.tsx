@@ -183,7 +183,7 @@ describe("thread usage summary", () => {
     const appCss = readFileSync("src/app.css", "utf8");
 
     expect(appCss).toMatch(
-      /@container thread-header \(min-width: 58rem\)[\s\S]*?\[data-agent-summary-full\][\s\S]*?display: inline/,
+      /@container thread-header \(min-width: 50rem\)[\s\S]*?\[data-agent-summary-full\][\s\S]*?display: inline/,
     );
     expect(appCss).toMatch(
       /@container thread-header \(max-width: 28rem\)[\s\S]*?\[data-agent-summary-count\][\s\S]*?display: inline/,
