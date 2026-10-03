@@ -727,10 +727,44 @@ function findActiveTurnId(
   rows: readonly ThreadTimelineViewRow[],
   streamingAssistantMessageId: string | null,
 ): string | null {
-  if (streamingAssistantMessageId === null) return null;
-  return (
-    rows.find((row) => row.id === streamingAssistantMessageId)?.turnId ?? null
-  );
+  if (streamingAssistantMessageId !== null) {
+    const streamingTurnId = rows.find(
+      (row) => row.id === streamingAssistantMessageId,
+    )?.turnId;
+    if (streamingTurnId != null) return streamingTurnId;
+  }
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row === undefined) continue;
+    if (row.kind === "turn") {
+      if (row.status === "pending" && row.turnId !== null) {
+        return row.turnId;
+      }
+      if (row.children !== null) {
+        const childTurnId = findActiveTurnId(row.children, null);
+        if (childTurnId !== null) return childTurnId;
+      }
+      continue;
+    }
+    if (row.kind === "work") {
+      if (row.status === "pending" && row.turnId !== null) {
+        return row.turnId;
+      }
+      if (row.workKind === "delegation") {
+        const childTurnId = findActiveTurnId(row.childRows, null);
+        if (childTurnId !== null) return childTurnId;
+      }
+      continue;
+    }
+    if (
+      (row.kind === "step-summary" || row.kind === "bundle-summary") &&
+      row.status === "pending" &&
+      row.turnId !== null
+    ) {
+      return row.turnId;
+    }
+  }
+  return null;
 }
 
 export function findStreamingAssistantMessageId(
@@ -2311,7 +2345,10 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                           }
                           flatTurnTokenSummaryExcludedTurnId={
                             scopeActive
-                              ? findActiveTurnId(rows, streamingAssistantMessageId)
+                              ? findActiveTurnId(
+                                  rows,
+                                  streamingAssistantMessageId,
+                                )
                               : undefined
                           }
                           scopeActive={scopeActive}

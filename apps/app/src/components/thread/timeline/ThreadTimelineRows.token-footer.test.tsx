@@ -4,7 +4,10 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import liveCapture from "@/test/fixtures/thread-token-footer-live-capture.json";
-import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
+import {
+  commandRow,
+  conversationRow,
+} from "@/test/fixtures/thread-timeline-rows";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
 const useThreadSpendSummary = vi.hoisted(() => vi.fn());
@@ -172,6 +175,71 @@ describe("ThreadTimelineRows token footer", () => {
     ).toBe(row.id);
   });
 
+  it("hides an active turn with spend while paused in a tool call", () => {
+    const firstTurn = liveCapture.sample.timelineRow;
+    const activeTurn = liveCapture.sample.secondTimelineRow;
+    const completedAssistant = conversationRow({
+      id: firstTurn.id,
+      threadId: firstTurn.threadId,
+      turnId: firstTurn.turnId,
+      role: "assistant",
+      text: firstTurn.text,
+      sourceSeqStart: firstTurn.sourceSeqStart,
+      sourceSeqEnd: firstTurn.sourceSeqEnd,
+    });
+    const activeAssistant = conversationRow({
+      id: activeTurn.id,
+      threadId: activeTurn.threadId,
+      turnId: activeTurn.turnId,
+      role: "assistant",
+      text: activeTurn.text,
+      sourceSeqStart: activeTurn.sourceSeqStart,
+      sourceSeqEnd: activeTurn.sourceSeqEnd,
+    });
+    const pendingToolCall = commandRow({
+      id: "active-tool-call",
+      command: "node scripts/check.js",
+      threadId: activeTurn.threadId,
+      turnId: activeTurn.turnId,
+      status: "pending",
+      seq: activeTurn.sourceSeqEnd + 1,
+    });
+
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={firstTurn.threadId}
+          timelineRows={[completedAssistant, activeAssistant, pendingToolCall]}
+          threadRuntimeDisplayStatus="active"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    const summaries = container.querySelectorAll("[data-thread-turn-tokens]");
+    expect(summaries).toHaveLength(1);
+    expect(
+      summaries[0]
+        ?.closest("[data-timeline-row-id]")
+        ?.getAttribute("data-timeline-row-id"),
+    ).toBe(firstTurn.id);
+
+    rerender(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={firstTurn.threadId}
+          timelineRows={[completedAssistant, activeAssistant, pendingToolCall]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      container.querySelectorAll("[data-thread-turn-tokens]"),
+    ).toHaveLength(2);
+  });
+
   it("joins each captured response to its own turn when history is incomplete", () => {
     const sample = liveCapture.sample;
     const firstTurn = sample.timelineRow;
@@ -211,9 +279,9 @@ describe("ThreadTimelineRows token footer", () => {
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(firstTurn.id);
     expect(
-      summaries[0]
-        ?.querySelector('[data-token-part="output"] [data-token-value]')
-        ?.textContent,
+      summaries[0]?.querySelector(
+        '[data-token-part="output"] [data-token-value]',
+      )?.textContent,
     ).toBe("435");
     expect(
       summaries[1]
@@ -221,9 +289,9 @@ describe("ThreadTimelineRows token footer", () => {
         ?.getAttribute("data-timeline-row-id"),
     ).toBe(secondTurn.id);
     expect(
-      summaries[1]
-        ?.querySelector('[data-token-part="output"] [data-token-value]')
-        ?.textContent,
+      summaries[1]?.querySelector(
+        '[data-token-part="output"] [data-token-value]',
+      )?.textContent,
     ).toBe("3.2K");
     expect(useThreadSpendSummary.mock.calls).toEqual([
       [firstTurn.threadId],
