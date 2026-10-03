@@ -66,7 +66,7 @@ describe("SidebarSectionRow", () => {
       label.compareDocumentPosition(disclosure) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
-    expect(row?.style.paddingLeft).toBe("32px");
+    expect(row?.style.paddingLeft).toBe("22px");
     expect(row?.classList.contains(SIDEBAR_GROUP_TEXT_CLASS)).toBe(true);
     for (const token of SIDEBAR_CONTROL_STATE_CLASS.split(" ")) {
       expect(disclosure.classList.contains(token)).toBe(true);

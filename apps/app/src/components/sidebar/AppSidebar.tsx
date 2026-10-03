@@ -216,7 +216,10 @@ export function AppSidebar({
         onNavigate={closeOnMobile}
       />
       <SidebarContent
-        className={cn(isCompactCustomizeModeActive && "hidden")}
+        className={cn(
+          "overflow-x-clip",
+          isCompactCustomizeModeActive && "hidden",
+        )}
         aria-hidden={isCompactCustomizeModeActive ? true : undefined}
         inert={isCompactCustomizeModeActive ? true : undefined}
       >

@@ -321,6 +321,33 @@
     opacity: 0;
   }
 
+  :where(.bb-sidebar-hover-actions-row) {
+    container-name: sidebar-thread-row;
+    container-type: inline-size;
+  }
+
+  :where(.bb-sidebar-success-status) {
+    color: color-mix(in oklch, var(--success) 80%, var(--ink));
+  }
+
+  :where(.bb-sidebar-hover-actions-row [data-sidebar-status-compact]) {
+    display: inline;
+  }
+
+  :where(.bb-sidebar-hover-actions-row [data-sidebar-status-full]) {
+    display: none;
+  }
+
+  @container sidebar-thread-row (min-width: 24rem) {
+    :where(.bb-sidebar-hover-actions-row [data-sidebar-status-compact]) {
+      display: none;
+    }
+
+    :where(.bb-sidebar-hover-actions-row [data-sidebar-status-full]) {
+      display: inline;
+    }
+  }
+
   @media (max-width: 767px) and (pointer: coarse) {
     /* The overlay is hidden on coarse phones, so no room is reserved. */
     .bb-sidebar-hover-actions-row:is(:hover, :has(:focus-visible))

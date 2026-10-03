@@ -77,6 +77,7 @@ import {
   SIDEBAR_ROW_OPEN_IN_SPLIT_STATE_CLASS,
   SIDEBAR_ROW_SELECTED_STATE_CLASS,
   SIDEBAR_STATUS_GLYPH_BOX_CLASS,
+  SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
   SIDEBAR_WORKING_STATUS_COLOR_CLASS,
   getSidebarThreadGroupLineLeft,
   getSidebarThreadRowPaddingLeft,
@@ -268,16 +269,17 @@ export function CollapsedThreadStatusGlyph({
 }
 
 type ThreadTrailingIndicatorProps = ThreadStatusGlyphProps & {
+  automationStartedAt: number | null;
+  elapsedMinutes: number | null;
   pluginStatus: PluginSidebarThreadRowStatus | null;
-  threadId: string;
 };
 
 function ThreadTrailingIndicator({
+  automationStartedAt,
+  elapsedMinutes,
   pluginStatus,
-  threadId,
   ...statusProps
 }: ThreadTrailingIndicatorProps) {
-  const { startedAt: automationStartedAt, now } = useAutomationWokeAt(threadId);
   const isAutomationWoken = automationStartedAt !== null;
   const resolvedStatusProps = { ...statusProps, isAutomationWoken };
   const { indicatorKind, pluginStatusIsVisible } = resolveThreadStatus(
@@ -289,10 +291,6 @@ function ThreadTrailingIndicator({
     return null;
   }
 
-  const elapsedMinutes =
-    automationStartedAt === null
-      ? null
-      : Math.max(1, Math.floor((now - automationStartedAt) / 60_000));
   const statusText =
     indicatorKind === "needs-input"
       ? "Needs input"
@@ -304,15 +302,18 @@ function ThreadTrailingIndicator({
             ? "Done"
             : null;
 
-  return (
+  const indicator = (
     <span
       data-sidebar-thread-trailing-indicator=""
+      data-sidebar-status-slot={statusText === null ? undefined : ""}
       className={cn(
         "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full px-1.5 font-medium text-xs",
-        indicatorKind === "needs-input" && "text-warning",
+        statusText !== null &&
+          "w-full justify-end gap-1 overflow-hidden whitespace-nowrap px-0",
+        indicatorKind === "needs-input" && "text-destructive-text",
         indicatorKind === "working" && SIDEBAR_WORKING_STATUS_COLOR_CLASS,
-        indicatorKind === "woke" && "text-attention",
-        indicatorKind === "done-unread" && "text-success-foreground",
+        indicatorKind === "woke" && "text-warning",
+        indicatorKind === "done-unread" && SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
         statusText === null && SIDEBAR_ROW_GLYPH_SLOT_CLASS,
         statusText === null && SIDEBAR_STATUS_GLYPH_BOX_CLASS,
       )}
@@ -323,8 +324,22 @@ function ThreadTrailingIndicator({
         hideAccessibleLabel={statusText !== null}
         pluginStatus={pluginStatus}
       />
-      {statusText}
+      {statusText === null ? null : (
+        <span className="min-w-0 truncate text-right">
+          {elapsedMinutes === null ? null : (
+            <span data-sidebar-status-compact="">{elapsedMinutes}m</span>
+          )}
+          <span data-sidebar-status-full="">{statusText}</span>
+        </span>
+      )}
     </span>
+  );
+  if (statusText === null) return indicator;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{indicator}</TooltipTrigger>
+      <TooltipContent side="top">{statusText}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -475,6 +490,11 @@ function ThreadRowComponent({
     [startEditing],
   );
   const miniMap = useThreadSplitMiniMap(thread.id);
+  const { startedAt: automationStartedAt, elapsedMinutes } =
+    useAutomationWokeAt(
+      thread.id,
+      miniMap === null && thread.archivedAt === null,
+    );
   const isOpenInSplit = miniMap !== null;
   const split = experimental_useSidebarThreadSplit(thread.id);
   const onSplitDragPointerDown = split.splitProps.onPointerDown;
@@ -540,6 +560,18 @@ function ThreadRowComponent({
     pluginThreadRowStatus,
   );
   const trailingIndicatorKind = trailingIndicatorResolution.indicatorKind;
+  const hasFixedStatusSlot =
+    thread.archivedAt === null &&
+    (automationStartedAt !== null ||
+      trailingIndicatorKind === "needs-input" ||
+      trailingIndicatorKind === "working" ||
+      trailingIndicatorKind === "woke" ||
+      trailingIndicatorKind === "done-unread");
+  const hasVisibleStatus =
+    trailingIndicatorKind !== "none" ||
+    trailingIndicatorResolution.pluginStatusIsVisible ||
+    miniMap !== null ||
+    automationStartedAt !== null;
   const splitIndicatorIsWorking = hasThreadListWorkingActivity(
     trailingIndicatorState,
     pluginThreadRowStatus?.tone === "running",
@@ -616,16 +648,18 @@ function ThreadRowComponent({
       <span
         className={cn(
           "relative flex min-w-0 flex-1 items-center gap-1.5 self-stretch",
+          hasVisibleStatus && "gap-1",
           !isActionsOpen &&
             "group-data-[sidebar-touch-armed=true]/thread-row:hidden",
           !shortcut &&
             !isEditing &&
-            (reserveActionSpace
+            (reserveActionSpace && !hasVisibleStatus
               ? "pr-(--bb-sidebar-hover-actions-inset) max-md:pointer-coarse:pr-0"
               : SIDEBAR_HOVER_ACTIONS_INSET_CLASS),
         )}
         style={getHoverActionsInsetStyle(
-          thread.archivedAt !== null ? 1 : rowActionIds.length,
+          (thread.archivedAt !== null ? 1 : rowActionIds.length) +
+            (hasFixedStatusSlot ? 2 : 0),
         )}
       >
         <a
@@ -662,10 +696,7 @@ function ThreadRowComponent({
         />
         <span
           className={cn(
-            "pointer-events-none relative flex min-w-0 items-center self-stretch",
-            ((crossProjectLabel === null && (!parentOptions || !hasChildren)) ||
-              isEditing) &&
-              "flex-1",
+            "pointer-events-none relative flex min-w-0 flex-1 items-center self-stretch",
           )}
         >
           {provider ? (
@@ -698,10 +729,7 @@ function ThreadRowComponent({
             </span>
           ) : (
             <span
-              className={cn(
-                "bb-thread-title",
-                crossProjectLabel !== null && "min-w-0 truncate",
-              )}
+              className={cn("bb-thread-title", "min-w-0 flex-1 truncate")}
               title={labelTitle}
               onDoubleClick={startTitleEditing}
             >
@@ -732,7 +760,7 @@ function ThreadRowComponent({
         {parentOptions && hasChildren ? (
           <SidebarChildToggleChevron
             disabled={isEditing}
-            className={isEditing ? "hidden" : undefined}
+            className={cn(isEditing && "hidden", hasVisibleStatus && "size-4")}
             isCollapsed={isParentCollapsed}
             expandLabel={`Expand ${labelTitle} threads`}
             collapseLabel={`Collapse ${labelTitle} threads`}
@@ -757,7 +785,9 @@ function ThreadRowComponent({
           isEditing && "hidden",
         )}
       >
-        <SidebarThreadPullRequestChip threadId={thread.id} />
+        {hasVisibleStatus ? null : (
+          <SidebarThreadPullRequestChip threadId={thread.id} />
+        )}
         {thread.archivedAt !== null ? (
           <span className="relative flex items-center max-md:pointer-coarse:hidden">
             <div
@@ -793,7 +823,17 @@ function ThreadRowComponent({
               className={cn(
                 "relative shrink-0",
                 COARSE_POINTER_ROW_ACTION_SIZE_CLASS,
+                hasFixedStatusSlot && "justify-end",
               )}
+              style={
+                hasFixedStatusSlot
+                  ? {
+                      width: "clamp(2.5rem, 18cqi, 7rem)",
+                      minWidth: "2.5rem",
+                      overflow: "hidden",
+                    }
+                  : undefined
+              }
             >
               <span
                 data-sidebar-hover-actions-open={
@@ -821,7 +861,8 @@ function ThreadRowComponent({
                 ) : (
                   <ThreadTrailingIndicator
                     {...trailingIndicatorState}
-                    threadId={thread.id}
+                    automationStartedAt={automationStartedAt}
+                    elapsedMinutes={elapsedMinutes}
                     hideIdleDraftLabel={
                       !hasHiddenChildren && trailingIndicatorKind === "draft"
                     }
@@ -835,10 +876,13 @@ function ThreadRowComponent({
                 }
                 className={cn(
                   SIDEBAR_HOVER_ACTIONS_CLASS,
-                  "absolute inset-y-0 right-0 z-10 flex items-center justify-end max-md:pointer-coarse:hidden",
+                  "absolute inset-y-0 right-0 z-10 flex items-center justify-end gap-1 max-md:pointer-coarse:hidden",
                   isEditing && "invisible pointer-events-none",
                 )}
               >
+                {hasVisibleStatus ? (
+                  <SidebarThreadPullRequestChip threadId={thread.id} />
+                ) : null}
                 <SidebarRowControls
                   primaryAction={
                     <ThreadRowQuickActions

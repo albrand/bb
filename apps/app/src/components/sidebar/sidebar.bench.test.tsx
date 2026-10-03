@@ -111,6 +111,22 @@ async function loadPluginThreadListReplacement(): Promise<
 }
 
 vi.mock("@/hooks/useLocalPathPicker", () => ({
+  useLocalPathPicker: () => ({
+    isAvailable: true,
+    hostId: "host_test",
+    hostName: "bee",
+    openPathEntry: vi.fn(),
+    openPicker: vi.fn(),
+    platform: "linux",
+    projectPathDialog: {
+      isOpen: false,
+      onClose: vi.fn(),
+      onOpen: vi.fn(),
+      onOpenChange: vi.fn(),
+      target: null,
+    },
+    submitProjectPath: vi.fn(),
+  }),
   usePathPickerHost: () => ({ hostId: null, hostName: null }),
 }));
 

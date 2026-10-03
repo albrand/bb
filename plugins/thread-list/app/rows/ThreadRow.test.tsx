@@ -29,6 +29,7 @@ import {
   type RenderedSlot,
 } from "@get-bb/plugin-sdk/testing/app";
 import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
+import { useAutomationWokeAt } from "../model/automation-woke.js";
 import { makeSidebarThread } from "../model/fixtures.js";
 import { sidebarShowProviderIconsAtom } from "../preferences/atoms.js";
 import {
@@ -301,6 +302,7 @@ function deferred() {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   resetSidebarTitleDoubleClickForTest();
   resetPreferencesSyncForTest();
@@ -315,7 +317,7 @@ describe("ThreadRow", () => {
           automation: {
             lastRunStatus: "running",
             lastRunThreadId: "thr_woke",
-            lastRunAt: Date.now() - 3 * 60_000,
+            lastRunAt: Date.now() - (3 * 60_000 + 30_000),
           },
         },
       ],
@@ -334,15 +336,101 @@ describe("ThreadRow", () => {
       createThread({ id: "thr_done", isUnread: true }),
     ];
     renderThreadRows(threads, callRpc);
-    await waitFor(() => expect(screen.getByText("Needs input")).toBeTruthy());
-    expect(screen.getByText("Working")).toBeTruthy();
-    expect(screen.getByText("Woke 3m")).toBeTruthy();
-    expect(screen.getByText("Done")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Needs input")).toBeTruthy(),
+    );
+    expect(screen.getByLabelText("Working")).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText("Woke 3m")).toBeTruthy());
+    expect(screen.getByLabelText("Done")).toBeTruthy();
     expect(callRpc).toHaveBeenCalledWith(
       expect.objectContaining({
         pluginId: "automations",
         method: "automations_overview",
       }),
+    );
+  });
+
+  it("reserves a compact status slot with full accessible status text", async () => {
+    const callRpc = vi.fn().mockResolvedValue({
+      automations: [],
+    }) as PluginBrowserBbSdk["plugins"]["callRpc"];
+    const { container } = renderThreadRows(
+      [createThread({ id: "thr_done", isUnread: true })],
+      callRpc,
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-sidebar-status-slot]"),
+      ).not.toBeNull(),
+    );
+    expect(
+      container.querySelector('[data-sidebar-status-slot][aria-label="Done"]'),
+    ).not.toBeNull();
+    const statusSlot = container.querySelector("[data-sidebar-status-slot]");
+    expect(statusSlot?.classList.contains("whitespace-nowrap")).toBe(true);
+    expect(
+      statusSlot?.parentElement?.parentElement?.getAttribute("style"),
+    ).toContain("min-width: 2.5rem");
+    expect(
+      statusSlot?.parentElement?.parentElement?.getAttribute("style"),
+    ).toContain("overflow: hidden");
+  });
+
+  it("updates only rows whose automation status or elapsed minute changed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 30_000);
+    const startedAt = Date.now() - 60_000;
+    const callRpc = vi.fn().mockResolvedValue({
+      automations: [
+        {
+          automation: {
+            lastRunStatus: "running",
+            lastRunThreadId: "thr_automation_active",
+            lastRunAt: startedAt,
+          },
+        },
+      ],
+    }) as PluginBrowserBbSdk["plugins"]["callRpc"];
+    const renders: Record<string, number> = {};
+    const Probe = ({ threadId }: { threadId: string }) => {
+      const snapshot = useAutomationWokeAt(threadId);
+      renders[threadId] = (renders[threadId] ?? 0) + 1;
+      return <span>{snapshot.elapsedMinutes ?? "none"}</span>;
+    };
+    const Probes = () => (
+      <>
+        <Probe threadId="thr_automation_active" />
+        <Probe threadId="thr_automation_idle" />
+      </>
+    );
+    renderSlot(
+      { component: Probes },
+      {},
+      { sdk: { plugins: { callRpc } } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(callRpc).toHaveBeenCalledTimes(1);
+    const beforeRefresh = { ...renders };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+    expect(renders).toEqual(beforeRefresh);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(renders["thr_automation_active"]).toBe(
+      beforeRefresh["thr_automation_active"] + 1,
+    );
+    expect(renders["thr_automation_idle"]).toBe(
+      beforeRefresh["thr_automation_idle"],
     );
   });
 
@@ -374,6 +462,18 @@ describe("ThreadRow", () => {
       ).toBeTruthy();
       expect(slot.getByText(`${state} thread`)).toBeTruthy();
     }
+  });
+
+  it("moves the PR chip into hover actions while a status uses the row slot", () => {
+    renderThreadRow({
+      thread: createThread({ isUnread: true }),
+      sidebarPullRequest: createPullRequest("open"),
+    });
+    const pullRequest = screen.getByRole("link", {
+      name: /Pull request #10843/,
+    });
+
+    expect(pullRequest.closest(".bb-sidebar-hover-actions")).not.toBeNull();
   });
 
   it.each([
@@ -606,7 +706,7 @@ describe("ThreadRow", () => {
       document
         .querySelector<HTMLElement>(".bb-sidebar-hover-actions-inset")
         ?.style.getPropertyValue("--bb-sidebar-hover-actions-inset"),
-    ).toBe("calc(var(--spacing) * 22.5)");
+    ).toBe("calc(var(--spacing) * 37.5)");
     fireEvent.click(screen.getByRole("button", { name: "Pin" }));
     expect(slot.inspection.sidebarActionCalls).toEqual([
       { method: "setPinned", threadId: "thr_test", pinned: true },
@@ -622,7 +722,7 @@ describe("ThreadRow", () => {
       document
         .querySelector<HTMLElement>(".bb-sidebar-hover-actions-inset")
         ?.style.getPropertyValue("--bb-sidebar-hover-actions-inset"),
-    ).toBe("calc(var(--spacing) * 0)");
+    ).toBe("calc(var(--spacing) * 15)");
   });
 
   it.each([[[]], [["pin", "copyLink", "archive"]]] as const)(
@@ -1375,7 +1475,11 @@ describe("ThreadRow", () => {
       }),
     });
 
-    expect(screen.getByLabelText("Done")).not.toBeNull();
+    const doneStatus = screen.getByLabelText("Done");
+    expect(doneStatus).not.toBeNull();
+    expect(doneStatus.classList.contains(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS)).toBe(
+      true,
+    );
     expect(
       screen.queryByLabelText("Thread has a message waiting to send"),
     ).toBeNull();
@@ -1439,22 +1543,22 @@ describe("ThreadRow", () => {
       const titleWrapper = link.nextElementSibling;
       expect(
         titleContainer?.classList.contains("bb-sidebar-hover-actions-inset"),
-      ).toBe(false);
+      ).toBe(true);
       expect(
         titleContainer?.classList.contains(
           "pr-(--bb-sidebar-hover-actions-inset)",
         ),
-      ).toBe(true);
+      ).toBe(false);
       expect(
         titleContainer?.style.getPropertyValue(
           "--bb-sidebar-hover-actions-inset",
         ),
-      ).toBe("calc(var(--spacing) * 7.5)");
+      ).toBe("calc(var(--spacing) * 22.5)");
       expect(
         titleContainer?.classList.contains("max-md:pointer-coarse:pr-0"),
-      ).toBe(true);
+      ).toBe(false);
       expect(navigationTarget?.classList.contains("flex-1")).toBe(true);
-      expect(titleWrapper?.classList.contains("flex-1")).toBe(false);
+      expect(titleWrapper?.classList.contains("flex-1")).toBe(true);
       fireEvent.click(toggle);
       expect(onToggleCollapsed).toHaveBeenCalledWith("thr_test");
     },
@@ -1570,7 +1674,7 @@ describe("ThreadRow", () => {
     expect(
       tier?.style.getPropertyValue("--bb-sidebar-sticky-parent-level"),
     ).toBe("1");
-    expect(tier?.style.paddingLeft).toBe("56px");
+    expect(tier?.style.paddingLeft).toBe("36px");
     expect(tier?.querySelector('[aria-hidden="true"].w-px')).not.toBeNull();
   });
 

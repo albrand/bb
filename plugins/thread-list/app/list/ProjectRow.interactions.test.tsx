@@ -598,7 +598,7 @@ describe("ProjectRow interactions", () => {
     expect(
       child?.closest<HTMLElement>(".bb-sidebar-hover-actions-row")?.style
         .paddingLeft,
-    ).toBe("32px");
+    ).toBe("22px");
   });
 
   it("shows generic runtime activity before a named workflow rollup", () => {
