@@ -1,7 +1,15 @@
 import type { TimelineRow, TimelineTurnRow } from "@bb/server-contract";
 import { useQueryClient } from "@tanstack/react-query";
-import { ThreadUsageAndAgents } from "@/components/thread/ThreadUsageSummary";
+import {
+  ThreadTurnTokenTooltipContent,
+  ThreadUsageAndAgents,
+} from "@/components/thread/ThreadUsageSummary";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@bb/shared-ui/tooltip";
 import {
   commandRow,
   conversationRow,
@@ -360,5 +368,31 @@ export function TokenFooterLayout() {
       </p>
       <TokenFooterThread />
     </div>
+  );
+}
+
+export function TokenFooterTooltip() {
+  return (
+    <TooltipProvider>
+      <div className="p-3">
+        <Tooltip open>
+          <TooltipTrigger asChild>
+            <span className="font-mono text-xs text-muted-foreground">
+              in 30 · out 6.1K · reason 500 · cached 2.8M · Σ 2.9M
+            </span>
+          </TooltipTrigger>
+          <ThreadTurnTokenTooltipContent
+            turn={{
+              inputTokens: 30,
+              outputTokens: 6_149,
+              reasoningOutputTokens: 500,
+              cachedInputTokens: 2_843_776,
+              totalTokens: 2_850_455,
+            }}
+            reasoningDisplayValue={500}
+          />
+        </Tooltip>
+      </div>
+    </TooltipProvider>
   );
 }

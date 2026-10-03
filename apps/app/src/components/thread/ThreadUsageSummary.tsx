@@ -1,6 +1,9 @@
 import { Link } from "react-router-dom";
 import { Icon } from "@bb/shared-ui/icon";
-import type { ThreadChildSummaryResponse } from "@bb/server-contract";
+import type {
+  ThreadChildSummaryResponse,
+  ThreadSpendBreakdownResponse,
+} from "@bb/server-contract";
 import { tokenBreakdownLabels } from "@bb/domain";
 import { useThreadSpendSummary } from "@/hooks/queries/thread-queries";
 import { sdk } from "@/lib/sdk";
@@ -20,6 +23,43 @@ function exactTokens(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString("en");
 }
 
+export function ThreadTurnTokenTooltipContent({
+  turn,
+  reasoningDisplayValue,
+}: {
+  turn: ThreadSpendBreakdownResponse;
+  reasoningDisplayValue: number | null;
+}) {
+  const labels = tokenBreakdownLabels(reasoningDisplayValue);
+  return (
+    <TooltipContent
+      side="bottom"
+      className="max-w-[min(24rem,calc(100vw-1rem))]"
+    >
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs tabular-nums">
+        <span>{labels.input}</span>
+        <span>{exactTokens(turn.inputTokens)}</span>
+        <span>Output</span>
+        <span>{exactTokens(turn.outputTokens)}</span>
+        <span>
+          {reasoningDisplayValue === null ? "Reasoning" : labels.reasoning}
+        </span>
+        <span>
+          {reasoningDisplayValue === null
+            ? "Not reported"
+            : reasoningDisplayValue === 0
+              ? "Included in output"
+              : exactTokens(reasoningDisplayValue)}
+        </span>
+        <span>Cached (read + write)</span>
+        <span>{exactTokens(turn.cachedInputTokens)}</span>
+        <span>Total</span>
+        <span>{exactTokens(turn.totalTokens)}</span>
+      </div>
+    </TooltipContent>
+  );
+}
+
 export function ThreadTurnTokenSummary({
   threadId,
   turnId,
@@ -32,7 +72,6 @@ export function ThreadTurnTokenSummary({
   if (!turn) return null;
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
-  const labels = tokenBreakdownLabels(reasoningDisplayValue);
   const compact = (value: number | null) =>
     value === null ? null : compactTokens(value);
   return (
@@ -63,31 +102,10 @@ export function ThreadTurnTokenSummary({
           <span data-token-part="total">Σ {compact(turn.totalTokens)}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        className="max-w-[min(24rem,calc(100vw-1rem))]"
-      >
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs tabular-nums">
-          <span>{labels.input}</span>
-          <span>{exactTokens(turn.inputTokens)}</span>
-          <span>Output</span>
-          <span>{exactTokens(turn.outputTokens)}</span>
-          <span>
-            {reasoningDisplayValue === null ? "Reasoning" : labels.reasoning}
-          </span>
-          <span>
-            {reasoningDisplayValue === null
-              ? "Not reported"
-              : reasoningDisplayValue === 0
-                ? "Included in output"
-                : exactTokens(reasoningDisplayValue)}
-          </span>
-          <span>Cached (read + write)</span>
-          <span>{exactTokens(turn.cachedInputTokens)}</span>
-          <span>Total</span>
-          <span>{exactTokens(turn.totalTokens)}</span>
-        </div>
-      </TooltipContent>
+      <ThreadTurnTokenTooltipContent
+        turn={turn}
+        reasoningDisplayValue={reasoningDisplayValue}
+      />
     </Tooltip>
   );
 }
