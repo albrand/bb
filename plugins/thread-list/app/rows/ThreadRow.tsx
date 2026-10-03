@@ -77,6 +77,7 @@ import {
   SIDEBAR_ROW_OPEN_IN_SPLIT_STATE_CLASS,
   SIDEBAR_ROW_SELECTED_STATE_CLASS,
   SIDEBAR_STATUS_GLYPH_BOX_CLASS,
+  SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
   SIDEBAR_WORKING_STATUS_COLOR_CLASS,
   getSidebarThreadGroupLineLeft,
   getSidebarThreadRowPaddingLeft,
@@ -312,7 +313,7 @@ function ThreadTrailingIndicator({
         indicatorKind === "needs-input" && "text-destructive-text",
         indicatorKind === "working" && SIDEBAR_WORKING_STATUS_COLOR_CLASS,
         indicatorKind === "woke" && "text-warning",
-        indicatorKind === "done-unread" && "text-success-foreground",
+        indicatorKind === "done-unread" && SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
         statusText === null && SIDEBAR_ROW_GLYPH_SLOT_CLASS,
         statusText === null && SIDEBAR_STATUS_GLYPH_BOX_CLASS,
       )}

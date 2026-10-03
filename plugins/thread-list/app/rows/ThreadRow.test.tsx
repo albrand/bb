@@ -1475,7 +1475,11 @@ describe("ThreadRow", () => {
       }),
     });
 
-    expect(screen.getByLabelText("Done")).not.toBeNull();
+    const doneStatus = screen.getByLabelText("Done");
+    expect(doneStatus).not.toBeNull();
+    expect(doneStatus.classList.contains(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS)).toBe(
+      true,
+    );
     expect(
       screen.queryByLabelText("Thread has a message waiting to send"),
     ).toBeNull();

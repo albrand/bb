@@ -326,6 +326,10 @@
     container-type: inline-size;
   }
 
+  :where(.bb-sidebar-success-status) {
+    color: color-mix(in oklch, var(--success) 80%, var(--ink));
+  }
+
   :where(.bb-sidebar-hover-actions-row [data-sidebar-status-compact]) {
     display: inline;
   }

@@ -19,7 +19,8 @@ export const SIDEBAR_STATUS_GLYPH_BOX_CLASS = "h-4 w-4";
 
 export const SIDEBAR_WORKING_STATUS_COLOR_CLASS = "text-timeline-accent";
 
-export const SIDEBAR_SUCCESS_STATUS_COLOR_CLASS = "text-success-foreground";
+export const SIDEBAR_SUCCESS_STATUS_COLOR_CLASS =
+  "bb-sidebar-success-status";
 
 export const SIDEBAR_SUCCESS_STATUS_DOT_CLASS =
   "size-[5px] rounded-full bg-muted-foreground/60 max-md:pointer-coarse:size-1.5";
