@@ -93,6 +93,12 @@ async function refreshAutomationSnapshots() {
   }
 }
 
+function refreshAutomationSnapshotsInBackground() {
+  refreshAutomationSnapshots().catch((error: unknown) => {
+    console.error("Unable to refresh automation status snapshots", error);
+  });
+}
+
 function subscribeToAutomationSnapshot(
   threadId: string,
   listener: () => void,
@@ -106,8 +112,8 @@ function subscribeToAutomationSnapshot(
   listeners.add(listener);
   activeSdk ??= sdk;
   if (timer === null) {
-    void refreshAutomationSnapshots();
-    timer = setInterval(() => void refreshAutomationSnapshots(), 20_000);
+    refreshAutomationSnapshotsInBackground();
+    timer = setInterval(refreshAutomationSnapshotsInBackground, 20_000);
   }
   return () => {
     const current = subscribers.get(threadId);
