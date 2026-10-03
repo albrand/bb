@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import liveCapture from "@/test/fixtures/thread-token-footer-live-capture.json";
@@ -99,6 +101,30 @@ describe("ThreadTimelineRows token footer", () => {
     expect(
       container.querySelector("[data-token-total-tight]")?.textContent,
     ).toBe("467K");
+    const breakdown = container.querySelector("[data-thread-turn-tokens]");
+    expect(breakdown?.getAttribute("class")).toContain("flex-wrap");
+    expect(breakdown?.getAttribute("class")).toContain("whitespace-normal");
+    const trailingGroup = container.querySelector("[data-token-trailing-group]");
+    expect(
+      trailingGroup?.querySelector('[data-token-part="cached"]'),
+    ).toBeTruthy();
+    expect(
+      trailingGroup?.querySelector('[data-token-part="total"]'),
+    ).toBeTruthy();
+  });
+
+  it("keeps token parts visible and allows them to wrap in narrow action rows", () => {
+    const actionBarStyles = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/thread/timeline/message-action-bar.css",
+      ),
+      "utf8",
+    );
+    expect(actionBarStyles).not.toMatch(
+      /\[data-thread-turn-tokens\]\s*\[data-token-part="(?:reasoning|output|input|cached)"\]\s*\{\s*display:\s*none\s*;/,
+    );
+    expect(actionBarStyles).toContain("flex-wrap: wrap");
   });
 
   it("renders captured reasoning tokens on a wide flat Claude response", () => {

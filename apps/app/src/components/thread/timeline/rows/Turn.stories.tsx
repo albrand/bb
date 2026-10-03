@@ -278,6 +278,183 @@ const tokenTurnRows: TimelineTurnRow[] = [
   },
 ];
 
+const activeFooterThreadIds = {
+  claude: "thr_token_footer_active_claude",
+  codex: "thr_token_footer_active_codex",
+};
+
+function makeActiveFooterAssistant(
+  threadId: string,
+  turnId: string,
+  seq: number,
+  text: string,
+): TimelineRow {
+  return conversationRow({
+    id: `${threadId}:assistant-${turnId}`,
+    threadId,
+    turnId,
+    sourceSeqStart: seq,
+    sourceSeqEnd: seq,
+    role: "assistant",
+    text,
+  });
+}
+
+function makePausedToolCall(
+  threadId: string,
+  turnId: string,
+  seq: number,
+): TimelineRow {
+  return commandRow({
+    id: `${threadId}:command-${turnId}`,
+    threadId,
+    turnId,
+    sourceSeqStart: seq,
+    sourceSeqEnd: seq,
+    status: "pending",
+    command: "pnpm test --run",
+  });
+}
+
+const flatClaudeActiveRunRows: TimelineRow[] = [
+  makeActiveFooterAssistant(
+    activeFooterThreadIds.claude,
+    "claude-turn-1",
+    1,
+    "Claude completed response one.",
+  ),
+  makeActiveFooterAssistant(
+    activeFooterThreadIds.claude,
+    "claude-turn-2",
+    2,
+    "Claude completed response two.",
+  ),
+  makePausedToolCall(activeFooterThreadIds.claude, "claude-active-turn", 3),
+];
+
+const groupedCodexActiveRunRows: TimelineTurnRow[] = [
+  ...[
+    {
+      turnId: "codex-turn-1",
+      sourceSeqStart: 1,
+      sourceSeqEnd: 2,
+      status: "completed" as const,
+      assistantText: "Codex completed response one.",
+    },
+    {
+      turnId: "codex-turn-2",
+      sourceSeqStart: 3,
+      sourceSeqEnd: 4,
+      status: "completed" as const,
+      assistantText: "Codex completed response two.",
+    },
+    {
+      turnId: "codex-active-turn",
+      sourceSeqStart: 5,
+      sourceSeqEnd: 6,
+      status: "pending" as const,
+      assistantText: null,
+    },
+  ].map((turn) =>
+    turnRow({
+      id: `${activeFooterThreadIds.codex}:${turn.turnId}`,
+      threadId: activeFooterThreadIds.codex,
+      turnId: turn.turnId,
+      sourceSeqStart: turn.sourceSeqStart,
+      sourceSeqEnd: turn.sourceSeqEnd,
+      startedAt: 1777337120000 + turn.sourceSeqStart * 1000,
+      status: turn.status,
+      children:
+        turn.assistantText === null
+          ? [
+              makePausedToolCall(
+                activeFooterThreadIds.codex,
+                turn.turnId,
+                turn.sourceSeqEnd,
+              ),
+            ]
+          : [
+              makeActiveFooterAssistant(
+                activeFooterThreadIds.codex,
+                turn.turnId,
+                turn.sourceSeqEnd,
+                turn.assistantText,
+              ),
+            ],
+    }),
+  ),
+];
+
+function seedActiveFooterSpend(threadId: string, reasoningOutputTokens: number) {
+  const turns = ["1", "2", "active"].map((turn) => ({
+    turnId: `${threadId.includes("claude") ? "claude" : "codex"}-${turn === "active" ? "active-turn" : `turn-${turn}`}`,
+    inputTokens: turn === "active" ? 8 : 4_100,
+    cachedInputTokens: turn === "active" ? 4 : 3_200,
+    outputTokens: turn === "active" ? 6 : 890,
+    reasoningOutputTokens:
+      turn === "active" || reasoningOutputTokens === 0
+        ? 0
+        : reasoningOutputTokens,
+    totalTokens: turn === "active" ? 18 : 8_190,
+  }));
+  return {
+    historyComplete: false,
+    total: {
+      inputTokens: 8_208,
+      cachedInputTokens: 6_404,
+      outputTokens: 1_786,
+      reasoningOutputTokens,
+      totalTokens: 16_398,
+    },
+    turns,
+  };
+}
+
+function ActiveRunFooterThread({
+  provider,
+}: {
+  provider: "claude" | "codex";
+}) {
+  const queryClient = useQueryClient();
+  const threadId = activeFooterThreadIds[provider];
+  queryClient.setQueryData(
+    ["threadSpendSummary", threadId],
+    seedActiveFooterSpend(threadId, provider === "codex" ? 567 : 0),
+  );
+  const isGrouped = provider === "codex";
+  const timelineRows = isGrouped
+    ? groupedCodexActiveRunRows
+    : flatClaudeActiveRunRows;
+  return (
+    <div className="w-full min-w-0 p-3" data-active-footer-fixture={provider}>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {provider === "claude" ? "Flat Claude" : "Grouped Codex"}: two
+        completed responses followed by an active turn paused in a tool call.
+      </p>
+      <ThreadTimelineRows
+        threadId={threadId}
+        timelineRows={timelineRows}
+        threadRuntimeDisplayStatus="waiting-for-host"
+        threadIsActive={true}
+        initialExpanded={
+          isGrouped
+            ? new Set(groupedCodexActiveRunRows.map((row) => row.id))
+            : undefined
+        }
+        workspaceRootPath={undefined}
+      />
+    </div>
+  );
+}
+
+export function ActiveRunFlatClaude() {
+  return <ActiveRunFooterThread provider="claude" />;
+}
+
+export function ActiveRunGroupedCodex() {
+  return <ActiveRunFooterThread provider="codex" />;
+}
+
 function TokenFooterThread() {
   const queryClient = useQueryClient();
   queryClient.setQueryData(["threadChildSummary", TOKEN_THREAD_ID], {

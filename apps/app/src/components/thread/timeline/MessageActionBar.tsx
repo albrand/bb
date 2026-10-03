@@ -191,11 +191,9 @@ const ACTION_TOOLTIP_SIDE = "bottom";
 const MENU_CONTENT_WIDTH_CLASS = "max-w-[min(16rem,calc(100vw-1rem))]";
 
 const ACTION_ROW_CLASS =
-  "absolute top-0 flex max-w-full items-center gap-2 overflow-hidden data-[menu-open]:[&_button]:opacity-100";
+  "flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 overflow-visible data-[menu-open]:[&_button]:opacity-100";
 
 const BUBBLE_ALIGN_INSET_CLASS = "pr-[13px] max-md:pointer-coarse:pr-[11px]";
-const BUBBLE_ALIGN_OFFSET_CLASS =
-  "right-[13px] max-md:pointer-coarse:right-[11px]";
 const PROSE_ALIGN_INSET_CLASS = "-ml-1 max-md:pointer-coarse:-ml-1.5";
 export const PROSE_COLUMN_INSET_CLASS = "px-2";
 
@@ -442,8 +440,8 @@ export function MessageActionBar({
   const rowClass = cn(
     ACTION_ROW_CLASS,
     alignment === "end"
-      ? BUBBLE_ALIGN_OFFSET_CLASS
-      : cn("left-0", PROSE_ALIGN_INSET_CLASS),
+      ? "justify-end"
+      : PROSE_ALIGN_INSET_CLASS,
   );
   const slotClass = cn(
     "relative w-full",
@@ -456,7 +454,7 @@ export function MessageActionBar({
         ref={slotRef}
         className={cn(
           slotClass,
-          "@container/message-actions h-5 max-md:pointer-coarse:h-7",
+          "@container/message-actions min-h-5 max-md:pointer-coarse:min-h-7",
         )}
         data-message-action-slot=""
       >

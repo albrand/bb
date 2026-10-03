@@ -1,29 +1,41 @@
-@container message-actions (max-width: 25rem) {
-  [data-thread-turn-tokens] [data-token-part="reasoning"] {
-    display: none;
-  }
+.thread-turn-token-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
 }
 
-@container message-actions (max-width: 23rem) {
-  [data-thread-turn-tokens] [data-token-part="output"] {
-    display: none;
-  }
+.thread-turn-token-breakdown > [data-token-part] {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-@container message-actions (max-width: 18rem) {
-  [data-thread-turn-tokens] [data-token-part="input"] {
-    display: none;
-  }
-}
-
-@container message-actions (max-width: 14rem) {
-  [data-thread-turn-tokens] [data-token-part="cached"] {
-    display: none;
-  }
+.thread-turn-token-breakdown [data-token-trailing-group] {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.25rem;
+  white-space: nowrap;
 }
 
 [data-token-total-tight] {
   display: none;
+}
+
+@container message-actions (max-width: 25rem) {
+  [data-message-action-row] {
+    align-items: flex-start;
+  }
+
+  [data-message-action-row] > button[aria-label="Message actions"] {
+    order: 1;
+  }
+
+  [data-message-action-row] [data-thread-turn-tokens] {
+    order: 2;
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 @container message-actions (max-width: 8rem) {
