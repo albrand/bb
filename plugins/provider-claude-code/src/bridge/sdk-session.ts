@@ -492,6 +492,23 @@ export class SdkSession {
     this.query = undefined;
   }
 
+  async stopAndDrain(timeoutMs: number): Promise<void> {
+    this.stop();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.completion,
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
   async closeGracefully(timeoutMs: number): Promise<void> {
     this.inputDone = true;
     this.rejectQueuedInputs("Claude SDK session closed before input consumed");
