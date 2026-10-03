@@ -955,3 +955,35 @@ export function EnvironmentSummary() {
     </StoryCard>
   );
 }
+
+export function ActionButtonStates() {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-4 p-4">
+      <div data-card24-state="idle">
+        <Row submitMode={{ kind: "ready" }} environmentSummary={null} />
+      </div>
+      <div data-card24-state="send">
+        <Row
+          submitMode={{ kind: "ready" }}
+          initialMessage="A typed follow-up"
+          environmentSummary={null}
+        />
+      </div>
+      <div data-card24-state="steer">
+        <Row
+          submitMode={{ kind: "queue", onStop: noop }}
+          threadRuntimeDisplayStatus="active"
+          initialMessage="A follow-up to steer"
+          environmentSummary={null}
+        />
+      </div>
+      <div data-card24-state="stop">
+        <Row
+          submitMode={{ kind: "queue", onStop: noop }}
+          threadRuntimeDisplayStatus="active"
+          environmentSummary={null}
+        />
+      </div>
+    </div>
+  );
+}
