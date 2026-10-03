@@ -119,4 +119,99 @@ describe("ThreadTimelineRows token footer", () => {
 
     expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
   });
+
+  it("keeps completed token summaries when an active flat row has no turn ID", () => {
+    const row = liveCapture.sample.timelineRow;
+    const completedAssistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+      startedAt: row.startedAt,
+      createdAt: row.createdAt,
+    });
+    const streamingAssistant = conversationRow({
+      id: "streaming-assistant-without-turn-id",
+      threadId: row.threadId,
+      turnId: null,
+      role: "assistant",
+      text: "Streaming response with an unscoped row.",
+      sourceSeqStart: row.sourceSeqEnd + 1,
+      sourceSeqEnd: row.sourceSeqEnd + 1,
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={row.threadId}
+          timelineRows={[completedAssistant, streamingAssistant]}
+          threadRuntimeDisplayStatus="active"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      container
+        .querySelector("[data-thread-turn-tokens]")
+        ?.closest("[data-timeline-row-id]")
+        ?.getAttribute("data-timeline-row-id"),
+    ).toBe(row.id);
+  });
+
+  it("joins each captured response to its own turn when history is incomplete", () => {
+    const sample = liveCapture.sample;
+    const firstTurn = sample.timelineRow;
+    const secondTurn = sample.secondTimelineRow;
+    const assistantRows = [firstTurn, secondTurn].map((row) =>
+      conversationRow({
+        id: row.id,
+        threadId: row.threadId,
+        turnId: row.turnId,
+        role: "assistant",
+        text: row.text,
+        sourceSeqStart: row.sourceSeqStart,
+        sourceSeqEnd: row.sourceSeqEnd,
+        startedAt: row.startedAt,
+        createdAt: row.createdAt,
+      }),
+    );
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={firstTurn.threadId}
+          timelineRows={assistantRows}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(sample.spendSummary.historyComplete).toBe(false);
+    expect(useThreadSpendSummary).toHaveBeenCalledWith(firstTurn.threadId);
+    const summaries = container.querySelectorAll("[data-thread-turn-tokens]");
+    expect(summaries).toHaveLength(2);
+    expect(
+      summaries[0]
+        ?.closest("[data-timeline-row-id]")
+        ?.getAttribute("data-timeline-row-id"),
+    ).toBe(firstTurn.id);
+    expect(summaries[0]?.querySelector('[data-token-part="output"]')?.textContent)
+      .toBe("out 435");
+    expect(
+      summaries[1]
+        ?.closest("[data-timeline-row-id]")
+        ?.getAttribute("data-timeline-row-id"),
+    ).toBe(secondTurn.id);
+    expect(summaries[1]?.querySelector('[data-token-part="output"]')?.textContent)
+      .toBe("out 3.2K");
+    expect(useThreadSpendSummary.mock.calls).toEqual([
+      [firstTurn.threadId],
+      [firstTurn.threadId],
+    ]);
+  });
 });

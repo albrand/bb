@@ -32,8 +32,29 @@
           "outputTokens": 435,
           "reasoningOutputTokens": null,
           "totalTokens": 466632
+        },
+        {
+          "turnId": "da4335ba24-t3",
+          "inputTokens": 14,
+          "cachedInputTokens": 904405,
+          "outputTokens": 3242,
+          "reasoningOutputTokens": null,
+          "totalTokens": 907661
         }
       ]
+    },
+    "secondTimelineRow": {
+      "kind": "conversation",
+      "role": "assistant",
+      "id": "assistant-live-sample-turn-3",
+      "threadId": "thread-live-sample",
+      "turnId": "da4335ba24-t3",
+      "sourceSeqStart": 39010,
+      "sourceSeqEnd": 39013,
+      "startedAt": 1790979734878,
+      "createdAt": 1790979734878,
+      "turnRequest": null,
+      "text": "redacted"
     }
   }
 }

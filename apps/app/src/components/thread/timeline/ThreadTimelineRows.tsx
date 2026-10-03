@@ -723,12 +723,10 @@ function findLastAssistantMessageIdsByTurnId(
   return summariesByMessageId;
 }
 
-function findLastTurnId(rows: readonly ThreadTimelineViewRow[]): string | null {
-  let turnId: string | null = null;
-  for (const row of rows) {
-    if (row.turnId !== null) turnId = row.turnId;
-  }
-  return turnId;
+function findActiveTurnId(
+  rows: readonly ThreadTimelineViewRow[],
+): string | null {
+  return rows.at(-1)?.turnId ?? null;
 }
 
 export function findStreamingAssistantMessageId(
@@ -2308,7 +2306,7 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                               : props.threadId
                           }
                           flatTurnTokenSummaryExcludedTurnId={
-                            scopeActive ? findLastTurnId(rows) : undefined
+                            scopeActive ? findActiveTurnId(rows) : undefined
                           }
                           scopeActive={scopeActive}
                           showAssistantMessageActions={true}
