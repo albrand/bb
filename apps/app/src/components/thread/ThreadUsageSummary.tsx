@@ -95,9 +95,12 @@ export function ThreadTurnTokenSummary({
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
   const compact = (value: number) => compactTokens(value);
-  const tightSummaryValue = hasTokens(turn.totalTokens)
+  const hasTotalTokens = hasTokens(turn.totalTokens);
+  const tightSummaryValue = hasTotalTokens
     ? turn.totalTokens
-    : null;
+    : hasTokens(turn.cachedInputTokens)
+      ? turn.cachedInputTokens
+      : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -123,7 +126,7 @@ export function ThreadTurnTokenSummary({
                   cached {compact(turn.cachedInputTokens)}
                 </span>
               ) : null}
-              {tightSummaryValue !== null ? (
+              {hasTotalTokens && tightSummaryValue !== null ? (
                 <span data-token-part="total">
                   <span data-token-total-full>
                     Σ {compact(tightSummaryValue)}
@@ -134,6 +137,13 @@ export function ThreadTurnTokenSummary({
                   >
                     {compactTokens(tightSummaryValue, 0)}
                   </span>
+                </span>
+              ) : tightSummaryValue !== null ? (
+                <span
+                  data-token-total-tight
+                  aria-label={`Cached ${exactTokens(tightSummaryValue)} tokens`}
+                >
+                  {compactTokens(tightSummaryValue, 0)}
                 </span>
               ) : null}
             </span>

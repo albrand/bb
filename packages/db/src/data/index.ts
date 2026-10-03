@@ -64,6 +64,7 @@ export {
   isSpendThreadHistoryComplete,
   getSpendThreadLatestSequence,
   hasThreadRewind,
+  hasStoredTokenUsageEvents,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listSpendBackfillThreads,
   listSpendRollupRows,

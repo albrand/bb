@@ -6,6 +6,7 @@ import {
   getSpendCoverage,
   getSpendCursor,
   getSpendThreadLatestSequence,
+  hasStoredTokenUsageEvents,
   hasThreadRewind,
   listCompletedTurnsByThreadIds,
   listSpendBackfillThreads,
@@ -298,6 +299,7 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   const repairDailyRollup =
     dailyRepairRecorded === undefined &&
     listSpendRollupRows(db, { threadId: args.threadId }).length === 0 &&
+    hasStoredTokenUsageEvents(db, { threadId: args.threadId }) &&
     resolveHistoryComplete(db, { threadId: args.threadId });
   if (turnsToRepair.size === 0 && !repairDailyRollup) return;
   const states = new Map<string, SpendCursorState>();
@@ -404,7 +406,17 @@ export function repairThreadTurnSpendFromStoredEvents(
   const needsRepair = [...completedTurnIds].some(
     (turnId) => !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
   );
-  if (!needsRepair) return;
+  const dailyRepairRecorded = db.$client
+    .prepare<[string], { threadId: string }>(
+      `SELECT thread_id AS threadId FROM ${THREAD_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+    )
+    .get(args.threadId);
+  const needsDailyRepair =
+    dailyRepairRecorded === undefined &&
+    listSpendRollupRows(db, { threadId: args.threadId }).length === 0 &&
+    hasStoredTokenUsageEvents(db, { threadId: args.threadId }) &&
+    resolveHistoryComplete(db, { threadId: args.threadId });
+  if (!needsRepair && !needsDailyRepair) return;
   db.$client.transaction(() =>
     repairThreadTurnSpendFromStoredEventsInTransaction(db, args),
   )();
