@@ -2947,17 +2947,30 @@ describe("PromptBoxInternal compact layout", () => {
 
   it.each([
     {
+      state: "send",
       label: "Submit (Enter)",
       value: "A typed prompt",
       submission: {},
     },
     {
+      state: "steer",
+      label: "Submit (Enter)",
+      value: "A typed prompt",
+      submission: {
+        isRunning: true,
+        onStop: vi.fn(),
+        onModifierSubmit: vi.fn(),
+        showModifierSubmitAction: true,
+      },
+    },
+    {
+      state: "stop",
       label: "Stop run",
       value: "",
       submission: { isRunning: true, onStop: vi.fn() },
     },
   ])(
-    "keeps $label square and centered in a tall composer row",
+    "keeps the $state action square and centered in a tall composer row",
     ({ label, value, submission }) => {
       render(
         <PromptBoxInternal {...createPromptBoxProps({ value, submission })} />,
