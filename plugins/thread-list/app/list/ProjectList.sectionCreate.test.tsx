@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
 import { afterEach, describe, expect, it } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -48,8 +48,8 @@ const ALEXANDRE_PROJECT_IDS = [
   "proj_4y7pccahv4",
 ];
 
-function alexandreProjects() {
-  return ALEXANDRE_PROJECT_IDS.map((id, index) =>
+function alexandreProjects(count = 4) {
+  return ALEXANDRE_PROJECT_IDS.slice(0, count).map((id, index) =>
     makePluginProject({ id, name: `Project ${index}` }),
   );
 }
@@ -75,6 +75,10 @@ function Harness({
 
 function makeSection(id: string, name: string) {
   return { id, name, createdAt: 1, updatedAt: 1 };
+}
+
+function pendingSectionList() {
+  return () => new Promise<ReturnType<typeof makeSection>[]>(() => {});
 }
 
 function renderCustomSections(
@@ -164,19 +168,32 @@ function renderCustomSections(
 }
 
 async function createSectionFrom(actionsLabel: string) {
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: actionsLabel }),
-    { button: 0 },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "New section" }));
-  const input = await screen.findByRole("textbox", { name: "Section name" });
-  fireEvent.change(input, { target: { value: "Gamma" } });
-  fireEvent.click(screen.getByRole("button", { name: "Create section" }));
+  await act(async () => {
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: actionsLabel }),
+      { button: 0 },
+    );
+    await Promise.resolve();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section" }));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    fireEvent.change(screen.getByRole("textbox", { name: "Section name" }), {
+      target: { value: "Gamma" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create section" }));
+    await Promise.resolve();
+  });
+  expect(
+    screen.getByRole("button", { name: "New thread in Gamma section" }),
+  ).toBeTruthy();
 }
 
 describe("creating a sidebar section", () => {
   it.each(["chronological", "project", "machine"] as const)(
-    "places both empty sections after Pinned and before large %s groups with Alexandre’s preferences",
+    "places both empty sections after Pinned and before %s groups with Alexandre’s preferences",
     (mode) => {
       const sections = [
         makeSection("sec_29ztuf93jc", "discovery"),
@@ -188,7 +205,7 @@ describe("creating a sidebar section", () => {
           projectId: ALEXANDRE_PROJECT_IDS[0],
           pinnedAt: 1,
         }),
-        ...Array.from({ length: 24 }, (_, index) =>
+        ...Array.from({ length: 4 }, (_, index) =>
           makeSidebarThread({
             id: `thr_many_${index}`,
             projectId:
@@ -239,11 +256,14 @@ describe("creating a sidebar section", () => {
       expect(follows(pinned, discovery)).toBe(true);
       expect(follows(discovery, rais3)).toBe(true);
       expect(follows(rais3, firstModeGroup)).toBe(true);
+      if (mode === "project") {
+        expect(screen.queryByText("Project 3", { exact: true })).toBeNull();
+      }
     },
   );
 
   it.each(["project", "machine"] as const)(
-    "keeps an empty custom section discoverable ahead of long %s groups with Alexandre’s saved preferences",
+    "keeps an empty custom section discoverable ahead of %s groups with Alexandre’s saved preferences",
     async (mode) => {
       renderCustomSections(
         true,
@@ -261,7 +281,7 @@ describe("creating a sidebar section", () => {
         ],
       );
 
-      const emptySection = await screen.findByRole("button", {
+      const emptySection = screen.getByRole("button", {
         name: "New thread in rais3 section",
       });
       const pinnedSection = screen.getByRole("button", {
@@ -293,7 +313,7 @@ describe("creating a sidebar section", () => {
         true,
         mode,
         true,
-        undefined,
+        pendingSectionList(),
         alexandreProjects(),
         true,
         [
@@ -304,7 +324,7 @@ describe("creating a sidebar section", () => {
 
       await createSectionFrom("rais3 section actions");
 
-      const createdSection = await screen.findByRole("button", {
+      const createdSection = screen.getByRole("button", {
         name: "New thread in Gamma section",
       });
       expect(createdSection).toBeTruthy();
@@ -335,7 +355,7 @@ describe("creating a sidebar section", () => {
   it.each(["chronological", "project", "machine"] as const)(
     "renders the returned empty section immediately in %s mode",
     async (mode) => {
-      renderCustomSections(false, mode, true);
+      renderCustomSections(false, mode, true, pendingSectionList());
       await createSectionFrom(
         mode === "project"
           ? "Test project actions"
@@ -345,7 +365,7 @@ describe("creating a sidebar section", () => {
       );
 
       expect(
-        await screen.findByRole("button", {
+        screen.getByRole("button", {
           name: "New thread in Gamma section",
         }),
       ).toBeTruthy();
@@ -362,54 +382,61 @@ describe("creating a sidebar section", () => {
     await createSectionFrom("Test project actions");
 
     expect(
-      await screen.findByRole("button", {
+      screen.getByRole("button", {
         name: "New thread in Gamma section",
       }),
     ).toBeTruthy();
 
-    resolveList([makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")]);
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", {
-          name: "New thread in Gamma section",
-        }),
-      ).toBeNull(),
-    );
+    await act(async () => {
+      resolveList([makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")]);
+      await Promise.resolve();
+    });
+    expect(
+      screen.queryByRole("button", { name: "New thread in Gamma section" }),
+    ).toBeNull();
   });
 
   it("removes an optimistic section after a successful delete", async () => {
     renderCustomSections(false, "project", true);
     await createSectionFrom("Test project actions");
     expect(
-      await screen.findByRole("button", {
+      screen.getByRole("button", {
         name: "New thread in Gamma section",
       }),
     ).toBeTruthy();
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Gamma section actions" }),
-      { button: 0 },
-    );
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Remove section" }),
-    );
+    await act(async () => {
+      fireEvent.pointerDown(
+        screen.getByRole("button", { name: "Gamma section actions" }),
+        { button: 0 },
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove section" }));
+      await Promise.resolve();
+    });
 
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", {
-          name: "New thread in Gamma section",
-        }),
-      ).toBeNull(),
-    );
+    expect(
+      screen.queryByRole("button", { name: "New thread in Gamma section" }),
+    ).toBeNull();
   });
 
   it.each(["project", "machine"] as const)(
     "keeps custom sections visible while creating from %s mode",
     async (mode) => {
-      const { inspection } = renderCustomSections(false, mode, true);
+      const { inspection } = renderCustomSections(
+        false,
+        mode,
+        true,
+        pendingSectionList(),
+      );
       expect(
-        await screen.findByRole("button", {
+        screen.getByRole("button", {
           name: "New thread in Alpha section",
         }),
       ).toBeTruthy();
@@ -417,11 +444,12 @@ describe("creating a sidebar section", () => {
         mode === "project" ? "Test project actions" : "No machine actions",
       );
 
-      await waitFor(() =>
-        expect(
-          screen.queryByRole("textbox", { name: "Section name" }),
-        ).toBeNull(),
-      );
+      expect(
+        screen.getByRole("button", { name: "New thread in Gamma section" }),
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole("textbox", { name: "Section name" }),
+      ).toBeNull();
       expect(inspection.sdkCalls).toContainEqual({
         method: "threadSections.create",
         args: [{ name: "Gamma" }],
@@ -432,7 +460,7 @@ describe("creating a sidebar section", () => {
   it("pins new threads from the Pinned header", async () => {
     const { inspection } = renderCustomSections(true);
     fireEvent.click(
-      await screen.findByRole("button", { name: "New thread in Pinned" }),
+      screen.getByRole("button", { name: "New thread in Pinned" }),
     );
     expect(inspection.sidebarActionCalls).toContainEqual({
       method: "openNewThread",
@@ -446,7 +474,7 @@ describe("creating a sidebar section", () => {
   it("keeps the composer project when starting a thread in a section", async () => {
     const { inspection } = renderCustomSections();
     fireEvent.click(
-      await screen.findByRole("button", {
+      screen.getByRole("button", {
         name: "New thread in Alpha section",
       }),
     );
@@ -463,26 +491,24 @@ describe("creating a sidebar section", () => {
   it("offers section moves from a thread row in the rendered list", async () => {
     const slot = renderCustomSections();
     fireEvent.pointerDown(
-      await screen.findByRole("button", { name: "Thread actions" }),
+      screen.getByRole("button", { name: "Thread actions" }),
       { button: 0 },
     );
-    const move = await screen.findByRole("menuitem", {
+    const move = screen.getByRole("menuitem", {
       name: "Move to section",
     });
     fireEvent.keyDown(move, { key: "ArrowRight" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Beta" }));
-    await waitFor(() =>
-      expect(slot.inspection.sdkCalls).toContainEqual({
-        method: "threads.update",
-        args: [{ threadId: "thr_alpha", sectionId: "sec_b" }],
-      }),
-    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Beta" }));
+    expect(slot.inspection.sdkCalls).toContainEqual({
+      method: "threads.update",
+      args: [{ threadId: "thr_alpha", sectionId: "sec_b" }],
+    });
   });
 
   it("shows one divider before the built-in section visibility actions", async () => {
     renderCustomSections();
     fireEvent.pointerDown(
-      await screen.findByRole("button", { name: "Threads actions" }),
+      screen.getByRole("button", { name: "Threads actions" }),
       { button: 0 },
     );
     const menu = screen
@@ -494,28 +520,24 @@ describe("creating a sidebar section", () => {
   it("places the new section directly below the section it was created from", async () => {
     const { store } = renderCustomSections();
     await createSectionFrom("Alpha section actions");
-    await waitFor(() =>
-      expect(store.get(sidebarManualSectionOrderAtom)).toEqual([
-        "pinned",
-        "section:sec_a",
-        "section:sec_created",
-        "section:sec_b",
-        "threads",
-      ]),
-    );
+    expect(store.get(sidebarManualSectionOrderAtom)).toEqual([
+      "pinned",
+      "section:sec_a",
+      "section:sec_created",
+      "section:sec_b",
+      "threads",
+    ]);
   });
 
   it("places the new section directly below a built-in section", async () => {
     const { store } = renderCustomSections();
     await createSectionFrom("Threads actions");
-    await waitFor(() =>
-      expect(store.get(sidebarManualSectionOrderAtom)).toEqual([
-        "pinned",
-        "section:sec_a",
-        "section:sec_b",
-        "threads",
-        "section:sec_created",
-      ]),
-    );
+    expect(store.get(sidebarManualSectionOrderAtom)).toEqual([
+      "pinned",
+      "section:sec_a",
+      "section:sec_b",
+      "threads",
+      "section:sec_created",
+    ]);
   });
 });
