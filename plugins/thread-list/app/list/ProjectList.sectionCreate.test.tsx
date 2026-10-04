@@ -155,6 +155,31 @@ describe("creating a sidebar section", () => {
     );
   });
 
+  it("removes an optimistic section after a successful delete", async () => {
+    renderCustomSections(false, "project", true);
+    await createSectionFrom("Test project actions");
+    expect(
+      await screen.findByRole("button", {
+        name: "New thread in Gamma section",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Gamma section actions" }),
+      { button: 0 },
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove section" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove section" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "New thread in Gamma section",
+        }),
+      ).toBeNull(),
+    );
+  });
+
   it.each(["project", "machine"] as const)(
     "keeps custom sections visible while creating from %s mode",
     async (mode) => {
