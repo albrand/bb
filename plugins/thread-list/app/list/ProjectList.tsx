@@ -1829,6 +1829,9 @@ function ProjectListComponent({
     >
       <ProjectListSectionMoveScope sections={sections}>
         <SidebarDraftPresenceSync />
+        {organizationMode !== "chronological" && sections.length > 0 && (
+          <div className="mb-4">{renderSections(true)}</div>
+        )}
         <ActiveSidebarModeSections
           mode={organizationMode}
           renderMachine={() => (
@@ -1891,9 +1894,6 @@ function ProjectListComponent({
             />
           )}
         />
-        {organizationMode !== "chronological" && sections.length > 0 && (
-          <div className="mt-4">{renderSections(true)}</div>
-        )}
         {archived !== null && (
           <>
             {status === "ready" && archived.status !== "ready" && (

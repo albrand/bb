@@ -248,11 +248,11 @@ describe("thread-list plugin", () => {
 
     await screen.findByText("Pinned thread");
     expect(sectionHeaders()).toEqual([
+      "Later",
+      "Review",
       "Pinned",
       "Laptop",
       "No machine",
-      "Later",
-      "Review",
     ]);
     const later = screen
       .getByTitle("Later")
@@ -307,12 +307,12 @@ describe("thread-list plugin", () => {
 
     await screen.findByText("Pinned thread");
     expect(sectionHeaders()).toEqual([
+      "Later",
+      "Review",
       "Pinned",
       "Laptop",
       "Studio Mac",
       "No machine",
-      "Later",
-      "Review",
     ]);
   });
 
@@ -325,12 +325,12 @@ describe("thread-list plugin", () => {
       "thr_personal",
     ]);
     expect(sectionHeaders()).toEqual([
+      "Later",
+      "Review",
       "Pinned",
       "App",
       "Web",
       "Threads",
-      "Later",
-      "Review",
     ]);
     const appGroup = screen
       .getByTitle("App")
