@@ -182,18 +182,26 @@ describe("creating a sidebar section", () => {
         makeSection("sec_29ztuf93jc", "discovery"),
         makeSection("sec_evxvad77wg", "rais3"),
       ];
-      const threads = Array.from({ length: 60 }, (_, index) =>
+      const threads = [
         makeSidebarThread({
-          id: `thr_many_${index}`,
-          projectId: ALEXANDRE_PROJECT_IDS[index % ALEXANDRE_PROJECT_IDS.length],
-          title: `Thread ${index}`,
-          sectionId: null,
-          host: {
-            id: `host_${index % 3}`,
-            name: `Machine ${index % 3}`,
-          },
+          id: "thr_many_pinned",
+          projectId: ALEXANDRE_PROJECT_IDS[0],
+          pinnedAt: 1,
         }),
-      );
+        ...Array.from({ length: 60 }, (_, index) =>
+          makeSidebarThread({
+            id: `thr_many_${index}`,
+            projectId:
+              ALEXANDRE_PROJECT_IDS[index % ALEXANDRE_PROJECT_IDS.length],
+            title: `Thread ${index}`,
+            sectionId: null,
+            host: {
+              id: `host_${index % 3}`,
+              name: `Machine ${index % 3}`,
+            },
+          }),
+        ),
+      ];
       renderCustomSections(
         true,
         mode,
