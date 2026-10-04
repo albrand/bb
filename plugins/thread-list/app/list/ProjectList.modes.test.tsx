@@ -166,6 +166,7 @@ function MachineModeProbe({
   return (
     <TooltipProvider>
       <MachineModeSections
+        customSections={null}
         threads={threads}
         effectivePinnedThreadIds={new Set()}
         status="ready"

@@ -17,14 +17,42 @@ import {
 import { preferencesReadyAtom } from "../preferences/preferences-sync.js";
 import type { OrganizationMode } from "../../shared/preferences.js";
 import {
+  sidebarHiddenGroupsAtom,
   sidebarManualSectionOrderAtom,
+  sidebarMachineSectionOrderAtom,
   sidebarOrganizationModeAtom,
+  sidebarSectionOrderAtom,
 } from "../preferences/atoms.js";
 
 installTestPluginRuntime();
 const { ProjectList } = await import("./ProjectList.js");
 const { resetSidebarDataCacheForTest } =
   await import("../model/use-sidebar-data.js");
+
+const ALEXANDRE_PROJECT_IDS = [
+  "proj_qryjzqk9q5",
+  "proj_d7xhqan8mu",
+  "proj_jar2yhj7rg",
+  "proj_mzwjz6w964",
+  "proj_vqpdy6v2fk",
+  "proj_x7jn4qukp5",
+  "proj_wxxgc32efp",
+  "proj_7ev9icuvv4",
+  "proj_mbwbcuricd",
+  "proj_vc7ja7zcxd",
+  "proj_ukf2dmbsdx",
+  "proj_gm6ymj27nh",
+  "proj_bx4a8g8s2w",
+  "proj_mwske3musv",
+  "proj_gnvrunrxvq",
+  "proj_4y7pccahv4",
+];
+
+function alexandreProjects() {
+  return ALEXANDRE_PROJECT_IDS.map((id, index) =>
+    makePluginProject({ id, name: `Project ${index}` }),
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -58,27 +86,67 @@ function renderCustomSections(
     makeSection("sec_b", "Beta"),
     makeSection("sec_created", "Gamma"),
   ]),
+  projects = [makePluginProject()],
+  alexandrePreferences = false,
+  sections = [makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")],
+  threadList?: ReturnType<typeof makeSidebarThread>[],
 ) {
   const store = createStore();
   store.set(preferencesReadyAtom(), true);
   store.set(sidebarOrganizationModeAtom, mode);
+  if (alexandrePreferences) {
+    store.set(sidebarSectionOrderAtom, [
+      "pinned",
+      "project:proj_qryjzqk9q5",
+      "project:proj_d7xhqan8mu",
+      "project:proj_jar2yhj7rg",
+      "project:proj_mzwjz6w964",
+      "project:proj_vqpdy6v2fk",
+      "project:proj_x7jn4qukp5",
+      "project:proj_wxxgc32efp",
+      "project:proj_7ev9icuvv4",
+      "project:proj_mbwbcuricd",
+      "threads",
+      "project:proj_vc7ja7zcxd",
+      "project:proj_ukf2dmbsdx",
+      "project:proj_gm6ymj27nh",
+      "project:proj_bx4a8g8s2w",
+      "project:proj_mwske3musv",
+      "project:proj_gnvrunrxvq",
+      "project:proj_4y7pccahv4",
+    ]);
+    store.set(sidebarManualSectionOrderAtom, [
+      "pinned",
+      "section:sec_pcm9ngh7cx",
+      "section:sec_29ztuf93jc",
+      "section:sec_evxvad77wg",
+      "threads",
+    ]);
+    store.set(sidebarMachineSectionOrderAtom, [
+      "pinned",
+      "machines",
+      "threads",
+    ]);
+    store.set(sidebarHiddenGroupsAtom, ["project:proj_mzwjz6w964"]);
+  }
   const rendered = renderSlot(
     { component: Harness },
     { children: <ProjectList activeThreadId={null} />, store },
     {
       sidebarThreads: {
-        threads: [
+        threads: threadList ?? [
           makeSidebarThread({
             id: "thr_alpha",
-            sectionId: "sec_a",
+            projectId: projects[0]?.id ?? "proj_test",
+            sectionId: pinned ? null : "sec_a",
             pinnedAt: pinned ? 1 : null,
           }),
           ...(looseThread
             ? [makeSidebarThread({ id: "thr_loose", title: "Project thread" })]
             : []),
         ],
-        projects: [makePluginProject()],
-        sections: [makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")],
+        projects,
+        sections,
       },
       sdk: {
         threads: {
@@ -107,6 +175,163 @@ async function createSectionFrom(actionsLabel: string) {
 }
 
 describe("creating a sidebar section", () => {
+  it.each(["chronological", "project", "machine"] as const)(
+    "places both empty sections after Pinned and before large %s groups with Alexandre’s preferences",
+    async (mode) => {
+      const sections = [
+        makeSection("sec_29ztuf93jc", "discovery"),
+        makeSection("sec_evxvad77wg", "rais3"),
+      ];
+      const threads = [
+        makeSidebarThread({
+          id: "thr_many_pinned",
+          projectId: ALEXANDRE_PROJECT_IDS[0],
+          pinnedAt: 1,
+        }),
+        ...Array.from({ length: 60 }, (_, index) =>
+          makeSidebarThread({
+            id: `thr_many_${index}`,
+            projectId:
+              ALEXANDRE_PROJECT_IDS[index % ALEXANDRE_PROJECT_IDS.length],
+            title: `Thread ${index}`,
+            sectionId: null,
+            host: {
+              id: `host_${index % 3}`,
+              name: `Machine ${index % 3}`,
+            },
+          }),
+        ),
+      ];
+      renderCustomSections(
+        true,
+        mode,
+        false,
+        sdkResult(sections),
+        alexandreProjects(),
+        true,
+        sections,
+        threads,
+      );
+
+      const pinned = await screen.findByRole("button", {
+        name: "New thread in Pinned",
+      });
+      const discovery = screen.getByRole("button", {
+        name: "New thread in discovery section",
+      });
+      const rais3 = screen.getByRole("button", {
+        name: "New thread in rais3 section",
+      });
+      const firstModeGroup = screen.getByText(
+        mode === "project"
+          ? "Project 0"
+          : mode === "machine"
+            ? "Machine 0"
+            : "Threads",
+        { exact: true },
+      );
+      const follows = (earlier: Element, later: Element) =>
+        Boolean(
+          earlier.compareDocumentPosition(later) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+
+      expect(follows(pinned, discovery)).toBe(true);
+      expect(follows(discovery, rais3)).toBe(true);
+      expect(follows(rais3, firstModeGroup)).toBe(true);
+    },
+  );
+
+  it.each(["project", "machine"] as const)(
+    "keeps an empty custom section discoverable ahead of long %s groups with Alexandre’s saved preferences",
+    async (mode) => {
+      renderCustomSections(
+        true,
+        mode,
+        false,
+        sdkResult([
+          makeSection("sec_29ztuf93jc", "discovery"),
+          makeSection("sec_evxvad77wg", "rais3"),
+        ]),
+        alexandreProjects(),
+        true,
+        [
+          makeSection("sec_29ztuf93jc", "discovery"),
+          makeSection("sec_evxvad77wg", "rais3"),
+        ],
+      );
+
+      const emptySection = await screen.findByRole("button", {
+        name: "New thread in rais3 section",
+      });
+      const pinnedSection = screen.getByRole("button", {
+        name: "New thread in Pinned",
+      });
+      const firstModeGroup = screen.getByText(
+        mode === "project" ? "Project 0" : "Threads",
+        { exact: true },
+      );
+      expect(
+        Boolean(
+          pinnedSection.compareDocumentPosition(emptySection) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(true);
+      expect(
+        Boolean(
+          emptySection.compareDocumentPosition(firstModeGroup) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(["chronological", "project", "machine"] as const)(
+    "shows a newly created empty section immediately in %s mode with Alexandre’s saved preferences",
+    async (mode) => {
+      renderCustomSections(
+        true,
+        mode,
+        true,
+        undefined,
+        alexandreProjects(),
+        true,
+        [
+          makeSection("sec_29ztuf93jc", "discovery"),
+          makeSection("sec_evxvad77wg", "rais3"),
+        ],
+      );
+
+      await createSectionFrom("rais3 section actions");
+
+      const createdSection = await screen.findByRole("button", {
+        name: "New thread in Gamma section",
+      });
+      expect(createdSection).toBeTruthy();
+      const pinnedSection = screen.getByRole("button", {
+        name: "New thread in Pinned",
+      });
+      expect(
+        Boolean(
+          pinnedSection.compareDocumentPosition(createdSection) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(true);
+      if (mode !== "chronological") {
+        const firstModeGroup = screen.getByText(
+          mode === "project" ? "Project 0" : "Threads",
+          { exact: true },
+        );
+        expect(
+          Boolean(
+            createdSection.compareDocumentPosition(firstModeGroup) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
   it.each(["chronological", "project", "machine"] as const)(
     "renders the returned empty section immediately in %s mode",
     async (mode) => {
@@ -142,10 +367,7 @@ describe("creating a sidebar section", () => {
       }),
     ).toBeTruthy();
 
-    resolveList([
-      makeSection("sec_a", "Alpha"),
-      makeSection("sec_b", "Beta"),
-    ]);
+    resolveList([makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")]);
     await waitFor(() =>
       expect(
         screen.queryByRole("button", {
@@ -169,7 +391,9 @@ describe("creating a sidebar section", () => {
       { button: 0 },
     );
     fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Remove section" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Remove section" }),
+    );
 
     await waitFor(() =>
       expect(
