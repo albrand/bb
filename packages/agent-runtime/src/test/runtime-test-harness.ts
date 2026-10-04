@@ -46,6 +46,7 @@ export interface ScriptedEchoLaunchScript {
   startDelayMs?: number;
   turnStartResponseDelayMs?: number;
   exitBeforeTurnStartAckRequestNumbers?: number[];
+  exitBeforeTurnStartAckExitCodes?: Record<string, number>;
   answerStartWithoutIdentity?: boolean;
   identityAfterResponse?: boolean;
   identityNotificationsBeforeTurn?: {

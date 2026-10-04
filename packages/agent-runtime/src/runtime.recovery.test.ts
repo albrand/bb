@@ -764,10 +764,49 @@ describe("runtime recovery hints", () => {
     ]);
   });
 
+  it("does not retry when turn/started arrives before the start response", async () => {
+    const { events, exits, processLog, record, runtime } =
+      createRecoveryRuntime(
+        {},
+        {
+          exitAfter: "turn/start",
+          sessionRestorable: true,
+          turnStartResponseDelayMs: 5_000,
+        },
+      );
+    await startThread(runtime, "t-worker-retry-late-ack");
+
+    await expect(
+      runtime.runTurn({
+        clientRequestId: "creq_lateackx23",
+        input: [promptTextInput({ text: "started before response" })],
+        options: fullRuntimeOptions,
+        threadId: "t-worker-retry-late-ack",
+      }),
+    ).rejects.toThrow(/exited unexpectedly/i);
+    await waitForRuntimeState({
+      label: "late-ack provider worker exit",
+      predicate: () => runtime.listRunningProviders().length === 0,
+      timeoutMs: 5_000,
+    });
+
+    expect(events.some((event) => event.type === "turn/started")).toBe(true);
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(countSpawns(processLog)).toBe(1);
+    expect(exits[0]?.threads[0]).toMatchObject({
+      pendingTurnStart: false,
+      pendingTurnStartRetryable: false,
+    });
+  });
+
   it("fails after one retry when the replacement worker also exits before ack", async () => {
     const { processLog, record, runtime } = createRecoveryRuntime(
       {},
-      { exitBeforeTurnStartAckRequestNumbers: [1, 2], sessionRestorable: true },
+      {
+        exitBeforeTurnStartAckExitCodes: { "1": 4, "2": 7 },
+        exitBeforeTurnStartAckRequestNumbers: [1, 2],
+        sessionRestorable: true,
+      },
     );
     await startThread(runtime, "t-worker-retry-exhausted");
 
@@ -778,7 +817,7 @@ describe("runtime recovery hints", () => {
         options: fullRuntimeOptions,
         threadId: "t-worker-retry-exhausted",
       }),
-    ).rejects.toThrow(/exited unexpectedly/i);
+    ).rejects.toThrow(/exited unexpectedly \(code 7\)/i);
 
     expect(countRequests(record, "turn/start")).toBe(2);
     expect(countSpawns(processLog)).toBe(2);

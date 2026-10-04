@@ -57,6 +57,9 @@ export const scriptedEchoOptionsSchema = z
     exitBeforeTurnStartAckRequestNumbers: z
       .array(z.number().int().positive())
       .optional(),
+    exitBeforeTurnStartAckExitCodes: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional(),
     answerStartWithoutIdentity: z.boolean().optional(),
     identityAfterResponse: z.boolean().optional(),
     identityNotificationsBeforeTurn: z
@@ -1137,12 +1140,17 @@ const handlers: Record<string, RequestHandler> = {
       return;
     }
     session.options = scriptedOptionsFor(parsed.data.options.providerOptions);
+    const turnStartRequestNumber = turnStartRequestCount();
     if (
       session.options.exitBeforeTurnStartAckRequestNumbers?.includes(
-        turnStartRequestCount(),
+        turnStartRequestNumber,
       )
     ) {
-      process.exit(1);
+      process.exit(
+        session.options.exitBeforeTurnStartAckExitCodes?.[
+          String(turnStartRequestNumber)
+        ] ?? 1,
+      );
     }
     if (rejectIfArchived(id, session.options, session.providerThreadId)) {
       return;
