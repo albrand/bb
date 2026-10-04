@@ -65,6 +65,7 @@ interface RuntimeProviderProcessManagerArgs {
   bridgeNodeExecutablePath?: string;
   captureThreadExitState: (
     threadId: string,
+    unexpected: boolean,
   ) => AgentRuntimeProcessExitThreadState;
   createProviderIdentityState: (
     providerId: string,
@@ -73,7 +74,10 @@ interface RuntimeProviderProcessManagerArgs {
   getNextRequestId: () => number;
   handleStdoutLine: (args: RuntimeProviderProcessLineArgs) => void;
   onProcessExit: AgentRuntimeOptions["onProcessExit"];
-  onProviderThreadDetached: (threadId: string) => void;
+  onProviderThreadDetached: (
+    threadId: string,
+    preserveSession: boolean,
+  ) => void;
   onStderr: AgentRuntimeOptions["onStderr"];
   skillRoots: readonly AgentRuntimeSkillRoot[];
   workspacePath: string;
@@ -157,6 +161,12 @@ class ProviderProcessExitedError extends Error {
     );
     this.name = "ProviderProcessExitedError";
   }
+}
+
+export function isProviderProcessExitedError(
+  error: unknown,
+): error is ProviderProcessExitedError {
+  return error instanceof ProviderProcessExitedError;
 }
 
 export class RuntimeProviderProcessManager {
@@ -394,7 +404,9 @@ export class RuntimeProviderProcessManager {
       ) {
         providerProcess.child.release();
       } else {
-        shutdownPromises.push(this.terminateProviderProcess({ providerProcess }));
+        shutdownPromises.push(
+          this.terminateProviderProcess({ providerProcess }),
+        );
       }
       for (const [, pending] of providerProcess.pending) {
         pending.reject(new Error("Runtime shutting down"));
@@ -402,7 +414,7 @@ export class RuntimeProviderProcessManager {
       providerProcess.pending.clear();
 
       for (const threadId of providerProcess.identity.threadIds) {
-        this.args.onProviderThreadDetached(threadId);
+        this.args.onProviderThreadDetached(threadId, false);
       }
       this.processes.delete(processKey);
     }
@@ -458,18 +470,18 @@ export class RuntimeProviderProcessManager {
       child = managed.child;
     } else {
       child = new SocketBridgeWorker({
-            kind: "spawn",
-            ...spawnRequest,
-            workerDir: bridgeWorkers.dir,
-            workspace: bridgeWorkers.workspace,
-            connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
-            registration: {
-              environmentId: bridgeWorkers.environmentId,
-              pluginId: args.pluginId,
-              processKey: args.processKey,
-              providerId: args.providerId,
-            },
-          });
+        kind: "spawn",
+        ...spawnRequest,
+        workerDir: bridgeWorkers.dir,
+        workspace: bridgeWorkers.workspace,
+        connectTimeoutMs: BRIDGE_WORKER_CONNECT_TIMEOUT_MS,
+        registration: {
+          environmentId: bridgeWorkers.environmentId,
+          pluginId: args.pluginId,
+          processKey: args.processKey,
+          providerId: args.providerId,
+        },
+      });
     }
     return this.attachProviderProcess({
       adapter: args.adapter,
@@ -666,11 +678,25 @@ export class RuntimeProviderProcessManager {
     const expected =
       consumeExpectedProviderProcessShutdown(args.providerProcess) ||
       isBridgeWorkerStoppedByDaemon(args.providerProcess.child);
+    const threads = [...args.providerProcess.identity.threadIds].map(
+      (threadId) => this.args.captureThreadExitState(threadId, !expected),
+    );
+    const retryablePendingTurnStart =
+      !expected &&
+      threads.some((thread) => thread.pendingTurnStartRetryable === true);
     this.processes.delete(args.providerProcess.processKey);
     const message = args.err.message;
     for (const [, pending] of args.providerProcess.pending) {
       pending.reject(
-        new Error(`Provider "${args.providerId}" failed to start: ${message}`),
+        retryablePendingTurnStart
+          ? new ProviderProcessExitedError({
+              providerId: args.providerId,
+              status: { code: null, signal: null },
+              stderrTail: args.providerProcess.stderrTail,
+            })
+          : new Error(
+              `Provider "${args.providerId}" failed to start: ${message}`,
+            ),
       );
     }
     args.providerProcess.pending.clear();
@@ -678,9 +704,7 @@ export class RuntimeProviderProcessManager {
     this.args.onProcessExit?.({
       bridgeWorker: bridgeWorkerIdentity(args.providerProcess.child),
       providerId: args.providerId,
-      threads: [...args.providerProcess.identity.threadIds].map((threadId) =>
-        this.args.captureThreadExitState(threadId),
-      ),
+      threads,
       code: null,
       expected,
       signal: null,
@@ -694,6 +718,10 @@ export class RuntimeProviderProcessManager {
     const expected = consumeExpectedProviderProcessShutdown(
       args.providerProcess,
     );
+    const threadIds = [...args.providerProcess.identity.threadIds];
+    const threads = threadIds.map((threadId) =>
+      this.args.captureThreadExitState(threadId, !expected),
+    );
     this.processes.delete(args.providerProcess.processKey);
     if (!expected) {
       void this.terminateProviderProcess({
@@ -704,12 +732,11 @@ export class RuntimeProviderProcessManager {
         );
       });
     }
-    const threadIds = [...args.providerProcess.identity.threadIds];
-    const threads = threadIds.map((threadId) =>
-      this.args.captureThreadExitState(threadId),
-    );
-    for (const threadId of threadIds) {
-      this.args.onProviderThreadDetached(threadId);
+    for (const thread of threads) {
+      this.args.onProviderThreadDetached(
+        thread.threadId,
+        thread.pendingTurnStartRetryable === true,
+      );
     }
     for (const [, pending] of args.providerProcess.pending) {
       pending.reject(

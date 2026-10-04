@@ -22,6 +22,7 @@ import {
 import { promptTextInput } from "./test/prompt-input.js";
 import type {
   AgentRuntime,
+  AgentRuntimeProcessExitInfo,
   AgentRuntimeProviderRecoveryHint,
 } from "./types.js";
 
@@ -29,6 +30,7 @@ const PROVIDER_ID = "fake";
 
 interface RecoveryRuntime {
   events: ThreadEvent[];
+  exits: AgentRuntimeProcessExitInfo[];
   hints: AgentRuntimeProviderRecoveryHint[];
   processLog: ReturnType<typeof createScriptedEchoProcessLog>;
   record: ReturnType<typeof createScriptedEchoRequestRecord>;
@@ -54,6 +56,7 @@ describe("runtime recovery hints", () => {
     processScript: ScriptedEchoLaunchScript = {},
   ): RecoveryRuntime {
     const events: ThreadEvent[] = [];
+    const exits: AgentRuntimeProcessExitInfo[] = [];
     const hints: AgentRuntimeProviderRecoveryHint[] = [];
     const stderr: string[] = [];
     const record = createScriptedEchoRequestRecord();
@@ -67,6 +70,7 @@ describe("runtime recovery hints", () => {
           ...scriptedEchoProcessEnv(processScript),
         },
         onEvent: (event) => events.push(event),
+        onProcessExit: (info) => exits.push(info),
         onProviderRecovery: (hint) => hints.push(hint),
         onStderr: (line) => stderr.push(line),
         rateLimitRetry: { delaysMs: [20, 40] },
@@ -74,7 +78,7 @@ describe("runtime recovery hints", () => {
       launch: { scripted },
     });
     runtimes.push(runtime);
-    return { events, hints, processLog, record, runtime, stderr };
+    return { events, exits, hints, processLog, record, runtime, stderr };
   }
 
   function countSpawns(processLog: RecoveryRuntime["processLog"]): number {
@@ -692,6 +696,165 @@ describe("runtime recovery hints", () => {
       text: "after the wait",
       threadId: "t-rate",
     });
+  });
+
+  it("retries an unacknowledged turn once after the provider worker exits", async () => {
+    const { events, processLog, record, runtime } = createRecoveryRuntime(
+      {},
+      { exitBeforeTurnStartAckRequestNumbers: [1], sessionRestorable: true },
+    );
+    const providerThreadId = await startThread(runtime, "t-worker-retry");
+
+    await runtime.runTurn({
+      clientRequestId: "creq_wrkretry23",
+      input: [promptTextInput({ text: "survive worker exit" })],
+      options: fullRuntimeOptions,
+      threadId: "t-worker-retry",
+    });
+    await waitForThreadAgentMessageText({
+      events,
+      providerId: PROVIDER_ID,
+      runtime,
+      text: "survive worker exit",
+      threadId: "t-worker-retry",
+    });
+
+    expect(countRequests(record, "turn/start")).toBe(2);
+    expect(countSpawns(processLog)).toBe(2);
+    expect(resumedThreadIds(record)).toEqual(["t-worker-retry"]);
+    expect(record.last("thread/resume")?.params?.providerThreadId).toBe(
+      providerThreadId,
+    );
+    expect(record.last("turn/start")?.params?.clientRequestId).toBe(
+      "creq_wrkretry23",
+    );
+  });
+
+  it("does not retry a turn when the worker exits after acknowledging start", async () => {
+    const { exits, processLog, record, runtime } = createRecoveryRuntime(
+      {},
+      { exitAfter: "turn/start", swallowTurnStart: true },
+    );
+    await startThread(runtime, "t-worker-retry-acked");
+
+    await runtime.runTurn({
+      clientRequestId: "creq_wrkretry24",
+      input: [promptTextInput({ text: "acknowledged turn" })],
+      options: fullRuntimeOptions,
+      threadId: "t-worker-retry-acked",
+    });
+    await waitForRuntimeState({
+      label: "acknowledged provider worker exit",
+      predicate: () => runtime.listRunningProviders().length === 0,
+      timeoutMs: 5_000,
+    });
+
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(countSpawns(processLog)).toBe(1);
+    expect(exits).toEqual([
+      expect.objectContaining({
+        expected: false,
+        threads: [
+          expect.objectContaining({
+            pendingTurnStart: true,
+            pendingTurnStartRetryable: false,
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("does not retry when turn/started arrives before the start response", async () => {
+    const { events, exits, processLog, record, runtime } =
+      createRecoveryRuntime(
+        {},
+        {
+          exitAfter: "turn/start",
+          sessionRestorable: true,
+          turnStartResponseDelayMs: 5_000,
+        },
+      );
+    await startThread(runtime, "t-worker-retry-late-ack");
+
+    await expect(
+      runtime.runTurn({
+        clientRequestId: "creq_zateackx23",
+        input: [promptTextInput({ text: "started before response" })],
+        options: {
+          ...fullRuntimeOptions,
+          providerOptions: { scripted: { turnStartResponseDelayMs: 5_000 } },
+        },
+        threadId: "t-worker-retry-late-ack",
+      }),
+    ).rejects.toThrow(/exited unexpectedly/i);
+    await waitForRuntimeState({
+      label: "late-ack provider worker exit",
+      predicate: () => runtime.listRunningProviders().length === 0,
+      timeoutMs: 5_000,
+    });
+
+    expect(events.some((event) => event.type === "turn/started")).toBe(true);
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(countSpawns(processLog)).toBe(1);
+    expect(exits[0]?.threads[0]).toMatchObject({
+      pendingTurnStart: false,
+      pendingTurnStartRetryable: false,
+    });
+  });
+
+  it("fails after one retry when the replacement worker also exits before ack", async () => {
+    const { processLog, record, runtime } = createRecoveryRuntime(
+      {},
+      {
+        exitBeforeTurnStartAckExitCodes: { "1": 4, "2": 7 },
+        exitBeforeTurnStartAckRequestNumbers: [1, 2],
+        sessionRestorable: true,
+      },
+    );
+    await startThread(runtime, "t-worker-retry-exhausted");
+
+    await expect(
+      runtime.runTurn({
+        clientRequestId: "creq_wrkretry25",
+        input: [promptTextInput({ text: "fail after replacement exit" })],
+        options: fullRuntimeOptions,
+        threadId: "t-worker-retry-exhausted",
+      }),
+    ).rejects.toThrow(/exited unexpectedly \(code 7\)/i);
+
+    expect(countRequests(record, "turn/start")).toBe(2);
+    expect(countSpawns(processLog)).toBe(2);
+  });
+
+  it("surfaces the retry resume error when restoring the existing session fails", async () => {
+    const { processLog, record, runtime } = createRecoveryRuntime(
+      {
+        failMethods: [
+          {
+            method: "thread/resume",
+            message: "retry session resume failed",
+          },
+        ],
+      },
+      {
+        exitBeforeTurnStartAckRequestNumbers: [1],
+        sessionRestorable: true,
+      },
+    );
+    await startThread(runtime, "t-worker-retry-resume-failed");
+
+    await expect(
+      runtime.runTurn({
+        clientRequestId: "creq_rsnfaiqx23",
+        input: [promptTextInput({ text: "resume retry failure" })],
+        options: fullRuntimeOptions,
+        threadId: "t-worker-retry-resume-failed",
+      }),
+    ).rejects.toThrow("retry session resume failed");
+
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(countRequests(record, "thread/resume")).toBe(1);
+    expect(countSpawns(processLog)).toBe(2);
   });
 
   it("rateLimited: the failure after the last rung surfaces as a typed error and is forwarded", async () => {

@@ -1390,6 +1390,9 @@ export class RuntimeManager {
     const events: ThreadEvent[] = [];
 
     for (const thread of info.threads) {
+      if (thread.pendingTurnStartRetryable) {
+        continue;
+      }
       if (thread.activeTurnId === null) {
         if (thread.pendingTurnStart) {
           events.push({
