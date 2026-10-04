@@ -100,6 +100,26 @@ async function createSectionFrom(actionsLabel: string) {
 }
 
 describe("creating a sidebar section", () => {
+  it.each(["chronological", "project", "machine"] as const)(
+    "renders the returned empty section immediately in %s mode",
+    async (mode) => {
+      renderCustomSections(false, mode, true);
+      await createSectionFrom(
+        mode === "project"
+          ? "Test project actions"
+          : mode === "machine"
+            ? "No machine actions"
+            : "Threads actions",
+      );
+
+      expect(
+        await screen.findByRole("button", {
+          name: "New thread in Gamma section",
+        }),
+      ).toBeTruthy();
+    },
+  );
+
   it.each(["project", "machine"] as const)(
     "keeps custom sections visible while creating from %s mode",
     async (mode) => {
