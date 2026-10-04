@@ -10,12 +10,7 @@ import type {
   TimelineRowBase,
   TimelineUserConversationRow,
 } from "@bb/server-contract";
-import type {
-  PromptTextMention,
-  SystemMessageKind,
-  SystemMessageSubject,
-  ThreadOriginKind,
-} from "@bb/domain";
+import type { PromptTextMention, ThreadOriginKind } from "@bb/domain";
 import { fileNameFromPath } from "@bb/thread-view";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
