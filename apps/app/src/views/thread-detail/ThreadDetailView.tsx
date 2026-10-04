@@ -1,3 +1,4 @@
+import { getPanelTabHistoryKey } from "@/components/secondary-panel/recentlyClosedPanelTabs";
 import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
 import { useSplitPreload } from "@/lib/define-split";
 import { idleSplitDownload } from "@/lib/split-prefetch";
@@ -605,7 +606,15 @@ function ThreadDetailViewInternal(
       isCompactViewport: renderSecondaryPanelAsDrawer,
       threadId,
     });
-  const pluginDetails = usePluginDetailPanelState(threadId, isFocused);
+  const pluginDetails = usePluginDetailPanelState(
+    threadId,
+    isFocused,
+    getPanelTabHistoryKey({
+      environmentId: thread?.environmentId,
+      fileOwnerThreadId: threadId ?? null,
+      panelStateId: threadId ?? null,
+    }),
+  );
   const isWorkspacePanelOpen = renderSecondaryPanelAsDrawer
     ? secondaryPanelDrawerVisibility.isDrawerVisible
     : isPersistedSecondaryPanelOpen;
@@ -1618,7 +1627,7 @@ function ThreadDetailViewInternal(
     return true;
   });
   useAppCommandHandler("panel.reopenClosedTab", () => {
-    if (!isFocused || !reopenClosedTab()) return false;
+    if (!isFocused || !reopenClosedTab(pluginDetails)) return false;
     openCompactDrawer();
     return true;
   });
@@ -1652,7 +1661,7 @@ function ThreadDetailViewInternal(
         cols: DEFAULT_TERMINAL_COLS,
         rows: DEFAULT_TERMINAL_ROWS,
       });
-      closeTab(newTab.id);
+      closeTab(newTab.id, { remember: false });
       setShouldAutoFocusTerminal(true);
       setActiveFixedTerminal(session.id);
       openCompactDrawer();
