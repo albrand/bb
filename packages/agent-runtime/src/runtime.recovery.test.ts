@@ -778,7 +778,7 @@ describe("runtime recovery hints", () => {
 
     await expect(
       runtime.runTurn({
-        clientRequestId: "creq_lateackx23",
+        clientRequestId: "creq_zateackx23",
         input: [promptTextInput({ text: "started before response" })],
         options: {
           ...fullRuntimeOptions,
