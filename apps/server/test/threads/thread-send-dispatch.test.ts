@@ -1090,6 +1090,67 @@ describe("startup queue waits", () => {
 });
 
 describe("turn submit failure settlement", () => {
+  it.each([
+    {
+      failure: "second worker exit",
+      errorMessage: 'Provider "fake" exited unexpectedly (code 7)',
+    },
+    {
+      failure: "retry resume failure",
+      errorMessage: "retry session resume failed",
+    },
+  ])(
+    "records a visible turn failure after $failure",
+    async ({ errorMessage }) => {
+      await withTestHarness(async (harness) => {
+        const { environment, thread } = seedProviderThreadFixture({
+          harness,
+          value: 70,
+        });
+        await sendThreadMessage(harness.deps, {
+          environment,
+          payload: {
+            input: textInput("retry failure should be visible"),
+            mode: "start",
+            model: "gpt-5",
+            permissionMode: "full",
+            reasoningLevel: "medium",
+            serviceTier: "default",
+          },
+          thread,
+          trigger: "user",
+        });
+        const queued = await waitForQueuedCommand(
+          harness,
+          (candidate) =>
+            candidate.command.type === "turn.submit" &&
+            candidate.command.threadId === thread.id,
+        );
+        if (queued.command.type !== "turn.submit") {
+          throw new Error("Expected a turn.submit command");
+        }
+
+        await reportQueuedCommandError(harness, queued, {
+          errorCode: "provider_rpc_error",
+          errorMessage,
+        });
+
+        const events = listEvents(harness.db, { threadId: thread.id });
+        expect(
+          events.some((event) => event.type === "client/turn/rejected"),
+        ).toBe(true);
+        expect(
+          events.some(
+            (event) =>
+              event.type === "system/error" &&
+              JSON.parse(event.data ?? "{}").detail === errorMessage,
+          ),
+        ).toBe(true);
+        expect(getThread(harness.db, thread.id)?.status).toBe("error");
+      });
+    },
+  );
+
   it("records a terminal rejection for the failed client request", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedProviderThreadFixture({

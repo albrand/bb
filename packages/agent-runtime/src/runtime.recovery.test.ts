@@ -826,6 +826,37 @@ describe("runtime recovery hints", () => {
     expect(countSpawns(processLog)).toBe(2);
   });
 
+  it("surfaces the retry resume error when restoring the existing session fails", async () => {
+    const { processLog, record, runtime } = createRecoveryRuntime(
+      {
+        failMethods: [
+          {
+            method: "thread/resume",
+            message: "retry session resume failed",
+          },
+        ],
+      },
+      {
+        exitBeforeTurnStartAckRequestNumbers: [1],
+        sessionRestorable: true,
+      },
+    );
+    await startThread(runtime, "t-worker-retry-resume-failed");
+
+    await expect(
+      runtime.runTurn({
+        clientRequestId: "creq_rsnfaiqx23",
+        input: [promptTextInput({ text: "resume retry failure" })],
+        options: fullRuntimeOptions,
+        threadId: "t-worker-retry-resume-failed",
+      }),
+    ).rejects.toThrow("retry session resume failed");
+
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(countRequests(record, "thread/resume")).toBe(1);
+    expect(countSpawns(processLog)).toBe(2);
+  });
+
   it("rateLimited: the failure after the last rung surfaces as a typed error and is forwarded", async () => {
     const { hints, record, runtime } = createRecoveryRuntime({
       failMethods: [
