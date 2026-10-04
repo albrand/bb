@@ -168,7 +168,7 @@ describe("creating a sidebar section", () => {
       screen.getByRole("button", { name: "Gamma section actions" }),
       { button: 0 },
     );
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove section" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
     fireEvent.click(await screen.findByRole("button", { name: "Remove section" }));
 
     await waitFor(() =>
