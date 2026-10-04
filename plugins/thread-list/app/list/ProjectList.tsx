@@ -1323,8 +1323,30 @@ function ProjectListComponent({
 }: ProjectListProps) {
   const sdk = useSdk();
   const sidebarActions = experimental_useSidebarThreadActions();
-  const { status, sections, projects, personalProject, archived } =
-    useSidebarData();
+  const {
+    status,
+    sections: loadedSections,
+    projects,
+    personalProject,
+    archived,
+  } = useSidebarData();
+  const [createdSections, setCreatedSections] = useState<
+    SidebarSectionDefinition[]
+  >([]);
+  const sections = useMemo(() => {
+    const loadedIds = new Set(loadedSections.map((section) => section.id));
+    return [
+      ...loadedSections,
+      ...createdSections.filter((section) => !loadedIds.has(section.id)),
+    ];
+  }, [createdSections, loadedSections]);
+  useEffect(() => {
+    const loadedIds = new Set(loadedSections.map((section) => section.id));
+    setCreatedSections((current) => {
+      const next = current.filter((section) => !loadedIds.has(section.id));
+      return next.length === current.length ? current : next;
+    });
+  }, [loadedSections]);
   const personalProjectId = personalProject?.id ?? null;
   const threads = useMemo<SidebarThread[]>(
     () => projects.flatMap((project) => project.threads),
@@ -1452,6 +1474,27 @@ function ProjectListComponent({
       void sdk.threadSections
         .create({ name })
         .then((section) => {
+          setCreatedSections((current) =>
+            current.some((created) => created.id === section.id)
+              ? current
+              : [...current, section],
+          );
+          void sdk.threadSections
+            .list()
+            .then((authoritativeSections) => {
+              if (
+                authoritativeSections.some(
+                  (authoritativeSection) =>
+                    authoritativeSection.id === section.id,
+                )
+              ) {
+                return;
+              }
+              setCreatedSections((current) =>
+                current.filter((created) => created.id !== section.id),
+              );
+            })
+            .catch(() => undefined);
           placeCreatedSectionNextToAnchor(section.id);
           setIsSectionCreateDialogOpen(false);
         })
@@ -1478,7 +1521,12 @@ function ProjectListComponent({
     setIsDeleteThreadSectionPending(true);
     void sdk.threadSections
       .delete({ id: section.id })
-      .then(() => sectionDeleteDialog.onClose())
+      .then(() => {
+        setCreatedSections((current) =>
+          current.filter((created) => created.id !== section.id),
+        );
+        sectionDeleteDialog.onClose();
+      })
       .catch((error: unknown) => {
         toast.error(
           getSectionMutationErrorMessage(error, "Failed to remove section."),
