@@ -407,7 +407,12 @@ function UserConversationMessage({
   if (generatedSource !== null) {
     const body =
       automationDue === null
-        ? generatedConversationBodySlice({ initiator, text })
+        ? generatedConversationBodySlice({
+            initiator,
+            systemMessageKind,
+            systemMessageSubject,
+            text,
+          })
         : {
             startOffset: automationDue.bodyOffset,
             text: text.slice(automationDue.bodyOffset),

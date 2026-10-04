@@ -135,6 +135,7 @@ function renderSegment(
   const baseClass = cn(
     widthClass,
     toneClass,
+    "leading-5",
     segment.shimmer ? "animate-shine" : null,
   );
 
@@ -146,6 +147,7 @@ function renderSegment(
         href={href}
         className={cn(
           baseClass,
+          "inline-flex items-baseline",
           "cursor-pointer text-left underline underline-offset-2 focus-visible:outline-none",
         )}
         onClick={(event: MouseEvent<HTMLAnchorElement>) => {

@@ -85,6 +85,8 @@ type GeneratedConversationSourceKind = "agent" | "automation" | "system";
 
 interface GeneratedConversationBodyTextArgs {
   initiator: TimelineUserConversationRow["initiator"];
+  systemMessageKind: SystemMessageKind;
+  systemMessageSubject: SystemMessageSubject | null;
   text: string;
 }
 
@@ -120,19 +122,29 @@ interface GeneratedConversationTitleArgs {
 
 export function generatedConversationBodySlice({
   initiator,
+  systemMessageKind,
+  systemMessageSubject,
   text,
 }: GeneratedConversationBodyTextArgs): GeneratedConversationBodySlice {
   const prefixLength = computeMutedPrefixLength(initiator, text);
-  if (prefixLength <= 0) {
-    return { startOffset: 0, text };
-  }
-
   const textAfterPrefix = text.slice(prefixLength);
+  const childCompletionEnvelope =
+    systemMessageKind === "child-completed" &&
+    systemMessageSubject?.kind === "thread"
+      ? `@thread:${systemMessageSubject.threadId} completed:`
+      : null;
+  const envelopeLength =
+    childCompletionEnvelope !== null &&
+    textAfterPrefix.startsWith(childCompletionEnvelope) &&
+    /^[\r\n]/u.test(textAfterPrefix.slice(childCompletionEnvelope.length))
+      ? childCompletionEnvelope.length
+      : 0;
+  const textAfterEnvelope = textAfterPrefix.slice(envelopeLength);
   const trimStartLength =
-    textAfterPrefix.length - textAfterPrefix.trimStart().length;
+    textAfterEnvelope.length - textAfterEnvelope.trimStart().length;
   return {
-    startOffset: prefixLength + trimStartLength,
-    text: textAfterPrefix.slice(trimStartLength),
+    startOffset: prefixLength + envelopeLength + trimStartLength,
+    text: textAfterEnvelope.slice(trimStartLength),
   };
 }
 
