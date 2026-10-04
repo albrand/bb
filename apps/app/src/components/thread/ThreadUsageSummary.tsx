@@ -79,11 +79,28 @@ export function ThreadTurnTokenSummary({
   const { data } = useThreadSpendSummary(threadId);
   const turn = data?.turns.find((item) => item.turnId === turnId);
   if (!turn) return null;
+  const hasTokens = (value: number | null): value is number =>
+    value !== null && value > 0;
+  if (
+    ![
+      turn.inputTokens,
+      turn.cachedInputTokens,
+      turn.outputTokens,
+      turn.reasoningOutputTokens,
+      turn.totalTokens,
+    ].some(hasTokens)
+  ) {
+    return null;
+  }
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
-  const compact = (value: number | null) =>
-    value === null ? null : compactTokens(value);
-  const tightSummaryValue = turn.totalTokens ?? turn.cachedInputTokens;
+  const compact = (value: number) => compactTokens(value);
+  const hasTotalTokens = hasTokens(turn.totalTokens);
+  const tightSummaryValue = hasTotalTokens
+    ? turn.totalTokens
+    : hasTokens(turn.cachedInputTokens)
+      ? turn.cachedInputTokens
+      : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -91,47 +108,46 @@ export function ThreadTurnTokenSummary({
           data-thread-turn-tokens=""
           className="thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
         >
-          {turn.inputTokens === null ? null : (
+          {hasTokens(turn.inputTokens) ? (
             <span data-token-part="input">in {compact(turn.inputTokens)}</span>
-          )}
-          {turn.outputTokens === null ? null : (
-            <span data-token-part="output">
-              out {compact(turn.outputTokens)}
-            </span>
-          )}
+          ) : null}
+          {hasTokens(turn.outputTokens) ? (
+            <span data-token-part="output">out {compact(turn.outputTokens)}</span>
+          ) : null}
           {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
             <span data-token-part="reasoning">
               reason {compact(reasoningDisplayValue)}
             </span>
           ) : null}
-          {turn.cachedInputTokens === null && tightSummaryValue === null ? null : (
+          {hasTokens(turn.cachedInputTokens) || tightSummaryValue !== null ? (
             <span data-token-trailing-group="">
-              {turn.cachedInputTokens === null ? null : (
+              {hasTokens(turn.cachedInputTokens) ? (
                 <span data-token-part="cached">
                   cached {compact(turn.cachedInputTokens)}
                 </span>
-              )}
-              {tightSummaryValue === null ? null : (
+              ) : null}
+              {hasTotalTokens && tightSummaryValue !== null ? (
                 <span data-token-part="total">
-                  {turn.totalTokens === null ? null : (
-                    <span data-token-total-full>
-                      Σ {compact(turn.totalTokens)}
-                    </span>
-                  )}
+                  <span data-token-total-full>
+                    Σ {compact(tightSummaryValue)}
+                  </span>
                   <span
                     data-token-total-tight
-                    aria-label={
-                      turn.totalTokens === null
-                        ? `Cached ${exactTokens(tightSummaryValue)} tokens`
-                        : `Total ${exactTokens(tightSummaryValue)} tokens`
-                    }
+                    aria-label={`Total ${exactTokens(tightSummaryValue)} tokens`}
                   >
                     {compactTokens(tightSummaryValue, 0)}
                   </span>
                 </span>
-              )}
+              ) : tightSummaryValue !== null ? (
+                <span
+                  data-token-total-tight
+                  aria-label={`Cached ${exactTokens(tightSummaryValue)} tokens`}
+                >
+                  {compactTokens(tightSummaryValue, 0)}
+                </span>
+              ) : null}
             </span>
-          )}
+          ) : null}
         </span>
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent

@@ -6,10 +6,14 @@ import {
   getSpendCoverage,
   getSpendCursor,
   getSpendThreadLatestSequence,
+  hasStoredTokenUsageEvents,
   hasThreadRewind,
+  listCompletedTurnsByThreadIds,
   listSpendBackfillThreads,
+  listSpendRollupRows,
   SPEND_PRUNE_SAFE_SEQUENCE,
   listStoredTokenUsageEvents,
+  listThreadTurnSpend,
   recordThreadTurnSpendContribution,
   resolveSpendModel,
   saveSpendCursor,
@@ -256,6 +260,166 @@ export function recordSpendForInsertedEvents(
   }));
   ensureSpendTables(db);
   return rollUpObservations(db, observations);
+}
+
+const TURN_SPEND_REPAIR_TABLE = "fork_thread_turn_spend_repair";
+const THREAD_SPEND_REPAIR_TABLE = "fork_thread_spend_rollup_repair";
+
+function repairThreadTurnSpendFromStoredEventsInTransaction(
+  db: DbConnection,
+  args: { providerId: string; threadId: string },
+): void {
+  const completedTurnIds = new Set(
+    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
+  );
+  const repairedTurnIds = new Set(
+    db.$client
+      .prepare<[string], { turnId: string }>(
+        `SELECT turn_id AS turnId FROM ${TURN_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+      )
+      .all(args.threadId)
+      .map((row) => row.turnId),
+  );
+  const existingTurnIds = new Set(
+    listThreadTurnSpend(db, { threadId: args.threadId }).map(
+      (row) => row.turnId,
+    ),
+  );
+  const turnsToRepair = new Set(
+    [...completedTurnIds].filter(
+      (turnId) =>
+        !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
+    ),
+  );
+  const dailyRepairRecorded = db.$client
+    .prepare<[string], { threadId: string }>(
+      `SELECT thread_id AS threadId FROM ${THREAD_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+    )
+    .get(args.threadId);
+  const repairDailyRollup =
+    dailyRepairRecorded === undefined &&
+    listSpendRollupRows(db, { threadId: args.threadId }).length === 0 &&
+    hasStoredTokenUsageEvents(db, { threadId: args.threadId }) &&
+    resolveHistoryComplete(db, { threadId: args.threadId });
+  if (turnsToRepair.size === 0 && !repairDailyRollup) return;
+  const states = new Map<string, SpendCursorState>();
+  const dailyContributions: SpendContribution[] = [];
+  for (const row of listStoredTokenUsageEvents(db, { threadId: args.threadId })) {
+    const record = JSON.parse(row.data) as Record<string, unknown>;
+    const usage = (record.tokenUsage ?? {}) as Record<string, unknown>;
+    const providerThreadId =
+      row.providerThreadId ??
+      (typeof record.providerThreadId === "string"
+        ? record.providerThreadId
+        : row.threadId);
+    const state =
+      states.get(providerThreadId) ?? emptySpendCursorState(row.sequence);
+    const last = readStoredUsage(usage.last);
+    const total = readStoredUsage(usage.total);
+    const storedLast = (usage.last ?? {}) as Record<string, unknown>;
+    const observation: TokenUsageObservation = {
+      createdAt: row.createdAt,
+      last,
+      providerId: args.providerId,
+      providerThreadId,
+      sequence: row.sequence,
+      threadId: row.threadId,
+      total,
+      turnId: row.turnId,
+      turnSpendUsage: {
+        cachedInputTokens:
+          storedLast.cacheReadInputTokens !== undefined ||
+          storedLast.cacheWriteInputTokens !== undefined ||
+          last.cachedInputTokens > 0
+            ? last.cachedInputTokens
+            : null,
+        reasoningOutputTokens:
+          last.reasoningOutputTokens > 0 ? last.reasoningOutputTokens : null,
+      },
+    };
+    const model = modelForObservation(db, state, observation);
+    const folded = foldTokenUsageObservation(state, observation, model);
+    states.set(providerThreadId, folded.next);
+    if (folded.contribution !== null && repairDailyRollup) {
+      dailyContributions.push(folded.contribution);
+    }
+    if (
+      folded.contribution !== null &&
+      row.turnId !== null &&
+      turnsToRepair.has(row.turnId)
+    ) {
+      recordThreadTurnSpendContribution(db, {
+        at: row.createdAt,
+        providerThreadId,
+        threadId: row.threadId,
+        turnId: row.turnId,
+        usage: {
+          cachedInputTokens:
+            observation.turnSpendUsage?.cachedInputTokens ?? null,
+          inputTokens: folded.contribution.usage.inputTokens,
+          outputTokens: folded.contribution.usage.outputTokens,
+          reasoningOutputTokens:
+            observation.turnSpendUsage?.reasoningOutputTokens ?? null,
+          totalTokens: folded.contribution.usage.totalTokens,
+        },
+      });
+    }
+  }
+  for (const merged of mergeContributions(dailyContributions)) {
+    applySpendContribution(db, merged.contribution, merged.turns);
+  }
+  const markRepaired = db.$client.prepare<[string, string, number]>(
+    `INSERT OR IGNORE INTO ${TURN_SPEND_REPAIR_TABLE} (thread_id, turn_id, repaired_at) VALUES (?, ?, ?)`,
+  );
+  for (const turnId of turnsToRepair) {
+    markRepaired.run(args.threadId, turnId, Date.now());
+  }
+  if (repairDailyRollup) {
+    db.$client
+      .prepare<[string, number]>(
+        `INSERT OR IGNORE INTO ${THREAD_SPEND_REPAIR_TABLE} (thread_id, repaired_at) VALUES (?, ?)`,
+      )
+      .run(args.threadId, Date.now());
+  }
+}
+
+export function repairThreadTurnSpendFromStoredEvents(
+  db: DbConnection,
+  args: { providerId: string; threadId: string },
+): void {
+  const completedTurnIds = new Set(
+    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
+  );
+  const repairedTurnIds = new Set(
+    db.$client
+      .prepare<[string], { turnId: string }>(
+        `SELECT turn_id AS turnId FROM ${TURN_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+      )
+      .all(args.threadId)
+      .map((row) => row.turnId),
+  );
+  const existingTurnIds = new Set(
+    listThreadTurnSpend(db, { threadId: args.threadId }).map(
+      (row) => row.turnId,
+    ),
+  );
+  const needsRepair = [...completedTurnIds].some(
+    (turnId) => !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
+  );
+  const dailyRepairRecorded = db.$client
+    .prepare<[string], { threadId: string }>(
+      `SELECT thread_id AS threadId FROM ${THREAD_SPEND_REPAIR_TABLE} WHERE thread_id = ?`,
+    )
+    .get(args.threadId);
+  const needsDailyRepair =
+    dailyRepairRecorded === undefined &&
+    listSpendRollupRows(db, { threadId: args.threadId }).length === 0 &&
+    hasStoredTokenUsageEvents(db, { threadId: args.threadId }) &&
+    resolveHistoryComplete(db, { threadId: args.threadId });
+  if (!needsRepair && !needsDailyRepair) return;
+  db.$client.transaction(() =>
+    repairThreadTurnSpendFromStoredEventsInTransaction(db, args),
+  )();
 }
 
 export function backfillSpend(db: DbConnection): SpendBackfillResult {

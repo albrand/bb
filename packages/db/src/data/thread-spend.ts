@@ -272,6 +272,21 @@ export function ensureSpendTables(db: DbConnection): void {
       thread_id TEXT NOT NULL
     )
   `);
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS fork_thread_turn_spend_repair (
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL,
+      repaired_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, turn_id)
+    )
+  `);
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS fork_thread_spend_rollup_repair (
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      repaired_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id)
+    )
+  `);
   spendTablesReady.add(db.$client);
 }
 
@@ -579,6 +594,20 @@ export function listStoredTokenUsageEvents(
         WHERE thread_id = ${args.threadId}
           AND type = 'thread/tokenUsage/updated'
         ORDER BY sequence`,
+  );
+}
+
+export function hasStoredTokenUsageEvents(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): boolean {
+  return (
+    db.get<{ found: number }>(
+      sql`SELECT 1 AS found FROM events
+          WHERE thread_id = ${args.threadId}
+            AND type = 'thread/tokenUsage/updated'
+          LIMIT 1`,
+    )?.found === 1
   );
 }
 

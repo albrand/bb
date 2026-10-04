@@ -115,6 +115,157 @@ describe("ThreadTimelineRows token footer", () => {
     ).toBeTruthy();
   });
 
+  it("shows Codex spend on a collapsed turn row when the timeline also has its assistant row", () => {
+    const row = liveCapture.sample.timelineRow;
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        ...liveCapture.sample.spendSummary,
+        total: {
+          ...liveCapture.sample.spendSummary.total,
+          reasoningOutputTokens: 567,
+        },
+        turns: [
+          {
+            turnId: row.turnId,
+            inputTokens: 39_887,
+            cachedInputTokens: 80_128,
+            outputTokens: 1_152,
+            reasoningOutputTokens: 567,
+            totalTokens: 121_167,
+          },
+        ],
+      },
+    });
+    const assistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+    });
+    const turnId = `turn-${row.turnId}`;
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={row.threadId}
+          timelineRows={[
+            turnRow({
+              id: turnId,
+              threadId: row.threadId,
+              turnId: row.turnId,
+              status: "completed",
+            }),
+            assistant,
+          ]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    const footer = container.querySelector("[data-thread-turn-tokens]");
+    expect(container.querySelectorAll("[data-thread-turn-tokens]")).toHaveLength(
+      1,
+    );
+    expect(
+      footer?.closest("[data-timeline-row-id]")?.getAttribute("data-timeline-row-id"),
+    ).toBe(turnId);
+    expect(footer?.querySelector('[data-token-part="reasoning"]')?.textContent)
+      .toBe("reason 567");
+  });
+
+  it("omits the token footer when every per-turn usage field is unavailable", () => {
+    const row = liveCapture.sample.timelineRow;
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        ...liveCapture.sample.spendSummary,
+        turns: [
+          {
+            turnId: row.turnId,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          },
+        ],
+      },
+    });
+    const assistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={row.threadId}
+          timelineRows={[assistant]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("[data-thread-turn-tokens]")).toBeNull();
+  });
+
+  it("omits unavailable and zero token parts when a turn has partial usage", () => {
+    const row = liveCapture.sample.timelineRow;
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        ...liveCapture.sample.spendSummary,
+        turns: [
+          {
+            turnId: row.turnId,
+            inputTokens: null,
+            cachedInputTokens: 0,
+            outputTokens: 23,
+            reasoningOutputTokens: 0,
+            totalTokens: null,
+          },
+        ],
+      },
+    });
+    const assistant = conversationRow({
+      id: row.id,
+      threadId: row.threadId,
+      turnId: row.turnId,
+      role: "assistant",
+      text: row.text,
+      sourceSeqStart: row.sourceSeqStart,
+      sourceSeqEnd: row.sourceSeqEnd,
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ThreadTimelineRows
+          threadId={row.threadId}
+          timelineRows={[assistant]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    const footer = container.querySelector("[data-thread-turn-tokens]");
+    expect(footer).not.toBeNull();
+    expect(footer?.textContent).toContain("out 23");
+    expect(footer?.textContent).not.toContain("unavailable");
+    expect(footer?.querySelector('[data-token-part="input"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="cached"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="reasoning"]')).toBeNull();
+    expect(footer?.querySelector('[data-token-part="total"]')).toBeNull();
+  });
+
   it("keeps token parts visible and allows them to wrap in narrow action rows", () => {
     const actionBarStyles = readFileSync(
       join(
@@ -463,6 +614,56 @@ describe("ThreadTimelineRows token footer", () => {
     },
   );
 
+  it.each([
+    { eventStatus: "failed", timelineStatus: "error" },
+    { eventStatus: "interrupted", timelineStatus: "interrupted" },
+  ] as const)(
+    "shows the $eventStatus footer inside its grouped response row",
+    ({ timelineStatus }) => {
+      const row = liveCapture.sample.timelineRow;
+      const assistant = conversationRow({
+        id: row.id,
+        threadId: row.threadId,
+        turnId: row.turnId,
+        role: "assistant",
+        text: row.text,
+        sourceSeqStart: row.sourceSeqStart,
+        sourceSeqEnd: row.sourceSeqEnd,
+      });
+
+      const { container } = render(
+        <MemoryRouter>
+          <ThreadTimelineRows
+            threadId={row.threadId}
+            timelineRows={[
+              turnRow({
+                id: `nested-terminal-turn-${timelineStatus}`,
+                threadId: row.threadId,
+                turnId: row.turnId,
+                sourceSeqStart: row.sourceSeqStart,
+                sourceSeqEnd: row.sourceSeqEnd,
+                status: timelineStatus,
+                children: [assistant],
+              }),
+            ]}
+            threadRuntimeDisplayStatus="idle"
+            workspaceRootPath={undefined}
+          />
+        </MemoryRouter>,
+      );
+
+      expect(
+        container.querySelectorAll("[data-thread-turn-tokens]"),
+      ).toHaveLength(1);
+      expect(
+        container
+          .querySelector("[data-thread-turn-tokens]")
+          ?.closest("[data-timeline-row-id]")
+          ?.getAttribute("data-timeline-row-id"),
+      ).toBe(`nested-terminal-turn-${timelineStatus}`);
+    },
+  );
+
   it("shows every completed grouped response while excluding the active turn", () => {
     const sample = liveCapture.sample;
     const first = sample.timelineRow;
@@ -523,7 +724,7 @@ describe("ThreadTimelineRows token footer", () => {
       summaries[0]
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
-    ).toBe(first.id);
+    ).toBe(`turn-${first.turnId}`);
     expect(
       summaries[0]?.querySelector('[data-token-part="output"]')?.textContent,
     ).toContain("out 435");
@@ -558,12 +759,12 @@ describe("ThreadTimelineRows token footer", () => {
       idleSummaries[0]
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
-    ).toBe(first.id);
+    ).toBe(`turn-${first.turnId}`);
     expect(
       idleSummaries[1]
         ?.closest("[data-timeline-row-id]")
         ?.getAttribute("data-timeline-row-id"),
-    ).toBe(second.id);
+    ).toBe(`turn-${second.turnId}`);
     expect(
       idleSummaries[1]?.querySelector('[data-token-part="output"]')
         ?.textContent,
