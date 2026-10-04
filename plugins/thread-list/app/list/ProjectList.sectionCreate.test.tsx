@@ -177,7 +177,7 @@ describe("creating a sidebar section", () => {
     "keeps an empty custom section discoverable ahead of long %s groups with Alexandre’s saved preferences",
     async (mode) => {
       renderCustomSections(
-        false,
+        true,
         mode,
         false,
         sdkResult([
@@ -195,10 +195,19 @@ describe("creating a sidebar section", () => {
       const emptySection = await screen.findByRole("button", {
         name: "New thread in rais3 section",
       });
+      const pinnedSection = screen.getByRole("button", {
+        name: "New thread in Pinned",
+      });
       const firstModeGroup = screen.getByText(
         mode === "project" ? "Project 0" : "Threads",
         { exact: true },
       );
+      expect(
+        Boolean(
+          pinnedSection.compareDocumentPosition(emptySection) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(true);
       expect(
         Boolean(
           emptySection.compareDocumentPosition(firstModeGroup) &
@@ -212,7 +221,7 @@ describe("creating a sidebar section", () => {
     "shows a newly created empty section immediately in %s mode with Alexandre’s saved preferences",
     async (mode) => {
       renderCustomSections(
-        false,
+        true,
         mode,
         true,
         undefined,
@@ -230,6 +239,15 @@ describe("creating a sidebar section", () => {
         name: "New thread in Gamma section",
       });
       expect(createdSection).toBeTruthy();
+      const pinnedSection = screen.getByRole("button", {
+        name: "New thread in Pinned",
+      });
+      expect(
+        Boolean(
+          pinnedSection.compareDocumentPosition(createdSection) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(true);
       if (mode !== "chronological") {
         const firstModeGroup = screen.getByText(
           mode === "project" ? "Project 0" : "Threads",

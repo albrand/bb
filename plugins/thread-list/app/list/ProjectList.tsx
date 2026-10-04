@@ -7,6 +7,7 @@ import {
 } from "./ThreadListVisibility.js";
 import { SidebarDraftPresenceSync } from "./sidebarDraftPresence.js";
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -506,6 +507,7 @@ function useGroupedModeThreadDnd({
 
 interface ProjectModeSectionsProps
   extends BuiltInSectionRenderState, GroupedModePinnedProps {
+  customSections: ReactNode;
   collapsedEnvironmentIds: Set<string>;
   collapsedThreadIds: Set<string>;
   compareThreads: ThreadComparator;
@@ -524,6 +526,7 @@ interface ProjectModeSectionsProps
 }
 
 function ProjectModeSections({
+  customSections,
   collapsedEnvironmentIds,
   collapsedSectionIds,
   collapsedThreadIds,
@@ -775,6 +778,7 @@ function ProjectModeSections({
       label="Projects"
       selectedThreadId={selectedThreadId}
     >
+      {!order.includes("pinned") ? customSections : null}
       <ReorderableSidebarSectionOrderList order={order} threadDnd={threadDnd}>
         {(sectionId, consumeClickSuppression) => {
           const builtInSection = renderBuiltInSidebarSection({
@@ -787,12 +791,21 @@ function ProjectModeSections({
             showPinnedSection,
           });
           if (builtInSection !== undefined) {
+            const sectionWithCustomSections =
+              sectionId === "pinned" ? (
+                <Fragment key={sectionId}>
+                  {builtInSection}
+                  {customSections}
+                </Fragment>
+              ) : (
+                builtInSection
+              );
             return sectionId === "threads" ? (
               <ThreadListVisibilityGroupScope key={sectionId} id={sectionId}>
-                {builtInSection}
+                {sectionWithCustomSections}
               </ThreadListVisibilityGroupScope>
             ) : (
-              builtInSection
+              sectionWithCustomSections
             );
           }
           const row = projectRowsBySectionId.get(sectionId);
@@ -942,6 +955,7 @@ function SectionModeSections({
 
 interface MachineModeSectionsProps
   extends BuiltInSectionRenderState, GroupedModePinnedProps {
+  customSections: ReactNode;
   collapsedEnvironmentIds: Set<string>;
   collapsedThreadIds: Set<string>;
   compareThreads: ThreadComparator;
@@ -1008,6 +1022,7 @@ function MachineSidebarSection({
 }
 
 export function MachineModeSections({
+  customSections,
   collapsedEnvironmentIds,
   collapsedSectionIds,
   collapsedThreadIds,
@@ -1241,6 +1256,7 @@ export function MachineModeSections({
       label="Machines"
       selectedThreadId={selectedThreadId}
     >
+      {!order.includes("pinned") ? customSections : null}
       <ReorderableSidebarSectionOrderList order={order} threadDnd={threadDnd}>
         {(sectionId, consumeClickSuppression) => {
           const builtInSection = renderBuiltInSidebarSection({
@@ -1253,12 +1269,21 @@ export function MachineModeSections({
             showPinnedSection,
           });
           if (builtInSection !== undefined) {
+            const sectionWithCustomSections =
+              sectionId === "pinned" ? (
+                <Fragment key={sectionId}>
+                  {builtInSection}
+                  {customSections}
+                </Fragment>
+              ) : (
+                builtInSection
+              );
             return sectionId === "threads" ? (
               <ThreadListVisibilityGroupScope key={sectionId} id={sectionId}>
-                {builtInSection}
+                {sectionWithCustomSections}
               </ThreadListVisibilityGroupScope>
             ) : (
-              builtInSection
+              sectionWithCustomSections
             );
           }
           const section = machineSectionsById.get(sectionId);
@@ -1829,13 +1854,15 @@ function ProjectListComponent({
     >
       <ProjectListSectionMoveScope sections={sections}>
         <SidebarDraftPresenceSync />
-        {organizationMode !== "chronological" && sections.length > 0 && (
-          <div className="mb-4">{renderSections(true)}</div>
-        )}
         <ActiveSidebarModeSections
           mode={organizationMode}
           renderMachine={() => (
             <MachineModeSections
+              customSections={
+                sections.length > 0 ? (
+                  <div className="mb-4">{renderSections(true)}</div>
+                ) : null
+              }
               threads={groupedThreads}
               effectivePinnedThreadIds={
                 pinnedSidebarState.effectivePinnedThreadIds
@@ -1866,6 +1893,11 @@ function ProjectListComponent({
           renderChronological={() => renderSections(false)}
           renderProject={() => (
             <ProjectModeSections
+              customSections={
+                sections.length > 0 ? (
+                  <div className="mb-4">{renderSections(true)}</div>
+                ) : null
+              }
               personalProjectId={personalProjectId}
               projects={projects}
               threads={groupedThreads}
