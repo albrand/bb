@@ -718,6 +718,7 @@ export function useThreadFileTabs({
     },
     [
       recentlyClosedPanelContextKey,
+      resolvedFileOwnerThreadId,
       storageFileExists,
       storageInventory,
       updateFixedPanelTabsState,
