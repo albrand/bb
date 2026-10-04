@@ -93,6 +93,46 @@ describe("GeneratedConversationMessage images", () => {
   });
 });
 
+describe("GeneratedConversationMessage child completion", () => {
+  it("previews the final response and expands the complete markdown", () => {
+    renderChildCompleted(
+      [
+        "[bb system]",
+        "",
+        "@thread:thr_child completed:",
+        "",
+        "# Final report",
+        "",
+        "The child finished with a useful result.",
+        "",
+        "- First detail",
+        "- Expanded detail line.",
+      ].join("\n"),
+    );
+
+    expect(screen.getByText("Final report")).toBeTruthy();
+    expect(screen.queryByText(/@thread:thr_child completed:/u)).toBeNull();
+
+    fireEvent.click(screen.getByText("Final report"));
+
+    expect(screen.getByText("Expanded detail line.")).toBeTruthy();
+  });
+
+  it("keeps the child title and completion status on one shared baseline", () => {
+    renderChildCompleted();
+
+    const status = screen.getByText("finished");
+    const titleLine = status.closest(".items-baseline");
+    const title = screen.getByText("Rebuild comments").closest("a");
+
+    expect(titleLine).not.toBeNull();
+    expect(status.classList.contains("leading-5")).toBe(true);
+    expect(title?.classList.contains("leading-5")).toBe(true);
+    expect(title?.classList.contains("inline-flex")).toBe(true);
+    expect(title?.classList.contains("items-baseline")).toBe(true);
+  });
+});
+
 const AGENT_BODY = "# notes\nedited path:src/app.ts here";
 const AGENT_PATH_TOKEN = "path:src/app.ts";
 const AGENT_PATH_START = AGENT_BODY.indexOf(AGENT_PATH_TOKEN);

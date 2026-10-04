@@ -10,7 +10,12 @@ import type {
   TimelineRowBase,
   TimelineUserConversationRow,
 } from "@bb/server-contract";
-import type { PromptTextMention, ThreadOriginKind } from "@bb/domain";
+import type {
+  PromptTextMention,
+  SystemMessageKind,
+  SystemMessageSubject,
+  ThreadOriginKind,
+} from "@bb/domain";
 import { fileNameFromPath } from "@bb/thread-view";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
@@ -407,7 +412,12 @@ function UserConversationMessage({
   if (generatedSource !== null) {
     const body =
       automationDue === null
-        ? generatedConversationBodySlice({ initiator, text })
+        ? generatedConversationBodySlice({
+            initiator,
+            systemMessageKind,
+            systemMessageSubject,
+            text,
+          })
         : {
             startOffset: automationDue.bodyOffset,
             text: text.slice(automationDue.bodyOffset),
