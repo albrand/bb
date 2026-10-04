@@ -1,3 +1,4 @@
+import { getPanelTabHistoryKey } from "@/components/secondary-panel/recentlyClosedPanelTabs";
 import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
 import type { ComposerAttachment } from "@get-bb/plugin-sdk";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
@@ -524,10 +525,6 @@ function RootComposeSurface({
 }: RootComposeSurfaceProps) {
   const paneContext = useOptionalPaneContext();
   const isFocusedPane = paneContext?.isFocused ?? true;
-  const pluginDetails = usePluginDetailPanelState(
-    ROOT_COMPOSE_FIXED_PANEL_STATE_ID,
-    isFocusedPane,
-  );
   const location = useLocation();
   const navigate = useNavigate();
   const [, setPlacement] = useRootComposePlacement();
@@ -781,6 +778,17 @@ function RootComposeSurface({
   const isWorkspacePanelOpen = isCompactViewport
     ? secondaryPanelDrawerVisibility.isDrawerVisible
     : isPersistedSecondaryPanelOpen;
+  const pluginDetails = usePluginDetailPanelState(
+    ROOT_COMPOSE_FIXED_PANEL_STATE_ID,
+    isFocusedPane,
+    getPanelTabHistoryKey({
+      panelStateId: ROOT_COMPOSE_FIXED_PANEL_STATE_ID,
+      environmentId: rootPanelEnvironmentId,
+      fileOwnerThreadId: rootPanelThreadId,
+      projectHostId: rootProjectHostId,
+      projectId: isProjectless ? null : projectId,
+    }),
+  );
   const isSecondaryPanelOpen =
     isWorkspacePanelOpen || pluginDetails.activePluginId !== null;
   const touchFixedPanelTabsState = useTouchFixedPanelTabsState(
@@ -1270,7 +1278,7 @@ function RootComposeSurface({
     return true;
   });
   useAppCommandHandler("panel.reopenClosedTab", () => {
-    if (!isFocusedPane || !reopenClosedTab()) return false;
+    if (!isFocusedPane || !reopenClosedTab(pluginDetails)) return false;
     openCompactDrawer();
     return true;
   });
@@ -1314,7 +1322,7 @@ function RootComposeSurface({
           });
     void createTerminal
       .then((session) => {
-        closeTab(newTab.id);
+        closeTab(newTab.id, { remember: false });
         setShouldAutoFocusTerminal(true);
         setActiveFixedTerminal(session.id);
         openCompactDrawer();
@@ -1663,9 +1671,7 @@ function RootComposeSurface({
     </div>
   ) : null;
   const showEmptyWelcome =
-    !startedComposing &&
-    projects !== undefined &&
-    projects.length === 0;
+    !startedComposing && projects !== undefined && projects.length === 0;
   const handleStartComposing = useCallback(
     (prefill?: string) => {
       if (prefill) {
