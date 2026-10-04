@@ -29,6 +29,31 @@ const { ProjectList } = await import("./ProjectList.js");
 const { resetSidebarDataCacheForTest } =
   await import("../model/use-sidebar-data.js");
 
+const ALEXANDRE_PROJECT_IDS = [
+  "proj_qryjzqk9q5",
+  "proj_d7xhqan8mu",
+  "proj_jar2yhj7rg",
+  "proj_mzwjz6w964",
+  "proj_vqpdy6v2fk",
+  "proj_x7jn4qukp5",
+  "proj_wxxgc32efp",
+  "proj_7ev9icuvv4",
+  "proj_mbwbcuricd",
+  "proj_vc7ja7zcxd",
+  "proj_ukf2dmbsdx",
+  "proj_gm6ymj27nh",
+  "proj_bx4a8g8s2w",
+  "proj_mwske3musv",
+  "proj_gnvrunrxvq",
+  "proj_4y7pccahv4",
+];
+
+function alexandreProjects() {
+  return ALEXANDRE_PROJECT_IDS.map((id, index) =>
+    makePluginProject({ id, name: `Project ${index}` }),
+  );
+}
+
 afterEach(() => {
   cleanup();
   resetSidebarDataCacheForTest();
@@ -151,24 +176,6 @@ describe("creating a sidebar section", () => {
   it.each(["project", "machine"] as const)(
     "keeps an empty custom section discoverable ahead of long %s groups with Alexandre’s saved preferences",
     async (mode) => {
-      const projectIds = [
-        "proj_qryjzqk9q5",
-        "proj_d7xhqan8mu",
-        "proj_jar2yhj7rg",
-        "proj_mzwjz6w964",
-        "proj_vqpdy6v2fk",
-        "proj_x7jn4qukp5",
-        "proj_wxxgc32efp",
-        "proj_7ev9icuvv4",
-        "proj_mbwbcuricd",
-        "proj_vc7ja7zcxd",
-        "proj_ukf2dmbsdx",
-        "proj_gm6ymj27nh",
-        "proj_bx4a8g8s2w",
-        "proj_mwske3musv",
-        "proj_gnvrunrxvq",
-        "proj_4y7pccahv4",
-      ];
       renderCustomSections(
         false,
         mode,
@@ -177,9 +184,7 @@ describe("creating a sidebar section", () => {
           makeSection("sec_29ztuf93jc", "discovery"),
           makeSection("sec_evxvad77wg", "rais3"),
         ]),
-        projectIds.map((id, index) =>
-          makePluginProject({ id, name: `Project ${index}` }),
-        ),
+        alexandreProjects(),
         true,
         [
           makeSection("sec_29ztuf93jc", "discovery"),
@@ -200,6 +205,43 @@ describe("creating a sidebar section", () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
         ),
       ).toBe(true);
+    },
+  );
+
+  it.each(["chronological", "project", "machine"] as const)(
+    "shows a newly created empty section immediately in %s mode with Alexandre’s saved preferences",
+    async (mode) => {
+      renderCustomSections(
+        false,
+        mode,
+        true,
+        undefined,
+        alexandreProjects(),
+        true,
+        [
+          makeSection("sec_29ztuf93jc", "discovery"),
+          makeSection("sec_evxvad77wg", "rais3"),
+        ],
+      );
+
+      await createSectionFrom("rais3 section actions");
+
+      const createdSection = await screen.findByRole("button", {
+        name: "New thread in Gamma section",
+      });
+      expect(createdSection).toBeTruthy();
+      if (mode !== "chronological") {
+        const firstModeGroup = screen.getByText(
+          mode === "project" ? "Project 0" : "Threads",
+          { exact: true },
+        );
+        expect(
+          Boolean(
+            createdSection.compareDocumentPosition(firstModeGroup) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ).toBe(true);
+      }
     },
   );
 
