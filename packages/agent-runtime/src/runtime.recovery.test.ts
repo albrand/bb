@@ -780,7 +780,10 @@ describe("runtime recovery hints", () => {
       runtime.runTurn({
         clientRequestId: "creq_lateackx23",
         input: [promptTextInput({ text: "started before response" })],
-        options: fullRuntimeOptions,
+        options: {
+          ...fullRuntimeOptions,
+          providerOptions: { scripted: { turnStartResponseDelayMs: 5_000 } },
+        },
         threadId: "t-worker-retry-late-ack",
       }),
     ).rejects.toThrow(/exited unexpectedly/i);
