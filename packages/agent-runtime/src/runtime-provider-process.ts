@@ -414,7 +414,7 @@ export class RuntimeProviderProcessManager {
       providerProcess.pending.clear();
 
       for (const threadId of providerProcess.identity.threadIds) {
-        this.args.onProviderThreadDetached(threadId);
+        this.args.onProviderThreadDetached(threadId, false);
       }
       this.processes.delete(processKey);
     }
@@ -723,7 +723,7 @@ export class RuntimeProviderProcessManager {
     for (const thread of threads) {
       this.args.onProviderThreadDetached(
         thread.threadId,
-        thread.pendingTurnStartRetryable,
+        thread.pendingTurnStartRetryable === true,
       );
     }
     for (const [, pending] of args.providerProcess.pending) {
