@@ -136,7 +136,8 @@ function renderCustomSections(
         threads: [
           makeSidebarThread({
             id: "thr_alpha",
-            sectionId: "sec_a",
+            projectId: projects[0]?.id ?? "proj_test",
+            sectionId: pinned ? null : "sec_a",
             pinnedAt: pinned ? 1 : null,
           }),
           ...(looseThread

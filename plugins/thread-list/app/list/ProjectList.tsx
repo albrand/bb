@@ -790,22 +790,21 @@ function ProjectModeSections({
             consumeClickSuppression,
             showPinnedSection,
           });
+          if (sectionId === "pinned") {
+            return (
+              <Fragment key={sectionId}>
+                {builtInSection}
+                {customSections}
+              </Fragment>
+            );
+          }
           if (builtInSection !== undefined) {
-            const sectionWithCustomSections =
-              sectionId === "pinned" ? (
-                <Fragment key={sectionId}>
-                  {builtInSection}
-                  {customSections}
-                </Fragment>
-              ) : (
-                builtInSection
-              );
             return sectionId === "threads" ? (
               <ThreadListVisibilityGroupScope key={sectionId} id={sectionId}>
-                {sectionWithCustomSections}
+                {builtInSection}
               </ThreadListVisibilityGroupScope>
             ) : (
-              sectionWithCustomSections
+              builtInSection
             );
           }
           const row = projectRowsBySectionId.get(sectionId);
@@ -1268,22 +1267,21 @@ export function MachineModeSections({
             consumeClickSuppression,
             showPinnedSection,
           });
+          if (sectionId === "pinned") {
+            return (
+              <Fragment key={sectionId}>
+                {builtInSection}
+                {customSections}
+              </Fragment>
+            );
+          }
           if (builtInSection !== undefined) {
-            const sectionWithCustomSections =
-              sectionId === "pinned" ? (
-                <Fragment key={sectionId}>
-                  {builtInSection}
-                  {customSections}
-                </Fragment>
-              ) : (
-                builtInSection
-              );
             return sectionId === "threads" ? (
               <ThreadListVisibilityGroupScope key={sectionId} id={sectionId}>
-                {sectionWithCustomSections}
+                {builtInSection}
               </ThreadListVisibilityGroupScope>
             ) : (
-              sectionWithCustomSections
+              builtInSection
             );
           }
           const section = machineSectionsById.get(sectionId);
