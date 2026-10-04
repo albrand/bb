@@ -1981,6 +1981,27 @@ describe("RuntimeManager", () => {
         },
       },
     ]);
+
+    emittedEvents.length = 0;
+    onProcessExit({
+      bridgeWorker: null,
+      providerId: "claude-code",
+      threads: [
+        {
+          threadId: "thread-pending",
+          activeTurnId: null,
+          pendingTurnStart: true,
+          pendingTurnStartRetryable: true,
+          providerThreadId: "provider-pending",
+        },
+      ],
+      code: 1,
+      expected: false,
+      signal: null,
+      stderr: "provider failed before acknowledging the turn",
+    });
+
+    expect(emittedEvents).toEqual([]);
   });
 
   it("does not emit failure events for expected provider exits", async () => {

@@ -46,6 +46,7 @@ export type AgentRuntimeSkillRoot = SkillsConfigureRoot;
 export interface AgentRuntimeProcessExitThreadState {
   activeTurnId: string | null;
   pendingTurnStart: boolean;
+  pendingTurnStartRetryable?: boolean;
   providerThreadId: string | null;
   threadId: string;
 }

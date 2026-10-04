@@ -51,6 +51,7 @@ import {
 import {
   RuntimeProviderProcessManager,
   hasChildProcessExited,
+  isProviderProcessExitedError,
   type RuntimeProviderProcess,
 } from "./runtime-provider-process.js";
 import {
@@ -331,6 +332,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     string,
     { sinceMs: number; watchdogFired: boolean }
   >();
+  const pendingTurnStartAttempts = new Map<
+    string,
+    { acknowledged: boolean; retryAttempted: boolean }
+  >();
   const turnStartWatchdogThresholdMs =
     options.turnStartWatchdog?.thresholdMs ?? 120_000;
   const turnStartWatchdogTimer = setInterval(() => {
@@ -369,13 +374,26 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     bridgeWorkers: options.bridgeWorkers,
     ...(bridgeNodeEnv !== undefined ? { bridgeNodeEnv } : {}),
     bridgeNodeExecutablePath: process.execPath,
-    captureThreadExitState: (threadId) => ({
-      activeTurnId: turnState.getActiveTurnId(threadId),
-      pendingTurnStart: pendingTurnStarts.has(threadId),
-      providerThreadId:
-        threadIdentityRegistry.getProviderThreadId(threadId) ?? null,
-      threadId,
-    }),
+    captureThreadExitState: (threadId, unexpected) => {
+      const attempt = pendingTurnStartAttempts.get(threadId);
+      const config = threadRuntimeConfigs.get(threadId);
+      const providerThreadId =
+        threadIdentityRegistry.getProviderThreadId(threadId) ?? null;
+      return {
+        activeTurnId: turnState.getActiveTurnId(threadId),
+        pendingTurnStart: pendingTurnStarts.has(threadId),
+        pendingTurnStartRetryable:
+          unexpected &&
+          pendingTurnStarts.has(threadId) &&
+          attempt !== undefined &&
+          !attempt.acknowledged &&
+          !attempt.retryAttempted &&
+          config?.sessionRestorable === true &&
+          providerThreadId !== null,
+        providerThreadId,
+        threadId,
+      };
+    },
     createProviderIdentityState: (providerId) =>
       threadIdentityRegistry.createProviderState({ providerId }),
     env: options.env,
@@ -383,7 +401,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     handleStdoutLine: (args) =>
       handleStdoutLine(args.line, args.providerProcess, args.wseq),
     onProcessExit: options.onProcessExit,
-    onProviderThreadDetached: (threadId) => {
+    onProviderThreadDetached: (threadId, preserveSession) => {
+      if (preserveSession) return;
       toolCalls.cancelThread(threadId);
       threadIdentityRegistry.clearThread(threadId);
       clearThreadRuntimeConfig(threadId);
@@ -894,6 +913,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     threadsRetryingBridgeRestartOnIdle.delete(threadId);
     idleProviderSessionSinceMsByThreadId.delete(threadId);
     pendingTurnStarts.delete(threadId);
+    pendingTurnStartAttempts.delete(threadId);
     threadGoalState.clearThread(threadId);
     threadRuntimeConfigs.delete(threadId);
   }
@@ -1006,6 +1026,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
   function observeProviderSessionIdleState(event: ThreadEvent): void {
     if (event.type === "turn/started") {
+      const attempt = pendingTurnStartAttempts.get(event.threadId);
+      if (attempt !== undefined) attempt.acknowledged = true;
       pendingTurnStarts.delete(event.threadId);
       markProviderSessionNotIdle(event.threadId);
       return;
@@ -1222,10 +1244,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     options: AgentRuntimeExecutionOptions;
     providerThreadId: string;
     threadId: string;
-  }): Promise<void> {
+  }): Promise<string> {
     const { currentConfig } = args;
     const resumeInstructions = args.instructions ?? currentConfig.instructions;
-    await runtime.resumeThread({
+    const result = await runtime.resumeThread({
       bridgeLaunch: currentConfig.bridgeLaunch,
       skillRoots: currentConfig.skillRoots,
       environmentId: currentConfig.environmentId,
@@ -1245,6 +1267,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         : {}),
       instructionMode: currentConfig.instructionMode,
     });
+    return result.providerThreadId;
   }
 
   async function archiveOrUnarchiveThread(
@@ -2267,6 +2290,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             sinceMs: Date.now(),
             watchdogFired: false,
           });
+          const turnStartAttempt = {
+            acknowledged: false,
+            retryAttempted: false,
+          };
+          pendingTurnStartAttempts.set(threadId, turnStartAttempt);
           markProviderSessionNotIdle(threadId);
           try {
             await sendCommand({
@@ -2279,6 +2307,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
                 threadId,
               },
             });
+            turnStartAttempt.acknowledged = true;
             setThreadRuntimeConfig(threadId, {
               ...currentConfig,
               contributedEnv: resolvedContributedEnv,
@@ -2293,7 +2322,77 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
                 threadId,
               });
             }
+            pendingTurnStartAttempts.delete(threadId);
           } catch (error) {
+            if (
+              isProviderProcessExitedError(error) &&
+              !turnStartAttempt.acknowledged &&
+              !turnStartAttempt.retryAttempted &&
+              currentConfig.sessionRestorable &&
+              providerThreadId.length > 0
+            ) {
+              turnStartAttempt.retryAttempted = true;
+              try {
+                const resumedProviderThreadId = await resumeThreadFromConfig({
+                  currentConfig: {
+                    ...currentConfig,
+                    contributedEnv: resolvedContributedEnv,
+                    envVars: resolvedEnvironment.envVars,
+                    instructions,
+                    options: execOpts,
+                  },
+                  instructions,
+                  options: execOpts,
+                  providerThreadId,
+                  threadId,
+                });
+                if (resumedProviderThreadId !== providerThreadId) {
+                  throw new Error(
+                    `Provider resumed thread "${threadId}" as "${resumedProviderThreadId}" instead of the existing session "${providerThreadId}"`,
+                  );
+                }
+                const retryProc = requireProviderProcessForThread(threadId);
+                const retryCommand = requireProviderRequestPlan({
+                  commandType: adapterCommand.type,
+                  plan: retryProc.adapter.buildCommandPlan(adapterCommand),
+                  providerId: pid,
+                });
+                await sendCommand({
+                  proc: retryProc,
+                  message: retryCommand,
+                  resultSchema: ignoredJsonRpcResultSchema,
+                  recovery: {
+                    providerId: pid,
+                    providerThreadId,
+                    threadId,
+                  },
+                });
+                turnStartAttempt.acknowledged = true;
+                setThreadRuntimeConfig(threadId, {
+                  ...currentConfig,
+                  contributedEnv: resolvedContributedEnv,
+                  envVars: resolvedEnvironment.envVars,
+                  options: execOpts,
+                });
+                if (environmentChanged) {
+                  emitResolvedProviderEnvironment({
+                    droppedContributions:
+                      resolvedEnvironment.droppedContributions,
+                    entries: resolvedEnvironment.entries,
+                    providerThreadId,
+                    threadId,
+                  });
+                }
+                pendingTurnStartAttempts.delete(threadId);
+                return;
+              } catch (retryError) {
+                pendingTurnStartAttempts.delete(threadId);
+                pendingTurnStarts.delete(threadId);
+                markHostedProviderSessionIdle(threadId);
+                throw retryError;
+              }
+            }
+            pendingTurnStartAttempts.delete(threadId);
             pendingTurnStarts.delete(threadId);
             markHostedProviderSessionIdle(threadId);
             throw error;

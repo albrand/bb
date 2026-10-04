@@ -31,7 +31,7 @@ import {
   runBridgeRequest,
   type ProviderRecoveryHint,
 } from "@get-bb/plugin-sdk/provider-bridge";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
 const scriptedMethodSchema = z.enum([
@@ -54,6 +54,9 @@ export const scriptedEchoOptionsSchema = z
   .object({
     startDelayMs: z.number().int().nonnegative().optional(),
     turnStartResponseDelayMs: z.number().int().nonnegative().optional(),
+    exitBeforeTurnStartAckRequestNumbers: z
+      .array(z.number().int().positive())
+      .optional(),
     answerStartWithoutIdentity: z.boolean().optional(),
     identityAfterResponse: z.boolean().optional(),
     identityNotificationsBeforeTurn: z
@@ -107,6 +110,19 @@ export type ScriptedEchoOptions = z.infer<typeof scriptedEchoOptionsSchema>;
 const SCRIPTED_OPTIONS_ENV = "SCRIPTED_ECHO_OPTIONS";
 const SCRIPTED_RECORD_PATH_ENV = "SCRIPTED_ECHO_RECORD_PATH";
 const SCRIPTED_PROCESS_LOG_PATH_ENV = "SCRIPTED_ECHO_PROCESS_LOG_PATH";
+
+function turnStartRequestCount(): number {
+  const recordPath = process.env[SCRIPTED_RECORD_PATH_ENV];
+  if (recordPath === undefined || recordPath.length === 0) return 0;
+  try {
+    return readFileSync(recordPath, "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .filter((line) => JSON.parse(line).method === "turn/start").length;
+  } catch {
+    return 0;
+  }
+}
 
 function logProcessStep(step: string): void {
   const logPath = process.env[SCRIPTED_PROCESS_LOG_PATH_ENV];
@@ -1121,6 +1137,13 @@ const handlers: Record<string, RequestHandler> = {
       return;
     }
     session.options = scriptedOptionsFor(parsed.data.options.providerOptions);
+    if (
+      session.options.exitBeforeTurnStartAckRequestNumbers?.includes(
+        turnStartRequestCount(),
+      )
+    ) {
+      process.exit(1);
+    }
     if (rejectIfArchived(id, session.options, session.providerThreadId)) {
       return;
     }
