@@ -11,7 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadEvent } from "@bb/domain";
 import { createAgentRuntime } from "./runtime.js";
 import { createProviderForId } from "./provider-registry.js";
-import { RuntimeProviderProcessManager } from "./runtime-provider-process.js";
+import {
+  isProviderProcessExitedError,
+  RuntimeProviderProcessManager,
+} from "./runtime-provider-process.js";
 import { RuntimeThreadIdentityRegistry } from "./runtime-thread-identity.js";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import {
@@ -36,6 +39,7 @@ import type {
   AgentRuntimeBridgeLaunch,
   AgentRuntimeBridgeWorkers,
   AgentRuntimeOptions,
+  AgentRuntimeProcessExitThreadState,
 } from "./types.js";
 
 interface CreateProviderProcessManagerArgs {
@@ -46,6 +50,10 @@ interface CreateProviderProcessManagerArgs {
   handleStdoutLine?: (line: string, childPid: number | undefined) => void;
   onStderr?: NonNullable<AgentRuntimeOptions["onStderr"]>;
   onProcessExit: NonNullable<AgentRuntimeOptions["onProcessExit"]>;
+  captureThreadExitState?: (
+    threadId: string,
+    unexpected: boolean,
+  ) => AgentRuntimeProcessExitThreadState;
   rawScriptPath?: string;
   workspacePath: string;
 }
@@ -138,13 +146,15 @@ describe("createAgentRuntime process lifecycle", () => {
       bridgeBundleDir: undefined,
       bridgeWorkers: args.bridgeWorkers,
       bridgeNodeExecutablePath: process.execPath,
-      captureThreadExitState: (threadId) => ({
-        activeTurnId: null,
-        pendingTurnStart: false,
-        providerThreadId:
-          identityRegistry.getProviderThreadId(threadId) ?? null,
-        threadId,
-      }),
+      captureThreadExitState:
+        args.captureThreadExitState ??
+        ((threadId) => ({
+          activeTurnId: null,
+          pendingTurnStart: false,
+          providerThreadId:
+            identityRegistry.getProviderThreadId(threadId) ?? null,
+          threadId,
+        })),
       createProviderIdentityState: (providerId) =>
         identityRegistry.createProviderState({ providerId }),
       env: args.env,
@@ -747,6 +757,64 @@ describe("createAgentRuntime process lifecycle", () => {
     );
     replacementProcess.child.kill("SIGTERM");
     await replacementExited;
+    await manager.shutdown();
+  });
+
+  it("reports a retryable unexpected exit when a pending turn start hits a process error", async () => {
+    const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+    const manager = createProviderProcessManager({
+      captureThreadExitState: (threadId, unexpected) => ({
+        activeTurnId: null,
+        pendingTurnStart: true,
+        pendingTurnStartRetryable: unexpected,
+        providerThreadId: "provider-session",
+        threadId,
+      }),
+      onProcessExit: exitInfo,
+      workspacePath: tmpDir,
+    });
+    await manager.ensureProvider({
+      bridgeLaunch: MANAGER_BRIDGE_LAUNCH,
+      processKey: "fake",
+      providerId: "fake",
+    });
+    const providerProcess = manager.getProviderProcess("fake");
+    expect(providerProcess).toBeDefined();
+    providerProcess?.identity.threadIds.add("t-pending-start");
+    let rejectedError: unknown;
+    const pendingRequest = new Promise<void>((_, reject) => {
+      providerProcess?.pending.set("turn-start", {
+        resolve: () => {},
+        reject: (error) => {
+          rejectedError = error;
+          reject(error);
+        },
+      });
+    });
+
+    providerProcess?.child.emit("error", new Error("worker pipe failed"));
+    await expect(pendingRequest).rejects.toThrow(/exited unexpectedly/i);
+    expect(isProviderProcessExitedError(rejectedError)).toBe(true);
+    expect(exitInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected: false,
+        threads: [
+          expect.objectContaining({
+            pendingTurnStart: true,
+            pendingTurnStartRetryable: true,
+            threadId: "t-pending-start",
+          }),
+        ],
+      }),
+    );
+
+    if (providerProcess !== undefined) {
+      const exited = new Promise<void>((resolve) =>
+        providerProcess.child.once("exit", () => resolve()),
+      );
+      providerProcess.child.kill("SIGTERM");
+      await exited;
+    }
     await manager.shutdown();
   });
 
