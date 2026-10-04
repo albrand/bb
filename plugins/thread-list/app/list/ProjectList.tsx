@@ -1479,6 +1479,22 @@ function ProjectListComponent({
               ? current
               : [...current, section],
           );
+          void sdk.threadSections
+            .list()
+            .then((authoritativeSections) => {
+              if (
+                authoritativeSections.some(
+                  (authoritativeSection) =>
+                    authoritativeSection.id === section.id,
+                )
+              ) {
+                return;
+              }
+              setCreatedSections((current) =>
+                current.filter((created) => created.id !== section.id),
+              );
+            })
+            .catch(() => undefined);
           placeCreatedSectionNextToAnchor(section.id);
           setIsSectionCreateDialogOpen(false);
         })
@@ -1505,7 +1521,12 @@ function ProjectListComponent({
     setIsDeleteThreadSectionPending(true);
     void sdk.threadSections
       .delete({ id: section.id })
-      .then(() => sectionDeleteDialog.onClose())
+      .then(() => {
+        setCreatedSections((current) =>
+          current.filter((created) => created.id !== section.id),
+        );
+        sectionDeleteDialog.onClose();
+      })
       .catch((error: unknown) => {
         toast.error(
           getSectionMutationErrorMessage(error, "Failed to remove section."),

@@ -53,6 +53,11 @@ function renderCustomSections(
   pinned = false,
   mode: OrganizationMode = "chronological",
   looseThread = false,
+  listSections: () => Promise<ReturnType<typeof makeSection>[]> = sdkResult([
+    makeSection("sec_a", "Alpha"),
+    makeSection("sec_b", "Beta"),
+    makeSection("sec_created", "Gamma"),
+  ]),
 ) {
   const store = createStore();
   store.set(preferencesReadyAtom(), true);
@@ -81,6 +86,8 @@ function renderCustomSections(
         },
         threadSections: {
           create: sdkResult(makeSection("sec_created", "Gamma")),
+          delete: sdkResult({ ok: true }),
+          list: listSections,
         },
       },
     },
@@ -119,6 +126,34 @@ describe("creating a sidebar section", () => {
       ).toBeTruthy();
     },
   );
+
+  it("removes a created section when the authoritative read sees another client's deletion", async () => {
+    let resolveList!: (sections: ReturnType<typeof makeSection>[]) => void;
+    const listSections = () =>
+      new Promise<ReturnType<typeof makeSection>[]>((resolve) => {
+        resolveList = resolve;
+      });
+    renderCustomSections(false, "project", true, listSections);
+    await createSectionFrom("Test project actions");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "New thread in Gamma section",
+      }),
+    ).toBeTruthy();
+
+    resolveList([
+      makeSection("sec_a", "Alpha"),
+      makeSection("sec_b", "Beta"),
+    ]);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "New thread in Gamma section",
+        }),
+      ).toBeNull(),
+    );
+  });
 
   it.each(["project", "machine"] as const)(
     "keeps custom sections visible while creating from %s mode",
