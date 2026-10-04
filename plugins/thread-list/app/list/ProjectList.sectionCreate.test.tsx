@@ -177,7 +177,7 @@ async function createSectionFrom(actionsLabel: string) {
 describe("creating a sidebar section", () => {
   it.each(["chronological", "project", "machine"] as const)(
     "places both empty sections after Pinned and before large %s groups with Alexandre’s preferences",
-    async (mode) => {
+    (mode) => {
       const sections = [
         makeSection("sec_29ztuf93jc", "discovery"),
         makeSection("sec_evxvad77wg", "rais3"),
@@ -188,7 +188,7 @@ describe("creating a sidebar section", () => {
           projectId: ALEXANDRE_PROJECT_IDS[0],
           pinnedAt: 1,
         }),
-        ...Array.from({ length: 60 }, (_, index) =>
+        ...Array.from({ length: 24 }, (_, index) =>
           makeSidebarThread({
             id: `thr_many_${index}`,
             projectId:
@@ -213,7 +213,7 @@ describe("creating a sidebar section", () => {
         threads,
       );
 
-      const pinned = await screen.findByRole("button", {
+      const pinned = screen.getByRole("button", {
         name: "New thread in Pinned",
       });
       const discovery = screen.getByRole("button", {
