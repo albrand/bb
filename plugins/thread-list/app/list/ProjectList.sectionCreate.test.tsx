@@ -89,6 +89,7 @@ function renderCustomSections(
   projects = [makePluginProject()],
   alexandrePreferences = false,
   sections = [makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")],
+  threadList?: ReturnType<typeof makeSidebarThread>[],
 ) {
   const store = createStore();
   store.set(preferencesReadyAtom(), true);
@@ -133,7 +134,7 @@ function renderCustomSections(
     { children: <ProjectList activeThreadId={null} />, store },
     {
       sidebarThreads: {
-        threads: [
+        threads: threadList ?? [
           makeSidebarThread({
             id: "thr_alpha",
             projectId: projects[0]?.id ?? "proj_test",
@@ -174,6 +175,65 @@ async function createSectionFrom(actionsLabel: string) {
 }
 
 describe("creating a sidebar section", () => {
+  it.each(["chronological", "project", "machine"] as const)(
+    "places both empty sections after Pinned and before large %s groups with Alexandre’s preferences",
+    async (mode) => {
+      const sections = [
+        makeSection("sec_29ztuf93jc", "discovery"),
+        makeSection("sec_evxvad77wg", "rais3"),
+      ];
+      const threads = Array.from({ length: 60 }, (_, index) =>
+        makeSidebarThread({
+          id: `thr_many_${index}`,
+          projectId: ALEXANDRE_PROJECT_IDS[index % ALEXANDRE_PROJECT_IDS.length],
+          title: `Thread ${index}`,
+          sectionId: null,
+          host: {
+            id: `host_${index % 3}`,
+            name: `Machine ${index % 3}`,
+          },
+        }),
+      );
+      renderCustomSections(
+        true,
+        mode,
+        false,
+        sdkResult(sections),
+        alexandreProjects(),
+        true,
+        sections,
+        threads,
+      );
+
+      const pinned = await screen.findByRole("button", {
+        name: "New thread in Pinned",
+      });
+      const discovery = screen.getByRole("button", {
+        name: "New thread in discovery section",
+      });
+      const rais3 = screen.getByRole("button", {
+        name: "New thread in rais3 section",
+      });
+      const firstModeGroup = screen.getByText(
+        mode === "project"
+          ? "Project 0"
+          : mode === "machine"
+            ? "Machine 0"
+            : "Threads",
+        { exact: true },
+      );
+      const follows = (earlier: Element, later: Element) =>
+        Boolean(
+          earlier.compareDocumentPosition(later) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+
+      expect(follows(pinned, discovery)).toBe(true);
+      expect(follows(discovery, rais3)).toBe(true);
+      expect(follows(rais3, firstModeGroup)).toBe(true);
+    },
+  );
+
   it.each(["project", "machine"] as const)(
     "keeps an empty custom section discoverable ahead of long %s groups with Alexandre’s saved preferences",
     async (mode) => {
