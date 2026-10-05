@@ -495,26 +495,31 @@ describe("incremental conversation outlines", () => {
     });
   });
 
-  it("rebuilds when a new nested item points into the completed prefix", () => {
+  it("rebuilds when a new nested turn points to a checkpointed tool call", () => {
     withTestThread((testThread) => {
-      seed(testThread, 100, parentCall("turn-0", "historical-call"));
+      appendRows(testThread, [
+        started("tool-turn"),
+        parentCall("tool-turn", "historical-call"),
+        message("tool-turn", "Historical tool call"),
+        completed("tool-turn"),
+        request("creq_abcdefghij"),
+        started("historical-root", "historical-call"),
+        accepted("creq_abcdefghij", "historical-root"),
+        message("historical-root", "Historical answer", "historical-call"),
+        completed("historical-root"),
+      ]);
+      seed(testThread, 100);
+      appendRows(testThread, [
+        delta("live", "continuation"),
+      ]);
       expectMatchesFull(testThread);
 
       appendRows(testThread, [
+        started("late-child", "historical-call"),
+        message("late-child", "Nested continuation", "historical-call"),
         {
-          type: "item/completed",
-          turnId: "live",
-          itemId: "message-child",
-          itemKind: "agentMessage",
+          ...completed("late-child"),
           parentToolCallId: "historical-call",
-          data: {
-            item: {
-              id: "message-child",
-              type: "agentMessage",
-              text: "Nested continuation",
-              parentToolCallId: "historical-call",
-            },
-          },
         },
       ]);
       const selectedRows = countSelectedEventRows(testThread, () => {
