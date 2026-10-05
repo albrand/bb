@@ -31,7 +31,6 @@ interface PluginCliOptionBase {
   hidden?: boolean;
   /** Value placeholder in help and usage; defaults to the value type. */
   placeholder?: string;
-  /** Accept this option only through `--<name>-stdin` and the request body. */
   stdin?: boolean;
 }
 
