@@ -13,6 +13,7 @@ import {
   accountReorderInputSchema,
   accountRenameInputSchema,
   accountPoolConfigSetInputSchema,
+  bypassGetInputSchema,
   bypassInputSchema,
   codexLoginPollInputSchema,
   loginCompleteInputSchema,
@@ -868,6 +869,30 @@ export function registerPoolCli(
                 stdout: input.options.json
                   ? json({ ok: true, token })
                   : `Rotated the Account Pooler token for ${token.hostName ?? token.hostId}.\n`,
+              };
+            }),
+        }),
+        "bypass get": cliCommand({
+          summary: "Read Account Pooler bypass status for one thread",
+          positionals: [
+            {
+              name: "thread-id",
+              description: "Thread whose routing bypass status to read",
+              required: true,
+            },
+          ],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const { threadId } = bypassGetInputSchema.parse({
+                threadId: input.positionals["thread-id"],
+              });
+              const result = await operations.getBypass(threadId);
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ok: true, ...result })
+                  : `Account Pooler bypass is ${result.bypassed ? "enabled" : "disabled"} for ${result.threadId}.\n`,
               };
             }),
         }),

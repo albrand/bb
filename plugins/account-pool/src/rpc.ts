@@ -10,6 +10,7 @@ import {
   accountReorderInputSchema,
   accountSchema,
   accountSummarySchema,
+  bypassGetInputSchema,
   bypassInputSchema,
   codexLoginCancelSchema,
   codexLoginPollInputSchema,
@@ -114,6 +115,15 @@ export const accountPoolRpcContract = defineRpcContract({
   "bypass.set": {
     input: bypassInputSchema,
     output: bypassInputSchema,
+  },
+});
+
+export const accountPoolBypassReadRpcContract = defineRpcContract({
+  "bypass.get": {
+    input: bypassGetInputSchema,
+    output: bypassInputSchema,
+    experimental_description:
+      "Reads whether Account Pooler routing is bypassed for one thread. This is read-only and does not change routing.",
   },
 });
 

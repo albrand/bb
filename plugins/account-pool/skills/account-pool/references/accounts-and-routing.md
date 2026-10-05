@@ -25,7 +25,12 @@ bb pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshol
 bb pool parent [proxy|isolate]
 bb pool token rotate --machine <id-or-name>
 bb pool bypass <thread-id> [--off]
+bb pool bypass get <thread-id>
 ```
+
+`bb pool bypass get <thread-id>` reads whether that thread currently bypasses
+Account Pooler routing. It is read-only; `bb pool bypass <thread-id> [--off]`
+continues to enable or disable the bypass.
 
 Every command accepts `--json` and `--help`. `bb pool --help` lists the
 commands; `bb pool <command> --help` prints that command's arguments, options,

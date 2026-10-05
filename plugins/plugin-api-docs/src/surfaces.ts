@@ -806,6 +806,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginCliContext",
         ],
         firstParty: [
+          "Account Pooler [Experimental]",
           "Automations",
           "Custom instructions",
           "Docs",
@@ -903,6 +904,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalPluginWebSocketHandlers",
         ],
         firstParty: [
+          "Account Pooler [Experimental]",
           "Automations",
           "Custom instructions",
           "Docs",

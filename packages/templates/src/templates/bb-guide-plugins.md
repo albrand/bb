@@ -48,6 +48,7 @@ bb pool config
 bb pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold> <value>
 bb pool token rotate --machine <id-or-name>
 bb pool bypass <thread-id> [--off]
+bb pool bypass get <thread-id>
 ```
 
 Claude `--login` starts a ten-minute in-memory PKCE session, prints the browser

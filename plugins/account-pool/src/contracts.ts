@@ -365,3 +365,7 @@ export const tokenRotateInputSchema = z
 export const bypassInputSchema = z
   .object({ threadId: z.string().min(1), bypassed: z.boolean() })
   .strict();
+
+export const bypassGetInputSchema = z
+  .object({ threadId: z.string().min(1) })
+  .strict();

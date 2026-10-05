@@ -30,7 +30,11 @@ import type {
 } from "./credentials.js";
 import { createHub } from "./hub.js";
 import { PoolOperations } from "./operations.js";
-import { accountPoolRpcContract, createRpcHandlers } from "./rpc.js";
+import {
+  accountPoolBypassReadRpcContract,
+  accountPoolRpcContract,
+  createRpcHandlers,
+} from "./rpc.js";
 import { ClaudeOAuthLogin } from "./oauth-login.js";
 import { CodexDeviceLogin } from "./codex-device-login.js";
 import {
@@ -242,6 +246,11 @@ export function createAccountPoolPlugin(
     bb.rpc.register(
       accountPoolRpcContract,
       createRpcHandlers(operations, login, codexLogin, config),
+    );
+    bb.rpc.register(
+      accountPoolBypassReadRpcContract,
+      { "bypass.get": ({ threadId }) => operations.getBypass(threadId) },
+      { experimental_discoverable: true },
     );
     registerPoolCli(bb, operations, login, codexLogin, config);
     const canServe = async (provider: PoolProvider): Promise<boolean> => {

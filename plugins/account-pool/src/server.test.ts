@@ -1828,6 +1828,42 @@ describe("Account Pool plugin", () => {
         bypassed: true,
       }),
     ).toEqual({ threadId: "thread-one", bypassed: true });
+    const publishedBypassRead =
+      fixture.host.harness.registrations.experimental_publishedRpcMethods.find(
+        ({ method }) => method === "bypass.get",
+      );
+    expect(publishedBypassRead).toMatchObject({
+      methodDescription:
+        "Reads whether Account Pooler routing is bypassed for one thread. This is read-only and does not change routing.",
+    });
+    await expect(
+      fixture.host.harness.behavior.callRpc("bypass.get", {
+        threadId: "thread-one",
+      }),
+    ).resolves.toEqual({ threadId: "thread-one", bypassed: true });
+    await expect(
+      fixture.host.harness.behavior.callRpc("bypass.get", {
+        threadId: "thread-two",
+      }),
+    ).resolves.toEqual({ threadId: "thread-two", bypassed: false });
+    await expect(
+      fixture.host.harness.behavior.callRpc("bypass.get", {
+        threadId: "thread-one",
+        bypassed: false,
+      }),
+    ).rejects.toThrow();
+    const bypassStatus = await fixture.host.harness.behavior.runCli([
+      "bypass",
+      "get",
+      "thread-one",
+      "--json",
+    ]);
+    expect(bypassStatus.exitCode).toBe(0);
+    expect(JSON.parse(bypassStatus.stdout)).toEqual({
+      ok: true,
+      threadId: "thread-one",
+      bypassed: true,
+    });
     expect(
       await fixture.host.harness.behavior.resolveProviderEnv("claude-code", {
         threadId: "thread-one",
@@ -6792,7 +6828,7 @@ it("publishes pooled usage without a display plugin and does not invent unobserv
     fixture.host.harness.registrations.experimental_publishedRpcMethods.map(
       (entry) => entry.method,
     ),
-  ).toEqual([usageListMethod, usageFetchMethod]);
+  ).toEqual([usageListMethod, usageFetchMethod, "bypass.get"]);
 });
 
 it("publishes an empty shared usage group before any accounts or settings are configured", async () => {
