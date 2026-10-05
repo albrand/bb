@@ -357,6 +357,7 @@ function AccountUsage({
 }) {
   const usage = account.usage;
   const email = usage?.status === "ok" ? usage.accountEmail : null;
+  const pool = account.accountPool;
   const title = account.accountLabel ?? email ?? account.displayName;
   const plan = usage?.status === "ok" ? usage.planLabel : null;
   const message =
@@ -390,6 +391,11 @@ function AccountUsage({
             {plan}
           </span>
         )}
+        {pool?.active ? (
+          <span className="shrink-0 rounded-sm bg-primary/10 px-1 py-0.5 text-2xs leading-none text-primary">
+            Active
+          </span>
+        ) : null}
       </div>
       {email !== null && email !== title ? (
         <p
@@ -397,6 +403,21 @@ function AccountUsage({
           className="col-span-full truncate text-2xs text-subtle-foreground"
         >
           {email}
+        </p>
+      ) : null}
+      {pool !== undefined && pool !== null ? (
+        <p className="col-span-full flex flex-wrap gap-x-2 text-2xs text-subtle-foreground">
+          <span>
+            {pool.enabled ? "Enabled" : "Disabled"} · {pool.status}
+          </span>
+          {pool.heldUntil !== null ? (
+            <span>
+              Held · {formatUsageReset(new Date(pool.heldUntil).toISOString())}
+            </span>
+          ) : null}
+          {pool.extraUsage === null ? null : (
+            <span>Extra usage {pool.extraUsage}</span>
+          )}
         </p>
       ) : null}
       {message !== null ? (

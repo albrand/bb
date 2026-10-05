@@ -42,22 +42,42 @@ function accountKey(account: AccountSummary): string | null {
       : null;
 }
 
-export function registerUsageSource(bb: BbPluginApi, hub: AccountPoolHub) {
+export function registerUsageSource(
+  bb: BbPluginApi,
+  hub: AccountPoolHub,
+  isRoutingEnabled: (provider: AccountSummary["provider"]) => Promise<boolean>,
+) {
   bb.rpc.register(
     usageSourceRpcContract,
     {
       async [usageListMethod]() {
-        const { accounts } = await hub.status();
+        const status = await hub.status();
+        const routed = await Promise.all(
+          status.accounts.map(async (account) => ({
+            account,
+            enabled: await isRoutingEnabled(account.provider),
+          })),
+        );
+        const accounts = routed
+          .filter(({ enabled }) => enabled)
+          .map(({ account }) => account)
+          .sort((left, right) => left.priority - right.priority);
         return {
-          label: "Account Pooler",
+          ...(accounts.length > 0 ? { label: "Account Pooler" } : {}),
           resources: accounts.map((account) => ({
             id: account.id,
             accountKey: accountKey(account),
             providerId: account.provider === "claude" ? "claude-code" : "codex",
-            label:
-              account.email ??
-              (account.provider === "claude" ? "Claude Code" : "Codex"),
+            label: account.label,
             scope: { kind: "shared" as const },
+            accountPool: {
+              active: account.active,
+              enabled: account.enabled,
+              status: account.status,
+              heldUntil: account.heldUntil,
+              error: account.error,
+              extraUsage: account.extraUsage?.status ?? null,
+            },
           })),
         };
       },

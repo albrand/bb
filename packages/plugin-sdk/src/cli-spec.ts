@@ -31,11 +31,6 @@ interface PluginCliOptionBase {
   hidden?: boolean;
   /** Value placeholder in help and usage; defaults to the value type. */
   placeholder?: string;
-  /**
-   * Recognize `--<name>-stdin`. The `bb` CLI reads that value from stdin and
-   * rewrites it to `--<name> <value>` before the plugin runs, so a command
-   * that still sees it reports that instead of "unknown option".
-   */
   stdin?: boolean;
 }
 
@@ -378,6 +373,7 @@ function optionPlaceholder(option: PluginCliOption): string {
 }
 
 function optionSignature(name: string, option: PluginCliOption): string {
+  if (option.stdin === true) return `--${name}-stdin`;
   const placeholder = optionPlaceholder(option);
   return placeholder ? `--${name} <${placeholder}>` : `--${name}`;
 }
@@ -440,7 +436,7 @@ function optionHelpRow(
   if (isRepeatable(option)) markers.push("repeatable");
   const fallback = defaultOf(option);
   if (fallback !== undefined) markers.push(`default: ${fallback}`);
-  if (option.stdin === true) markers.push(`or --${name}-stdin from the bb CLI`);
+  if (option.stdin === true) markers.push("stdin only; read by the bb CLI");
   const suffix = markers.length > 0 ? ` (${markers.join(", ")})` : "";
   return [optionSignature(name, option), `${option.description}${suffix}`];
 }
@@ -723,6 +719,7 @@ function tokenize(
   path: string,
   command: PluginCliCommand,
   argv: readonly string[],
+  experimental_stdinInputs?: Readonly<Record<string, string>>,
 ): ParsedTokens {
   const options = command.options ?? {};
   const byName = new Map<string, string>();
@@ -766,17 +763,28 @@ function tokenize(
     const inline = separator === -1 ? undefined : body.slice(separator + 1);
     const name = long ? byName.get(spelled) : byShort.get(spelled);
     const option = name === undefined ? undefined : options[name];
-    if (name === undefined || option === undefined) {
-      const stdinTarget = spelled.endsWith("-stdin")
-        ? byName.get(spelled.slice(0, -"-stdin".length))
-        : undefined;
-      if (stdinTarget !== undefined && options[stdinTarget]?.stdin === true) {
+    const stdinTarget = spelled.endsWith("-stdin")
+      ? byName.get(spelled.slice(0, -"-stdin".length))
+      : undefined;
+    if (stdinTarget !== undefined && options[stdinTarget]?.stdin === true) {
+      const sourceName = spelled.slice(0, -"-stdin".length);
+      const value = experimental_stdinInputs?.[sourceName];
+      if (value === undefined || inline !== undefined) {
         throw fail({
           code: "invalid_value",
-          message: `--${spelled} is read by the bb CLI, which rewrites it to --${stdinTarget} <value> before this command runs`,
-          hint: `Pass --${stdinTarget} <value> here, or run this through the bb CLI.`,
+          message: `--${spelled} must be supplied by the bb CLI through stdin`,
         });
       }
+      if (parsed.values.has(stdinTarget)) {
+        throw fail({
+          code: "unexpected_argument",
+          message: `--${stdinTarget} was given more than once; it takes a single stdin value`,
+        });
+      }
+      parsed.values.set(stdinTarget, [value]);
+      continue;
+    }
+    if (name === undefined || option === undefined) {
       const suggestion = nearest(
         spelled,
         visibleOptions(command).map(([optionName]) => optionName),
@@ -804,6 +812,12 @@ function tokenize(
       }
       if (inline !== "false") parsed.flags.add(name);
       continue;
+    }
+    if (option.stdin === true) {
+      throw fail({
+        code: "invalid_value",
+        message: `--${name} accepts input only through --${name}-stdin`,
+      });
     }
     const existing = parsed.values.get(name);
     if (existing !== undefined && !isRepeatable(option)) {
@@ -1239,7 +1253,13 @@ export function defineCli(spec: PluginCliSpec): PluginCliRegistration {
           throw unknownCommandError(spec, words);
         }
         const tail = asked.slice(resolved?.words ?? 0);
-        const parsed = tokenize(spec, path, command, tail);
+        const parsed = tokenize(
+          spec,
+          path,
+          command,
+          tail,
+          ctx.experimental_stdinInputs,
+        );
         const options = buildOptionValues(spec, path, command, parsed);
         const positionals = buildPositionalValues(spec, path, command, parsed);
         const missing = [

@@ -927,6 +927,7 @@ export interface PluginCliContext {
   cwd?: string;
   threadId?: string;
   projectId?: string;
+  experimental_stdinInputs?: Readonly<Record<string, string>>;
   /** Aborted when the invoking CLI HTTP request disconnects. */
   signal?: AbortSignal;
 }

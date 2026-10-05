@@ -790,6 +790,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "Be invoked the same way by a person at a terminal and by an agent mid-task",
           "Receive the thread and project it was invoked from, when bb knows them",
+          "Receive stdin-only option values in experimental_stdinInputs without copying them into argv",
           "Make the plugin usable from scripts and automations, not only from the UI",
           "Declare commands, arguments and options once and get parsing, `--help`, nearest-name suggestions and JSON errors",
         ],
@@ -802,6 +803,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginCliSpec",
           "PluginCliCommand",
           "PluginCliOption",
+          "PluginCliContext",
         ],
         firstParty: [
           "Automations",

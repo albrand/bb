@@ -120,6 +120,10 @@ export class AccountStore {
     return this.update(id, (account) => ({ ...account, priority }));
   }
 
+  async rename(id: string, label: string): Promise<Account | null> {
+    return this.update(id, (account) => ({ ...account, label }));
+  }
+
   async setSubscriptionType(
     id: string,
     subscriptionType: string,

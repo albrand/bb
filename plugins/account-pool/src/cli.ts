@@ -11,6 +11,7 @@ import {
   accountIdInputSchema,
   accountPriorityInputSchema,
   accountReorderInputSchema,
+  accountRenameInputSchema,
   accountPoolConfigSetInputSchema,
   bypassInputSchema,
   codexLoginPollInputSchema,
@@ -57,7 +58,7 @@ const SESSION_OPTION = {
   required: true,
   placeholder: "id",
   aliases: ["session-id", "sessionId"],
-  description: "Session ID printed by `bb pool account add --login`",
+  description: "Session ID printed by `{{BB_CLI}} pool account add --login`",
 } as const;
 
 const ACCOUNT_ID_POSITIONAL = {
@@ -119,6 +120,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
       "Provider",
       "Kind",
       "Enabled",
+      "Active",
       "Priority",
       "5h",
       "5h reset",
@@ -137,6 +139,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
         account.provider,
         account.kind,
         String(account.enabled),
+        String(account.active),
         String(account.priority),
         formatUtilization(account.fiveHourUtilization),
         formatReset(account.fiveHourResetAt),
@@ -233,6 +236,10 @@ function json(value: object): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 async function attempt(
   work: () => Promise<PluginCliResult>,
 ): Promise<PluginCliResult> {
@@ -265,7 +272,7 @@ export function registerPoolCli(
           summary:
             "Sign in to Claude or Codex, import credentials, or add an Anthropic API key",
           description:
-            "--login prints the browser or device step and exits; finish it with `bb pool account login-complete` (Claude) or `bb pool account login-poll` (Codex).\n--import reads the provider's existing login on this bb server host (~/.claude or ~/.codex).",
+            "--login prints the browser or device step and exits; finish it with `{{BB_CLI}} pool account login-complete` (Claude) or `{{BB_CLI}} pool account login-poll` (Codex).\n--import reads the provider's existing login on this bb server host (~/.claude or ~/.codex).",
           unexpectedPositionalHint:
             "the provider belongs in --provider <claude|codex>, not a bare argument",
           options: {
@@ -288,7 +295,7 @@ export function registerPoolCli(
               stdin: true,
               aliases: ["apikey", "key"],
               description:
-                "Anthropic API key, --provider claude only. Unsafe: exposes the key in process arguments, shell history, and agent transcripts",
+                "Anthropic API key, --provider claude only. Use --api-key-stdin to keep it out of process arguments",
             },
             label: {
               type: "string",
@@ -301,7 +308,6 @@ export function registerPoolCli(
               type: "integer",
               min: -1_000_000,
               max: 1_000_000,
-              default: 100,
               placeholder: "n",
               aliases: ["order"],
               description:
@@ -311,7 +317,6 @@ export function registerPoolCli(
           },
           constraints: [
             { kind: "exactly-one", options: ["login", "import", "api-key"] },
-            { kind: "at-most-one", options: ["login", "label"] },
             { kind: "at-most-one", options: ["login", "priority"] },
           ],
           run: (input) =>
@@ -332,7 +337,7 @@ export function registerPoolCli(
                           `Session ID: ${started.sessionId}`,
                           "",
                           "After authorizing, wait for the account to be added with:",
-                          `bb pool account login-poll --session ${started.sessionId}`,
+                          `{{BB_CLI}} pool account login-poll --session ${started.sessionId}${input.options.label === undefined ? "" : ` --label ${shellQuote(input.options.label)}`}`,
                         ].join("\n")}\n`,
                   };
                 }
@@ -348,7 +353,7 @@ export function registerPoolCli(
                         `Session ID: ${started.sessionId}`,
                         "",
                         "After signing in, pipe the code shown on the final page into:",
-                        `printf '%s\\n' \"$CLAUDE_AUTH_CODE\" | bb pool account login-complete --session ${started.sessionId} --code-stdin`,
+                        `printf '%s\\n' \"$CLAUDE_AUTH_CODE\" | {{BB_CLI}} pool account login-complete --session ${started.sessionId} --code-stdin${input.options.label === undefined ? "" : ` --label ${shellQuote(input.options.label)}`}`,
                       ].join("\n")}\n`,
                 };
               }
@@ -380,11 +385,22 @@ export function registerPoolCli(
           summary: "Wait for a Codex device-code login to complete",
           description:
             "Blocks until the Codex authorization finishes, fails, or the invocation is cancelled.",
-          options: { session: SESSION_OPTION, json: JSON_OPTION },
+          options: {
+            session: SESSION_OPTION,
+            label: {
+              type: "string",
+              placeholder: "text",
+              description: "Label shown in account listings",
+            },
+            json: JSON_OPTION,
+          },
           run: (input, ctx) =>
             attempt(async () => {
               const parsed = codexLoginPollInputSchema.parse({
                 sessionId: input.options.session,
+                ...(input.options.label === undefined
+                  ? {}
+                  : { label: input.options.label }),
               });
               const signal = ctx.signal;
               const cancel = () => codexLogin.cancel(parsed);
@@ -433,9 +449,14 @@ export function registerPoolCli(
         "account login-complete": cliCommand({
           summary: "Complete a Claude browser login with its manual code",
           description:
-            "Pipe the code the final login page shows:\n  printf '%s\\n' \"$CLAUDE_AUTH_CODE\" | bb pool account login-complete --session <id> --code-stdin",
+            "Pipe the code the final login page shows:\n  printf '%s\\n' \"$CLAUDE_AUTH_CODE\" | {{BB_CLI}} pool account login-complete --session <id> --code-stdin",
           options: {
             session: SESSION_OPTION,
+            label: {
+              type: "string",
+              placeholder: "text",
+              description: "Label shown in account listings",
+            },
             code: {
               type: "string",
               required: true,
@@ -443,7 +464,7 @@ export function registerPoolCli(
               stdin: true,
               aliases: ["pasted", "auth-code"],
               description:
-                "Manual callback code from the final login page. Unsafe: exposes the code in process arguments",
+                "Manual callback code from the final login page; use --code-stdin so it stays out of process arguments",
             },
             json: JSON_OPTION,
           },
@@ -452,6 +473,9 @@ export function registerPoolCli(
               const parsed = loginCompleteInputSchema.parse({
                 sessionId: input.options.session,
                 pasted: input.options.code,
+                ...(input.options.label === undefined
+                  ? {}
+                  : { label: input.options.label }),
               });
               const account = await login.complete(parsed);
               return {
@@ -585,6 +609,33 @@ export function registerPoolCli(
                 stdout: input.options.json
                   ? json({ ok: true, account })
                   : `Set ${account.label} priority to ${account.priority}.\n`,
+              };
+            }),
+        }),
+        "account rename": cliCommand({
+          summary: "Rename an account",
+          positionals: [
+            ACCOUNT_ID_POSITIONAL,
+            { name: "label", description: "New account label", required: true },
+          ],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const parsed = accountRenameInputSchema.parse({
+                id: input.positionals.id,
+                label: input.positionals.label,
+              });
+              const account = await operations.rename(parsed.id, parsed.label);
+              if (account === null) {
+                throw new PluginCliError("Account not found.", {
+                  code: "account_not_found",
+                });
+              }
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ok: true, account })
+                  : `Renamed account to ${account.label}.\n`,
               };
             }),
         }),

@@ -78,6 +78,16 @@ export const usageResourceSchema = z.object({
       hostName: z.string().min(1),
     }),
   ]),
+  accountPool: z
+    .object({
+      active: z.boolean(),
+      enabled: z.boolean(),
+      status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
+      heldUntil: z.number().int().nullable(),
+      error: z.string().nullable(),
+      extraUsage: z.enum(["allowed", "rejected"]).nullable(),
+    })
+    .optional(),
 });
 export const usageResourceListSchema = z.object({
   label: z

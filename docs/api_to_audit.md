@@ -3789,3 +3789,7 @@ with third-party providers.
 `bb.sdk.experimental_promptHistory.list({ cursor?, limit?, signal? })` returns `{ entries, nextCursor }`: every accepted user prompt across projects and threads, newest first, each with `id`, `createdAt`, `input`, `projectId`, and `threadId`. `limit` is a digit string, defaulting to 100 and capped at 1000. `nextCursor` is an opaque string, or null on the last page. A page can hold fewer than `limit` entries while `nextCursor` is set, because stored rows whose input no longer parses are skipped. Prompts from a deleted thread remain listed until the thread row is removed, which cascades to its prompt history. The same route backs `bb prompt-history list`.
 
 Before stabilization, audit whether `limit` should be a number, whether the cursor format needs versioning, whether project or thread filters belong on this call rather than on `projects.promptHistory` and `threads.promptHistory`, and whether skipped rows should fill the page.
+
+## PluginCliContext.experimental_stdinInputs
+
+PluginCliContext.experimental_stdinInputs carries values that the CLI proxy read from stdin in the request body, separately from argv. A plugin CLI option marked stdin: true accepts input only through its --<option>-stdin form; inline values are rejected without echoing them. Stabilize after auditing CLI logs, plugin telemetry, error formatting, and transcript serialization across core and third-party plugins, and confirming stdin values remain bounded and are handled only by the intended command.

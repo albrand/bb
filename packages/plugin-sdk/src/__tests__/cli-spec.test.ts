@@ -599,7 +599,10 @@ describe("defineCli parsing", () => {
               description: "API key",
             },
           },
-          run: (input) => ({ exitCode: 0, stdout: input.options.provider }),
+          run: (input) => {
+            ran(input.options);
+            return { exitCode: 0, stdout: input.options.provider };
+          },
         }),
         "account list": cliCommand({
           summary: "List accounts",
@@ -616,7 +619,7 @@ describe("defineCli parsing", () => {
         name: "account-add",
         summary: "Add an account",
         usage:
-          "bb pool account add --provider <claude|codex> [--api-key <value>]",
+          "bb pool account add --provider <claude|codex> [--api-key-stdin]",
       },
       {
         name: "account-list",
@@ -630,7 +633,24 @@ describe("defineCli parsing", () => {
 
     const stdin = await run(cli, ["account", "add", "--api-key-stdin"]);
     expect(stdin.exitCode).toBe(1);
-    expect(stdin.stderr).toContain("--api-key-stdin is read by the bb CLI");
+    expect(stdin.stderr).toContain(
+      "--api-key-stdin must be supplied by the bb CLI through stdin",
+    );
+    const direct = await run(cli, ["account", "add", "--api-key", "secret"]);
+    expect(direct.exitCode).toBe(1);
+    expect(direct.stderr).toContain(
+      "--api-key accepts input only through --api-key-stdin",
+    );
+    expect(direct.stderr).not.toContain("secret");
+    ran.mockClear();
+    const piped = await cli.run(
+      ["account", "add", "--provider", "claude", "--api-key-stdin"],
+      { experimental_stdinInputs: { "api-key": "piped-value" } },
+    );
+    expect(piped.exitCode).toBe(0);
+    expect(ran).toHaveBeenCalledWith(
+      expect.objectContaining({ "api-key": "piped-value" }),
+    );
   });
 
   it("runs a root command when no command word is given", async () => {

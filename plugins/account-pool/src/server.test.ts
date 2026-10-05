@@ -377,6 +377,54 @@ describe("Account Pool config schema", () => {
 });
 
 describe("Account Pool plugin", () => {
+  it("appends accounts to the current priority order and renames over RPC and CLI", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "http://127.0.0.1:9001",
+    });
+    const added = accountSchema.parse(
+      await fixture.host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-appended" },
+        label: "Appended account",
+      }),
+    );
+    expect(added.priority).toBe(fixture.account.priority + 1);
+    const renamed = await fixture.host.harness.behavior.callRpc(
+      "account.rename",
+      {
+        id: added.id,
+        label: "Work Claude",
+      },
+    );
+    expect(renamed).toMatchObject({
+      account: { label: "Work Claude", priority: added.priority },
+    });
+    const cliRename = await fixture.host.harness.behavior.runCli([
+      "account",
+      "rename",
+      added.id,
+      "Primary Claude",
+    ]);
+    expect(cliRename).toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("Primary Claude"),
+    });
+    const table = await fixture.host.harness.behavior.runCli([
+      "account",
+      "list",
+      "--json",
+    ]);
+    expect(JSON.parse(table.stdout).accounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: added.id,
+          label: "Primary Claude",
+          active: false,
+        }),
+      ]),
+    );
+  });
+
   it("removes persisted cache debugging settings while preserving pool configuration across reloads", async () => {
     const dataDir = await mkdtemp(
       path.join(tmpdir(), "bb-account-pool-config-upgrade-"),
@@ -869,6 +917,10 @@ describe("Account Pool plugin", () => {
       (account) =>
         account.provider === "codex" && account.id !== firstCodex?.id,
     );
+    expect(status.accounts.filter((account) => account.active)).toHaveLength(1);
+    expect(
+      status.accounts.find((account) => account.active)?.codexAccountId,
+    ).toBe(seen[3]?.accountId);
     if (secondCodex === undefined) throw new Error("Missing second account.");
     await host.harness.behavior.callRpc("account.disable", {
       id: secondCodex.id,
@@ -1140,20 +1192,24 @@ describe("Account Pool plugin", () => {
     ]);
     const hello = helloResponse();
     expect(hello.status).toBe(200);
-    const added = await host.harness.behavior.runCli([
-      "account",
-      "add",
-      "--provider",
-      "claude",
-      "--api-key",
-      "sk-cli-secret",
-      "--label",
-      "CLI account",
-      "--priority",
-      "7",
-    ]);
+    const added = await host.harness.behavior.runCli(
+      [
+        "account",
+        "add",
+        "--provider",
+        "claude",
+        "--api-key-stdin",
+        "--label",
+        "CLI account",
+        "--priority",
+        "7",
+      ],
+      {
+        experimental_stdinInputs: { "api-key": "fixture-cli-key" },
+      },
+    );
     expect(added.exitCode).toBe(0);
-    expect(added.stdout).not.toContain("sk-cli-secret");
+    expect(added.stdout).not.toContain("fixture-cli-key");
     expect(added.stdout).not.toContain("reload");
     const key = await resolveToken(host, "host-one", "thread-empty");
     const forwardedResponse = await host.harness.behavior.fetchHttp(
@@ -1183,7 +1239,9 @@ describe("Account Pool plugin", () => {
     expect(help.stdout).toContain("--login");
     expect(help.stdout).toContain("account login-complete");
     expect(help.stdout).toContain("--api-key-stdin");
-    expect(help.stdout).toContain("Unsafe: exposes the key");
+    expect(help.stdout).toContain(
+      "Use --api-key-stdin to keep it out of process arguments",
+    );
     const loginCompleteHelp = await fixture.host.harness.behavior.runCli([
       "account",
       "login-complete",
@@ -1333,7 +1391,7 @@ describe("Account Pool plugin", () => {
     ]);
     expect(stdinFlag.exitCode).toBe(1);
     expect(stdinFlag.stderr).toContain(
-      "--code-stdin is read by the bb CLI, which rewrites it to --code <value>",
+      "--code-stdin must be supplied by the bb CLI through stdin",
     );
 
     const badProvider = await run([
@@ -1518,14 +1576,12 @@ describe("Account Pool plugin", () => {
     }
     const cliState = new URL(authorizeUrl).searchParams.get("state");
     if (cliState === null) throw new Error("CLI login start omitted state.");
-    const cliCompleted = await host.harness.behavior.runCli([
-      "account",
-      "login-complete",
-      "--session",
-      sessionId,
-      "--code",
-      `cli-code#${cliState}`,
-    ]);
+    const cliCompleted = await host.harness.behavior.runCli(
+      ["account", "login-complete", "--session", sessionId, "--code-stdin"],
+      {
+        experimental_stdinInputs: { code: `cli-code#${cliState}` },
+      },
+    );
     expect(cliCompleted).toMatchObject({
       exitCode: 0,
       stdout: expect.stringContaining("Added Logged-in Claude"),
@@ -5282,6 +5338,7 @@ describe("Account Pool plugin", () => {
             accessToken: `access-${imported}`,
             refreshToken: `refresh-${imported}`,
             email: `account-${imported}@example.com`,
+            accountUuid: `00000000-0000-4000-8000-${String(imported).padStart(12, "0")}`,
             expiresAt: now + 10 * 60 * 1_000,
           });
         },
@@ -6031,7 +6088,7 @@ describe("sequential pool recovery", () => {
         refreshToken: "refresh",
         expiresAt: now + 3600000,
         idToken: null,
-        accountId: "codex-qa",
+        accountId: `codex-qa-${imports}`,
         email: null,
       }),
       fetch: async (input, init) => {
@@ -6244,6 +6301,7 @@ describe("sequential pool recovery", () => {
           importCredentials: async () =>
             importedCredentials({
               accessToken: ++importCount === 1 ? "paid" : "included",
+              accountUuid: `00000000-0000-4000-8000-${String(importCount).padStart(12, "0")}`,
             }),
           fetch: async (input, init) => {
             const key = new Headers(init?.headers).get("authorization");
@@ -6707,6 +6765,14 @@ it("publishes pooled usage without a display plugin and does not invent unobserv
       id: fixture.account.id,
       providerId: "claude-code",
       scope: { kind: "shared" },
+      accountPool: {
+        active: false,
+        enabled: true,
+        status: "ready",
+        heldUntil: null,
+        error: null,
+        extraUsage: null,
+      },
     }),
   ]);
   const result = usageMeasurementSchema.parse(
@@ -6748,7 +6814,7 @@ it("publishes an empty shared usage group before any accounts or settings are co
     ).toContain(usageListMethod);
     await expect(
       host.harness.behavior.callRpc(usageListMethod, {}),
-    ).resolves.toEqual({ label: "Account Pooler", resources: [] });
+    ).resolves.toEqual({ resources: [] });
     await expect(
       host.harness.behavior.callRpc(usageFetchMethod, {
         resourceId: "removed",
@@ -6760,6 +6826,60 @@ it("publishes an empty shared usage group before any accounts or settings are co
     await host.harness.lifecycle.dispose();
     await fs.rm(dataDir, { recursive: true, force: true });
   }
+});
+
+it("lists every routed pool account and hides them from provider usage when routing is off", async () => {
+  const upstream = await startUpstream((_request, response) => {
+    response.end();
+  });
+  cleanups.push(upstream.close);
+  const fixture = await createFixture({ upstreamUrl: upstream.url });
+  const second = accountSchema.parse(
+    await fixture.host.harness.behavior.callRpc("account.add", {
+      provider: "claude",
+      source: { kind: "api-key", apiKey: "sk-second" },
+      label: "Second",
+      priority: 2,
+    }),
+  );
+  await fixture.host.harness.behavior.callRpc("routing.set", {
+    provider: "claude",
+    enabled: true,
+  });
+  const inventory = usageResourceListSchema.parse(
+    await fixture.host.harness.behavior.callRpc(usageListMethod, {}),
+  );
+  expect(inventory.resources.map(({ id }) => id)).toEqual([
+    second.id,
+    fixture.account.id,
+  ]);
+  expect(inventory.resources.map(({ accountPool }) => accountPool)).toEqual([
+    {
+      active: false,
+      enabled: true,
+      status: "ready",
+      heldUntil: null,
+      error: null,
+      extraUsage: null,
+    },
+    {
+      active: false,
+      enabled: true,
+      status: "ready",
+      heldUntil: null,
+      error: null,
+      extraUsage: null,
+    },
+  ]);
+  await fixture.host.harness.behavior.callRpc("routing.set", {
+    provider: "claude",
+    enabled: false,
+  });
+  expect(
+    usageResourceListSchema.parse(
+      await fixture.host.harness.behavior.callRpc(usageListMethod, {}),
+    ),
+  ).toEqual({ resources: [] });
 });
 
 describe("Account Pool nested proxy", () => {

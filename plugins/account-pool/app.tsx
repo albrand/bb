@@ -81,7 +81,7 @@ import {
 } from "./src/realtime.js";
 
 type DialogState =
-  | { kind: "account" | "priority" | "remove"; accountId: string }
+  | { kind: "account" | "priority" | "remove" | "rename"; accountId: string }
   | { kind: "claude-login" | "codex-login" | "api-key" }
   | null;
 
@@ -390,7 +390,9 @@ function AccountRow({
   threshold: number;
   pending: boolean;
   refreshing: boolean;
-  onAction: (action: "toggle" | "priority" | "refresh" | "remove") => void;
+  onAction: (
+    action: "toggle" | "priority" | "refresh" | "remove" | "rename",
+  ) => void;
   onOpen: () => void;
   reorderDisabled: boolean;
 }) {
@@ -454,6 +456,7 @@ function AccountRow({
               {account.extraUsage?.status === "allowed" ? (
                 <SettingsBadge>Extra usage available</SettingsBadge>
               ) : null}
+              {account.active ? <SettingsBadge>Active</SettingsBadge> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground/75">
               <span className="inline-flex shrink-0 items-center gap-1.5">
@@ -510,6 +513,13 @@ function AccountRow({
               <Icon name="RotateCcw" />
               Refresh usage
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={pending}
+              onSelect={() => onAction("rename")}
+            >
+              <Icon name="Pencil" />
+              Rename…
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -535,9 +545,11 @@ function AccountRow({
 
 function AddAccountMenu({
   provider,
+  hasAccounts,
   onChoose,
 }: {
   provider: PoolProvider;
+  hasAccounts: boolean;
   onChoose: (choice: "login" | "import" | "api-key") => void;
 }) {
   return (
@@ -545,7 +557,7 @@ function AddAccountMenu({
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline">
           <Icon name="Plus" className="size-3.5" />
-          Add account
+          {hasAccounts ? "Add another account" : "Add account"}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -573,8 +585,9 @@ function AddAccountMenu({
           <span>
             <span className="block">Import from this machine</span>
             <span className="block text-xs text-muted-foreground">
-              Copies the server host&apos;s{" "}
-              {provider === "claude" ? "~/.claude" : "Codex"} login
+              Import the server host&apos;s current{" "}
+              {provider === "claude" ? "~/.claude" : "~/.codex"} login if it is
+              not already pooled
             </span>
           </span>
         </DropdownMenuItem>
@@ -885,6 +898,8 @@ function AccountPoolSettings() {
   );
   const [loginDone, setLoginDone] = useState<string | null>(null);
   const [pastedCode, setPastedCode] = useState("");
+  const [accountLabel, setAccountLabel] = useState("");
+  const [renameLabel, setRenameLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [priority, setPriority] = useState("100");
   const [countdown, setCountdown] = useState(0);
@@ -946,6 +961,7 @@ function AccountPoolSettings() {
       try {
         const result = await rpc.call("codexLogin.poll", {
           sessionId: codexStep.sessionId,
+          ...(accountLabel.trim() === "" ? {} : { label: accountLabel.trim() }),
         });
         if (cancelled) return;
         if (result.status === "complete") {
@@ -965,12 +981,13 @@ function AccountPoolSettings() {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [codexStep, loginDone, refresh, rpc]);
+  }, [accountLabel, codexStep, loginDone, refresh, rpc]);
   const accounts = status?.accounts ?? [];
   const selectedAccount =
     dialog?.kind === "account" ||
     dialog?.kind === "priority" ||
-    dialog?.kind === "remove"
+    dialog?.kind === "remove" ||
+    dialog?.kind === "rename"
       ? (accounts.find((account) => account.id === dialog.accountId) ?? null)
       : null;
   async function run(key: string, action: () => Promise<void>): Promise<void> {
@@ -1046,12 +1063,14 @@ function AccountPoolSettings() {
       const started = await rpc.call("login.start", null);
       setLoginStep(started);
       setPastedCode("");
+      setAccountLabel("");
     });
   }
   async function startCodex(): Promise<void> {
     setDialog({ kind: "codex-login" });
     setLoginDone(null);
     await run("codex-login", async () => {
+      setAccountLabel("");
       setCodexStep(await rpc.call("codexLogin.start", null));
     });
   }
@@ -1073,13 +1092,12 @@ function AccountPoolSettings() {
         provider,
         source: { kind: "import" },
         label: null,
-        priority: 100,
       });
     });
   }
   async function accountAction(
     account: AccountSummary,
-    action: "toggle" | "priority" | "refresh" | "remove",
+    action: "toggle" | "priority" | "refresh" | "remove" | "rename",
   ): Promise<void> {
     if (action === "priority") {
       setPriority(String(account.priority));
@@ -1088,6 +1106,11 @@ function AccountPoolSettings() {
     }
     if (action === "remove") {
       setDialog({ kind: "remove", accountId: account.id });
+      return;
+    }
+    if (action === "rename") {
+      setRenameLabel(account.label);
+      setDialog({ kind: "rename", accountId: account.id });
       return;
     }
     await run(`${action}-${account.id}`, async () => {
@@ -1127,6 +1150,8 @@ function AccountPoolSettings() {
     setLoginStep(null);
     setCodexStep(null);
     setLoginDone(null);
+    setPastedCode("");
+    setAccountLabel("");
     setError(null);
   }
   const hubHosts =
@@ -1243,6 +1268,7 @@ function AccountPoolSettings() {
                   />
                   <AddAccountMenu
                     provider={provider.id}
+                    hasAccounts={providerAccounts.length > 0}
                     onChoose={(choice) => void chooseAdd(provider.id, choice)}
                   />
                 </div>
@@ -1469,6 +1495,39 @@ function AccountPoolSettings() {
             />
           </DialogFrame>
         ) : null}
+        {dialog?.kind === "rename" && selectedAccount !== null ? (
+          <DialogFrame
+            title={`Rename ${selectedAccount.label}`}
+            footer={
+              <>
+                <span className="flex-1" />
+                <Button variant="outline" onClick={closeDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={renameLabel.trim().length === 0 || pending !== null}
+                  onClick={() =>
+                    void run(`rename-${selectedAccount.id}`, async () => {
+                      await rpc.call("account.rename", {
+                        id: selectedAccount.id,
+                        label: renameLabel.trim(),
+                      });
+                      setDialog(null);
+                    })
+                  }
+                >
+                  Save
+                </Button>
+              </>
+            }
+          >
+            <Input
+              aria-label="Account label"
+              value={renameLabel}
+              onChange={(event) => setRenameLabel(event.target.value)}
+            />
+          </DialogFrame>
+        ) : null}
         {dialog?.kind === "api-key" ? (
           <DialogFrame
             title="Add an Anthropic API key"
@@ -1486,7 +1545,6 @@ function AccountPoolSettings() {
                         provider: "claude",
                         source: { kind: "api-key", apiKey: apiKey.trim() },
                         label: null,
-                        priority: 100,
                       });
                       setApiKey("");
                       setDialog(null);
@@ -1557,13 +1615,19 @@ function AccountPoolSettings() {
             close={closeDialog}
             openUrl={navigate.openUrl}
             setPastedCode={setPastedCode}
+            accountLabel={accountLabel}
+            setAccountLabel={setAccountLabel}
             complete={() =>
               void run("complete-claude", async () => {
                 if (loginStep === null) return;
                 const added = await rpc.call("login.complete", {
                   sessionId: loginStep.sessionId,
                   pasted: pastedCode,
+                  ...(accountLabel.trim() === ""
+                    ? {}
+                    : { label: accountLabel.trim() }),
                 });
+                setPastedCode("");
                 setLoginDone(added.label);
                 setLoginStep(null);
               })
@@ -1584,6 +1648,8 @@ function AccountPoolSettings() {
             close={closeDialog}
             openUrl={navigate.openUrl}
             setPastedCode={() => {}}
+            accountLabel={accountLabel}
+            setAccountLabel={setAccountLabel}
             complete={() => {}}
             restart={() => void startCodex()}
           />
@@ -1746,6 +1812,8 @@ function LoginDialog({
   close,
   openUrl,
   setPastedCode,
+  accountLabel,
+  setAccountLabel,
   complete,
   restart,
 }: {
@@ -1760,6 +1828,8 @@ function LoginDialog({
   close: () => void;
   openUrl: (url: string) => boolean;
   setPastedCode: (value: string) => void;
+  accountLabel: string;
+  setAccountLabel: (value: string) => void;
   complete: () => void;
   restart: () => void;
 }) {
@@ -1827,8 +1897,20 @@ function LoginDialog({
             <UserCodeBlock userCode={codexStep.userCode} />
           )}
           <AuthorizationUrlRow name={name} url={url} openUrl={openUrl} />
+          <Input
+            aria-label="Account label"
+            placeholder={`Optional ${name} account label`}
+            value={accountLabel}
+            onChange={(event) => setAccountLabel(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Use a private window or sign in to the account you want to add.
+          </p>
           {provider === "claude" ? (
             <Input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
               aria-label="Claude authorization code"
               placeholder="Paste code#state here"
               value={pastedCode}

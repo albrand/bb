@@ -70,22 +70,64 @@ describe("provider usage footer disclosure", () => {
         ["codex", "Codex", "team@example.com", 46],
         ["codex", "Codex", "personal@example.com", 82],
         ["claude-code", "Claude Code", "claude-team@example.com", 97],
+        ["claude-code", "Claude Code", "claude-backup@example.com", 54],
       ] as const
     ).map(([providerId, displayName, email, usedPercent]) => ({
       id: email,
       providerId: providerId,
-      accountLabel: email,
+      accountLabel:
+        providerId === "claude-code"
+          ? email === "claude-team@example.com"
+            ? "Claude Principal"
+            : "Claude Secondary"
+          : email,
       displayName: displayName,
       logoUrl: `/api/v1/system/providers/${providerId}/logo`,
       icon: null,
       strings: { iconTint: null },
       signInHint: "Sign in.",
       expiredHint: "Sign in again.",
+      accountPool:
+        providerId !== "claude-code"
+          ? null
+          : email === "claude-team@example.com"
+            ? {
+                active: true,
+                enabled: true,
+                status: "ready",
+                heldUntil: null,
+                error: null,
+                extraUsage: "allowed",
+              }
+            : {
+                active: false,
+                enabled: true,
+                status: "held",
+                heldUntil: Date.now() + 30 * 60_000,
+                error: null,
+                extraUsage: "rejected",
+              },
       usage: {
         status: "ok",
         accountEmail: email,
         planLabel: "Pro",
         windows: [
+          ...(providerId === "claude-code"
+            ? [
+                {
+                  label: "Five-hour limit",
+                  usedPercent: 12,
+                  resetsAt: null,
+                  cost: null,
+                },
+                {
+                  label: "Weekly · Fable",
+                  usedPercent: 91,
+                  resetsAt: null,
+                  cost: null,
+                },
+              ]
+            : []),
           {
             label: "Weekly limit",
             usedPercent: usedPercent,
@@ -265,14 +307,17 @@ describe("provider usage footer disclosure", () => {
         .getAttribute("aria-selected"),
     ).toBe("true");
     expect(
-      slot
-        .getAllByRole("region")
-        .map((row) => row.getAttribute("aria-label")),
+      slot.getAllByRole("region").map((row) => row.getAttribute("aria-label")),
     ).toEqual([
       "Codex team@example.com",
       "Codex personal@example.com",
-      "Claude Code claude-team@example.com",
+      "Claude Code Claude Principal",
+      "Claude Code Claude Secondary",
     ]);
+    expect(slot.getAllByText("Active")).toHaveLength(1);
+    expect(slot.getByText("Extra usage allowed")).toBeTruthy();
+    expect(slot.getByText("Enabled · held")).toBeTruthy();
+    expect(slot.getByText("Extra usage rejected")).toBeTruthy();
     for (const providerId of ["codex", "claude-code"]) {
       await waitFor(() =>
         expect(fetchMock).toHaveBeenCalledWith(
@@ -425,6 +470,7 @@ describe("provider usage footer disclosure", () => {
     expect(slot.getByText("Reset time not reported.")).toBeTruthy();
     expect(slot.getByText("82%")).toBeTruthy();
     fireEvent.click(slot.getByRole("tab", { name: "Claude Code" }));
+    expect(slot.getByText("Claude Principal")).toBeTruthy();
     expect(slot.getByText("claude-team@example.com")).toBeTruthy();
     expect(slot.queryByText("personal@example.com")).toBeNull();
     const diagnostics = vi
