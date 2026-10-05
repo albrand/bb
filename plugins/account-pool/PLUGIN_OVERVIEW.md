@@ -1,4 +1,4 @@
-Route Claude Code and Codex conversations across your subscriptions through a local account pool.
+Route Claude Code and Codex conversations across subscriptions with a local pool.
 
 ## What you get
 
@@ -34,4 +34,4 @@ Experimental: routing, storage, and CLI may change.
 
 ## For agents
 
-`bb pool account add|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id> [--off]`, and `bb pool bypass get <thread-id>`. The `bypass.get` RPC and CLI command read one thread's bypass status without changing routing. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
+`bb pool account add|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id> [--off]`, and `bb pool bypass get <thread-id>`. The `bypass.get` RPC and CLI read one thread's bypass status without changing routing. Commands accept `--json` and `--help`; `bb pool --help` lists them.
