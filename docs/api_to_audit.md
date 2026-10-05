@@ -1,5 +1,34 @@
 # APIs To Audit
 
+## Model picker contributions and plugin creation configuration
+
+`ComposerCustomization.experimental_modelPicker` mounts plugin content inside
+the model menu. It receives the displayed provider ID; `useComposer()` targets
+the same draft or conversation. The component may read accounts and select a
+subscription without changing the model catalogue.
+
+For a new-thread composer, `experimental_setCreateData(value)` sets only the
+calling plugin's JSON configuration. `experimental_createData` reads it. Ordinary
+Enter/button sends and `submit()` both forward the full namespaced map through
+`CreateThreadRequest.experimental_pluginCreateData`. Keys are valid plugin IDs;
+the map has at most 32 entries and 16,384 serialized characters. Separate drafts
+have separate maps. A successful send clears the submitted map; a failed send
+retains it. Existing-thread composers reject writes. This map is not a secret
+channel and is not stored in prompts, events, or queued messages.
+
+`bb.experimental_hooks.on("experimental_thread.configure", handler)` receives
+`{thread: {id, providerId}, data}` only for its own entry after creation of the
+pending row and before every message admission hook. It returns `null`; a missing
+handler, invalid result, failure, or timeout fails creation. It cannot wait or
+admit a message. The plugin persists its configuration and removes it on thread
+deletion. Scheduled initial messages and retries then use that persisted state.
+Omitting the map preserves existing dispatch behavior and install order.
+
+Stabilization requires new-thread and existing-thread picker coverage, ordinary
+and programmatic sends, independently mounted drafts, retained failed submissions,
+owner-only delivery, invalid/unknown plugin rejection, and proof that configuration
+is applied before an admission hook regardless of plugin install order.
+
 ## Composer popups
 
 `ComposerCustomization.experimental_popups` registers an array of
@@ -391,7 +420,7 @@ and whose return value is ignored; the split is the one git draws between
 pre-commit and post-commit hooks, and it is why the two are separate
 namespaces rather than one `on`.
 
-One hook today. `"message.dispatch"` is THE admission checkpoint: it runs
+`"message.dispatch"` is the admission checkpoint: it runs
 before every message reaches a provider — a thread's first message, a
 follow-up, a steer, a drained queue row, a retry of a failed turn — and it runs
 identically for all of them. The handler receives a typed context (project,

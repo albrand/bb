@@ -696,14 +696,23 @@ export interface MessageDispatchHookContext {
  * derive from this map — and so does the server's hook registry — so a
  * half-added hook does not compile.
  *
- * One hook today: `message.dispatch`, THE admission checkpoint, run identically
+ * `message.dispatch` is the admission checkpoint, run identically
  * for a thread's first message, a follow-up, a steer, a retry, and every
  * re-attempt a drain makes. It replaced the earlier `thread.create` +
  * `turn.submit` pair, whose split was an accident of where the code happened to
  * branch rather than a difference a plugin needed to see — the attempt's own
- * `attempt` kind carries what actually differs.
+ * `attempt` kind carries what actually differs. Creation configuration applies
+ * plugin-owned data before that checkpoint and cannot decide admission.
  */
 export interface PluginHookSignatures {
+  /** Applies only this plugin's creation data before any message admission. Configuration is persisted by the plugin; it cannot wait or admit a message. */
+  "experimental_thread.configure": {
+    context: {
+      thread: Pick<ThreadResponse, "id" | "providerId">;
+      data: JsonValue;
+    };
+    decision: null;
+  };
   "message.dispatch": {
     context: MessageDispatchHookContext;
     decision: MessageDispatchHookDecision;

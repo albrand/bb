@@ -250,6 +250,7 @@ function parseRegions(
   | "sendMenu"
   | "richText"
   | "experimental_popups"
+  | "experimental_modelPicker"
 > {
   const actions = parseContributionArray<
     NonNullable<ComposerCustomization["actions"]>[number]
@@ -357,7 +358,19 @@ function parseRegions(
     }
   }
 
+  const modelPicker =
+    registration.experimental_modelPicker === undefined
+      ? undefined
+      : requireComponent<
+          NonNullable<ComposerCustomization["experimental_modelPicker"]>
+        >(
+          `${kind}.experimental_modelPicker`,
+          registration.experimental_modelPicker,
+        );
   return {
+    ...(modelPicker === undefined
+      ? {}
+      : { experimental_modelPicker: modelPicker }),
     ...(actions !== undefined ? { actions } : {}),
     ...(banners !== undefined ? { banners } : {}),
     ...(plusMenu !== undefined ? { plusMenu } : {}),

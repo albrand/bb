@@ -1147,6 +1147,7 @@ function createFakePluginHostInternal(
   const hooks: {
     [K in PluginHookName]: PluginHookHandler<K> | null;
   } = {
+    "experimental_thread.configure": null,
     "message.dispatch": null,
   };
   const environmentCompositions = new Map<

@@ -15,6 +15,8 @@ import {
   type PoolProvider,
   type PoolStatus,
 } from "./contracts.js";
+import { draftSelectionSchema } from "./contracts.js";
+import { ThreadTokenStore } from "./thread-tokens.js";
 import {
   AVAILABILITY_PATH,
   PARENT_TOKEN_ENV,
@@ -132,6 +134,8 @@ export function createAccountPoolPlugin(
     await hubTokens.initialize();
     const enrolledHosts = await bb.sdk.hosts.list();
     await hubTokens.prune(enrolledHosts.map((host) => host.id));
+    const threadTokens = new ThreadTokenStore(secretDir, hubTokens);
+    await threadTokens.initialize(enrolledHosts.map((host) => host.id));
     const routing = new RoutingStore(bb.storage.kv, now);
     const env = options.env ?? process.env;
     const configuredParentPool = readParentPool(env);
@@ -156,6 +160,8 @@ export function createAccountPoolPlugin(
       quotas,
       affinity: new PoolAffinityStore(db),
       hubTokens,
+      threadTokens,
+      routing,
       getSettings: () => currentSettings,
       fetch: upstreamFetch,
       now,
@@ -220,7 +226,44 @@ export function createAccountPoolPlugin(
       () => bb.realtime.publish(ACCOUNT_POOL_ACCOUNTS_CHANGED, {}),
       (accountId) => hub.refreshUsage(accountId, true),
       parentStatus,
+      async (threadId) => {
+        const [thread, queue] = await Promise.all([
+          bb.sdk.threads.get({ threadId }),
+          bb.sdk.threads.queuedMessages.list({ threadId }),
+        ]);
+        return {
+          providerId: thread.providerId,
+          status: thread.status,
+          queued: queue.length > 0,
+        };
+      },
     );
+    bb.experimental_hooks.on(
+      "experimental_thread.configure",
+      async ({ thread, data }) => {
+        const selection = draftSelectionSchema.parse(data);
+        if (
+          thread.providerId !==
+          (selection.provider === "claude" ? "claude-code" : "codex")
+        ) {
+          throw new Error(
+            "The selected subscription belongs to another provider.",
+          );
+        }
+        await operations.initializeSelection(
+          thread.id,
+          selection.provider,
+          selection.accountId,
+        );
+        return null;
+      },
+    );
+    bb.events.on("thread.deleted", async ({ thread }) => {
+      await Promise.all([
+        threadTokens.removeThread(thread.id),
+        routing.removeThread(thread.id),
+      ]);
+    });
     const login = new ClaudeOAuthLogin({
       fetch: upstreamFetch,
       now,
@@ -283,12 +326,25 @@ export function createAccountPoolPlugin(
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
         const bypassed = await routing.isBypassed(context.threadId);
-        if (!bypassed && (await canServe(provider))) {
-          const token = await hubTokens.forHost(context.hostId);
+        const accountId = await routing.selectedAccount(
+          context.threadId,
+          provider,
+        );
+        if (!bypassed && (accountId !== null || (await canServe(provider)))) {
+          const parentToken = await hubTokens.forHost(context.hostId);
+          const token = await threadTokens.forThread(
+            {
+              threadId: context.threadId,
+              hostId: context.hostId,
+              provider,
+              accountId,
+            },
+            parentToken,
+          );
           if (provider === "claude") {
             await routing.recordRouted(context.threadId, context.hostId);
           }
-          return [...serving(token), ...markerEntries(token)];
+          return [...serving(token), ...markerEntries(parentToken)];
         }
         return hasConfiguredParentPool ? neutralized(provider) : [];
       };

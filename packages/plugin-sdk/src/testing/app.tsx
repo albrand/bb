@@ -2058,7 +2058,18 @@ export function renderSlot<
   const composerIsAvailable = () =>
     composerOwnership.active || composerScope.kind !== "queued-message";
   const submissionListeners = new Set<() => void>();
+  const composerCreationData = new Map<string, JsonValue>();
   const composerTarget: ComposerHandleTarget = {
+    getCreateData: (pluginId) =>
+      composerCreationData.get(
+        `${testComposerKey(composerScope)}/${pluginId}`,
+      ) ?? null,
+    setCreateData: (pluginId, data) => {
+      const key = `${testComposerKey(composerScope)}/${pluginId}`;
+      if (data === null) composerCreationData.delete(key);
+      else composerCreationData.set(key, structuredClone(data));
+      notifyComposerListeners();
+    },
     get key() {
       return testComposerKey(composerScope);
     },

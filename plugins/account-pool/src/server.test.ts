@@ -9,7 +9,10 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import {
+  createFakePluginHost,
+  makeThreadResponse,
+} from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountSchema,
@@ -30,7 +33,7 @@ import type {
   ImportedCodexCredentials,
 } from "./credentials.js";
 import { PARENT_TOKEN_ENV, PARENT_URL_ENV } from "./parent-pool.js";
-import { AccountStore, HubTokenStore } from "./store.js";
+import { AccountStore, HubTokenStore, QuotaStore } from "./store.js";
 import {
   createAccountPoolPlugin,
   helloResponse,
@@ -121,6 +124,159 @@ async function resolveCodexToken(
   }
   return { token: token.value, baseUrl: baseUrl.value.serverPath };
 }
+
+describe("Explicit subscription routing", () => {
+  async function twoSubscriptions() {
+    const seen: string[] = [];
+    const upstream = await startUpstream((request, response) => {
+      seen.push(String(request.headers["x-api-key"]));
+      response.setHeader("content-type", "application/json");
+      response.end('{"ok":true}');
+    });
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      apiKey: "sk-first",
+    });
+    const second = accountSchema.parse(
+      await fixture.host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-second" },
+        label: "Second subscription",
+        priority: 200,
+      }),
+    );
+    const configure =
+      fixture.host.harness.registrations.hooks["experimental_thread.configure"];
+    if (configure === null)
+      throw new Error("Subscription configuration hook is missing.");
+    await configure({
+      thread: { id: "thr_pinned", providerId: "claude-code" },
+      data: { provider: "claude", accountId: second.id },
+    });
+    const key = await resolveToken(fixture.host, "host-one", "thr_pinned");
+    const request = async (token: string) => {
+      const response = await fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        "/v1/messages",
+        {
+          method: "POST",
+          headers: authHeaders(token),
+          body: JSON.stringify({
+            model: "claude-opus-4-1",
+            messages: [],
+            max_tokens: 1,
+          }),
+        },
+      );
+      await response.text();
+      return response;
+    };
+    return { fixture, second, seen, key, request };
+  }
+
+  it("uses the explicit account without moving the automatic provider cursor", async () => {
+    const { fixture, seen, key, request } = await twoSubscriptions();
+    expect((await request(key)).status).toBe(200);
+    expect((await request(fixture.key)).status).toBe(200);
+    expect(seen).toEqual(["sk-second", "sk-first"]);
+  });
+
+  it.each(["disabled", "exhausted", "removed"])(
+    "never switches away from a selected %s subscription",
+    async (state) => {
+      const { fixture, second, seen, key, request } = await twoSubscriptions();
+      if (state === "exhausted") {
+        const quotas = new QuotaStore(fixture.host.bb.storage.database());
+        quotas.put({
+          ...quotas.get(second.id),
+          sevenDayUtilization: 0.98,
+          sevenDayResetAt: Date.now() + 3_600_000,
+        });
+      } else {
+        await fixture.host.harness.behavior.callRpc(
+          state === "disabled" ? "account.disable" : "account.remove",
+          { id: second.id },
+        );
+      }
+      const response = await request(key);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(seen).toEqual([]);
+      expect((await request(fixture.key)).status).toBe(200);
+      expect(seen).toEqual(["sk-first"]);
+    },
+  );
+
+  it("keeps a running turn's credential on its account while the next turn changes", async () => {
+    const { fixture, key, seen, request } = await twoSubscriptions();
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({
+        id: threadId,
+        providerId: "claude-code",
+        status: "idle",
+      }),
+    );
+    fixture.host.harness.sdk.stub(
+      "threads.queuedMessages.list",
+      async () => [],
+    );
+    await fixture.host.harness.behavior.callRpc("routing.selection.set", {
+      threadId: "thr_pinned",
+      provider: "claude",
+      accountId: fixture.account.id,
+    });
+    const nextKey = await resolveToken(fixture.host, "host-one", "thr_pinned");
+    expect(nextKey).not.toBe(key);
+    expect((await request(key)).status).toBe(200);
+    expect((await request(nextKey)).status).toBe(200);
+    expect(seen).toEqual(["sk-second", "sk-first"]);
+    const result = await fixture.host.harness.behavior.runCli([
+      "select",
+      "thr_pinned",
+      "claude",
+      "automatic",
+      "--json",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ accountId: null });
+  });
+
+  it("rejects selection changes while a conversation has active or queued work", async () => {
+    const { fixture } = await twoSubscriptions();
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({
+        id: threadId,
+        providerId: "claude-code",
+        status: "active",
+      }),
+    );
+    fixture.host.harness.sdk.stub(
+      "threads.queuedMessages.list",
+      async () => [],
+    );
+    const input = {
+      threadId: "thr_pinned",
+      provider: "claude",
+      accountId: fixture.account.id,
+    };
+    await expect(
+      fixture.host.harness.behavior.callRpc("routing.selection.set", input),
+    ).rejects.toThrow("Wait for this conversation");
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({
+        id: threadId,
+        providerId: "claude-code",
+        status: "idle",
+      }),
+    );
+    fixture.host.harness.sdk.stub("threads.queuedMessages.list", async () => [
+      { id: "qmsg_waiting" },
+    ]);
+    await expect(
+      fixture.host.harness.behavior.callRpc("routing.selection.set", input),
+    ).rejects.toThrow("Wait for this conversation");
+  });
+});
 
 beforeEach(() => {
   vi.stubEnv(PARENT_URL_ENV, undefined);
@@ -1804,7 +1960,7 @@ describe("Account Pool plugin", () => {
       },
       {
         name: "BB_ACCOUNT_POOL_PARENT_TOKEN",
-        value: fixture.key,
+        value: expect.any(String),
         reason: "Account Pooler hub token for this machine",
       },
     ]);
@@ -4570,13 +4726,14 @@ describe("Account Pool plugin", () => {
           return attempts.length <= 2 ? openStream() : Response.json({});
         });
         await addApiAccount(fixture, "sk-claude-parent");
+        const claudeKey = await resolveToken(fixture.host);
         const claude = forkRequest("claude", "parent-session", null);
         const codex = forkRequest("codex-fork", "unrelated-session", null);
         const held = [
           await fixture.host.harness.behavior.fetchHttp(
             "POST",
             "/v1/messages",
-            { headers: authHeaders(fixture.key), body: claude.body },
+            { headers: authHeaders(claudeKey), body: claude.body },
           ),
           await fixture.host.harness.behavior.fetchHttp(
             "POST",
@@ -5115,6 +5272,7 @@ describe("Account Pool plugin", () => {
       });
       await addApiAccount(fixture, "sk-claude-first");
       const claudeSecond = await addApiAccount(fixture, "sk-claude-second");
+      const claudeKey = await resolveToken(fixture.host);
       const accounts = z
         .array(accountSummarySchema)
         .parse(
@@ -5127,7 +5285,7 @@ describe("Account Pool plugin", () => {
         throw new Error("Missing second Codex account.");
       const sendClaude = () =>
         fixture.host.harness.behavior.fetchHttp("POST", "/v1/messages", {
-          headers: authHeaders(fixture.key),
+          headers: authHeaders(claudeKey),
           body: claudeBody(sessionId),
         });
       const sendCodex = () =>

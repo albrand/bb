@@ -52,6 +52,8 @@ export interface ComposerHandleTarget {
     pluginSubmission: { pluginId: string; data: JsonValue } | undefined,
   ): Promise<void>;
   setSelection?(selection: ComposerSelection): Promise<ComposerSelection>;
+  getCreateData?(pluginId: string): JsonValue | null;
+  setCreateData?(pluginId: string, data: JsonValue | null): void;
 }
 
 export interface ComposerHandleController {
@@ -446,6 +448,19 @@ export function createComposerHandleBinding(
     experimental_closePopup: () =>
       target().closePopup?.(controller.pluginId) ?? false,
     submit,
+    get experimental_createData() {
+      return target().getCreateData?.(controller.pluginId) ?? null;
+    },
+    experimental_setCreateData: (data) => {
+      const current = target();
+      if (
+        current.scope.kind !== "new-thread" ||
+        current.setCreateData === undefined
+      ) {
+        throw new Error("Creation data requires a new-thread composer.");
+      }
+      current.setCreateData(controller.pluginId, data);
+    },
     setSelection,
     experimental_removeMention: (mention) => {
       warnDeprecatedComposerMember("experimental_removeMention", "replace");

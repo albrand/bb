@@ -129,7 +129,10 @@ describe("recordQueuedMessageDrainFailure", () => {
   it("hides a failed row from the wakes that are not its booked retry", async () => {
     await withTestHarness(async (harness) => {
       let attempts = 0;
-      const registry: HookRegistry = { "message.dispatch": [] };
+      const registry: HookRegistry = {
+        "experimental_thread.configure": [],
+        "message.dispatch": [],
+      };
       registry["message.dispatch"].push({
         pluginId: "rejector",
         handler: () => {
@@ -183,7 +186,10 @@ describe("recordQueuedMessageDrainFailure", () => {
 
   it("records a terminal failure from the turn-started wake", async () => {
     await withTestHarness(async (harness) => {
-      const registry: HookRegistry = { "message.dispatch": [] };
+      const registry: HookRegistry = {
+        "experimental_thread.configure": [],
+        "message.dispatch": [],
+      };
       registry["message.dispatch"].push({
         pluginId: "rejector",
         handler: () =>
@@ -310,7 +316,9 @@ describe("recordQueuedMessageDrainFailure", () => {
       });
 
       expect(reread(harness, row.id).failureReason).toBeNull();
-      expect(getQueuedMessageDispatchRetry(harness.db, row.id)?.attempt).toBe(1);
+      expect(getQueuedMessageDispatchRetry(harness.db, row.id)?.attempt).toBe(
+        1,
+      );
     });
   });
 
@@ -321,9 +329,15 @@ describe("recordQueuedMessageDrainFailure", () => {
         hostName: "M4",
       });
 
-      for (let attempt = 1; attempt <= QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS; attempt += 1) {
+      for (
+        let attempt = 1;
+        attempt <= QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
         recordQueuedMessageDrainFailure(harness.deps, {
-          error: new Error("Cannot read properties of undefined (reading 'id')"),
+          error: new Error(
+            "Cannot read properties of undefined (reading 'id')",
+          ),
           now: Date.now(),
           row,
           thread,
