@@ -415,6 +415,7 @@ async function createOAuthRequestFixture(
   provider: "claude" | "codex",
   upstreamFetch: typeof fetch,
   now: () => number,
+  usagePayload: Record<string, unknown> = {},
 ): Promise<Fixture> {
   return createFixture({
     upstreamUrl: "https://upstream.example",
@@ -423,7 +424,7 @@ async function createOAuthRequestFixture(
     options: {
       fetch: (input, init) =>
         String(input) === EMPTY_USAGE_URL
-          ? Promise.resolve(Response.json({}))
+          ? Promise.resolve(Response.json(usagePayload))
           : upstreamFetch(input, init),
       now,
       refreshUrl: "https://upstream.example/oauth/token",
@@ -3543,6 +3544,9 @@ describe("Account Pool plugin", () => {
           );
         },
         () => 1_800_000_000_000,
+        provider === "claude"
+          ? { seven_day: { utilization: 10 } }
+          : { rate_limit: { primary_window: { used_percent: 10 } } },
       );
       const send = async () => {
         const response = await fixture.host.harness.behavior.fetchHttp(
