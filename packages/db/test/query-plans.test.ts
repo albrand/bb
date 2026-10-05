@@ -1225,37 +1225,134 @@ describe("slow query index plans", () => {
   });
 
   it("resolves open background-task state without per-row subqueries", () => {
-    const { db, logger, thread } = setup();
+    const { db, thread } = setup();
 
-    listLatestOpenBackgroundTaskStateRowsForThread(db, {
-      threadId: thread.id,
-    });
+    insertEvents(db, noopNotifier, [
+      {
+        threadId: thread.id,
+        sequence: 1,
+        type: "item/started",
+        scope: threadScope(),
+        itemId: "task-a",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "pending" } }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 2,
+        type: "item/backgroundTask/progress",
+        scope: threadScope(),
+        itemId: "task-a",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "pending" } }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 3,
+        type: "item/started",
+        scope: threadScope(),
+        itemId: "task-b",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "pending" } }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 4,
+        type: "item/backgroundTask/completed",
+        scope: threadScope(),
+        itemId: "task-b",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "completed" } }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 5,
+        type: "item/started",
+        scope: threadScope(),
+        itemId: "task-c",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "running" } }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 6,
+        type: "item/started",
+        scope: threadScope(),
+        itemId: "task-d",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        data: JSON.stringify({ item: { status: "pending" } }),
+      },
+    ]);
 
-    const debugLog = findOnlyDebugLog({
-      logger,
-      predicate: (fields) =>
-        fields.operation === "all" &&
-        fields.sql.includes("completed_background_task_state"),
+    let rows: ReturnType<typeof listLatestOpenBackgroundTaskStateRowsForThread> =
+      [];
+    const captured = captureStatements(db, () => {
+      rows = listLatestOpenBackgroundTaskStateRowsForThread(db, {
+        threadId: thread.id,
+      });
     });
-    const params = [
-      thread.id,
-      thread.id,
-      "backgroundTask",
-      "item/started",
-      "item/backgroundTask/progress",
-      thread.id,
-      "item/backgroundTask/completed",
-    ];
-    assertEmittedQueryPlanUsesIndex({
-      db,
-      debugLog,
-      indexName: "events_background_task_thread_type_item_sequence_idx",
-      params,
-    });
-
-    expect(
-      queryPlanDetails({ db, params, sql: debugLog.fields.sql }),
-    ).not.toMatch(/CORRELATED/);
+    expect(rows.map((row) => Object.keys(row).sort())).toEqual(
+      Array.from({ length: 2 }, () => [
+        "createdAt",
+        "data",
+        "id",
+        "itemId",
+        "itemKind",
+        "parentToolCallId",
+        "providerThreadId",
+        "scopeKind",
+        "sequence",
+        "threadId",
+        "turnId",
+        "type",
+      ]),
+    );
+    expect(rows).toEqual([
+      expect.objectContaining({
+        createdAt: expect.any(Number),
+        data: JSON.stringify({ item: { status: "pending" } }),
+        id: expect.any(String),
+        itemId: "task-a",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        providerThreadId: null,
+        scopeKind: "thread",
+        sequence: 2,
+        threadId: thread.id,
+        turnId: null,
+        type: "item/backgroundTask/progress",
+      }),
+      expect.objectContaining({
+        createdAt: expect.any(Number),
+        data: JSON.stringify({ item: { status: "pending" } }),
+        id: expect.any(String),
+        itemId: "task-d",
+        itemKind: "backgroundTask",
+        parentToolCallId: null,
+        providerThreadId: null,
+        scopeKind: "thread",
+        sequence: 6,
+        threadId: thread.id,
+        turnId: null,
+        type: "item/started",
+      }),
+    ]);
+    expect(captured).toHaveLength(1);
+    const query = captured[0]!;
+    const details = queryPlanDetails({ db, ...query });
+    expect(details).toContain(
+      "SEARCH events USING COVERING INDEX events_background_task_thread_type_item_sequence_idx",
+    );
+    expect(details).toContain(
+      "SEARCH events USING INDEX events_thread_sequence_idx (thread_id=? AND sequence=?)",
+    );
+    expect(details).not.toMatch(/CORRELATED/);
 
     db.$client.close();
   });

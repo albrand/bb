@@ -2323,50 +2323,39 @@ export function listLatestOpenBackgroundTaskStateRowsForThread(
   db: DbConnection,
   args: ListLatestOpenBackgroundTaskStateRowsForThreadArgs,
 ): StoredEventRow[] {
-  const startedType = "item/started" satisfies ThreadEventType;
-  const progressType = "item/backgroundTask/progress" satisfies ThreadEventType;
-  const completedType =
-    "item/backgroundTask/completed" satisfies ThreadEventType;
-  const completed = alias(events, "completed_background_task_state");
-  const latest = alias(events, "latest_open_background_task_state");
-
-  const latestSequences = db
-    .select({ sequence: max(latest.sequence) })
-    .from(latest)
-    .where(
-      and(
-        eq(latest.threadId, args.threadId),
-        eq(latest.itemKind, "backgroundTask"),
-        inArray(latest.type, [startedType, progressType]),
-        isNotNull(latest.itemId),
-      ),
+  const selectedFields = sql.join(
+    Object.entries(storedEventRowFields).map(([key, field]) =>
+      sql`${field} AS ${sql.identifier(key)}`,
+    ),
+    sql`, `,
+  );
+  return db.all<StoredEventRow>(sql`
+    WITH latest_open_background_task_state AS (
+      SELECT ${events.itemId} AS item_id, MAX(${events.sequence}) AS sequence
+      FROM ${events} INDEXED BY events_background_task_thread_type_item_sequence_idx
+      WHERE ${events.threadId} = ${args.threadId}
+        AND ${events.itemKind} = 'backgroundTask'
+        AND ${events.type} IN ('item/started', 'item/backgroundTask/progress')
+        AND ${events.itemId} IS NOT NULL
+      GROUP BY ${events.itemId}
+    ), completed_background_task_ids AS MATERIALIZED (
+      SELECT ${events.itemId} AS item_id
+      FROM ${events}
+      WHERE ${events.threadId} = ${args.threadId}
+        AND ${events.type} = 'item/backgroundTask/completed'
+        AND ${events.itemId} IS NOT NULL
     )
-    .groupBy(latest.itemId);
-  const completedItemIds = db
-    .select({ itemId: completed.itemId })
-    .from(completed)
-    .where(
-      and(
-        eq(completed.threadId, args.threadId),
-        eq(completed.type, completedType),
-        isNotNull(completed.itemId),
-      ),
-    );
-
-  const rows = db
-    .select(storedEventRowFields)
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, args.threadId),
-        inArray(events.sequence, latestSequences),
-        sql`json_extract(${events.data}, '$.item.status') = 'pending'`,
-        notInArray(events.itemId, completedItemIds),
-      ),
-    )
-    .all();
-
-  return rows.sort((left, right) => left.sequence - right.sequence);
+    SELECT ${selectedFields}
+    FROM latest_open_background_task_state
+    CROSS JOIN ${events} INDEXED BY events_thread_sequence_idx
+    WHERE ${events.threadId} = ${args.threadId}
+      AND ${events.sequence} = latest_open_background_task_state.sequence
+      AND json_extract(${events.data}, '$.item.status') = 'pending'
+      AND latest_open_background_task_state.item_id NOT IN (
+        SELECT item_id FROM completed_background_task_ids
+      )
+    ORDER BY ${events.sequence}
+  `);
 }
 
 export function listActiveBackgroundTaskCountsByThreadIds(
