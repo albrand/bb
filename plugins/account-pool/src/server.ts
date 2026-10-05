@@ -328,11 +328,17 @@ export function createAccountPoolPlugin(
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
         const bypassed = await routing.isBypassed(context.threadId);
-        const accountId = await routing.selectedAccount(
+        const selectedAccountId = await routing.selectedAccount(
           context.threadId,
           provider,
         );
-        if (!bypassed && (accountId !== null || (await canServe(provider)))) {
+        const accountId = proxyingParent() === null ? selectedAccountId : null;
+        const canRoute =
+          !bypassed &&
+          (accountId === null
+            ? await canServe(provider)
+            : await operations.isRoutingEnabled(provider));
+        if (canRoute) {
           const parentToken = await hubTokens.forHost(context.hostId);
           const token = await threadTokens.forThread(
             {

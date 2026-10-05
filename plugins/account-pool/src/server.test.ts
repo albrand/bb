@@ -182,6 +182,24 @@ describe("Explicit subscription routing", () => {
     expect(seen).toEqual(["sk-second", "sk-first"]);
   });
 
+  it("stops contributing pinned account credentials when provider routing is disabled", async () => {
+    const { fixture } = await twoSubscriptions();
+    await fixture.host.harness.behavior.callRpc("routing.set", {
+      provider: "claude",
+      enabled: false,
+    });
+
+    const entries = await fixture.host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      { threadId: "thr_pinned", projectId: "project-one", hostId: "host-one" },
+    );
+    expect(
+      entries.filter(({ name }) =>
+        ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"].includes(name),
+      ),
+    ).toEqual([]);
+  });
+
   it.each(["disabled", "exhausted", "removed"])(
     "never switches away from a selected %s subscription",
     async (state) => {
@@ -7453,6 +7471,55 @@ describe("Account Pool nested proxy", () => {
     expect(
       entries.find((entry) => entry.name === "ANTHROPIC_AUTH_TOKEN")?.value,
     ).not.toBe(PARENT_TOKEN);
+  });
+
+  it("proxies a pinned thread through the parent pool after switching to proxy mode", async () => {
+    const parent = await startParent({});
+    cleanups.push(parent.upstream.close);
+    const host = await createChild({
+      parentUrl: `${parent.upstream.url}/api/v1/plugins/account-pool/http`,
+      parentMode: "isolate",
+    });
+    const account = accountSchema.parse(
+      await host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-local" },
+        label: "Local subscription",
+      }),
+    );
+    const configure =
+      host.harness.registrations.hooks["experimental_thread.configure"];
+    if (configure === null)
+      throw new Error("Subscription configuration hook is missing.");
+    await configure({
+      thread: { id: "thread-one", providerId: "claude-code" },
+      data: { provider: "claude", accountId: account.id },
+    });
+    await host.harness.behavior.callRpc("config.set", {
+      parentMode: "proxy",
+    });
+    const entries = await host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      { threadId: "thread-one", projectId: "project-one", hostId: "host-one" },
+    );
+    const childToken = entries.find(
+      (entry) => entry.name === "ANTHROPIC_AUTH_TOKEN",
+    )?.value;
+    const response = await host.harness.behavior.fetchHttp(
+      "POST",
+      "/v1/messages",
+      {
+        headers: { authorization: `Bearer ${String(childToken)}` },
+        body: JSON.stringify({ model: "claude-opus-4", messages: [] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(parent.records.at(-1)).toMatchObject({
+      url: "/api/v1/plugins/account-pool/http/v1/messages",
+      token: PARENT_TOKEN,
+    });
   });
 
   it("forwards pooled traffic to the parent with the parent token", async () => {
