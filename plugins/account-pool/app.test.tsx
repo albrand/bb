@@ -10,6 +10,7 @@ import type {
   AccountSummary,
   PoolStatus,
 } from "./src/contracts.js";
+import { ACCOUNT_POOL_CONFIG_CHANGED } from "./src/realtime.js";
 
 const app = await loadPluginApp(() => import("./app"));
 afterEach(() => {
@@ -246,6 +247,10 @@ describe("Subscription picker", () => {
         rpc: {
           "status.get": () => status(accounts),
           "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({
+            threadId: "thr_existing",
+            bypassed: false,
+          }),
           "routing.selection.set": () => {
             throw new Error("Wait for queued messages to finish.");
           },
@@ -265,6 +270,154 @@ describe("Subscription picker", () => {
       accountId: null,
     });
     expect((select as HTMLSelectElement).value).toBe(accounts[1]!.id);
+  });
+
+  it("shows a saved preference when parent routing or routing-off makes the pin inactive", async () => {
+    const pinnedSlot = (currentStatus: PoolStatus, bypassed = false) =>
+      renderSlot(
+        { component: Component },
+        { providerId: "claude-code" },
+        {
+          pluginId: "account-pool",
+          composer: {
+            scope: { kind: "thread", threadId: "thr_existing" },
+            selection: { providerId: "claude-code" },
+          },
+          rpc: {
+            "status.get": () => currentStatus,
+            "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+            "bypass.get": () => ({ threadId: "thr_existing", bypassed }),
+          },
+        },
+      );
+    const parentProxyStatus = {
+      ...status(accounts),
+      parent: {
+        baseUrl: "https://parent.example",
+        mode: "proxy" as const,
+        availability: { claude: true, codex: true },
+      },
+    };
+    const proxySlot = pinnedSlot(parentProxyStatus);
+    expect(
+      await proxySlot.findByText(
+        "Saved preference not in use right now. A parent pool decides which subscription to use.",
+      ),
+    ).toBeTruthy();
+    expect(
+      proxySlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+
+    const routingOffSlot = pinnedSlot({
+      ...status(accounts),
+      routing: { claude: false, codex: true },
+    });
+    expect(
+      await routingOffSlot.findByText(
+        "Saved preference not in use right now. Claude routing is off.",
+      ),
+    ).toBeTruthy();
+    expect(
+      routingOffSlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+
+    const bypassedSlot = pinnedSlot(status(accounts), true);
+    expect(
+      await bypassedSlot.findByText(
+        "Saved preference not in use right now. Pool routing is bypassed for this conversation.",
+      ),
+    ).toBeTruthy();
+    expect(
+      bypassedSlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+  });
+
+  it("refreshes the pin explanation after a routing configuration event", async () => {
+    let currentStatus: PoolStatus = status(accounts);
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: {
+          scope: { kind: "thread", threadId: "thr_existing" },
+          selection: { providerId: "claude-code" },
+        },
+        rpc: {
+          "status.get": () => currentStatus,
+          "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({ threadId: "thr_existing", bypassed: false }),
+        },
+      },
+    );
+    expect(
+      await slot.findByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeTruthy();
+    const statusCalls = slot.rpcCalls.filter(
+      (call) => call.method === "status.get",
+    ).length;
+    currentStatus = {
+      ...currentStatus,
+      parent: {
+        baseUrl: "https://parent.example",
+        mode: "proxy",
+        availability: { claude: true, codex: true },
+      },
+    };
+    await slot.emitRealtime(ACCOUNT_POOL_CONFIG_CHANGED, {});
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "status.get").length,
+      ).toBeGreaterThan(statusCalls),
+    );
+    expect(
+      await slot.findByText(
+        "Saved preference not in use right now. A parent pool decides which subscription to use.",
+      ),
+    ).toBeTruthy();
+    expect(
+      slot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps the exclusivity message for an active local pin", async () => {
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: {
+          scope: { kind: "thread", threadId: "thr_existing" },
+          selection: { providerId: "claude-code" },
+        },
+        rpc: {
+          "status.get": () => status(accounts),
+          "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({ threadId: "thr_existing", bypassed: false }),
+        },
+      },
+    );
+    expect(
+      await slot.findByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeTruthy();
+    expect(
+      slot.queryByText(/Saved preference not in use right now/u),
+    ).toBeNull();
   });
 });
 

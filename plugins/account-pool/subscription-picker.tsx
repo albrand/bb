@@ -6,8 +6,14 @@ import {
   type PoolProvider,
   type PoolStatus,
 } from "./src/contracts.js";
-import type { accountPoolRpcContract } from "./src/rpc.js";
-import { ACCOUNT_POOL_ACCOUNTS_CHANGED } from "./src/realtime.js";
+import {
+  accountPoolBypassReadRpcContract,
+  accountPoolRpcContract,
+} from "./src/rpc.js";
+import {
+  ACCOUNT_POOL_ACCOUNTS_CHANGED,
+  ACCOUNT_POOL_CONFIG_CHANGED,
+} from "./src/realtime.js";
 
 function percentage(value: number | null): string {
   return value === null ? "unknown" : `${Math.round(value * 100)}%`;
@@ -30,7 +36,9 @@ function label(account: AccountSummary): string {
 
 export function SubscriptionPicker({ providerId }: { providerId: string }) {
   const composer = useComposer();
-  const rpc = useRpc<typeof accountPoolRpcContract>();
+  const rpc = useRpc<
+    typeof accountPoolRpcContract & typeof accountPoolBypassReadRpcContract
+  >();
   const provider: PoolProvider | null =
     providerId === "claude-code"
       ? "claude"
@@ -45,6 +53,11 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
     value: PoolStatus;
   } | null>(null);
   const status = loadedStatus?.key === lookupKey ? loadedStatus.value : null;
+  const [loadedBypass, setLoadedBypass] = useState<{
+    key: string;
+    value: boolean;
+  } | null>(null);
+  const bypassed = loadedBypass?.key === lookupKey ? loadedBypass.value : false;
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +65,9 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
   const actualProvider = composer.selection?.providerId;
 
   useRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, () =>
+    setRefresh((value) => value + 1),
+  );
+  useRealtime(ACCOUNT_POOL_CONFIG_CHANGED, () =>
     setRefresh((value) => value + 1),
   );
   useEffect(() => {
@@ -72,14 +88,20 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
     let mounted = true;
     if (provider === null) return;
     const load = async () => {
-      const [nextStatus, selection] = await Promise.all([
+      const [nextStatus, selection, nextBypassed] = await Promise.all([
         rpc.call("status.get", null),
         threadId === null
           ? Promise.resolve(null)
           : rpc.call("routing.selection.get", { threadId, provider }),
+        threadId === null
+          ? Promise.resolve(false)
+          : rpc
+              .call("bypass.get", { threadId })
+              .then((result) => result.bypassed),
       ]);
       if (!mounted) return;
       setLoadedStatus({ key: lookupKey, value: nextStatus });
+      setLoadedBypass({ key: lookupKey, value: nextBypassed });
       setError(null);
       const draft = draftSelectionSchema.safeParse(
         composer.experimental_createData,
@@ -142,6 +164,20 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
   };
   const unavailable =
     selected !== null && !accounts.some((account) => account.id === selected);
+  const selectedInUse =
+    selected !== null &&
+    status !== null &&
+    status.routing[provider] &&
+    status.parent?.mode !== "proxy" &&
+    !bypassed;
+  const inactiveReason =
+    status?.parent?.mode === "proxy"
+      ? "A parent pool decides which subscription to use."
+      : status !== null && !status.routing[provider]
+        ? `${provider === "claude" ? "Claude" : "Codex"} routing is off.`
+        : bypassed
+          ? "Pool routing is bypassed for this conversation."
+          : null;
   const disabled =
     pending || status === null || composer.isRunning || composer.isSubmitting;
   return (
@@ -207,9 +243,13 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
           Change subscriptions after this turn finishes.
         </p>
       ) : null}
-      {selected !== null ? (
+      {selectedInUse ? (
         <p className="mt-1 text-xs text-muted-foreground">
           This conversation uses only the selected subscription.
+        </p>
+      ) : selected !== null && status !== null && inactiveReason !== null ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Saved preference not in use right now. {inactiveReason}
         </p>
       ) : null}
       {error === null ? null : (
