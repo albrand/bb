@@ -1155,6 +1155,10 @@ export type StoredEventRow = Pick<
   keyof typeof storedEventRowFields
 >;
 
+type StoredEventRowSqlFields = {
+  [Key in keyof StoredEventRow]: SQL<StoredEventRow[Key]>;
+};
+
 export type InlineOutputCharLimit = number | null;
 
 function storedEventRowFieldsWithInlineOutputLimit(
@@ -1168,7 +1172,9 @@ function storedEventRowFieldsWithInlineOutputLimit(
       };
 }
 
-function storedEventRowSqlFields(maxInlineOutputChars: InlineOutputCharLimit) {
+function storedEventRowSqlFields(
+  maxInlineOutputChars: InlineOutputCharLimit,
+): StoredEventRowSqlFields {
   return {
     createdAt: sql<number>`${events.createdAt}`,
     data: sql<string>`${storedEventRowFieldsWithInlineOutputLimit(maxInlineOutputChars).data}`,
@@ -1883,20 +1889,41 @@ export function listStoredItemLifecycleRowsByItems(
     return [];
   }
 
-  return db
-    .select(
-      storedEventRowFieldsWithInlineOutputLimit(args.maxInlineOutputChars),
-    )
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, args.threadId),
-        scopedItemRefsPredicate(items),
-        inArray(events.type, ["item/started", "item/completed"]),
-      ),
-    )
-    .orderBy(events.sequence)
-    .all();
+  const rowFields = storedEventRowSqlFields(args.maxInlineOutputChars);
+  const selectedFields = sql.join(
+    Object.entries(rowFields).map(([key, field]) =>
+      sql`${field} AS ${sql.identifier(key)}`,
+    ),
+    sql`, `,
+  );
+  return queryInSqliteVariableBatches({
+    values: items,
+    variableCountPerValue: 3,
+    dedupeKey: scopedItemRefKey,
+    fixedVariableCount: 64,
+    maximumValueCount: 256,
+    queryBatch: (batch) =>
+      db.all<StoredEventRow>(sql`
+        WITH selected_items(scope_kind, turn_id, item_id) AS (
+          VALUES ${sql.join(
+            batch.map(
+              (item) =>
+                sql`(${item.scopeKind}, ${item.turnId}, ${item.itemId})`,
+            ),
+            sql`, `,
+          )}
+        )
+        SELECT ${selectedFields}
+        FROM selected_items
+        CROSS JOIN events INDEXED BY events_thread_turn_type_item_sequence_idx
+        WHERE ${events.threadId} = ${args.threadId}
+          AND ${events.turnId} IS selected_items.turn_id
+          AND ${events.scopeKind} = selected_items.scope_kind
+          AND ${events.itemId} = selected_items.item_id
+          AND ${events.type} IN ('item/started', 'item/completed')
+        ORDER BY ${events.sequence}
+      `),
+  }).sort((left, right) => left.sequence - right.sequence);
 }
 
 export interface ListStoredBufferedTextDeltaRowsByItemsArgs {
