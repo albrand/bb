@@ -3571,9 +3571,11 @@ describe("Account Pool plugin", () => {
         "Could not refresh account usage. Try again.",
       );
       expect(refreshCalls).toBe(2);
-      const stillRejected = z.array(accountSummarySchema).parse(
-        await fixture.host.harness.behavior.callRpc("account.list", null),
-      )[0];
+      const stillRejected = z
+        .array(accountSummarySchema)
+        .parse(
+          await fixture.host.harness.behavior.callRpc("account.list", null),
+        )[0];
       expect(stillRejected?.error).toBe("OAuth refresh failed with HTTP 400.");
 
       refreshStatus = 200;
@@ -5962,52 +5964,98 @@ describe("Account Pool plugin", () => {
     ).toBe(42);
   });
 
-  it("reports a failed manual usage refresh without losing cached quota or blocking recovery", async () => {
-    let failUsage = false;
-    let utilization = 20;
-    const fixture = await createFixture({
-      upstreamUrl: "https://upstream.example",
-      source: "import",
-      options: {
-        usageUrl: "https://upstream.example/usage",
-        importCredentials: async () => importedCredentials(),
-        fetch: async (input) => {
-          if (new URL(String(input)).pathname === "/usage") {
-            if (failUsage) throw new Error("PRIVATE_UPSTREAM_DETAIL");
-            return Response.json({ seven_day: { utilization } });
-          }
-          return Response.json({ ok: true });
+  it.each(["claude", "codex"] as const)(
+    "reports failed %s manual usage reads without losing cached quota or blocking recovery",
+    async (provider) => {
+      let failure: "network" | "http" | "payload" | null = null;
+      let utilization = 20;
+      const fixture = await createFixture({
+        upstreamUrl: "https://upstream.example",
+        provider,
+        source: "import",
+        options: {
+          usageUrl: "https://upstream.example/usage",
+          codexUsageUrl: "https://upstream.example/usage",
+          importCredentials: async () => importedCredentials(),
+          importCodexCredentials: async () => ({
+            accessToken: "oauth-old",
+            refreshToken: "oauth-refresh",
+            idToken: null,
+            accountId: "chatgpt-account",
+            email: "codex@example.test",
+            expiresAt: Date.now() + 3_600_000,
+          }),
+          fetch: async (input) => {
+            if (new URL(String(input)).pathname === "/usage") {
+              if (failure === "network")
+                throw new Error("PRIVATE_UPSTREAM_DETAIL");
+              if (failure === "http")
+                return Response.json(
+                  { detail: "PRIVATE_UPSTREAM_DETAIL" },
+                  { status: 503 },
+                );
+              if (failure === "payload")
+                return Response.json({ unexpected: "PRIVATE_UPSTREAM_DETAIL" });
+              return Response.json(
+                provider === "claude"
+                  ? { seven_day: { utilization } }
+                  : {
+                      rate_limit: {
+                        primary_window: {
+                          used_percent: utilization,
+                          limit_window_seconds: 604800,
+                        },
+                      },
+                    },
+              );
+            }
+            return Response.json({ ok: true });
+          },
         },
-      },
-    });
-    const accountState = async () =>
-      statusSchema.parse(
-        await fixture.host.harness.behavior.callRpc("status.get", null),
-      ).accounts.find((account) => account.id === fixture.account.id);
-    const cached = await accountState();
-    expect(cached?.sevenDayUtilization).toBe(0.2);
-    failUsage = true;
-    await expect(
-      fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      });
+      const accountState = async () =>
+        statusSchema
+          .parse(
+            await fixture.host.harness.behavior.callRpc("status.get", null),
+          )
+          .accounts.find((account) => account.id === fixture.account.id);
+      const cached = await accountState();
+      const quota = (account: typeof cached) =>
+        provider === "claude"
+          ? account?.sevenDayUtilization
+          : account?.limitWindows[0]?.utilization;
+      expect(quota(cached)).toBe(0.2);
+      for (const mode of ["network", "http", "payload"] as const) {
+        failure = mode;
+        await expect(
+          fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+            accountId: fixture.account.id,
+          }),
+        ).rejects.toThrow("Could not refresh account usage. Try again.");
+        await expect(
+          fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+            resourceId: fixture.account.id,
+            refresh: true,
+          }),
+        ).rejects.toThrow("Could not refresh account usage. Try again.");
+        expect(await accountState()).toMatchObject({
+          enabled: true,
+          error: null,
+        });
+        expect(quota(await accountState())).toBe(quota(cached));
+      }
+      failure = null;
+      utilization = 30;
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
         accountId: fixture.account.id,
-      }),
-    ).rejects.toThrow("Could not refresh account usage. Try again.");
-    expect(await accountState()).toMatchObject({
-      enabled: true,
-      error: null,
-      sevenDayUtilization: cached?.sevenDayUtilization,
-    });
-    failUsage = false;
-    utilization = 30;
-    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
-      accountId: fixture.account.id,
-    });
-    expect(await accountState()).toMatchObject({
-      enabled: true,
-      error: null,
-      sevenDayUtilization: 0.3,
-    });
-  });
+      });
+      expect(await accountState()).toMatchObject({
+        enabled: true,
+        error: null,
+      });
+      expect(quota(await accountState())).toBe(0.3);
+    },
+  );
 
   it("keeps background usage failures from stopping the pool or rejecting requests", async () => {
     const fixture = await createFixture({
