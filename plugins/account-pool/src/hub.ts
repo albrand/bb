@@ -393,6 +393,8 @@ export class AccountPoolHub {
         const { accountId: _accountId, ...quotaFields } = quota;
         return {
           ...account,
+          active:
+            this.activeAccounts.get(account.provider)?.accountId === account.id,
           lastUsedHostName: null,
           ...quotaFields,
           inFlight: this.inFlightByAccount.get(account.id) ?? 0,

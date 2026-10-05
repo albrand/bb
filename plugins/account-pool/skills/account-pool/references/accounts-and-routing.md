@@ -12,6 +12,7 @@ bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
 bb pool account list [--json]
+bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
 bb pool account disable <id>
@@ -36,11 +37,14 @@ ignored, and a failing invocation that carries `--json` also prints
 
 Claude `--login` starts a PKCE session, prints a browser URL and session ID,
 then exits. Pipe the manual callback code to `account login-complete` with that
-session ID within ten minutes. Codex `--login` prints a device verification
+session ID within ten minutes. Its command hint uses the absolute path of the
+running bb executable. Codex `--login` prints a device verification
 URL, one-time code, session ID, and an `account login-poll` command that waits
 for authorization. The Claude code stays out of process arguments, and either
-browser may be on a different machine from the bb server. Newly added or
-enabled accounts are available without a plugin reload. With an
+browser may be on a different machine from the bb server. New accounts join the
+end of the provider's priority order by default; rename them with
+`bb pool account rename <id> <label>`. Newly added or enabled accounts are
+available without a plugin reload. With an
 enabled account whose secret file remains readable and valid, matching Claude
 Code or Codex sessions receive the pool route and a distinct secret token for
 their machine.
@@ -122,6 +126,10 @@ one provider. Include disabled accounts too. Reordering changes the next failove
 sequence without moving the current account. `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.
+
+`bb pool status --json` and `bb pool account list --json` include `active` for
+the account currently selected by the provider cursor. New accounts are added
+at the end of the provider's priority order unless an explicit priority is set.
 
 ## Nested bb servers
 

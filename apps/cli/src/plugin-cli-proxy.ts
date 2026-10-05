@@ -1,4 +1,5 @@
 import type { Writable } from "node:stream";
+import { resolve } from "node:path";
 import {
   resolveContextProjectId,
   resolveContextThreadId,
@@ -280,6 +281,15 @@ interface PluginCliInputStream extends AsyncIterable<Buffer | string> {
 const PLUGIN_CLI_STDIN_MAX_BYTES = 16 * 1024;
 const PLUGIN_CLI_STDIN_FLAG = /^--([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)-stdin$/u;
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function expandBbCliPlaceholder(value: string): string {
+  const executable = process.env.BB_CLI ?? process.argv[1] ?? "bb";
+  return value.replaceAll("{{BB_CLI}}", shellQuote(resolve(executable)));
+}
+
 async function materializeStdinFlag(
   argv: readonly string[],
   input: PluginCliInputStream,
@@ -427,7 +437,10 @@ export async function runPluginCliCommand(
     return 1;
   }
   if (typeof result.stdout === "string" && result.stdout.length > 0) {
-    await writePluginCliOutput(streams.stdout, result.stdout);
+    await writePluginCliOutput(
+      streams.stdout,
+      expandBbCliPlaceholder(result.stdout),
+    );
   }
   if (typeof result.stderr === "string" && result.stderr.length > 0) {
     await writePluginCliOutput(streams.stderr, result.stderr);

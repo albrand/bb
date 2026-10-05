@@ -79,6 +79,7 @@ export interface OAuthLoginStart {
 export interface OAuthLoginComplete {
   sessionId: string;
   pasted: string;
+  label?: string;
 }
 
 export function parseManualCode(
@@ -225,6 +226,7 @@ export class ClaudeOAuthLogin {
           null);
     return this.options.addAccount({
       label:
+        input.label ??
         profile.account.display_name ??
         email ??
         profile.organization?.name ??

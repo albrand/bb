@@ -59,6 +59,7 @@ function account(overrides: Partial<AccountSummary> = {}): AccountSummary {
     subscriptionType: "Max",
     rateLimitTier: "default_claude_max_5x",
     enabled: true,
+    active: false,
     priority: 100,
     createdAt: 1,
     lastUsedAt: 2,
@@ -369,12 +370,32 @@ describe("Account Pool settings", () => {
     });
   });
 
+  it("renames an account from its management actions", async () => {
+    const slot = render([account()], {
+      "account.rename": () => ({ account: account({ label: "Main Claude" }) }),
+    });
+    fireEvent.pointerDown(
+      await slot.findByRole("button", { name: "person@example.com actions" }),
+    );
+    fireEvent.click(await slot.findByText("Rename…"));
+    const label = await slot.findByRole("textbox", { name: "Account label" });
+    fireEvent.change(label, { target: { value: "Main Claude" } });
+    fireEvent.click(slot.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "account.rename",
+        input: { id: account().id, label: "Main Claude" },
+      }),
+    );
+  });
+
   it("opens the correct provider sign-in flow from each Add account menu", async () => {
     const slot = render([], {
       "login.start": () => ({
         sessionId: "22222222-2222-4222-8222-222222222222",
         authorizeUrl: "https://claude.ai/oauth/authorize",
       }),
+      "login.complete": () => account({ label: "Work Claude" }),
       "codexLogin.start": () => ({
         sessionId: "33333333-3333-4333-8333-333333333333",
         verificationUri: "https://auth.openai.com/codex/device",
@@ -390,9 +411,30 @@ describe("Account Pool settings", () => {
     fireEvent.click(
       await slot.findByText("Sign in to Claude", { selector: "span.block" }),
     );
+    const authorizationCode = await slot.findByLabelText(
+      "Claude authorization code",
+    );
+    expect(authorizationCode.getAttribute("type")).toBe("password");
     expect(
-      await slot.findByLabelText("Claude authorization code"),
+      slot.getByText(
+        /private window or sign in to the account you want to add/i,
+      ),
     ).toBeTruthy();
+    fireEvent.change(slot.getByRole("textbox", { name: "Account label" }), {
+      target: { value: "Work Claude" },
+    });
+    fireEvent.change(authorizationCode, { target: { value: "one-time-code" } });
+    fireEvent.click(await slot.findByRole("button", { name: "Complete" }));
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "login.complete",
+        input: {
+          sessionId: "22222222-2222-4222-8222-222222222222",
+          pasted: "one-time-code",
+          label: "Work Claude",
+        },
+      }),
+    );
     fireEvent.click(slot.getByRole("button", { name: "Close" }));
     fireEvent.pointerDown(addButtons[1]!);
     fireEvent.click(
@@ -481,6 +523,14 @@ describe("Account Pool settings", () => {
     );
     expect(await slot.findByText("Fable 7 day")).toBeTruthy();
     expect(slot.getByText("Opus 7 day")).toBeTruthy();
+  });
+
+  it("marks the account currently selected by the pool cursor", async () => {
+    const slot = render([account({ active: true })]);
+    expect(await slot.findByText("Active")).toBeTruthy();
+    expect(
+      slot.getByRole("button", { name: "Open person@example.com" }),
+    ).toBeTruthy();
   });
 
   it("shows the email beside a display-name label in the row and detail dialog", async () => {

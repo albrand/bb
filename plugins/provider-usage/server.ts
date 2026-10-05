@@ -146,10 +146,8 @@ function resourceProvider(
         }
       : {}),
     id: `${pluginId}:${resource.id}`,
-    accountLabel:
-      resource.scope.kind === "shared"
-        ? (measurement?.usage.accountEmail ?? resource.label)
-        : null,
+    accountLabel: resource.scope.kind === "shared" ? resource.label : null,
+    accountPool: resource.accountPool ?? null,
   };
 }
 

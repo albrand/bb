@@ -52,6 +52,8 @@ export class PoolOperations {
   ) {}
 
   async add(input: AccountAddInput): Promise<Account> {
+    const priority =
+      input.priority ?? (await this.nextPriority(input.provider));
     if (input.source.kind === "api-key") {
       if (input.provider !== "claude") {
         throw new Error("Codex accounts can only be added with --import.");
@@ -66,7 +68,7 @@ export class PoolOperations {
           subscriptionType: null,
           rateLimitTier: null,
           enabled: true,
-          priority: input.priority,
+          priority,
         },
         { kind: "api-key", apiKey: input.source.apiKey },
       );
@@ -75,6 +77,19 @@ export class PoolOperations {
       return account;
     }
     const imported = await this.hub.importAccount(input.provider);
+    const existing = await this.accounts.list();
+    const duplicate = existing.some(
+      (account) =>
+        account.provider === input.provider &&
+        (input.provider === "claude"
+          ? imported.accountUuid !== null &&
+            account.accountUuid === imported.accountUuid
+          : imported.codexAccountId !== undefined &&
+            account.codexAccountId === imported.codexAccountId),
+    );
+    if (duplicate) {
+      throw new Error("This current login is already in the account pool.");
+    }
     const account = await this.accounts.add(
       {
         provider: input.provider,
@@ -88,7 +103,7 @@ export class PoolOperations {
         subscriptionType: imported.subscriptionType,
         rateLimitTier: imported.rateLimitTier,
         enabled: true,
-        priority: input.priority,
+        priority,
       },
       imported.secret,
     );
@@ -108,7 +123,7 @@ export class PoolOperations {
         subscriptionType: authenticated.subscriptionType,
         rateLimitTier: authenticated.rateLimitTier,
         enabled: true,
-        priority: 100,
+        priority: await this.nextPriority("claude"),
       },
       {
         kind: "oauth",
@@ -136,7 +151,7 @@ export class PoolOperations {
         subscriptionType: null,
         rateLimitTier: null,
         enabled: true,
-        priority: 100,
+        priority: await this.nextPriority("codex"),
       },
       {
         kind: "oauth",
@@ -190,6 +205,12 @@ export class PoolOperations {
     return account;
   }
 
+  async rename(id: string, label: string): Promise<Account | null> {
+    const account = await this.accounts.rename(id, label);
+    if (account !== null) this.onAccountsChanged();
+    return account;
+  }
+
   async reorder(provider: PoolProvider, accountIds: string[]): Promise<void> {
     await this.accounts.reorder(provider, accountIds);
     this.onAccountsChanged();
@@ -212,6 +233,14 @@ export class PoolOperations {
 
   isRoutingEnabled(provider: PoolProvider): Promise<boolean> {
     return this.routing.isProviderEnabled(provider);
+  }
+
+  private async nextPriority(provider: PoolProvider): Promise<number> {
+    const accounts = await this.accounts.list();
+    const priorities = accounts
+      .filter((account) => account.provider === provider)
+      .map((account) => account.priority);
+    return priorities.length === 0 ? 0 : Math.max(...priorities) + 1;
   }
 
   async status(): Promise<PoolStatus> {

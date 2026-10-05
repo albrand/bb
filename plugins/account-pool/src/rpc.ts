@@ -6,6 +6,7 @@ import {
   accountPoolConfigSetInputSchema,
   accountIdInputSchema,
   accountPriorityInputSchema,
+  accountRenameInputSchema,
   accountReorderInputSchema,
   accountSchema,
   accountSummarySchema,
@@ -50,6 +51,10 @@ export const accountPoolRpcContract = defineRpcContract({
   },
   "account.setPriority": {
     input: accountPriorityInputSchema,
+    output: z.object({ account: accountSchema.nullable() }).strict(),
+  },
+  "account.rename": {
+    input: accountRenameInputSchema,
     output: z.object({ account: accountSchema.nullable() }).strict(),
   },
   "account.reorder": {
@@ -133,6 +138,9 @@ export function createRpcHandlers(
     "account.setPriority": async ({ accountId, priority }) => ({
       account: await operations.setPriority(accountId, priority),
     }),
+    "account.rename": async ({ id, label }) => ({
+      account: await operations.rename(id, label),
+    }),
     "account.refreshUsage": async ({ accountId }) => ({
       account: await operations.refreshUsage(accountId),
     }),
@@ -149,7 +157,17 @@ export function createRpcHandlers(
     "login.start": () => login.start(),
     "login.complete": (input) => login.complete(input),
     "codexLogin.start": () => codexLogin.start(),
-    "codexLogin.poll": (input) => codexLogin.poll(input),
+    "codexLogin.poll": async ({ sessionId, label }) => {
+      const result = await codexLogin.poll({ sessionId });
+      if (result.status !== "complete" || label === undefined) return result;
+      const account = await operations.rename(result.account.id, label);
+      return account === null
+        ? result
+        : {
+            status: "complete" as const,
+            account: { ...result.account, label },
+          };
+    },
     "codexLogin.cancel": (input) => ({
       cancelled: codexLogin.cancel(input),
     }),

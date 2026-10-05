@@ -214,6 +214,7 @@ export type AccountQuota = z.infer<typeof quotaSchema>;
 
 export const accountSummarySchema = accountSchema.extend({
   lastUsedHostName: z.string().min(1).nullable(),
+  active: z.boolean().default(false),
   ...quotaFieldsShape,
   inFlight: z.number().int().nonnegative(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
@@ -283,8 +284,8 @@ export const accountAddInputSchema = z
         .object({ kind: z.literal("api-key"), apiKey: z.string().min(1) })
         .strict(),
     ]),
-    label: z.string().min(1).nullable(),
-    priority: z.number().int(),
+    label: z.string().trim().min(1).nullable(),
+    priority: z.number().int().optional(),
   })
   .strict();
 
@@ -301,6 +302,7 @@ export const loginCompleteInputSchema = z
   .object({
     sessionId: z.string().uuid(),
     pasted: z.string().trim().min(1),
+    label: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 
@@ -315,7 +317,10 @@ export const codexLoginStartSchema = z
   .strict();
 
 export const codexLoginPollInputSchema = z
-  .object({ sessionId: z.string().uuid() })
+  .object({
+    sessionId: z.string().uuid(),
+    label: z.string().trim().min(1).max(120).optional(),
+  })
   .strict();
 
 export const codexLoginCancelSchema = z
@@ -332,6 +337,10 @@ export const codexLoginPollSchema = z.discriminatedUnion("status", [
 
 export const accountIdInputSchema = z
   .object({ id: z.string().uuid() })
+  .strict();
+
+export const accountRenameInputSchema = z
+  .object({ id: z.string().uuid(), label: z.string().trim().min(1).max(120) })
   .strict();
 
 export const accountPriorityInputSchema = z

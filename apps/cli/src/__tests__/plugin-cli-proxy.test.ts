@@ -11,6 +11,7 @@ import {
 } from "../command-groups.js";
 import {
   describeUnreachableServer,
+  expandBbCliPlaceholder,
   fetchPluginCliContributions,
   findDisabledPluginForCommand,
   findPluginCliCommand,
@@ -469,6 +470,15 @@ describe("findPluginCliCommand", () => {
 describe("runPluginCliCommand", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("expands login hints to an absolute shell-safe bb path", () => {
+    vi.stubEnv("BB_CLI", "/Applications/bb.app/Contents/MacOS/bb's cli");
+    expect(expandBbCliPlaceholder("{{BB_CLI}} pool account login-poll")).toBe(
+      "'/Applications/bb.app/Contents/MacOS/bb'\\''s cli' pool account login-poll",
+    );
   });
 
   it("waits for output larger than 64 KiB to flush before returning", async () => {
@@ -511,6 +521,56 @@ describe("runPluginCliCommand", () => {
       { channel: "stdout", value: `${stdout}\n` },
       { channel: "stderr", value: "warning\n" },
     ]);
+  });
+
+  it("keeps piped OAuth codes out of logs and rendered output", async () => {
+    const code = "one-time-oauth-code#state";
+    const bodies: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(String(init.body));
+        return new Response(
+          JSON.stringify({ exitCode: 0, stdout: "Added account.\n" }),
+        );
+      }),
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const stream = (target: string[]) =>
+      new Writable({
+        write(chunk, _encoding, callback) {
+          target.push(chunk.toString());
+          callback();
+        },
+      });
+    const input = {
+      isTTY: false,
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(code);
+      },
+    };
+
+    const exitCode = await runPluginCliCommand(
+      "http://localhost",
+      "account-pool",
+      ["account", "login-complete", "--session", "session-id", "--code-stdin"],
+      { stdout: stream(stdout), stderr: stream(stderr) },
+      input,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(bodies[0] ?? "{}").argv).toContain(code);
+    expect(stdout.join("")).not.toContain(code);
+    expect(stderr.join("")).not.toContain(code);
+    expect(log).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it.each(["stdout", "stderr"] as const)(

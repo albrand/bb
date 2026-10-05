@@ -36,6 +36,7 @@ bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
 bb pool account list [--json]
+bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
 bb pool account disable <id>
@@ -54,7 +55,10 @@ Claude `--login` starts a ten-minute in-memory PKCE session, prints the browser
 sign-in URL and session ID, then exits. After sign-in, pipe the manual callback
 code to `account login-complete` with that session ID. The browser does not need
 to run on the bb server machine, and neither the code nor account tokens enter
-process arguments. Codex `--login` prints a device verification URL, one-time
+process arguments. The login hint prints the absolute path of the running bb
+executable. New accounts join the end of the provider's priority order by
+default, and `bb pool account rename <id> <label>` updates their label. Codex
+`--login` prints a device verification URL, one-time
 code, session ID, and an `account login-poll` command that waits for
 authorization. Both flows are available in the plugin settings page through
 the **Sign in to Claude** and **Sign in to Codex** buttons. The CLI Codex import
@@ -121,6 +125,9 @@ one provider. Include disabled accounts too. Reordering changes the next failove
 sequence without moving the current account. `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.
+
+`bb pool status --json` and `bb pool account list --json` include `active` for
+the account currently selected by the provider cursor.
 
 The builtin Keep Awake plugin prevents macOS idle sleep while bb is running.
 Its settings page lets you target all hosts or selected hosts. The CLI
