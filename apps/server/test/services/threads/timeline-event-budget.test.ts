@@ -672,8 +672,7 @@ describe("timeline event budget", () => {
           const statement = prepareBeforeCaptureBound(source);
           const normalizedSource = source.toLowerCase();
           if (
-            normalizedSource.includes("turn_id") &&
-            normalizedSource.includes(" in (") &&
+            normalizedSource.includes('"turn_id" in (') &&
             (normalizedSource.includes("events_thread_sequence_idx") ||
               normalizedSource.includes(
                 "events_thread_turn_type_item_sequence_idx",
