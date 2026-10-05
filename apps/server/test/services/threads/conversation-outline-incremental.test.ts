@@ -220,6 +220,48 @@ function countSelectedEventRows(
   return count;
 }
 
+function expectCheckpointFallbackForTailEvent(tailEvent: RowSpec): void {
+  withTestThread((testThread) => {
+    seed(testThread, 100, parentCall("turn-0", "historical-call"));
+    const sequenceStarts: number[] = [];
+    const project = () =>
+      projectConversationOutlineIncrementally({
+        db: testThread.db,
+        threadId: testThread.thread.id,
+        key: "checkpoint-parent-reference",
+        maxSeq: getLatestThreadSequence(testThread.db, {
+          threadId: testThread.thread.id,
+        }),
+        contextBoundarySeq: 0,
+        orderingBoundarySequence: null,
+        resolveProjectionState: () => ({
+          includeNestedEvents: true,
+          summaryCompactionEnabled: false,
+        }),
+        select: (sequenceStart) => {
+          sequenceStarts.push(sequenceStart);
+          const rows = listStoredConversationOutlineEventRows(testThread.db, {
+            sequenceStart,
+            threadId: testThread.thread.id,
+          });
+          return {
+            events: rows.map(toThreadEventWithMeta),
+            project: () => [],
+          };
+        },
+      });
+
+    project();
+    sequenceStarts.length = 0;
+    appendRows(testThread, [tailEvent]);
+
+    project();
+
+    expect(sequenceStarts).toEqual([502, 0]);
+    expectMatchesFull(testThread);
+  });
+}
+
 describe("incremental conversation outlines", () => {
   it.each(["collapse", "flat"] as const)(
     "retains completed nested history while updating the live tail (%s)",
@@ -530,59 +572,38 @@ describe("incremental conversation outlines", () => {
   });
 
   it("invalidates a checkpoint when a tail event references a checkpointed item", () => {
-    withTestThread((testThread) => {
-      seed(testThread, 100, parentCall("turn-0", "historical-call"));
-      const sequenceStarts: number[] = [];
-      const project = () =>
-        projectConversationOutlineIncrementally({
-          db: testThread.db,
-          threadId: testThread.thread.id,
-          key: "checkpoint-parent-reference",
-          maxSeq: getLatestThreadSequence(testThread.db, {
-            threadId: testThread.thread.id,
-          }),
-          contextBoundarySeq: 0,
-          orderingBoundarySequence: null,
-          resolveProjectionState: () => ({
-            includeNestedEvents: true,
-            summaryCompactionEnabled: false,
-          }),
-          select: (sequenceStart) => {
-            sequenceStarts.push(sequenceStart);
-            const rows = listStoredConversationOutlineEventRows(
-              testThread.db,
-              { sequenceStart, threadId: testThread.thread.id },
-            );
-            return {
-              events: rows.map(toThreadEventWithMeta),
-              project: () => [],
-            };
-          },
-        });
-
-      project();
-      sequenceStarts.length = 0;
-      appendRows(testThread, [
-        {
-          type: "item/completed",
-          turnId: "live",
-          itemId: "message-child",
-          itemKind: "agentMessage",
+    expectCheckpointFallbackForTailEvent({
+      type: "item/completed",
+      turnId: "live",
+      itemId: "message-child",
+      itemKind: "agentMessage",
+      parentToolCallId: "historical-call",
+      data: {
+        item: {
+          id: "message-child",
+          type: "agentMessage",
+          text: "Nested continuation",
           parentToolCallId: "historical-call",
-          data: {
-            item: {
-              id: "message-child",
-              type: "agentMessage",
-              text: "Nested continuation",
-              parentToolCallId: "historical-call",
-            },
-          },
         },
-      ]);
+      },
+    });
+  });
 
-      project();
-
-      expect(sequenceStarts).toEqual([502, 0]);
+  it("invalidates a checkpoint when a tail tool call reuses a completed item id", () => {
+    expectCheckpointFallbackForTailEvent({
+      type: "item/started",
+      turnId: "live",
+      itemId: "historical-call",
+      itemKind: "toolCall",
+      data: {
+        item: {
+          id: "historical-call",
+          type: "toolCall",
+          tool: "Agent",
+          arguments: {},
+          status: "pending",
+        },
+      },
     });
   });
 
