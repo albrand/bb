@@ -85,7 +85,11 @@ function accepted(requestId: string, turnId: string): RowSpec {
   };
 }
 
-function seed(testThread: TestThread, count = 3): void {
+function seed(
+  testThread: TestThread,
+  count = 3,
+  nestedWork?: RowSpec,
+): void {
   appendRows(
     testThread,
     Array.from({ length: count }, (_, i) => {
@@ -96,6 +100,7 @@ function seed(testThread: TestThread, count = 3): void {
         started(turnId),
         accepted(requestId, turnId),
         message(turnId, `Answer ${i}`),
+        ...(i === 0 && nestedWork !== undefined ? [nestedWork] : []),
         completed(turnId),
       ];
     }).flat(),
@@ -308,6 +313,57 @@ describe("incremental conversation outlines", () => {
               type: "agentMessage",
               text: "Nested continuation",
               parentToolCallId: "message-turn-0",
+            },
+          },
+        },
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("rebuilds when a late nested update targets an item in the completed prefix", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100, {
+        type: "item/backgroundTask/progress",
+        providerThreadId: "provider-memo",
+        itemId: "workflow-task",
+        itemKind: "backgroundTask",
+        data: {
+          item: {
+            id: "workflow-task",
+            type: "backgroundTask",
+            taskType: "local_workflow",
+            description: "Complete workflow",
+            status: "pending",
+            taskStatus: "pending",
+            skipTranscript: false,
+            description: "Complete workflow",
+          },
+        },
+      });
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        {
+          type: "item/backgroundTask/completed",
+          providerThreadId: "provider-memo",
+          itemId: "workflow-task",
+          itemKind: "backgroundTask",
+          data: {
+            item: {
+              id: "workflow-task",
+              type: "backgroundTask",
+              taskType: "local_workflow",
+              description: "Complete workflow",
+              status: "completed",
+              taskStatus: "completed",
+              skipTranscript: false,
+              summary: "Workflow finished",
             },
           },
         },

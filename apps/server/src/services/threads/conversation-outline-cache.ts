@@ -105,6 +105,15 @@ function canReuse(
 ): boolean {
   let hasTailTurn = false;
   return events.every(({ event }) => {
+    const itemId = eventItemId(event);
+    if (itemId !== null && checkpoint.itemIds.has(itemId)) return false;
+    const parentToolCallId = eventParentToolCallId(event);
+    if (
+      parentToolCallId !== null &&
+      checkpoint.itemIds.has(parentToolCallId)
+    ) {
+      return false;
+    }
     if (isNestedWorkEvent(event)) return true;
     if (event.type === "turn/started") hasTailTurn = true;
     if (isThreadError(event) && !hasTailTurn) return false;
@@ -116,15 +125,6 @@ function canReuse(
     const requestId = referencedRequestId(event);
     if (requestId !== null && checkpoint.requestIds.has(requestId))
       return false;
-    const itemId = eventItemId(event);
-    if (itemId !== null && checkpoint.itemIds.has(itemId)) return false;
-    const parentToolCallId = eventParentToolCallId(event);
-    if (
-      parentToolCallId !== null &&
-      checkpoint.itemIds.has(parentToolCallId)
-    ) {
-      return false;
-    }
     if (
       event.type === "client/turn/requested" &&
       "expectedTurnId" in event.target
