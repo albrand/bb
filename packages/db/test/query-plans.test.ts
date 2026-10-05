@@ -740,7 +740,7 @@ describe("slow query index plans", () => {
     const { db, thread } = setup();
     try {
       insertEvents(db, noopNotifier, [
-        ...[
+        ...([
           {
             sequence: 1,
             type: "item/started",
@@ -783,7 +783,7 @@ describe("slow query index plans", () => {
             itemId: "unrequested-tool",
             itemKind: "toolCall",
           },
-        ].map(({ sequence, type, itemId, itemKind }) => ({
+        ] as const).map(({ sequence, type, itemId, itemKind }) => ({
           threadId: thread.id,
           sequence,
           type,
