@@ -214,20 +214,32 @@ describe("Claude OAuth login", () => {
   });
 
   it("returns a user-readable exchange failure and consumes the session", async () => {
-    const serverUrl = await startServer((_request, response) => {
+    const submittedCode = "fixture-oauth-code";
+    let exchangedCode: string | undefined;
+    const serverUrl = await startServer(async (request, response) => {
+      const body = await requestBody(request);
+      if ("code" in body && typeof body.code === "string") {
+        exchangedCode = body.code;
+      }
       response.statusCode = 400;
-      response.end("rejected secret detail");
+      response.end(JSON.stringify({ error_description: submittedCode }));
     });
     const login = new ClaudeOAuthLogin({
       tokenUrl: serverUrl,
       addAccount: async (authenticated) => savedAccount(authenticated),
     });
     const started = login.start();
+    let error = "";
+    await login
+      .complete({ sessionId: started.sessionId, pasted: submittedCode })
+      .catch((cause: unknown) => {
+        error = cause instanceof Error ? cause.message : String(cause);
+      });
+    expect(error).toBe("Claude token exchange failed (HTTP 400). Start again.");
+    expect(error).not.toContain(submittedCode);
+    expect(exchangedCode).toBe(submittedCode);
     await expect(
-      login.complete({ sessionId: started.sessionId, pasted: "bad-code" }),
-    ).rejects.toThrow("Claude token exchange failed (HTTP 400). Start again.");
-    await expect(
-      login.complete({ sessionId: started.sessionId, pasted: "bad-code" }),
+      login.complete({ sessionId: started.sessionId, pasted: submittedCode }),
     ).rejects.toThrow("Login session was not found. Start again.");
   });
 
