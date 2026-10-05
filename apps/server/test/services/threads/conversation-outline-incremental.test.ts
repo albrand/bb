@@ -532,7 +532,7 @@ describe("incremental conversation outlines", () => {
   it("invalidates a checkpoint when a tail event references a checkpointed item", () => {
     withTestThread((testThread) => {
       seed(testThread, 100, parentCall("turn-0", "historical-call"));
-      let selectedRows = 0;
+      const sequenceStarts: number[] = [];
       const project = () =>
         projectConversationOutlineIncrementally({
           db: testThread.db,
@@ -548,11 +548,11 @@ describe("incremental conversation outlines", () => {
             summaryCompactionEnabled: false,
           }),
           select: (sequenceStart) => {
+            sequenceStarts.push(sequenceStart);
             const rows = listStoredConversationOutlineEventRows(
               testThread.db,
               { sequenceStart, threadId: testThread.thread.id },
             );
-            selectedRows += rows.length;
             return {
               events: rows.map(toThreadEventWithMeta),
               project: () => [],
@@ -561,6 +561,7 @@ describe("incremental conversation outlines", () => {
         });
 
       project();
+      sequenceStarts.length = 0;
       appendRows(testThread, [
         {
           type: "item/completed",
@@ -578,11 +579,12 @@ describe("incremental conversation outlines", () => {
           },
         },
       ]);
-      selectedRows = 0;
 
       project();
 
-      expect(selectedRows).toBeGreaterThan(500);
+      expect(sequenceStarts).toHaveLength(2);
+      expect(sequenceStarts[0]).toBeGreaterThan(0);
+      expect(sequenceStarts[1]).toBe(0);
     });
   });
 
