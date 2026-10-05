@@ -497,7 +497,7 @@ describe("incremental conversation outlines", () => {
 
   it("rebuilds when a new nested item points into the completed prefix", () => {
     withTestThread((testThread) => {
-      seed(testThread, 100);
+      seed(testThread, 100, parentCall("turn-0", "historical-call"));
       expectMatchesFull(testThread);
 
       appendRows(testThread, [
@@ -506,13 +506,13 @@ describe("incremental conversation outlines", () => {
           turnId: "live",
           itemId: "message-child",
           itemKind: "agentMessage",
-          parentToolCallId: "message-turn-0",
+          parentToolCallId: "historical-call",
           data: {
             item: {
               id: "message-child",
               type: "agentMessage",
               text: "Nested continuation",
-              parentToolCallId: "message-turn-0",
+              parentToolCallId: "historical-call",
             },
           },
         },
@@ -521,7 +521,7 @@ describe("incremental conversation outlines", () => {
         load(testThread);
       });
 
-      expect(selectedRows).toBeLessThan(20);
+      expect(selectedRows).toBeGreaterThan(500);
       expectMatchesFull(testThread);
     });
   });
