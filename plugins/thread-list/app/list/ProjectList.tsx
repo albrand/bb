@@ -92,7 +92,6 @@ import {
 } from "./PinnedThreadTree.js";
 import {
   collapsedEnvironmentIdsAtom,
-  collapsedThreadIdsAtom,
   collapsedProjectIdsAtom,
   collapsedSidebarSectionIdsAtom,
   sidebarChronologicalSortAtom,
@@ -121,6 +120,7 @@ import {
 } from "./BuiltInSidebarSection.js";
 import { ReorderableSidebarSectionOrderList } from "./ReorderableSidebarSectionOrderList.js";
 import { useSidebarModeSectionOrder } from "./useSidebarModeSectionOrder.js";
+import { useReadStatusGrouping } from "./useReadStatusGrouping.js";
 import { haveSameOrder } from "../model/stored-order.js";
 import {
   useSidebarData,
@@ -1566,9 +1566,6 @@ function ProjectListComponent({
     },
     [sectionDeleteDialog],
   );
-  const [collapsedThreadIdList, setCollapsedThreadIdList] = useAtom(
-    collapsedThreadIdsAtom,
-  );
   const [collapsedEnvironmentIdList, setCollapsedEnvironmentIdList] = useAtom(
     collapsedEnvironmentIdsAtom,
   );
@@ -1633,7 +1630,7 @@ function ProjectListComponent({
   );
   const sortDirection = useAtomValue(sidebarSortDirectionAtom);
   const activeRename = useSidebarRenameState();
-  const sidebarThreadComparator = useMemo<ThreadComparator>(
+  const baseThreadComparator = useMemo<ThreadComparator>(
     () =>
       getSidebarThreadComparator(
         chronologicalSort,
@@ -1642,10 +1639,15 @@ function ProjectListComponent({
       ),
     [chronologicalSort, sortDirection, activeRename],
   );
-  const collapsedThreadIds = useMemo(
-    () => new Set(collapsedThreadIdList),
-    [collapsedThreadIdList],
-  );
+  const {
+    comparator: sidebarThreadComparator,
+    collapsedThreadIds,
+    toggleThreadCollapsed,
+  } = useReadStatusGrouping({
+    threads,
+    selectedThreadId,
+    comparator: baseThreadComparator,
+  });
   const collapsedEnvironmentIds = useMemo(
     () => new Set(collapsedEnvironmentIdList),
     [collapsedEnvironmentIdList],
@@ -1691,15 +1693,6 @@ function ProjectListComponent({
     [pinnedSidebarState.rootNodes],
   );
   const hasPinnedSection = pinnedSidebarState.rootNodes.length > 0;
-  const toggleThreadCollapsed = useCallback<ToggleCollapsedId>(
-    (threadId) => {
-      setCollapsedThreadIdList((current) => {
-        return toggleCollapsedIdList({ current, id: threadId });
-      });
-    },
-    [setCollapsedThreadIdList],
-  );
-
   const toggleEnvironmentCollapsed = useCallback<ToggleCollapsedId>(
     (environmentId) => {
       setCollapsedEnvironmentIdList((current) => {

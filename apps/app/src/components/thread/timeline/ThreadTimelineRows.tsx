@@ -9,7 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useComposedRefs } from "@radix-ui/react-compose-refs";
 import { TimelineImageGallery } from "./TimelineImageGallery";
 import type {
@@ -31,10 +31,12 @@ import {
   buildTimelineViewRows,
   createTimelineViewRowsCache,
   findActiveLatestBundleId,
+  parseSentThreadMessage,
   workRowGlyph,
   workRowPluginGlyph,
   workRowPresentation,
   type BuildTimelineRowTitleOptions,
+  type ThreadTellCommand,
   type BuildTimelineViewRowsOptions,
   type ThreadTimelineViewRow,
   type TimelineActivityIntentTitle,
@@ -49,7 +51,10 @@ import {
   isNonExpandableSummary,
   isRowExpandable,
 } from "@bb/client-core";
-import { isRunningThreadRuntimeDisplayStatus } from "@bb/client-core";
+import {
+  getMessageLinkPath,
+  isRunningThreadRuntimeDisplayStatus,
+} from "@bb/client-core";
 import type {
   ThreadTimelineAddToChatHandler,
   ThreadTimelineEditMessageHandler,
@@ -118,6 +123,8 @@ import {
   useArmTopLevelTimelineRowContainment,
 } from "./timeline-row-containment.js";
 import { NESTED_TIMELINE_GROUP_LINE_CLASS_NAME } from "./timeline-nested-group-line.js";
+import { GeneratedConversationMessage } from "./GeneratedConversationMessage.js";
+import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { useThreadTimelineTurnSummaryDetails } from "@/hooks/queries/thread-queries";
 import { type ThreadTimelineTurnSummaryDetailsQueryIdentity } from "@/hooks/queries/query-keys";
 import {
@@ -540,7 +547,11 @@ function useTimelineSearchExpansionRowIds(
     ) {
       return inheritedRowIds;
     }
-    const localRowIds = collectSearchedMessageAncestorRowIds(rows, target.seq);
+    const localRowIds = collectSearchedMessageAncestorRowIds(
+      rows,
+      target.seq,
+      target.match,
+    );
     if (localRowIds.size === 0) {
       return inheritedRowIds;
     }
@@ -1059,6 +1070,27 @@ const ConversationRowContent = memo(function ConversationRowContent({
     rowConsumerActions.length === 0
       ? rowSlotActions
       : [...(rowSlotActions ?? []), ...rowConsumerActions];
+  const isSettledMessage =
+    row.role === "user" ? row.turnRequest.status !== "pending" : !streaming;
+  const onCopyLink =
+    projectId === undefined || !isSettledMessage
+      ? undefined
+      : () => {
+          void copyToClipboardWithToast(
+            new URL(
+              getMessageLinkPath({
+                projectId,
+                threadId: row.threadId,
+                seq: row.messageSeq,
+              }),
+              window.location.origin,
+            ).toString(),
+            {
+              successMessage: "Message link copied",
+              errorMessage: "Failed to copy message link",
+            },
+          );
+        };
   if (row.role === "user") {
     const senderThreadMetadata =
       row.senderThreadId === null
@@ -1103,6 +1135,7 @@ const ConversationRowContent = memo(function ConversationRowContent({
         mentions={row.mentions}
         mobileActionDisplay={mobileActionDisplay}
         onAddToChat={onSelectionAddToChat}
+        onCopyLink={onCopyLink}
         onEdit={onEdit}
         onOpenLink={onOpenLink}
         onOpenLocalFileLink={onOpenLocalFileLink}
@@ -1152,6 +1185,7 @@ const ConversationRowContent = memo(function ConversationRowContent({
       attachments={row.attachments}
       id={row.id}
       onAddToChat={onMessageAddToChat}
+      onCopyLink={onCopyLink}
       onFork={onFork}
       onSendToMain={onSendToMain}
       forkDisabled={!canSpawnChild}
@@ -1604,6 +1638,56 @@ function useLeadingIconUrlForRow(
   );
 }
 
+type GeneratedMessageProps = ComponentProps<
+  typeof GeneratedConversationMessage
+>;
+const NO_ATTACHMENTS: GeneratedMessageProps["attachmentItems"] = {
+  filePaths: [],
+  imageItems: [],
+};
+const NO_MENTIONS: GeneratedMessageProps["mentions"] = [];
+const ACCEPTED_MESSAGE: GeneratedMessageProps["turnRequest"] = {
+  isGrouped: false,
+  kind: "message",
+  status: "accepted",
+};
+
+function SentThreadMessageRow({
+  message,
+  sentAt,
+}: {
+  message: ThreadTellCommand;
+  sentAt: number;
+}) {
+  const context = useTimelineRendererStaticContext();
+  const recipient = useSenderThreadMetadataContext().get(message.threadId);
+  return (
+    <GeneratedConversationMessage
+      attachmentItems={NO_ATTACHMENTS}
+      automationLink={null}
+      mentions={NO_MENTIONS}
+      onOpenLink={context.onOpenLink}
+      onOpenLocalFileLink={context.onOpenLocalFileLink}
+      onTitleAction={context.onTitleAction}
+      originKind={null}
+      projectId={context.projectId}
+      resolveMentionLink={context.resolveMentionLink}
+      sourceIsPluginSideChat={false}
+      sourceKind="agent-recipient"
+      sourceName={recipient?.title ?? "Agent"}
+      sourceProjectId={recipient?.projectId ?? null}
+      sourceThreadId={message.threadId}
+      systemMessageKind="unlabeled"
+      systemMessageSubject={null}
+      text={message.message}
+      threadId={context.threadId}
+      timestamp={sentAt}
+      turnRequest={ACCEPTED_MESSAGE}
+      workspaceRootPath={context.workspaceRootPath}
+    />
+  );
+}
+
 function TimelineRowView({
   activeLatestBundleId,
   compactActivityIntents,
@@ -1640,6 +1724,19 @@ function TimelineRowView({
               ? flatTurnTokenSummary
               : undefined
         }
+      />
+    );
+  }
+
+  const sentThreadMessage =
+    row.kind === "work" && row.workKind === "command"
+      ? parseSentThreadMessage(row)
+      : null;
+  if (sentThreadMessage !== null) {
+    return (
+      <SentThreadMessageRow
+        message={sentThreadMessage}
+        sentAt={row.startedAt}
       />
     );
   }
@@ -1959,10 +2056,11 @@ function TimelineRowsList({
   const measurements = inheritedMeasurements ?? standaloneMeasurements;
   const searchExpandedRowIds = useTimelineSearchExpansionRowIds(rows);
   const stableSearchExpandedRowIds = useStableReadonlySet(searchExpandedRowIds);
-  useScrollToSearchedMessage(rows, threadId, {
+  const isInitialRevealPending = useScrollToSearchedMessage(rows, threadId, {
     hasOlderRows: hasOlderTimelineRows,
     isLoadingOlderRows: isLoadingOlderTimelineRows,
     onLoadOlderRows,
+    reportsMissingTarget: spacing === "top-level",
   });
   const activeLatestBundleId = useMemo(
     () => findActiveLatestBundleId(rows),
@@ -2047,6 +2145,8 @@ function TimelineRowsList({
             className,
           )}
           data-timeline-row-list={spacing}
+          style={isInitialRevealPending ? { visibility: "hidden" } : undefined}
+          aria-busy={isInitialRevealPending || undefined}
         >
           <TimelineWindowedItemsLoader
             alwaysMountedKeys={alwaysMountedKeys}

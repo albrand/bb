@@ -410,6 +410,8 @@ export {
   listCompletedTurnsByThreadIds,
   listEvents,
   listStoredConversationOutlineEventRows,
+  listStoredRootConversationOutlineEventRows,
+  getStoredConversationOutlineProjectionState,
   listTimelineWindowHintsDescending,
   getFirstParentedTimelineBoundarySequence,
   getTimelineGroupingContextChangesInRange,

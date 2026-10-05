@@ -41,7 +41,8 @@ export function useThreadStorageViewer({
   return {
     checkThreadStorageFileExists,
     isThreadStorageFilesLoading,
-    threadStorageFilesError,
+    threadStorageFilesError:
+      threadStorageFiles === undefined ? threadStorageFilesError : null,
     threadStorageFiles,
     refetchThreadStorageFiles,
   };

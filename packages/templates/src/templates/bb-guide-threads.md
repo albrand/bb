@@ -220,6 +220,8 @@ Inspecting:
                                            user-message turns for minimal/verbose (newest first, default 20, max 100)
     --after-seq <seq>                      Paginate after sequence number (json only)
     --all                                  Print the whole thread, paging through every entry
+    --message <seq>                        Print one message
+    --context <count>                      With --message, also print this many messages around it (max 20)
 
   Human formats end with a notice when older history was omitted; --json warns
   on stderr when more events exist beyond the printed page. Human-format --all
@@ -239,6 +241,14 @@ Opening threads and files in the app:
 
   In chat, reference a thread as @thread:thr_abc123, substituting its actual ID.
   BB renders the correct project-aware link; do not construct thread URLs manually.
+  Pasting a bare thread URL from the current bb origin into a composer turns it
+  into the same thread pill when the target resolves. Undo restores the URL;
+  paste without formatting (Cmd/Ctrl+Shift+V) keeps it literal. Links with query
+  strings or fragments, quoted/code text, and links to other origins stay literal.
+  CLI prompts can use @thread:<id> directly; URL conversion only runs on a user paste.
+  Reference one message as @thread:thr_abc123#msg=42, taking the number from
+  sourceSeq in `bb thread search --json`. Read it, or a copied message link
+  (…/threads/thr_abc123#msg=42), with `bb thread log thr_abc123 --message 42`.
 
   bb thread open <path>                    Open a file in the current BB thread panel
   bb thread open <thread-id> [path]        Open a thread, optionally with a panel file
@@ -492,3 +502,9 @@ Lifecycle ownership:
   recursively deletes them after runtime/storage cleanup. Failed cleanup retries
   durably. Unarchive the owner before explicitly restoring a dependent. Stop does
   not cascade. Sidebar parents and ordinary forks retain their existing policies.
+
+Thread storage deletion and orphan cleanup stop processes whose working
+directories are inside that storage before removing files, including dev
+servers in nested checkouts. On macOS and Linux this uses the same SIGTERM
+grace period and SIGKILL fallback as worktree removal. Windows does not
+enumerate process working directories.

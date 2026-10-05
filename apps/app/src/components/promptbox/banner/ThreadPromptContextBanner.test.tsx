@@ -511,7 +511,7 @@ describe("ThreadPromptContextBanner", () => {
     expect(markup).toContain(
       "2 active child threads: Investigate failing checks",
     );
-    expect(markup).toContain("+1 more");
+    expect(markup).toContain(">+1<");
   });
 
   it("constrains a long active child title inside the composer pane", () => {
