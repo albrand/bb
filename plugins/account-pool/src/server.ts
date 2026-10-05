@@ -224,7 +224,9 @@ export function createAccountPoolPlugin(
         (await bb.sdk.system.providerStates({ hostId })).providers,
       now,
       () => bb.realtime.publish(ACCOUNT_POOL_ACCOUNTS_CHANGED, {}),
-      (accountId) => hub.refreshUsage(accountId, true),
+      async (accountId) => {
+        await hub.refreshUsage(accountId, true);
+      },
       parentStatus,
       async (threadId) => {
         const [thread, queue] = await Promise.all([

@@ -146,7 +146,7 @@ export class AccountPoolHub {
   private readonly pacingByAccount = new Map<string, PacingFlight>();
   private affinityBindings = new Map<string, AccountBinding>();
   private activeAccounts = new Map<PoolProvider, ActiveAccount>();
-  private readonly usageRefreshes = new Map<string, Promise<void>>();
+  private readonly usageRefreshes = new Map<string, Promise<boolean>>();
   private readonly lastUsageRefreshAt = new Map<string, number>();
   private readonly drainWaiters = new Set<() => void>();
 
@@ -305,14 +305,14 @@ export class AccountPoolHub {
     }
   }
 
-  async refreshUsage(accountId?: string, force = false): Promise<void> {
+  async refreshUsage(accountId?: string, force = false): Promise<boolean> {
     const accounts = (await this.options.accounts.list()).filter(
       (account) =>
         account.enabled &&
         account.kind === "oauth" &&
         (accountId === undefined || account.id === accountId),
     );
-    await Promise.all(
+    const refreshed = await Promise.all(
       accounts.map((account) =>
         this.refreshAccountUsage(
           account,
@@ -321,6 +321,7 @@ export class AccountPoolHub {
         ),
       ),
     );
+    return refreshed.every(Boolean);
   }
 
   private async refreshExhaustedUsage(
@@ -354,14 +355,14 @@ export class AccountPoolHub {
     account: Account,
     minIntervalMs: number,
     recoverError = false,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const adapter = this.adapter(account.provider);
-    if ((this.inFlightByAccount.get(account.id) ?? 0) > 0) return;
+    if ((this.inFlightByAccount.get(account.id) ?? 0) > 0) return true;
     const running = this.usageRefreshes.get(account.id);
     if (running !== undefined) return running;
     const now = this.options.now();
     const last = this.lastUsageRefreshAt.get(account.id);
-    if (last !== undefined && now - last < minIntervalMs) return;
+    if (last !== undefined && now - last < minIntervalMs) return true;
     this.lastUsageRefreshAt.set(account.id, now);
     const recover =
       recoverError && this.options.quotas.get(account.id).error !== null;
@@ -381,7 +382,7 @@ export class AccountPoolHub {
         fetch: this.options.fetch,
         now: this.options.now,
       })
-      .catch(() => undefined)
+      .then(() => true, () => false)
       .finally(() => this.usageRefreshes.delete(account.id));
     this.usageRefreshes.set(account.id, refresh);
     return refresh;
