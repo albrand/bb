@@ -1155,6 +1155,10 @@ export type StoredEventRow = Pick<
   keyof typeof storedEventRowFields
 >;
 
+type StoredEventRowSqlFields = {
+  [Key in keyof StoredEventRow]: SQL<StoredEventRow[Key]>;
+};
+
 export type InlineOutputCharLimit = number | null;
 
 function storedEventRowFieldsWithInlineOutputLimit(
@@ -1170,7 +1174,7 @@ function storedEventRowFieldsWithInlineOutputLimit(
 
 function storedEventRowSqlFields(
   maxInlineOutputChars: InlineOutputCharLimit,
-): Record<keyof StoredEventRow, SQL> {
+): StoredEventRowSqlFields {
   return {
     createdAt: sql<number>`${events.createdAt}`,
     data: sql<string>`${storedEventRowFieldsWithInlineOutputLimit(maxInlineOutputChars).data}`,
