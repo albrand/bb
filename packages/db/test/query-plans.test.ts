@@ -251,6 +251,7 @@ describe("slow query index plans", () => {
         {
           threadId: thread.id,
           sequence: 1,
+          createdAt: 100,
           type: "item/started",
           scope: turnScope("turn-a"),
           itemId: "item-a",
@@ -261,6 +262,7 @@ describe("slow query index plans", () => {
         {
           threadId: thread.id,
           sequence: 2,
+          createdAt: 200,
           type: "item/completed",
           scope: turnScope("turn-a"),
           itemId: "item-a",
@@ -271,6 +273,7 @@ describe("slow query index plans", () => {
         {
           threadId: thread.id,
           sequence: 3,
+          createdAt: 300,
           type: "item/completed",
           scope: turnScope("turn-b"),
           itemId: "item-a",
@@ -281,6 +284,7 @@ describe("slow query index plans", () => {
         {
           threadId: thread.id,
           sequence: 4,
+          createdAt: 400,
           type: "item/started",
           scope: threadScope(),
           itemId: "thread-item",
@@ -291,6 +295,7 @@ describe("slow query index plans", () => {
         {
           threadId: thread.id,
           sequence: 5,
+          createdAt: 500,
           type: "item/completed",
           scope: threadScope(),
           itemId: "thread-item",
@@ -302,17 +307,90 @@ describe("slow query index plans", () => {
       logger.clear();
 
       const captured = captureStatements(db, () => {
-        expect(
-          listStoredItemLifecycleRowsByItems(db, {
-            items: [
-              { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
-              { itemId: "thread-item", scopeKind: "thread", turnId: null },
-              { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
-            ],
-            maxInlineOutputChars: null,
+        const rows = listStoredItemLifecycleRowsByItems(db, {
+          items: [
+            { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
+            { itemId: "thread-item", scopeKind: "thread", turnId: null },
+            { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
+          ],
+          maxInlineOutputChars: 32_000,
+          threadId: thread.id,
+        });
+        expect(rows.map((row) => row.sequence)).toEqual([1, 2, 4, 5]);
+        expect(rows.map((row) => Object.keys(row).sort())).toEqual(
+          Array.from({ length: 4 }, () => [
+            "createdAt",
+            "data",
+            "id",
+            "itemId",
+            "itemKind",
+            "parentToolCallId",
+            "providerThreadId",
+            "scopeKind",
+            "sequence",
+            "threadId",
+            "turnId",
+            "type",
+          ]),
+        );
+        expect(rows).toEqual([
+          expect.objectContaining({
+            createdAt: 100,
+            data: "{}",
+            id: expect.any(String),
+            itemId: "item-a",
+            itemKind: "agentMessage",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "turn",
+            sequence: 1,
             threadId: thread.id,
-          }).map((row) => row.sequence),
-        ).toEqual([1, 2, 4, 5]);
+            turnId: "turn-a",
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 200,
+            data: "{}",
+            id: expect.any(String),
+            itemId: "item-a",
+            itemKind: "agentMessage",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "turn",
+            sequence: 2,
+            threadId: thread.id,
+            turnId: "turn-a",
+            type: "item/completed",
+          }),
+          expect.objectContaining({
+            createdAt: 400,
+            data: "{}",
+            id: expect.any(String),
+            itemId: "thread-item",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 4,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 500,
+            data: "{}",
+            id: expect.any(String),
+            itemId: "thread-item",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 5,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/completed",
+          }),
+        ]);
       });
 
       expect(captured).toHaveLength(1);
@@ -322,6 +400,60 @@ describe("slow query index plans", () => {
       );
       expect(details).not.toMatch(/SCAN events\b/u);
       expect(details).not.toContain("events_thread_sequence_idx");
+    } finally {
+      db.$client.close();
+    }
+  });
+
+  it("batches lifecycle hydration while projecting bounded output", () => {
+    const { db, thread } = setup();
+    try {
+      const items = Array.from({ length: 257 }, (_, index) => ({
+        itemId: `item-${index}`,
+        scopeKind: index % 2 === 0 ? ("turn" as const) : ("thread" as const),
+        turnId: index % 2 === 0 ? "turn-batch" : null,
+      }));
+      insertEvents(
+        db,
+        noopNotifier,
+        items.map((item, index) => ({
+          threadId: thread.id,
+          sequence: index + 1,
+          createdAt: index + 1,
+          type: "item/started",
+          scope:
+            item.scopeKind === "turn"
+              ? turnScope(item.turnId ?? "turn-batch")
+              : threadScope(),
+          itemId: item.itemId,
+          itemKind: "toolCall",
+          parentToolCallId: null,
+          data: JSON.stringify({ item: { result: "long enough to trim" } }),
+        })),
+      );
+
+      const captured = captureStatements(db, () => {
+        const rows = listStoredItemLifecycleRowsByItems(db, {
+          items,
+          maxInlineOutputChars: 5,
+          threadId: thread.id,
+        });
+        expect(rows.map((row) => row.sequence)).toEqual(
+          Array.from({ length: 257 }, (_, index) => index + 1),
+        );
+        expect(
+          rows.every((row) => row.data.includes("characters truncated")),
+        ).toBe(true);
+      });
+
+      expect(captured).toHaveLength(2);
+      for (const query of captured) {
+        const details = queryPlanDetails({ db, ...query });
+        expect(details).toContain(
+          "SEARCH events USING INDEX events_thread_turn_type_item_sequence_idx (thread_id=? AND turn_id=? AND type=? AND item_id=?)",
+        );
+        expect(query.params.length).toBeLessThanOrEqual(832);
+      }
     } finally {
       db.$client.close();
     }

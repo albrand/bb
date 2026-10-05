@@ -1895,6 +1895,7 @@ export function listStoredItemLifecycleRowsByItems(
     variableCountPerValue: 3,
     dedupeKey: scopedItemRefKey,
     fixedVariableCount: 64,
+    maximumValueCount: 256,
     queryBatch: (batch) =>
       db.all<StoredEventRow>(sql`
         WITH selected_items(scope_kind, turn_id, item_id) AS (
