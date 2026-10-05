@@ -7,6 +7,7 @@ import {
   type McpServerStatus,
   type Options,
   type Query,
+  type Settings,
   type SDKMessage,
   type SDKUserMessage,
   type SpawnedProcess,
@@ -216,8 +217,14 @@ export class SdkSession {
   }
 
   async setPermissionMode(mode: ClaudePermissionMode): Promise<void> {
-    this.options.permissionMode = mode;
     await this.query?.setPermissionMode(mode);
+    this.options.permissionMode = mode;
+  }
+
+  async applyPermissionSettings(
+    settings: Pick<Settings, "sandbox" | "permissions">,
+  ): Promise<void> {
+    await this.query?.applyFlagSettings(settings);
   }
 
   async getContextUsage(): Promise<unknown> {
