@@ -3567,8 +3567,13 @@ describe("Account Pool plugin", () => {
       expect(await send()).toBe(429);
       expect(refreshCalls).toBe(1);
 
-      const stillRejected = await refresh();
+      await expect(refresh()).rejects.toThrow(
+        "Could not refresh account usage. Try again.",
+      );
       expect(refreshCalls).toBe(2);
+      const stillRejected = z.array(accountSummarySchema).parse(
+        await fixture.host.harness.behavior.callRpc("account.list", null),
+      )[0];
       expect(stillRejected?.error).toBe("OAuth refresh failed with HTTP 400.");
 
       refreshStatus = 200;
