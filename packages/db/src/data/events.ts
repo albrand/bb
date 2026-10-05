@@ -1730,21 +1730,25 @@ export function listStoredDelegatingItemRowsByItemIds(
     return [];
   }
 
-  return db
-    .select(
-      storedEventRowFieldsWithInlineOutputLimit(args.maxInlineOutputChars),
-    )
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, args.threadId),
-        inArray(events.itemId, itemIds),
-        sql`${events.itemKind} IN ('toolCall', 'delegation')`,
-        inArray(events.type, ["item/started", "item/completed"]),
-      ),
-    )
-    .orderBy(events.sequence)
-    .all();
+  const rowFields = storedEventRowSqlFields(args.maxInlineOutputChars);
+  const selectedFields = sql.join(
+    Object.entries(rowFields).map(([key, field]) =>
+      sql`${field} AS ${sql.identifier(key)}`,
+    ),
+    sql`, `,
+  );
+  return db.all<StoredEventRow>(sql`
+    SELECT ${selectedFields}
+    FROM ${events} INDEXED BY events_delegating_item_lookup_idx
+    WHERE ${events.threadId} = ${args.threadId}
+      AND ${events.itemId} IN (${sql.join(
+        itemIds.map((itemId) => sql`${itemId}`),
+        sql`, `,
+      )})
+      AND ${events.itemKind} IN ('toolCall', 'delegation')
+      AND ${events.type} IN ('item/started', 'item/completed')
+    ORDER BY ${events.sequence}
+  `);
 }
 
 export function isTimelineCursorSequencePresent(
