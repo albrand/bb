@@ -1168,7 +1168,9 @@ function storedEventRowFieldsWithInlineOutputLimit(
       };
 }
 
-function storedEventRowSqlFields(maxInlineOutputChars: InlineOutputCharLimit) {
+function storedEventRowSqlFields(
+  maxInlineOutputChars: InlineOutputCharLimit,
+): Record<keyof StoredEventRow, SQL> {
   return {
     createdAt: sql<number>`${events.createdAt}`,
     data: sql<string>`${storedEventRowFieldsWithInlineOutputLimit(maxInlineOutputChars).data}`,
