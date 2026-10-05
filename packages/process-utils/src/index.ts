@@ -13,3 +13,4 @@ export * from "./socket-type-of-service.js";
 export * from "./process-info.js";
 
 export * from "./tcp-server-sockets.js";
+export * from "./performance-diagnostics.js";

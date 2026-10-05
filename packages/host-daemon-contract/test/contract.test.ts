@@ -791,6 +791,10 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a dynamic tool's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
   "hostDaemonCommandSchema.dynamicTools.waitsForUserInput":
     "a dynamic tool waits for user input only while its plugin-owned interaction is pending; absence means the tool completes with the turn.",
+  "hostDaemonCommandSchema.input.sourceProjectId":
+    "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending a daemon command.",
+  "hostDaemonCommandSchema.input.hostId":
+    "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
   "hostDaemonCommandSchema.input.mimeType":
     "a localFile prompt input carries a mime type only when the uploader determined one; absence means the daemon must sniff or fall back, not that the file is untyped.",
   "hostDaemonCommandSchema.input.name":
@@ -799,6 +803,10 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a localFile prompt input carries a size only when the uploader measured one; absence means unknown, and no reader may read it as zero.",
   "hostDaemonCommandSchema.input.visibility":
     "a prompt input declares visibility only to hide itself from the person: the single value agent-only marks an input the transcript does not show, so absence is the ordinary visible input.",
+  "hostDaemonCommandSchema.inputGroups.sourceProjectId":
+    "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending grouped input to the daemon.",
+  "hostDaemonCommandSchema.inputGroups.hostId":
+    "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
   "hostDaemonCommandSchema.inputGroups.mimeType":
     "a localFile prompt input carries a mime type only when the uploader determined one; absence means the daemon must sniff or fall back, not that the file is untyped.",
   "hostDaemonCommandSchema.inputGroups.name":
@@ -1191,7 +1199,7 @@ const CONTRIBUTED_ENV = [
 
 describe("host-daemon command schemas", () => {
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(227);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(228);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 

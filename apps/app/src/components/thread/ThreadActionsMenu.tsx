@@ -5,7 +5,8 @@ import {
   ActionMenuSub,
 } from "@/components/ui/action-menu-items";
 import type { Thread } from "@bb/domain";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +45,7 @@ interface ThreadActionsMenuBaseProps {
   onOpenInSplit?: (side?: SplitSide) => void;
   onRename?: () => void;
   onCloseAutoFocus?: (event: Event) => void;
+  onCreateNewThreadInEnvironment?: () => void;
 }
 
 export interface ThreadActionsMenuResponsiveAction {
@@ -167,6 +169,7 @@ function ThreadActionsMenuItems({
   onCloseMenu,
   onMoveToProject,
   onOpenInSplit,
+  onCreateNewThreadInEnvironment,
   compactStep = "actions",
   onCompactStepChange,
   responsiveActions = [],
@@ -304,6 +307,15 @@ function ThreadActionsMenuItems({
           {showSeparators ? <ActionMenuSeparator surface="dropdown" /> : null}
         </>
       ) : null}
+      {isCompactViewport && onCreateNewThreadInEnvironment ? (
+        <ActionMenuItem
+          surface="dropdown"
+          icon="MessageSquarePlus"
+          onSelect={onCreateNewThreadInEnvironment}
+        >
+          New thread in environment
+        </ActionMenuItem>
+      ) : null}
       <ActionMenuItem
         surface="dropdown"
         icon="Copy"
@@ -409,6 +421,7 @@ export function ThreadActionsMenu({
   thread,
   onOpenInSplit,
   onMoveToProject,
+  onCreateNewThreadInEnvironment,
   responsiveActions,
   onOpenChange,
   triggerClassName,
@@ -445,11 +458,40 @@ export function ThreadActionsMenu({
           onCloseMenu={() => handleOpenChange(false)}
           onMoveToProject={onMoveToProject}
           onOpenInSplit={onOpenInSplit}
+          onCreateNewThreadInEnvironment={onCreateNewThreadInEnvironment}
           compactStep={compactStep}
           onCompactStepChange={setCompactStep}
           responsiveActions={responsiveActions}
         />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+export function ThreadActionsLongPressMenu({
+  children,
+  thread,
+}: {
+  children: ReactNode;
+  thread: Thread;
+}) {
+  const { compactStep, setCompactStep, handleOpenChange } =
+    useThreadActionsMenuLifecycle();
+
+  return (
+    <CompactLongPressMenu
+      label="Thread actions"
+      onOpenChange={handleOpenChange}
+      items={
+        <ThreadActionsMenuItems
+          thread={thread}
+          onCloseMenu={() => handleOpenChange(false)}
+          compactStep={compactStep}
+          onCompactStepChange={setCompactStep}
+        />
+      }
+    >
+      {children}
+    </CompactLongPressMenu>
   );
 }

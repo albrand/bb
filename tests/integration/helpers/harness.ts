@@ -200,6 +200,7 @@ async function startIntegrationServer(
     sharedSkillRoots: { user: [], project: [] },
     isDevelopment: false,
     turnAcceptanceGraceMs: 0,
+    performanceDiagnosticsAvailable: false,
   };
   const terminalSessions = new TerminalSessionLifecycle({
     attachTimeoutMs: 50,
@@ -245,10 +246,13 @@ async function startIntegrationServer(
   });
   pendingInteractions.start();
   const appVersion = createAppVersionService({
+    installKind: null,
+    sourceCommit: null,
     config,
     logger: testLogger,
   });
   const appUpdate = createAppUpdateService({
+    currentCommit: null,
     appSurface: "web",
     appVersion,
     config,

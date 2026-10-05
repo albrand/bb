@@ -210,6 +210,7 @@ function appPaletteLabel(
 }
 
 interface ExperimentsSettingsSectionProps {
+  performanceDiagnosticsAvailable: boolean;
   disabled: boolean;
   experiments: Experiments;
   onExperimentChange: (key: ExperimentKey, enabled: boolean) => void;
@@ -1071,6 +1072,11 @@ const EXPERIMENT_DEFINITIONS: Record<
     description:
       "Show the latest release notes as a compact preview on the Updates page.",
   },
+  performanceDiagnostics: {
+    label: "Server performance diagnostics",
+    description:
+      "Collect CPU profiles and detailed performance logs while the server was launched with --perf-diagnostics. Turning this off stops collection; saved profiles remain.",
+  },
   serverMove: {
     label: "Server move",
     description:
@@ -1078,6 +1084,7 @@ const EXPERIMENT_DEFINITIONS: Record<
   },
 };
 export function ExperimentsSettingsSection({
+  performanceDiagnosticsAvailable,
   disabled,
   experiments,
   onExperimentChange,
@@ -1090,6 +1097,11 @@ export function ExperimentsSettingsSection({
       >
         <div className="space-y-5">
           {experimentKeys.map((experimentKey) => {
+            if (
+              experimentKey === "performanceDiagnostics" &&
+              !performanceDiagnosticsAvailable
+            )
+              return null;
             const definition = EXPERIMENT_DEFINITIONS[experimentKey];
             return (
               <SettingsWithControl
@@ -1271,6 +1283,9 @@ export function SettingsView() {
           updateExperimentsMutation.isPending
         }
         experiments={experiments}
+        performanceDiagnosticsAvailable={
+          systemConfigQuery.data?.performanceDiagnosticsAvailable ?? false
+        }
         onExperimentChange={(key, enabled) =>
           updateExperimentsMutation.mutate({ [key]: enabled })
         }

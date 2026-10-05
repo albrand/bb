@@ -34,7 +34,7 @@ import {
   goneThreadEnvironmentDetails,
   throwThreadNotWritable,
 } from "../lib/lifecycle-api-errors.js";
-import { validatePromptAttachmentReferences } from "../projects/attachments.js";
+import { resolvePromptAttachmentReferences } from "../projects/attachments.js";
 import {
   dispatchEnvironmentAndHost,
   dispatchExecutionSources,
@@ -173,6 +173,15 @@ export function intendedThreadHostId(
   return intent === null ? null : hostIdForEnvironmentIntent(deps, intent);
 }
 
+export function threadTargetHostId(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  thread: Pick<Thread, "id" | "environmentId">,
+): string | null {
+  return thread.environmentId !== null
+    ? (getEnvironment(deps.db, thread.environmentId)?.hostId ?? null)
+    : intendedThreadHostId(deps, thread.id);
+}
+
 export function listRunningThreadsWithIntendedHosts(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
 ): RunningThreadRow[] {
@@ -233,16 +242,20 @@ async function runDispatchAttempt(
   args: DispatchAttemptArgs,
   reattempted: boolean,
 ): Promise<DispatchAttemptOutcome> {
-  const { payload, thread } = args;
+  const { thread } = args;
+  let { payload } = args;
   ensureThreadIsWritable(thread, true);
   assertThreadHostAcceptsWork(deps.db, thread);
   if (args.trigger === "user" && args.source.kind === "inline") {
-    await validatePromptAttachmentReferences({
+    const input = await resolvePromptAttachmentReferences({
       db: deps.db,
       dataDir: deps.config.dataDir,
       input: payload.input,
       projectId: thread.projectId,
+      hostId: threadTargetHostId(deps, thread),
     });
+    payload = { ...payload, input };
+    args = { ...args, payload };
   }
   const senderThreadId = resolveMessageSenderThreadId(deps, {
     ...(payload.senderThreadId !== undefined

@@ -307,6 +307,29 @@ function ThreadActionsMenuItems({
           {separator}
         </>
       ) : null}
+      {isCompactViewport &&
+      thread.environment?.id &&
+      thread.environment.path !== null ? (
+        <ActionMenuItem
+          surface={surface}
+          icon="MessageSquarePlus"
+          onSelect={() => {
+            const environmentId = thread.environment?.id;
+            if (!environmentId) return;
+            actions.openNewThread({
+              projectId: thread.projectId,
+              environmentId,
+              experimental_placement: {
+                sectionId: thread.sectionId,
+                pinned: thread.pinnedAt !== null,
+              },
+              focusPrompt: true,
+            });
+          }}
+        >
+          New thread in environment
+        </ActionMenuItem>
+      ) : null}
       {THREAD_ROW_ACTION_IDS.map((id) => (
         <Fragment key={id}>
           {id === "archive" ? (
@@ -647,7 +670,9 @@ function ThreadMoveQuickAction({
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
-        align="end"
+        side="right"
+        align="start"
+        sideOffset={8}
         className="max-h-[min(24rem,calc(100vh-2rem))] min-w-44 overflow-y-auto"
       >
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
@@ -728,7 +753,12 @@ export function ThreadActionsMenu({
           />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" onCloseAutoFocus={onCloseAutoFocus}>
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={8}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <ThreadActionsMenuItems
           thread={thread}
           onOpenInSplit={onOpenInSplit}
