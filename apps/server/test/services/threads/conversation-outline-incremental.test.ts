@@ -227,6 +227,100 @@ describe("incremental conversation outlines", () => {
     });
   });
 
+  it("reuses a completed prefix after nested history and a live-tail update", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      testThread.db.$client
+        .prepare(
+          "UPDATE events SET parent_tool_call_id = ?, data = json_set(data, '$.item.parentToolCallId', ?) WHERE thread_id = ? AND sequence = 4",
+        )
+        .run(
+          "historical-parent",
+          "historical-parent",
+          testThread.thread.id,
+        );
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [delta("live", " continuation")]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBe(3);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("keeps the completed prefix when late background work follows a turn", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      appendRows(testThread, [
+        {
+          type: "item/backgroundTask/completed",
+          providerThreadId: "provider-memo",
+          itemId: "workflow-task",
+          itemKind: "backgroundTask",
+          parentToolCallId: "workflow-call",
+          data: {
+            item: {
+              type: "backgroundTask",
+              id: "workflow-task",
+              taskType: "local_workflow",
+              description: "Complete workflow",
+              status: "completed",
+              taskStatus: "completed",
+              skipTranscript: false,
+              summary: "Workflow finished",
+              parentToolCallId: "workflow-call",
+            },
+          },
+        },
+      ]);
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        { type: "system/manager/user_message", data: { text: "New response" } },
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeLessThan(20);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("rebuilds when a new nested item points into the completed prefix", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        {
+          type: "item/completed",
+          turnId: "live",
+          itemId: "message-child",
+          itemKind: "agentMessage",
+          parentToolCallId: "message-turn-0",
+          data: {
+            item: {
+              id: "message-child",
+              type: "agentMessage",
+              text: "Nested continuation",
+              parentToolCallId: "message-turn-0",
+            },
+          },
+        },
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
   it.each([
     "rewind",
     "clear",
