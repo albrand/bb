@@ -2,6 +2,12 @@
 
 ## Spawning Threads
 
+`--plugin-create-data <json>` passes plugin-owned, non-secret configuration before
+the initial message's admission checks. Its SDK counterpart is
+`experimental_pluginCreateData`. Each keyed value goes only to that plugin's
+`experimental_thread.configure` hook; unknown or disabled handlers fail creation.
+For subscription choices, use Account Pooler's documented account-pool entry.
+
 - Use `bb thread spawn --project <project-id> --prompt "..."` to create another
   thread. For a multi-line or Markdown prompt use `--prompt-file <path>` (`-`
   reads stdin) instead of quoting it inline; `bb thread fork` takes it too.

@@ -9,6 +9,7 @@ import {
   type JsonValue,
 } from "@bb/domain";
 import type { CreateThreadEnvironmentArgs } from "@bb/server-contract";
+import { createThreadRequestSchema } from "@bb/server-contract";
 import { action, CliUsageError } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import { missingProjectHint } from "../../context-hints.js";
@@ -75,6 +76,7 @@ interface ThreadSpawnCommandOptions {
   sourceSeqEnd?: string;
   visibility?: string;
   sendAt?: string;
+  pluginCreateData?: string;
 }
 
 export function looksLikePath(value: string): boolean {
@@ -363,6 +365,10 @@ export function registerSpawnCommand(
     .option("--parent-self", "Parent the new thread to BB_THREAD_ID")
     .option("--provider <id>", PROVIDER_HELP)
     .option(
+      "--plugin-create-data <json>",
+      "Plugin-owned non-secret creation configuration, keyed by plugin ID",
+    )
+    .option(
       "--model <model>",
       "Model ID for the thread. Omit to use the project's remembered default for the resolved provider",
     )
@@ -569,6 +575,12 @@ export function registerSpawnCommand(
         const sendAt =
           opts.sendAt === undefined ? undefined : parseSendAt(opts.sendAt);
         const providerId = opts.provider?.trim();
+        const pluginCreateData =
+          opts.pluginCreateData === undefined
+            ? undefined
+            : createThreadRequestSchema.shape.experimental_pluginCreateData.parse(
+                JSON.parse(opts.pluginCreateData),
+              );
 
         let thread: Thread;
         try {
@@ -585,6 +597,9 @@ export function registerSpawnCommand(
           });
           thread = await sdk.threads.spawn({
             origin: "cli",
+            ...(pluginCreateData === undefined
+              ? {}
+              : { experimental_pluginCreateData: pluginCreateData }),
             projectId,
             ...(providerId ? { providerId } : {}),
             ...(opts.model ? { model: opts.model } : {}),

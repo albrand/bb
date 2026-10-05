@@ -41,6 +41,7 @@ import {
   ModelLoadErrorMessage,
 } from "./model-load-error-message";
 import type { ModelNavRow } from "./ModelReasoningPicker";
+import { ComposerModelPickerSlot } from "../plugin/ComposerModelPickerSlot";
 
 export interface ModelReasoningMenuProps {
   listRef: RefObject<HTMLDivElement | null>;
@@ -128,6 +129,7 @@ export function ModelReasoningMenu({
   return (
     <MenuHoverProvider>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <ComposerModelPickerSlot providerId={providerId} />
         <div
           ref={listRef}
           key={providerId || "no-provider"}

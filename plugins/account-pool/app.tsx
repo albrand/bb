@@ -75,6 +75,7 @@ import {
   statusSchema,
 } from "./src/contracts.js";
 import { blockingResetAt } from "./src/quota.js";
+import { SubscriptionPicker } from "./subscription-picker.js";
 import {
   ACCOUNT_POOL_ACCOUNTS_CHANGED,
   ACCOUNT_POOL_CONFIG_CHANGED,
@@ -1930,6 +1931,11 @@ function LoginDialog({
 }
 
 export default definePluginApp((app) => {
+  app.composer.customize({
+    id: "subscription",
+    scopes: ["new-thread", "thread"],
+    experimental_modelPicker: SubscriptionPicker,
+  });
   app.slots.settingsSection({
     id: "accounts",
     component: AccountPoolSettings,

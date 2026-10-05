@@ -20,6 +20,8 @@ import {
   parentModeSchema,
   tokenRotateInputSchema,
   routingSetInputSchema,
+  threadSelectionInputSchema,
+  threadSelectionSetSchema,
   type AccountPoolConfig,
   type AccountPoolConfigController,
   type AccountPoolConfigSetInput,
@@ -699,6 +701,55 @@ export function registerPoolCli(
                   : account.error === null
                     ? `Refreshed usage for ${id}.\n`
                     : `Account ${id} is still in error: ${account.error}\n`,
+              };
+            }),
+        }),
+        select: cliCommand({
+          summary: "Show or select a subscription for one idle conversation",
+          positionals: [
+            {
+              name: "thread-id",
+              description: "Conversation ID",
+              required: true,
+            },
+            {
+              name: "provider",
+              description: "claude or codex",
+              required: true,
+            },
+            {
+              name: "account-id",
+              description:
+                "Account UUID or automatic; omit to show the current choice",
+            },
+          ],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const target = threadSelectionInputSchema.parse({
+                threadId: input.positionals["thread-id"],
+                provider: input.positionals.provider,
+              });
+              const requested = input.positionals["account-id"];
+              const selection =
+                requested === undefined
+                  ? await operations.selectedAccount(
+                      target.threadId,
+                      target.provider,
+                    )
+                  : await operations.selectAccount(
+                      target.threadId,
+                      target.provider,
+                      threadSelectionSetSchema.parse({
+                        ...target,
+                        accountId: requested === "automatic" ? null : requested,
+                      }).accountId,
+                    );
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ...target, ...selection })
+                  : `${target.threadId}: ${selection.accountId ?? "Automatic"}\n`,
               };
             }),
         }),

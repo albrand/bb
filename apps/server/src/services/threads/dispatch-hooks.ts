@@ -457,6 +457,48 @@ export async function runMessageDispatchHookPass(
   });
 }
 
+export async function configureThreadPlugins(
+  thread: Pick<ThreadResponse, "id" | "providerId">,
+  data: Record<string, import("@get-bb/plugin-sdk").JsonValue> | undefined,
+): Promise<void> {
+  if (data === undefined || Object.keys(data).length === 0) return;
+  const provider = pluginHookProvider();
+  const hooks = provider?.listHooks("experimental_thread.configure") ?? [];
+  for (const pluginId of Object.keys(data)) {
+    if (!hooks.some((hook) => hook.pluginId === pluginId)) {
+      throw new ApiError(
+        400,
+        "plugin_configuration_unavailable",
+        `Plugin ${pluginId} cannot configure this conversation.`,
+      );
+    }
+  }
+  if (provider === undefined) return;
+  for (const hook of hooks) {
+    if (!Object.hasOwn(data, hook.pluginId)) continue;
+    const ownData = data[hook.pluginId];
+    if (ownData === undefined) continue;
+    const invocation = await provider.invokeHook(
+      hook.pluginId,
+      "thread configuration",
+      () =>
+        decideWithinBox(
+          async () => hook.handler({ thread, data: ownData }),
+          provider.decisionTimeoutMs,
+        ),
+    );
+    if (!invocation.ok)
+      throw messageDispatchHookFailure(hook.pluginId, invocation.error);
+    if (!invocation.value.ok)
+      throw messageDispatchHookFailure(hook.pluginId, invocation.value.error);
+    if (invocation.value.value !== null)
+      throw messageDispatchHookFailure(
+        hook.pluginId,
+        "returned an invalid configuration result",
+      );
+  }
+}
+
 /**
  * The wait reason for a pass, naming every plugin that voted to wait. The
  * first waiter owns the row, so its reason leads; the rest are appended so the

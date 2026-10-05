@@ -620,6 +620,7 @@ export function createPluginApi(options: {
     "thread.unarchived": [],
   };
   const hooks: PluginHookRecords = {
+    "experimental_thread.configure": null,
     "message.dispatch": null,
   };
   const environmentCompositions = new Map<

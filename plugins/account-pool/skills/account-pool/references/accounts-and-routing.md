@@ -1,3 +1,20 @@
+Use the model menu's Subscription selector or
+`bb pool select <thread-id> <claude|codex> [<account-id>|automatic]` to read or
+choose an account for one conversation. Automatic is the default. Explicit
+choices never silently fail over and do not reorder the pool. Existing-thread
+changes require an idle or failed conversation with no queued messages. The
+read/write RPCs are `routing.selection.get` and `routing.selection.set`;
+their inputs are `{threadId, provider}` and `{threadId, provider, accountId}`,
+where `accountId: null` restores Automatic. For new threads, use the
+`experimental_pluginCreateData: {"account-pool": {provider: "claude", accountId: "<uuid>"}}`
+field with `threads.spawn`, or pass that JSON to `bb thread spawn --plugin-create-data`.
+This persists the pin before Fleet's initial admission check. The same draft
+data works for ordinary Enter/button sends and programmatic composer submissions.
+No entry means Automatic. Choices require a local pool; choose Automatic when
+proxying a parent pool. Conversation credentials carry the current account choice;
+active turns keep their choice. Machine token rotation also revokes derived
+conversation credentials after the existing ten-minute grace period.
+
 The builtin Account Pooler plugin is disabled by default. Enable it, add Claude
 or Codex credentials, and inspect its proxy routes and account quota with:
 

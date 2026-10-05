@@ -1,4 +1,9 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type Database from "better-sqlite3";
@@ -308,6 +313,22 @@ export class HubTokenStore {
     });
   }
 
+  async authenticateGeneration(
+    hostId: string,
+    digest: string,
+  ): Promise<boolean> {
+    await this.initialize();
+    const record = this.read(hostId);
+    if (record === null) return false;
+    const valid = [
+      record.value,
+      ...record.previous.map((previous) => previous.value),
+    ].some((value) =>
+      safeTokenEqual(createHash("sha256").update(value).digest("hex"), digest),
+    );
+    return valid && (await this.authenticate(record.value)) === hostId;
+  }
+
   async authenticate(presented: string | null): Promise<string | null> {
     if (presented === null) return null;
     await this.initialize();
@@ -479,6 +500,37 @@ export class RoutingStore {
 
   async isBypassed(threadId: string): Promise<boolean> {
     return (await this.kv.get(this.bypassKey(threadId))) === true;
+  }
+
+  async selectedAccount(
+    threadId: string,
+    provider: PoolProvider,
+  ): Promise<string | null> {
+    const value = await this.kv.get(
+      `selection:${provider}:${z.string().min(1).parse(threadId)}`,
+    );
+    return value === undefined || value === null
+      ? null
+      : z.string().uuid().parse(value);
+  }
+
+  async selectAccount(
+    threadId: string,
+    provider: PoolProvider,
+    accountId: string | null,
+  ): Promise<void> {
+    const key = `selection:${provider}:${z.string().min(1).parse(threadId)}`;
+    if (accountId === null) await this.kv.delete(key);
+    else await this.kv.set(key, z.string().uuid().parse(accountId));
+  }
+
+  async removeThread(threadId: string): Promise<void> {
+    await Promise.all([
+      this.kv.delete(`selection:claude:${threadId}`),
+      this.kv.delete(`selection:codex:${threadId}`),
+      this.kv.delete(this.bypassKey(threadId)),
+      this.kv.delete(this.routedKey(threadId)),
+    ]);
   }
 
   async isProviderEnabled(provider: PoolProvider): Promise<boolean> {

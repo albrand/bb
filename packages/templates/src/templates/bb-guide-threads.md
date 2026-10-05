@@ -19,6 +19,9 @@ Spawning:
                                    multi-line or Markdown prompts: inside double quotes the shell
                                    runs `backticks` and $(...) before bb sees them
     --title <title>                Thread title
+    --plugin-create-data <json>    Non-secret plugin creation configuration keyed by plugin ID.
+                                   Applies before message admission. For Account Pooler:
+                                   {"account-pool":{"provider":"claude","accountId":"<uuid>"}}
     --project <id>                 Project (required; when omitted the error prints this thread's project ID to add)
     --parent-thread <id>           Parent thread (may be in another project)
     --parent-self                  Parent to the current thread (BB_THREAD_ID)
