@@ -32,6 +32,7 @@ import {
   listLatestThreadStateEventRowsByThreadIds,
   listLatestOpenBackgroundTaskStateRowsForThread,
   listStoredConversationOutlineEventRows,
+  listStoredDelegatingItemRowsByItemIds,
   listStoredEventRows,
   listStoredItemLifecycleRowsByItems,
   listStoredEventRowsByParentToolCallIds,
@@ -949,6 +950,164 @@ describe("slow query index plans", () => {
     );
 
     db.$client.close();
+  });
+
+  it("looks up missing delegating timeline parents through the item index", () => {
+    const { db, thread } = setup();
+    try {
+      insertEvents(db, noopNotifier, [
+        ...([
+          {
+            sequence: 1,
+            type: "item/started",
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+          },
+          {
+            sequence: 2,
+            type: "item/completed",
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+          },
+          {
+            sequence: 3,
+            type: "item/started",
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+          },
+          {
+            sequence: 4,
+            type: "item/completed",
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+          },
+          {
+            sequence: 5,
+            type: "item/started",
+            itemId: "unrelated-item",
+            itemKind: "agentMessage",
+          },
+          {
+            sequence: 6,
+            type: "item/backgroundTask/progress",
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+          },
+          {
+            sequence: 7,
+            type: "item/started",
+            itemId: "unrequested-tool",
+            itemKind: "toolCall",
+          },
+        ] as const).map(({ sequence, type, itemId, itemKind }) => ({
+          threadId: thread.id,
+          sequence,
+          createdAt: sequence * 100,
+          type,
+          scope: threadScope(),
+          itemId,
+          itemKind,
+          parentToolCallId: null,
+          data:
+            itemKind === "toolCall" || itemKind === "delegation"
+              ? JSON.stringify({ item: { result: "long enough to trim" } })
+              : JSON.stringify({}),
+        })),
+      ]);
+
+      const [query] = captureStatements(db, () => {
+        const rows = listStoredDelegatingItemRowsByItemIds(db, {
+          itemIds: ["wanted-tool", "wanted-delegation"],
+          maxInlineOutputChars: 5,
+          threadId: thread.id,
+        });
+        expect(rows.map((row) => row.sequence)).toEqual([1, 2, 3, 4]);
+        expect(rows.map((row) => Object.keys(row).sort())).toEqual(
+          Array.from({ length: 4 }, () => [
+            "createdAt",
+            "data",
+            "id",
+            "itemId",
+            "itemKind",
+            "parentToolCallId",
+            "providerThreadId",
+            "scopeKind",
+            "sequence",
+            "threadId",
+            "turnId",
+            "type",
+          ]),
+        );
+        expect(rows).toEqual([
+          expect.objectContaining({
+            createdAt: 100,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 1,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 200,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 2,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/completed",
+          }),
+          expect.objectContaining({
+            createdAt: 300,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 3,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 400,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 4,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/completed",
+          }),
+        ]);
+      });
+      if (!query) {
+        throw new Error("Expected the missing parent lookup SQL");
+      }
+      const details = queryPlanDetails({ db, ...query });
+      expect(details).toContain(
+        "SEARCH events USING INDEX events_delegating_item_lookup_idx (thread_id=? AND item_id=?)",
+      );
+      expect(details).not.toContain("events_thread_sequence_idx");
+    } finally {
+      db.$client.close();
+    }
   });
 
   it("scans background-task history once without a completed-set join", () => {
