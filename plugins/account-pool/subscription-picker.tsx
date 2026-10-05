@@ -72,35 +72,33 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
     let mounted = true;
     if (provider === null) return;
     const load = async () => {
-      try {
-        const [nextStatus, selection] = await Promise.all([
-          rpc.call("status.get", null),
-          threadId === null
-            ? Promise.resolve(null)
-            : rpc.call("routing.selection.get", { threadId, provider }),
-        ]);
-        if (!mounted) return;
-        setLoadedStatus({ key: lookupKey, value: nextStatus });
-        setError(null);
-        const draft = draftSelectionSchema.safeParse(
-          composer.experimental_createData,
-        );
-        setSelected(
-          selection?.accountId ??
-            (draft.success && draft.data.provider === provider
-              ? draft.data.accountId
-              : null),
-        );
-      } catch (failure) {
-        if (mounted)
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : "Unable to load subscriptions.",
-          );
-      }
+      const [nextStatus, selection] = await Promise.all([
+        rpc.call("status.get", null),
+        threadId === null
+          ? Promise.resolve(null)
+          : rpc.call("routing.selection.get", { threadId, provider }),
+      ]);
+      if (!mounted) return;
+      setLoadedStatus({ key: lookupKey, value: nextStatus });
+      setError(null);
+      const draft = draftSelectionSchema.safeParse(
+        composer.experimental_createData,
+      );
+      setSelected(
+        selection?.accountId ??
+          (draft.success && draft.data.provider === provider
+            ? draft.data.accountId
+            : null),
+      );
     };
-    void load();
+    void load().catch((failure: unknown) => {
+      if (mounted)
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Unable to load subscriptions.",
+        );
+    });
     return () => {
       mounted = false;
     };
@@ -173,7 +171,13 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
           value={selected ?? "automatic"}
           disabled={disabled}
           onChange={(event) => {
-            void choose(event.target.value);
+            void choose(event.target.value).catch((failure: unknown) => {
+              setError(
+                failure instanceof Error
+                  ? failure.message
+                  : "Unable to select this subscription.",
+              );
+            });
           }}
         >
           <option value="automatic">
