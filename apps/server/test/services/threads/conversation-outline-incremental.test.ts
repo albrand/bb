@@ -342,7 +342,6 @@ describe("incremental conversation outlines", () => {
             status: "pending",
             taskStatus: "pending",
             skipTranscript: false,
-            description: "Complete workflow",
           },
         },
       });
