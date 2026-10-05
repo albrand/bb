@@ -6924,6 +6924,8 @@ describe("Account Pool nested proxy", () => {
   async function createChild(args: {
     parentUrl: string | null;
     parentMode?: "proxy" | "isolate";
+    ownServerUrl?: string;
+    fetch?: typeof fetch;
   }): Promise<ReturnType<typeof createFakePluginHost>> {
     const dataDir = await mkdtemp(
       path.join(tmpdir(), "bb-account-pool-child-"),
@@ -6936,15 +6938,25 @@ describe("Account Pool nested proxy", () => {
     if (args.parentMode !== undefined) {
       await host.bb.storage.kv.set("config", { parentMode: args.parentMode });
     }
+    if (args.fetch !== undefined) {
+      await host.bb.storage.kv.set("config", {
+        anthropicUpstreamBaseUrl: "https://api.anthropic.test",
+        codexUpstreamBaseUrl: "https://api.openai.test",
+      });
+    }
     await createAccountPoolPlugin({
       usageUrl: "data:application/json,{}",
       availabilityTtlMs: 0,
+      ...(args.fetch === undefined ? {} : { fetch: args.fetch }),
       env:
         args.parentUrl === null
           ? {}
           : {
               BB_ACCOUNT_POOL_PARENT_URL: args.parentUrl,
               BB_ACCOUNT_POOL_PARENT_TOKEN: PARENT_TOKEN,
+              ...(args.ownServerUrl === undefined
+                ? {}
+                : { BB_SERVER_URL: args.ownServerUrl }),
             },
     })(host.bb);
     host.harness.behavior.runService("hub");
@@ -7045,7 +7057,10 @@ describe("Account Pool nested proxy", () => {
   it("forwards pooled traffic to the parent with the parent token", async () => {
     const parent = await startParent({});
     cleanups.push(parent.upstream.close);
-    const host = await createChild({ parentUrl: parent.upstream.url });
+    const host = await createChild({
+      parentUrl: parent.upstream.url,
+      ownServerUrl: "http://localhost:49999",
+    });
     const entries = await host.harness.behavior.resolveProviderEnv(
       "claude-code",
       { threadId: "thread-one", projectId: "project-one", hostId: "host-one" },
@@ -7073,6 +7088,92 @@ describe("Account Pool nested proxy", () => {
       model: "claude-opus-4",
       messages: [],
     });
+  });
+
+  it.each([
+    {
+      label: "canonical URL",
+      ownServerUrl: "http://localhost:38886",
+      parentUrl:
+        "http://localhost:38886/api/v1/plugins/account-pool/http",
+    },
+    {
+      label: "trailing slash and IPv4 loopback alias",
+      ownServerUrl: "http://localhost:38886",
+      parentUrl:
+        "http://127.0.0.1:38886/api/v1/plugins/account-pool/http///",
+    },
+    {
+      label: "IPv6 loopback alias",
+      ownServerUrl: "http://localhost:38886",
+      parentUrl: "http://[::1]:38886/api/v1/plugins/account-pool/http",
+    },
+    {
+      label: "default HTTPS port and server path prefix",
+      ownServerUrl: "https://bb.example.test:443/desk",
+      parentUrl:
+        "https://bb.example.test/desk/api/v1/plugins/account-pool/http/",
+    },
+  ])("uses local account selection when parent URL is this hub ($label)", async ({
+    parentUrl,
+    ownServerUrl,
+  }) => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) =>
+      String(input).endsWith("/availability")
+        ? Response.json({ claude: true, codex: true })
+        : Response.json({ ok: true }),
+    ) as unknown as typeof fetch;
+    const host = await createChild({
+      parentUrl,
+      ownServerUrl,
+      fetch: fetchImpl,
+    });
+    await host.harness.behavior.callRpc("account.add", {
+      provider: "claude",
+      source: { kind: "api-key", apiKey: "synthetic-local-key" },
+      label: "Local account",
+      priority: 100,
+    });
+    const childToken = await resolveToken(host);
+    const response = await host.harness.behavior.fetchHttp(
+      "POST",
+      "/v1/messages",
+      {
+        headers: { authorization: `Bearer ${childToken}` },
+        body: JSON.stringify({ model: "claude-opus-4", messages: [] }),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetchImpl).mock.calls[0]?.[0])).toBe(
+      "https://api.anthropic.test/v1/messages",
+    );
+    const init = vi.mocked(fetchImpl).mock.calls[0]?.[1];
+    expect(new Headers(init?.headers).get("x-api-key")).toBe(
+      "synthetic-local-key",
+    );
+    expect(new Headers(init?.headers).get("authorization")).toBeNull();
+    expect(
+      new Headers(init?.headers).get("x-bb-account-pool-token"),
+    ).toBeNull();
+  });
+
+  it("neutralises inherited routing for a bypassed self-parent thread", async () => {
+    const host = await createChild({
+      parentUrl: "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
+      ownServerUrl: "http://localhost:38886",
+    });
+    await host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-one",
+      bypassed: true,
+    });
+    await expect(
+      host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-one",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+    ).resolves.toEqual(neutralised("claude"));
   });
 
   it("rejects pooled traffic that does not present the child's own token", async () => {

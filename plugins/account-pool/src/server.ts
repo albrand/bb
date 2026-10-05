@@ -128,7 +128,13 @@ export function createAccountPoolPlugin(
     const enrolledHosts = await bb.sdk.hosts.list();
     await hubTokens.prune(enrolledHosts.map((host) => host.id));
     const routing = new RoutingStore(bb.storage.kv, now);
-    const parentPool = readParentPool(options.env ?? process.env);
+    const env = options.env ?? process.env;
+    const ownServerUrl = env.BB_SERVER_URL;
+    const hasConfiguredParentPool = readParentPool(env) !== null;
+    const parentPool = readParentPool(
+      env,
+      ownServerUrl === undefined ? undefined : `${ownServerUrl}${HUB_BASE_PATH}`,
+    );
     const proxyingParent = (): ParentPool | null =>
       parentPool !== null && currentSettings.parentMode === "proxy"
         ? parentPool
@@ -271,7 +277,7 @@ export function createAccountPoolPlugin(
           }
           return [...serving(token), ...markerEntries(token)];
         }
-        return parentPool === null ? [] : neutralized(provider);
+        return hasConfiguredParentPool ? neutralized(provider) : [];
       };
     const proxiedHealth = async (provider: PoolProvider) =>
       (await canServe(provider))
