@@ -6061,6 +6061,63 @@ describe("Account Pool plugin", () => {
     },
   );
 
+  it("publishes recovered account state when the follow-up usage read fails", async () => {
+    const now = 1_800_000_000_000;
+    let refreshCalls = 0;
+    let usageCalls = 0;
+    const fixture = await createFixture({
+      upstreamUrl: "https://upstream.example",
+      provider: "claude",
+      source: "import",
+      options: {
+        refreshUrl: "https://upstream.example/oauth/token",
+        usageUrl: "https://upstream.example/usage",
+        now: () => now,
+        importCredentials: async () =>
+          importedCredentials({ expiresAt: now + 60 * 60 * 1_000 }),
+        fetch: async (input) => {
+          if (new URL(String(input)).pathname === "/oauth/token") {
+            refreshCalls += 1;
+            return Response.json({
+              access_token: "oauth-recovered",
+              expires_in: 3600,
+            });
+          }
+          usageCalls += 1;
+          return Response.json(
+            { detail: "usage unavailable" },
+            { status: 500 },
+          );
+        },
+      },
+    });
+    const quotas = new QuotaStore(fixture.host.bb.storage.database());
+    quotas.put({
+      ...quotas.get(fixture.account.id),
+      error: "Previous refresh failed.",
+    });
+    const baselineUsageCalls = usageCalls;
+    const changedCount = () =>
+      fixture.host.harness.inspection.realtimeSignals.filter(
+        (signal) => signal.channel === "accounts-changed",
+      ).length;
+    const baseline = changedCount();
+
+    await expect(
+      fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: fixture.account.id,
+      }),
+    ).rejects.toThrow("Could not refresh account usage. Try again.");
+    expect(refreshCalls).toBe(1);
+    expect(usageCalls).toBe(baselineUsageCalls + 1);
+
+    const account = statusSchema
+      .parse(await fixture.host.harness.behavior.callRpc("status.get", null))
+      .accounts.find((item) => item.id === fixture.account.id);
+    expect(account?.error).toBeNull();
+    expect(changedCount()).toBe(baseline + 1);
+  });
+
   it("keeps background usage failures from stopping the pool or rejecting requests", async () => {
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
