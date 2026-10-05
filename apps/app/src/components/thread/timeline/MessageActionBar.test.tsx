@@ -138,6 +138,7 @@ describe("MessageActionBar", () => {
       ]),
     );
     const onPluginSelect = vi.fn();
+    const onCopyLink = vi.fn();
     const { container } = render(
       <MessageActionBar
         timestamp={TIMESTAMP}
@@ -145,6 +146,7 @@ describe("MessageActionBar", () => {
         alignment="start"
         mobileActionDisplay="inline"
         onEdit={vi.fn()}
+        onCopyLink={onCopyLink}
         onAddToChat={vi.fn()}
         onFork={vi.fn()}
         pluginActions={[
@@ -178,8 +180,12 @@ describe("MessageActionBar", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Add to chat", "Fork into new thread"]);
+    ).toEqual(["Copy link", "Add to chat", "Fork into new thread"]);
     expect(menu.getAttribute("data-side")).toBe("bottom");
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Copy link" }),
+    );
+    expect(onCopyLink).toHaveBeenCalledTimes(1);
   });
 
   it("moves candidates that do not fit into the menu from the end", () => {
@@ -191,6 +197,7 @@ describe("MessageActionBar", () => {
         alignment="end"
         mobileActionDisplay="inline"
         onEdit={vi.fn()}
+        onCopyLink={vi.fn()}
         onAddToChat={vi.fn()}
         onFork={vi.fn()}
         pluginActions={[
@@ -222,6 +229,7 @@ describe("MessageActionBar", () => {
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
     ).toEqual([
+      "Copy link",
       "Summarize",
       "Translate",
       "Add to chat",
@@ -351,6 +359,7 @@ describe("MessageActionBar", () => {
 
   it("shows only the menu trigger on older touch messages", async () => {
     mockMobileCoarsePointer();
+    const onCopyLink = vi.fn();
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
@@ -358,6 +367,7 @@ describe("MessageActionBar", () => {
         alignment="start"
         mobileActionDisplay="overflow"
         onEdit={vi.fn()}
+        onCopyLink={onCopyLink}
         onAddToChat={vi.fn()}
         onFork={vi.fn()}
       />,
@@ -372,11 +382,16 @@ describe("MessageActionBar", () => {
     });
     const menuItems = await within(drawer).findAllByRole("menuitem");
     expect(menuItems.map((item) => item.textContent)).toEqual([
+      "Copy link",
       "Copy message",
       "Edit message",
       "Add to chat",
       "Fork into new thread",
     ]);
+    fireEvent.click(
+      within(drawer).getByRole("menuitem", { name: "Copy link" }),
+    );
+    expect(onCopyLink).toHaveBeenCalledTimes(1);
   });
 
   it("passes message text and attachments from Add to chat", () => {

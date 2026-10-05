@@ -81,6 +81,7 @@ import { buildMarkdownMessageLinkRouting } from "@/components/ui/markdown-messag
 
 interface ConversationMessageContentBaseProps {
   attachments: TimelineConversationAttachments | null;
+  onCopyLink?: () => void;
   onOpenLocalFileLink?: ThreadTimelineLocalFileLinkHandler;
   onOpenPluginPanel?: MarkdownMessageDirectives["openThreadPanel"];
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
@@ -162,6 +163,7 @@ interface UserConversationMessageProps {
   mentions: readonly PromptTextMention[];
   mobileActionDisplay: "inline" | "overflow";
   onAddToChat?: ThreadTimelineAddToChatHandler;
+  onCopyLink?: () => void;
   onEdit?: () => void;
   onOpenLink?: ThreadTimelineLinkHandler;
   onOpenLocalFileLink?: ThreadTimelineLocalFileLinkHandler;
@@ -186,6 +188,7 @@ interface AssistantConversationMessageProps extends AssistantMessageRowIdentity 
   attachmentItems: ConversationAttachmentItems;
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
   onAddToChat?: ThreadTimelineAddToChatHandler;
+  onCopyLink?: () => void;
   onFork?: () => void;
   onSendToMain?: () => void;
   forkDisabled?: boolean;
@@ -323,13 +326,11 @@ function buildAddToChatAttachments(
       type: "localImage" as const,
       path,
       name: fileNameFromPath(path),
-      sizeBytes: 0,
     })),
     ...attachments.localFilePaths.map((path) => ({
       type: "localFile" as const,
       path,
       name: fileNameFromPath(path),
-      sizeBytes: 0,
     })),
   ];
 }
@@ -342,6 +343,7 @@ function UserConversationMessage({
   mentions,
   mobileActionDisplay,
   onAddToChat,
+  onCopyLink,
   onEdit,
   onOpenLink,
   onOpenLocalFileLink,
@@ -492,6 +494,7 @@ function UserConversationMessage({
             addToChatAttachments={addToChatAttachments}
             copyImageUrl={attachmentItems.imageItems[0]?.src}
             onAddToChat={onAddToChat}
+            onCopyLink={onCopyLink}
             onEdit={onEdit}
             pluginActions={pluginActions}
           />
@@ -506,6 +509,7 @@ function AssistantConversationMessage({
   attachmentItems,
   id,
   onAddToChat,
+  onCopyLink,
   onFork,
   onSendToMain,
   forkDisabled,
@@ -650,6 +654,7 @@ function AssistantConversationMessage({
           addToChatAttachments={addToChatAttachments}
           copyImageUrl={attachmentItems.imageItems[0]?.src}
           onAddToChat={onAddToChat}
+          onCopyLink={onCopyLink}
           onFork={onFork}
           onSendToMain={onSendToMain}
           disabled={forkDisabled}
@@ -697,6 +702,7 @@ export function ConversationMessageContent(
         mentions={props.mentions}
         mobileActionDisplay={props.mobileActionDisplay ?? "overflow"}
         onAddToChat={props.onAddToChat}
+        onCopyLink={props.onCopyLink}
         onEdit={props.onEdit}
         onOpenLink={props.onOpenLink}
         onOpenLocalFileLink={onOpenLocalFileLink}
@@ -725,6 +731,7 @@ export function ConversationMessageContent(
       id={props.id}
       pluginActions={props.pluginActions}
       onAddToChat={props.onAddToChat}
+      onCopyLink={props.onCopyLink}
       onFork={props.onFork}
       onSendToMain={props.onSendToMain}
       forkDisabled={props.forkDisabled}

@@ -181,7 +181,7 @@ export function ThreadUsageAndAgents({
     <li key={child.id} className="min-w-0">
       <Link
         className="block min-w-0 whitespace-normal break-words hover:underline"
-        to={routeForThread(child.id, undefined)}
+        to={routeForThread(child.id, undefined, null)}
       >
         {child.title ?? child.id} · {child.status}
       </Link>

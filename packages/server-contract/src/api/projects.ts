@@ -443,6 +443,7 @@ export type SidebarBootstrapResponse = z.infer<
 >;
 
 export const uploadedPromptAttachmentSchema = z.object({
+  sourceProjectId: z.string().min(1).optional(),
   type: z.enum(["localImage", "localFile"]),
   path: z.string(),
   name: z.string(),

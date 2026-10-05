@@ -236,6 +236,8 @@ import type {
   ThreadSpendSummaryResponse,
   ThreadEventWaitQuery,
   ThreadEventsQuery,
+  ThreadMessageQuery,
+  ThreadMessageResponse,
   ThreadSectionMutationResponse,
   ThreadSectionResponse,
   ThreadGetQuery,
@@ -390,6 +392,7 @@ import {
   systemAppUpdateQuerySchema,
   threadEventWaitQuerySchema,
   threadEventsQuerySchema,
+  threadMessageQuerySchema,
   threadGetQuerySchema,
   threadCountQuerySchema,
   threadListQuerySchema,
@@ -429,6 +432,7 @@ import {
 import type { ApiError } from "./errors.js";
 
 type PathProjectSourceId = { param: { id: string; sourceId: string } };
+type PathThreadMessage = { param: { id: string; seq: string } };
 type PathThreadInteractionId = {
   param: { id: string; interactionId: string };
 };
@@ -1696,6 +1700,14 @@ export const publicApiRoutes = {
         threadEventsQuerySchema,
       ),
       response: jsonResponse<ThreadEventRow[]>(),
+    }),
+    message: defineRoute({
+      path: "/threads/:id/messages/:seq",
+      method: "get",
+      request: optionalQueryRequest<PathThreadMessage, ThreadMessageQuery>(
+        threadMessageQuerySchema,
+      ),
+      response: jsonResponse<ThreadMessageResponse>(),
     }),
     eventWait: defineRoute({
       path: "/threads/:id/events/wait",

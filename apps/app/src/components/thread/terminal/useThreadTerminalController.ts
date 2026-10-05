@@ -703,7 +703,8 @@ export function useThreadTerminalController({
     handleActiveTerminalUserInput,
     handleCreateTerminal,
     handleSelectTerminal,
-    hasTerminalQueryError: terminalsQuery.error !== null,
+    hasTerminalQueryError:
+      terminalsQuery.error !== null && terminalsQuery.data === undefined,
     isCreateTerminalPending,
     isPanelOpen,
     shouldMountTerminalView,

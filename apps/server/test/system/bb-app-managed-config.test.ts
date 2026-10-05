@@ -68,6 +68,7 @@ function createRuntimeConfig(): ServerRuntimeConfig {
     inheritedSkillsRootPaths: [],
     isDevelopment: false,
     turnAcceptanceGraceMs: 0,
+    performanceDiagnosticsAvailable: false,
     serverPort: 38886,
     sharedSkillRoots: { user: [], project: [] },
   };

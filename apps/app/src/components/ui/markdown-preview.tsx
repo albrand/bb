@@ -84,12 +84,11 @@ import {
   type MarkdownPromptMentions,
 } from "./markdown-prompt-mentions.js";
 import {
-  buildMessageDirectiveComponent,
+  MessageDirectiveElement,
   EMPTY_MOUNTED_MESSAGE_DIRECTIVES,
   MESSAGE_DIRECTIVE_MOUNT_LIMIT,
   MessageDirectiveMountsContext,
   remarkMessageDirectives,
-  type BuildMessageDirectiveComponentArgs,
   type MarkdownMessageDirectives,
   type MountedMessageDirective,
 } from "./markdown-message-directives.js";
@@ -157,7 +156,7 @@ interface BuildMarkdownComponentsArgs {
   setExpandedImage: ExpandedMarkdownImageSetter;
   threadMentions?: MarkdownThreadMentions;
   promptMentions?: ResolvedPromptMentions;
-  messageDirectives?: BuildMessageDirectiveComponentArgs;
+  hasMessageDirectives: boolean;
 }
 
 interface ResolvedPromptMentions {
@@ -1080,7 +1079,7 @@ function buildMarkdownComponents({
   setExpandedImage,
   threadMentions,
   promptMentions,
-  messageDirectives,
+  hasMessageDirectives,
 }: BuildMarkdownComponentsArgs): Components {
   interface RawThreadIdLabelCandidate {
     end: number;
@@ -1419,9 +1418,8 @@ function buildMarkdownComponents({
     });
   }
 
-  if (messageDirectives !== undefined) {
-    components["bb-message-directive"] =
-      buildMessageDirectiveComponent(messageDirectives);
+  if (hasMessageDirectives) {
+    components["bb-message-directive"] = MessageDirectiveElement;
   }
 
   return components;
@@ -1790,7 +1788,7 @@ function MarkdownPreviewComponent({
         setExpandedImage,
         threadMentions,
         promptMentions: resolvedPromptMentions,
-        messageDirectives: messageDirectiveMounts ?? undefined,
+        hasMessageDirectives: messageDirectiveMounts !== null,
       }),
     [
       linkRouting,
@@ -1930,11 +1928,13 @@ function MarkdownPreviewComponent({
           <MarkdownFrontmatter source={frontmatter} />
         ) : null}
         <MessageDirectiveMountsContext.Provider
-          value={
-            markdownPieces?.mounts ??
-            messageDirectiveMounts?.mounts ??
-            EMPTY_MOUNTED_MESSAGE_DIRECTIVES
-          }
+          value={{
+            mounts:
+              markdownPieces?.mounts ??
+              messageDirectiveMounts?.mounts ??
+              EMPTY_MOUNTED_MESSAGE_DIRECTIVES,
+            render: messageDirectiveMounts,
+          }}
         >
           {threadMentions === undefined ? (
             renderedMarkdown

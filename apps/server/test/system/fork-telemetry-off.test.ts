@@ -34,6 +34,7 @@ describe("fork: telemetry is off by default", () => {
     try {
       const telemetry = await createTelemetryService({
         apiKey: loadServerConfig({ env: { ...BASE_ENV } }).BB_POSTHOG_API_KEY,
+        appInstall: null,
         appSurface: "desktop",
         appVersion: "0.42.1",
         dataDir: "/tmp/fork-telemetry-off",

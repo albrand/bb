@@ -890,6 +890,7 @@ function ThreadDetailViewInternal(
     contextWindowUsage,
     goal,
     hasOlderTimelineRows,
+    isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,
     modelFallback,
@@ -2563,6 +2564,7 @@ function ThreadDetailViewInternal(
         <ThreadActionsMenu
           thread={thread}
           onMoveToProject={moveThreadToProject}
+          onCreateNewThreadInEnvironment={onCreateNewThreadInEnvironment}
           triggerClassName={HEADER_ICON_BUTTON_CLASS}
           onOpenInSplit={openThisThreadInSplit}
           responsiveActions={
@@ -3047,6 +3049,7 @@ function ThreadDetailViewInternal(
               threadOriginKind,
               hasOlderTimelineRows,
               hostConnectionNotice,
+              isCatchingUpTimeline,
               isLoadingOlderTimelineRows,
               isThreadTimelinePending,
               timelineError: Boolean(timelineError),

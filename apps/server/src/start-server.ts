@@ -30,6 +30,7 @@ import {
 } from "./services/threads/workspace-write-serialization.js";
 import { createLauncherChannel } from "./services/system/launcher-channel.js";
 import { createBbAppManagedConfigReloader } from "./services/system/bb-app-managed-config.js";
+import { startGatedPerformanceDiagnostics } from "./services/system/performance-diagnostics.js";
 import { startEventLoopStallMonitor } from "./services/system/event-loop-stall-monitor.js";
 import {
   runPeriodicSweeps,
@@ -41,7 +42,10 @@ import {
   type ProviderRegistryService,
 } from "./services/providers/provider-registry.js";
 import type { PluginService } from "./services/plugins/plugin-service.js";
-import { createTelemetryService } from "./services/system/telemetry.js";
+import {
+  appInstallFromServerConfig,
+  createTelemetryService,
+} from "./services/system/telemetry.js";
 import { TerminalSessionLifecycle } from "./services/terminals/terminal-session-lifecycle.js";
 import { createLifecycleDedupers } from "./lifecycle-dedupers.js";
 import { TURN_ACCEPTANCE_GRACE_MS } from "./constants.js";
@@ -125,7 +129,9 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     dataDir: serverConfig.BB_DATA_DIR,
     logger,
   });
+  let diagnosticsEnabled = () => false;
   const db = initDb(serverConfig.databasePath, {
+    slowQueryThresholdMs: () => (diagnosticsEnabled() ? 25 : 100),
     dataDir: serverConfig.BB_DATA_DIR,
     logger,
   });
@@ -175,6 +181,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     inheritedSkillsRootPaths: serverConfig.BB_INHERITED_SKILLS_ROOTS,
     isDevelopment: !isProduction,
     turnAcceptanceGraceMs: TURN_ACCEPTANCE_GRACE_MS,
+    performanceDiagnosticsAvailable: serverConfig.BB_PERF_DIAGNOSTICS,
     serverPort: serverConfig.BB_SERVER_PORT,
     sharedSkillRoots: { user: [], project: [] },
   };
@@ -214,6 +221,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
 
   const telemetry = await createTelemetryService({
     apiKey: serverConfig.BB_POSTHOG_API_KEY,
+    appInstall: appInstallFromServerConfig(serverConfig),
     appSurface: serverConfig.BB_APP_SURFACE,
     appVersion: serverConfig.BB_APP_VERSION,
     dataDir: serverConfig.BB_DATA_DIR,
@@ -253,11 +261,17 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
   setPluginToolCallRegistry(new PluginToolCallRegistry({ logger }));
 
   const appVersion = createAppVersionService({
+    installKind: serverConfig.BB_APP_INSTALL_KIND ?? null,
+    sourceCommit: serverConfig.BB_APP_SOURCE_COMMIT ?? null,
     config: runtimeConfig,
     logger,
   });
   const appUpdateMode = serverConfig.BB_APP_UPDATE_MODE ?? null;
   const appUpdate = createAppUpdateService({
+    currentCommit:
+      serverConfig.BB_APP_INSTALL_KIND === "source"
+        ? (serverConfig.BB_APP_SOURCE_COMMIT ?? null)
+        : null,
     appSurface: serverConfig.BB_APP_SURFACE,
     appVersion,
     config: runtimeConfig,
@@ -307,6 +321,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
         retireProcess: retireServerProcess,
       },
       staticDir,
+      performanceDiagnosticsEnabled: () => diagnosticsEnabled(),
     },
   );
   disconnectImportedDaemonSessions(
@@ -329,7 +344,18 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
   );
   resetWorkspaceWriteClaims({ db });
   startWorkspaceWriteClaimHeartbeat({ db });
-  const eventLoopStallMonitor = startEventLoopStallMonitor({ logger });
+  const performanceDiagnostics = await startGatedPerformanceDiagnostics({
+    allowed: serverConfig.BB_PERF_DIAGNOSTICS,
+    dataDir: serverConfig.BB_DATA_DIR,
+    db,
+    hub,
+    logger,
+  });
+  diagnosticsEnabled = performanceDiagnostics.isEnabled;
+  const eventLoopStallMonitor = startEventLoopStallMonitor({
+    logger,
+    thresholdMs: () => (diagnosticsEnabled() ? 100 : 500),
+  });
   const stopDaemonLivenessChecks = startDaemonLivenessChecks({
     config: runtimeConfig,
     db,
@@ -441,6 +467,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       appUpdate.dispose();
       providerModelCatalogPrewarm?.stop();
       eventLoopStallMonitor.stop();
+      await performanceDiagnostics.stop();
       stopDaemonLivenessChecks();
       stopWorkspaceWriteClaimHeartbeat({ db });
       if (sweepInterval !== null) {
