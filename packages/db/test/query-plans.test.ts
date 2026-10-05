@@ -33,6 +33,7 @@ import {
   listLatestOpenBackgroundTaskStateRowsForThread,
   listStoredConversationOutlineEventRows,
   listStoredEventRows,
+  listStoredItemLifecycleRowsByItems,
   listStoredEventRowsByParentToolCallIds,
   listStoredTurnCompletedKeys,
   listTodoSnapshotEventRowsForThread,
@@ -243,6 +244,89 @@ function assertEmittedQueryPlanUsesIndex(
 }
 
 describe("slow query index plans", () => {
+  it("hydrates selected item lifecycles through turn-scoped index probes", () => {
+    const { db, logger, thread } = setup();
+    try {
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: 1,
+          type: "item/started",
+          scope: turnScope("turn-a"),
+          itemId: "item-a",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({}),
+        },
+        {
+          threadId: thread.id,
+          sequence: 2,
+          type: "item/completed",
+          scope: turnScope("turn-a"),
+          itemId: "item-a",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({}),
+        },
+        {
+          threadId: thread.id,
+          sequence: 3,
+          type: "item/completed",
+          scope: turnScope("turn-b"),
+          itemId: "item-a",
+          itemKind: "agentMessage",
+          parentToolCallId: null,
+          data: JSON.stringify({}),
+        },
+        {
+          threadId: thread.id,
+          sequence: 4,
+          type: "item/started",
+          scope: threadScope(),
+          itemId: "thread-item",
+          itemKind: "toolCall",
+          parentToolCallId: null,
+          data: JSON.stringify({}),
+        },
+        {
+          threadId: thread.id,
+          sequence: 5,
+          type: "item/completed",
+          scope: threadScope(),
+          itemId: "thread-item",
+          itemKind: "toolCall",
+          parentToolCallId: null,
+          data: JSON.stringify({}),
+        },
+      ]);
+      logger.clear();
+
+      const captured = captureStatements(db, () => {
+        expect(
+          listStoredItemLifecycleRowsByItems(db, {
+            items: [
+              { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
+              { itemId: "thread-item", scopeKind: "thread", turnId: null },
+              { itemId: "item-a", scopeKind: "turn", turnId: "turn-a" },
+            ],
+            maxInlineOutputChars: null,
+            threadId: thread.id,
+          }).map((row) => row.sequence),
+        ).toEqual([1, 2, 4, 5]);
+      });
+
+      expect(captured).toHaveLength(1);
+      const details = queryPlanDetails({ db, ...captured[0]! });
+      expect(details).toContain(
+        "SEARCH events USING INDEX events_thread_turn_type_item_sequence_idx (thread_id=? AND turn_id=? AND type=? AND item_id=?)",
+      );
+      expect(details).not.toMatch(/SCAN events\b/u);
+      expect(details).not.toContain("events_thread_sequence_idx");
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("checks spawn-agent history without reading unrelated event payloads", () => {
     const { db, thread } = setup();
     try {
