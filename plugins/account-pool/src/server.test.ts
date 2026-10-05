@@ -6907,7 +6907,7 @@ describe("Account Pool nested proxy", () => {
         authorization: request.headers.authorization ?? null,
         body: body.toString("utf8"),
       });
-      if ((request.url ?? "").startsWith("/availability")) {
+      if ((request.url ?? "").endsWith("/availability")) {
         const status = args.availabilityStatus ?? 200;
         response.writeHead(status, { "content-type": "application/json" });
         response.end(
@@ -6924,7 +6924,8 @@ describe("Account Pool nested proxy", () => {
   async function createChild(args: {
     parentUrl: string | null;
     parentMode?: "proxy" | "isolate";
-    ownServerUrl?: string;
+    loopbackBaseUrl?: string;
+    inheritedServerUrl?: string;
     fetch?: typeof fetch;
   }): Promise<ReturnType<typeof createFakePluginHost>> {
     const dataDir = await mkdtemp(
@@ -6933,7 +6934,23 @@ describe("Account Pool nested proxy", () => {
     const host = createFakePluginHost({
       pluginId: "account-pool",
       dataDir,
+      ...(args.loopbackBaseUrl === undefined
+        ? {}
+        : { loopbackBaseUrl: args.loopbackBaseUrl }),
       sdk: sdkStubs(),
+    });
+    let pluginInitialized = false;
+    const loopbackBaseUrl = args.loopbackBaseUrl ?? "http://127.0.0.1:38886";
+    Object.defineProperty(host.bb.server, "loopbackBaseUrl", {
+      configurable: true,
+      get: () => {
+        if (!pluginInitialized) {
+          throw new Error(
+            "Server loopback URL read during plugin registration",
+          );
+        }
+        return loopbackBaseUrl;
+      },
     });
     if (args.parentMode !== undefined) {
       await host.bb.storage.kv.set("config", { parentMode: args.parentMode });
@@ -6954,11 +6971,12 @@ describe("Account Pool nested proxy", () => {
           : {
               BB_ACCOUNT_POOL_PARENT_URL: args.parentUrl,
               BB_ACCOUNT_POOL_PARENT_TOKEN: PARENT_TOKEN,
-              ...(args.ownServerUrl === undefined
+              ...(args.inheritedServerUrl === undefined
                 ? {}
-                : { BB_SERVER_URL: args.ownServerUrl }),
+                : { BB_SERVER_URL: args.inheritedServerUrl }),
             },
     })(host.bb);
+    pluginInitialized = true;
     host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
@@ -7057,9 +7075,11 @@ describe("Account Pool nested proxy", () => {
   it("forwards pooled traffic to the parent with the parent token", async () => {
     const parent = await startParent({});
     cleanups.push(parent.upstream.close);
+    const parentPoolUrl = `${parent.upstream.url}/api/v1/plugins/account-pool/http`;
     const host = await createChild({
-      parentUrl: parent.upstream.url,
-      ownServerUrl: "http://localhost:49999",
+      parentUrl: parentPoolUrl,
+      loopbackBaseUrl: "http://localhost:49999/",
+      inheritedServerUrl: parent.upstream.url,
     });
     const entries = await host.harness.behavior.resolveProviderEnv(
       "claude-code",
@@ -7078,8 +7098,8 @@ describe("Account Pool nested proxy", () => {
     );
     expect(response.status).toBe(200);
     await response.text();
-    const forwarded = parent.records.filter(
-      (record) => record.url === "/v1/messages",
+    const forwarded = parent.records.filter((record) =>
+      record.url.endsWith("/v1/messages"),
     );
     expect(forwarded).toHaveLength(1);
     expect(forwarded[0]?.token).toBe(PARENT_TOKEN);
@@ -7093,75 +7113,73 @@ describe("Account Pool nested proxy", () => {
   it.each([
     {
       label: "canonical URL",
-      ownServerUrl: "http://localhost:38886",
-      parentUrl:
-        "http://localhost:38886/api/v1/plugins/account-pool/http",
+      loopbackBaseUrl: "http://localhost:38886",
+      parentUrl: "http://localhost:38886/api/v1/plugins/account-pool/http",
     },
     {
       label: "trailing slash and IPv4 loopback alias",
-      ownServerUrl: "http://localhost:38886",
-      parentUrl:
-        "http://127.0.0.1:38886/api/v1/plugins/account-pool/http///",
+      loopbackBaseUrl: "http://localhost:38886/",
+      parentUrl: "http://127.0.0.1:38886/api/v1/plugins/account-pool/http///",
     },
     {
       label: "IPv6 loopback alias",
-      ownServerUrl: "http://localhost:38886",
-      parentUrl: "http://[::1]:38886/api/v1/plugins/account-pool/http",
+      loopbackBaseUrl: "http://[::1]:38886/",
+      parentUrl: "http://localhost:38886/api/v1/plugins/account-pool/http",
     },
     {
       label: "default HTTPS port and server path prefix",
-      ownServerUrl: "https://bb.example.test:443/desk",
+      loopbackBaseUrl: "https://bb.example.test:443/desk/",
       parentUrl:
         "https://bb.example.test/desk/api/v1/plugins/account-pool/http/",
     },
-  ])("uses local account selection when parent URL is this hub ($label)", async ({
-    parentUrl,
-    ownServerUrl,
-  }) => {
-    const fetchImpl = vi.fn(async (input: string | URL | Request) =>
-      String(input).endsWith("/availability")
-        ? Response.json({ claude: true, codex: true })
-        : Response.json({ ok: true }),
-    ) as unknown as typeof fetch;
-    const host = await createChild({
-      parentUrl,
-      ownServerUrl,
-      fetch: fetchImpl,
-    });
-    await host.harness.behavior.callRpc("account.add", {
-      provider: "claude",
-      source: { kind: "api-key", apiKey: "synthetic-local-key" },
-      label: "Local account",
-      priority: 100,
-    });
-    const childToken = await resolveToken(host);
-    const response = await host.harness.behavior.fetchHttp(
-      "POST",
-      "/v1/messages",
-      {
-        headers: { authorization: `Bearer ${childToken}` },
-        body: JSON.stringify({ model: "claude-opus-4", messages: [] }),
-      },
-    );
-    expect(response.status).toBe(200);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(fetchImpl).mock.calls[0]?.[0])).toBe(
-      "https://api.anthropic.test/v1/messages",
-    );
-    const init = vi.mocked(fetchImpl).mock.calls[0]?.[1];
-    expect(new Headers(init?.headers).get("x-api-key")).toBe(
-      "synthetic-local-key",
-    );
-    expect(new Headers(init?.headers).get("authorization")).toBeNull();
-    expect(
-      new Headers(init?.headers).get("x-bb-account-pool-token"),
-    ).toBeNull();
-  });
+  ])(
+    "uses local account selection when parent URL is this hub ($label)",
+    async ({ parentUrl, loopbackBaseUrl }) => {
+      const fetchImpl = vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/availability")
+          ? Response.json({ claude: true, codex: true })
+          : Response.json({ ok: true }),
+      ) as unknown as typeof fetch;
+      const host = await createChild({
+        parentUrl,
+        loopbackBaseUrl,
+        fetch: fetchImpl,
+      });
+      await host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "synthetic-local-key" },
+        label: "Local account",
+        priority: 100,
+      });
+      const childToken = await resolveToken(host);
+      const response = await host.harness.behavior.fetchHttp(
+        "POST",
+        "/v1/messages",
+        {
+          headers: { authorization: `Bearer ${childToken}` },
+          body: JSON.stringify({ model: "claude-opus-4", messages: [] }),
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(String(vi.mocked(fetchImpl).mock.calls[0]?.[0])).toBe(
+        "https://api.anthropic.test/v1/messages",
+      );
+      const init = vi.mocked(fetchImpl).mock.calls[0]?.[1];
+      expect(new Headers(init?.headers).get("x-api-key")).toBe(
+        "synthetic-local-key",
+      );
+      expect(new Headers(init?.headers).get("authorization")).toBeNull();
+      expect(
+        new Headers(init?.headers).get("x-bb-account-pool-token"),
+      ).toBeNull();
+    },
+  );
 
   it("neutralises inherited routing for a bypassed self-parent thread", async () => {
     const host = await createChild({
       parentUrl: "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
-      ownServerUrl: "http://localhost:38886",
+      loopbackBaseUrl: "http://localhost:38886/",
     });
     await host.harness.behavior.callRpc("bypass.set", {
       threadId: "thread-one",

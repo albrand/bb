@@ -20,6 +20,7 @@ import {
   PARENT_TOKEN_ENV,
   PARENT_URL_ENV,
   ParentAvailability,
+  isParentPoolSelf,
   readParentPool,
   type ParentPool,
 } from "./parent-pool.js";
@@ -129,16 +130,17 @@ export function createAccountPoolPlugin(
     await hubTokens.prune(enrolledHosts.map((host) => host.id));
     const routing = new RoutingStore(bb.storage.kv, now);
     const env = options.env ?? process.env;
-    const ownServerUrl = env.BB_SERVER_URL;
-    const hasConfiguredParentPool = readParentPool(env) !== null;
-    const parentPool = readParentPool(
-      env,
-      ownServerUrl === undefined ? undefined : `${ownServerUrl}${HUB_BASE_PATH}`,
-    );
+    const configuredParentPool = readParentPool(env);
+    const hasConfiguredParentPool = configuredParentPool !== null;
+    const parentPool = (): ParentPool | null => {
+      if (configuredParentPool === null) return null;
+      const ownHubUrl = `${bb.server.loopbackBaseUrl.replace(/\/+$/u, "")}${HUB_BASE_PATH}`;
+      return isParentPoolSelf(configuredParentPool, ownHubUrl)
+        ? null
+        : configuredParentPool;
+    };
     const proxyingParent = (): ParentPool | null =>
-      parentPool !== null && currentSettings.parentMode === "proxy"
-        ? parentPool
-        : null;
+      currentSettings.parentMode === "proxy" ? parentPool() : null;
     const db = bb.storage.database();
     bb.storage.migrate(db, QUOTA_MIGRATIONS);
     const quotas = new QuotaStore(db);
@@ -177,10 +179,10 @@ export function createAccountPoolPlugin(
       });
     }
     const availability =
-      parentPool === null
+      configuredParentPool === null
         ? null
         : new ParentAvailability({
-            parent: parentPool,
+            parent: configuredParentPool,
             fetch: upstreamFetch ?? fetch,
             now,
             ...(options.availabilityTtlMs === undefined
@@ -191,14 +193,16 @@ export function createAccountPoolPlugin(
                 `Account Pooler could not read parent availability: ${error instanceof Error ? error.message : String(error)}.`,
               ),
           });
-    const parentStatus = async (): Promise<PoolStatus["parent"]> =>
-      parentPool === null || availability === null
+    const parentStatus = async (): Promise<PoolStatus["parent"]> => {
+      const parent = parentPool();
+      return parent === null || availability === null
         ? null
         : {
-            baseUrl: parentPool.baseUrl,
+            baseUrl: parent.baseUrl,
             mode: currentSettings.parentMode,
             availability: await availability.get(),
           };
+    };
     const operations = new PoolOperations(
       accounts,
       quotas,

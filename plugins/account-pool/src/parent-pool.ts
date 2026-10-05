@@ -71,6 +71,13 @@ function sameHubUrl(parentUrl: string, ownHubUrl: string): boolean {
   return parent !== null && own !== null && parent === own;
 }
 
+export function isParentPoolSelf(
+  parent: ParentPool | null,
+  ownHubUrl: string,
+): boolean {
+  return parent !== null && sameHubUrl(parent.baseUrl, ownHubUrl);
+}
+
 export function parentRequestHeaders(inbound: Headers, token: string): Headers {
   const headers = new Headers();
   for (const [name, value] of inbound) {
