@@ -786,23 +786,100 @@ describe("slow query index plans", () => {
         ] as const).map(({ sequence, type, itemId, itemKind }) => ({
           threadId: thread.id,
           sequence,
+          createdAt: sequence * 100,
           type,
           scope: threadScope(),
           itemId,
           itemKind,
           parentToolCallId: null,
-          data: JSON.stringify({}),
+          data:
+            itemKind === "toolCall" || itemKind === "delegation"
+              ? JSON.stringify({ item: { result: "long enough to trim" } })
+              : JSON.stringify({}),
         })),
       ]);
 
       const [query] = captureStatements(db, () => {
-        expect(
-          listStoredDelegatingItemRowsByItemIds(db, {
-            itemIds: ["wanted-tool", "wanted-delegation"],
-            maxInlineOutputChars: null,
+        const rows = listStoredDelegatingItemRowsByItemIds(db, {
+          itemIds: ["wanted-tool", "wanted-delegation"],
+          maxInlineOutputChars: 5,
+          threadId: thread.id,
+        });
+        expect(rows.map((row) => row.sequence)).toEqual([1, 2, 3, 4]);
+        expect(rows.map((row) => Object.keys(row).sort())).toEqual(
+          Array.from({ length: 4 }, () => [
+            "createdAt",
+            "data",
+            "id",
+            "itemId",
+            "itemKind",
+            "parentToolCallId",
+            "providerThreadId",
+            "scopeKind",
+            "sequence",
+            "threadId",
+            "turnId",
+            "type",
+          ]),
+        );
+        expect(rows).toEqual([
+          expect.objectContaining({
+            createdAt: 100,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 1,
             threadId: thread.id,
-          }).map((row) => row.sequence),
-        ).toEqual([1, 2, 3, 4]);
+            turnId: null,
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 200,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-tool",
+            itemKind: "toolCall",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 2,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/completed",
+          }),
+          expect.objectContaining({
+            createdAt: 300,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 3,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/started",
+          }),
+          expect.objectContaining({
+            createdAt: 400,
+            data: expect.stringContaining("characters truncated"),
+            id: expect.any(String),
+            itemId: "wanted-delegation",
+            itemKind: "delegation",
+            parentToolCallId: null,
+            providerThreadId: null,
+            scopeKind: "thread",
+            sequence: 4,
+            threadId: thread.id,
+            turnId: null,
+            type: "item/completed",
+          }),
+        ]);
       });
       if (!query) {
         throw new Error("Expected the missing parent lookup SQL");
