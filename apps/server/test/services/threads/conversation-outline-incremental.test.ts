@@ -582,9 +582,7 @@ describe("incremental conversation outlines", () => {
 
       project();
 
-      expect(sequenceStarts).toHaveLength(2);
-      expect(sequenceStarts[0]).toBeGreaterThan(0);
-      expect(sequenceStarts[1]).toBe(0);
+      expect(sequenceStarts).toEqual([502, 0]);
     });
   });
 
