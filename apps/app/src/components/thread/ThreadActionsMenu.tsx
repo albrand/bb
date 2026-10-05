@@ -5,8 +5,7 @@ import {
   ActionMenuSub,
 } from "@/components/ui/action-menu-items";
 import type { Thread } from "@bb/domain";
-import { useCallback, useState, type ReactNode } from "react";
-import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
+import { useCallback, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,7 +60,7 @@ interface ThreadActionsMenuProps extends ThreadActionsMenuBaseProps {
   responsiveActions?: readonly ThreadActionsMenuResponsiveAction[];
 }
 
-type ThreadActionsCompactStep = "actions" | "move" | "project";
+export type ThreadActionsCompactStep = "actions" | "move" | "project";
 
 interface ThreadActionsMenuItemsProps extends ThreadActionsMenuBaseProps {
   onCloseMenu: () => void;
@@ -468,30 +467,23 @@ export function ThreadActionsMenu({
   );
 }
 
-export function ThreadActionsLongPressMenu({
-  children,
+export function ThreadActionsLongPressMenuContents({
   thread,
+  compactStep,
+  onCompactStepChange,
+  onCloseMenu,
 }: {
-  children: ReactNode;
   thread: Thread;
+  compactStep: ThreadActionsCompactStep;
+  onCompactStepChange: (step: ThreadActionsCompactStep) => void;
+  onCloseMenu: () => void;
 }) {
-  const { compactStep, setCompactStep, handleOpenChange } =
-    useThreadActionsMenuLifecycle();
-
   return (
-    <CompactLongPressMenu
-      label="Thread actions"
-      onOpenChange={handleOpenChange}
-      items={
-        <ThreadActionsMenuItems
-          thread={thread}
-          onCloseMenu={() => handleOpenChange(false)}
-          compactStep={compactStep}
-          onCompactStepChange={setCompactStep}
-        />
-      }
-    >
-      {children}
-    </CompactLongPressMenu>
+    <ThreadActionsMenuItems
+      thread={thread}
+      onCloseMenu={onCloseMenu}
+      compactStep={compactStep}
+      onCompactStepChange={onCompactStepChange}
+    />
   );
 }

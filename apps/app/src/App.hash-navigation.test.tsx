@@ -32,14 +32,18 @@ describe("HashNavigationScroll", () => {
     });
   });
 
-  it.each([false, true])(
-    "leaves message fragments to the timeline (matching DOM id: %s)",
-    (hasMatchingId) => {
+  it.each([
+    ["/threads/thr_main#msg=187", false],
+    ["/threads/thr_main#msg=187", true],
+    ["/projects/proj_main/threads/thr_main#msg=187", false],
+  ])(
+    "leaves message fragments to the timeline for %s (matching DOM id: %s)",
+    (entry, hasMatchingId) => {
       const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
       const observe = vi.spyOn(MutationObserver.prototype, "observe");
 
       render(
-        <MemoryRouter initialEntries={["/threads/thr_main#msg=187"]}>
+        <MemoryRouter initialEntries={[entry]}>
           <HashNavigationScroll />
           {hasMatchingId ? <div id="msg=187" /> : null}
         </MemoryRouter>,
@@ -49,6 +53,18 @@ describe("HashNavigationScroll", () => {
       expect(observe).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps malformed message fragments on the hash-scroll path", () => {
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+
+    render(
+      <MemoryRouter initialEntries={["/threads/thr_main#msg=007"]}>
+        <HashNavigationScroll />
+      </MemoryRouter>,
+    );
+
+    expect(observe).toHaveBeenCalled();
+  });
 
   it("waits for lazy plugin surfaces to mount", async () => {
     const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");

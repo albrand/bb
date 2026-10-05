@@ -679,7 +679,7 @@ describe("mobile recent thread rows", () => {
 });
 
 describe("RootComposeMobileRecents", () => {
-  it("opens thread actions on a long press without following the thread link", () => {
+  it("opens thread actions on a long press without following the thread link", async () => {
     vi.useFakeTimers();
     const thread = makeThread();
     render(
@@ -709,7 +709,8 @@ describe("RootComposeMobileRecents", () => {
     fireEvent(link, click);
     expect(click.defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
-    const pin = screen.getByRole("menuitem", { name: "Pin" });
+    vi.useRealTimers();
+    const pin = await screen.findByRole("menuitem", { name: "Pin" });
     fireEvent.pointerDown(pin, { pointerType: "touch" });
     fireEvent.click(pin);
     expect(threadActions.togglePin).toHaveBeenCalledWith(thread);
