@@ -293,7 +293,10 @@ export function expandBbCliPlaceholder(value: string): string {
 async function materializeStdinFlag(
   argv: readonly string[],
   input: PluginCliInputStream,
-): Promise<string[]> {
+): Promise<{
+  argv: string[];
+  experimental_stdinInputs?: Record<string, string>;
+}> {
   const terminator = argv.indexOf("--");
   const scanned = terminator === -1 ? argv : argv.slice(0, terminator);
   const matches = scanned.flatMap((flag, index) => {
@@ -301,10 +304,10 @@ async function materializeStdinFlag(
     const name = match?.[1];
     return name === undefined ? [] : [{ flag, index, name }];
   });
-  if (matches.length === 0) return [...argv];
+  if (matches.length === 0) return { argv: [...argv] };
   if (matches.length > 1) throw new Error("Choose only one stdin input flag.");
   const match = matches[0];
-  if (match === undefined) return [...argv];
+  if (match === undefined) return { argv: [...argv] };
   const valueFlag = `--${match.name}`;
   if (scanned.includes(valueFlag)) {
     throw new Error(`Choose only one of ${match.flag} and ${valueFlag}.`);
@@ -328,12 +331,10 @@ async function materializeStdinFlag(
   if (value.length === 0 || /[\r\n]/u.test(value)) {
     throw new Error(`${match.flag} requires exactly one non-empty stdin line.`);
   }
-  return [
-    ...argv.slice(0, match.index),
-    valueFlag,
-    value,
-    ...argv.slice(match.index + 1),
-  ];
+  return {
+    argv: [...argv],
+    experimental_stdinInputs: { [match.name]: value },
+  };
 }
 
 async function writePluginCliOutput(
@@ -395,7 +396,10 @@ export async function runPluginCliCommand(
   },
   input: PluginCliInputStream = process.stdin,
 ): Promise<number> {
-  let resolvedArgv: string[];
+  let resolvedArgv: {
+    argv: string[];
+    experimental_stdinInputs?: Record<string, string>;
+  };
   try {
     resolvedArgv = await materializeStdinFlag(argv, input);
   } catch (error) {
@@ -413,7 +417,12 @@ export async function runPluginCliCommand(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        argv: resolvedArgv,
+        argv: resolvedArgv.argv,
+        ...(resolvedArgv.experimental_stdinInputs === undefined
+          ? {}
+          : {
+              experimental_stdinInputs: resolvedArgv.experimental_stdinInputs,
+            }),
         cwd: process.cwd(),
         ...(threadId ? { threadId } : {}),
         ...(projectId ? { projectId } : {}),

@@ -10,7 +10,6 @@ bb pool account login-poll --session <id>
 bb pool account add --provider claude --import
 bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
-bb pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
 bb pool account list [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
@@ -40,7 +39,7 @@ then exits. Pipe the manual callback code to `account login-complete` with that
 session ID within ten minutes. Its command hint uses the absolute path of the
 running bb executable. Codex `--login` prints a device verification
 URL, one-time code, session ID, and an `account login-poll` command that waits
-for authorization. The Claude code stays out of process arguments, and either
+for authorization. OAuth codes and API keys must be piped through stdin, and either
 browser may be on a different machine from the bb server. New accounts join the
 end of the provider's priority order by default; rename them with
 `bb pool account rename <id> <label>`. Newly added or enabled accounts are
@@ -55,9 +54,7 @@ Tokens are never printed. `status` prunes tokens for unenrolled machines and
 shows token timestamps plus recently routed threads whose machines need a
 local Claude login before the pool can be disabled safely. Rotation keeps the
 prior token valid for ten minutes. Agents should pipe API keys to
-`--api-key-stdin`;
-`--api-key <key>` is an unsafe compatibility form that exposes the key in
-process arguments, shell history, and agent transcripts. Prefer `--import` for
+`--api-key-stdin`; the CLI rejects inline secret values. Prefer `--import` for
 an existing Claude Code login. The CLI Codex import path reads
 `~/.codex/auth.json` on the bb server host. OAuth quota refreshes on add or
 enable and every five minutes while an account is idle. When a request finds no

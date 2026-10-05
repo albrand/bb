@@ -1192,20 +1192,24 @@ describe("Account Pool plugin", () => {
     ]);
     const hello = helloResponse();
     expect(hello.status).toBe(200);
-    const added = await host.harness.behavior.runCli([
-      "account",
-      "add",
-      "--provider",
-      "claude",
-      "--api-key",
-      "sk-cli-secret",
-      "--label",
-      "CLI account",
-      "--priority",
-      "7",
-    ]);
+    const added = await host.harness.behavior.runCli(
+      [
+        "account",
+        "add",
+        "--provider",
+        "claude",
+        "--api-key-stdin",
+        "--label",
+        "CLI account",
+        "--priority",
+        "7",
+      ],
+      {
+        experimental_stdinInputs: { "api-key": "fixture-cli-key" },
+      },
+    );
     expect(added.exitCode).toBe(0);
-    expect(added.stdout).not.toContain("sk-cli-secret");
+    expect(added.stdout).not.toContain("fixture-cli-key");
     expect(added.stdout).not.toContain("reload");
     const key = await resolveToken(host, "host-one", "thread-empty");
     const forwardedResponse = await host.harness.behavior.fetchHttp(
@@ -1387,7 +1391,7 @@ describe("Account Pool plugin", () => {
     ]);
     expect(stdinFlag.exitCode).toBe(1);
     expect(stdinFlag.stderr).toContain(
-      "--code-stdin is read by the bb CLI, which rewrites it to --code <value>",
+      "--code-stdin must be supplied by the bb CLI through stdin",
     );
 
     const badProvider = await run([
@@ -1572,14 +1576,12 @@ describe("Account Pool plugin", () => {
     }
     const cliState = new URL(authorizeUrl).searchParams.get("state");
     if (cliState === null) throw new Error("CLI login start omitted state.");
-    const cliCompleted = await host.harness.behavior.runCli([
-      "account",
-      "login-complete",
-      "--session",
-      sessionId,
-      "--code",
-      `cli-code#${cliState}`,
-    ]);
+    const cliCompleted = await host.harness.behavior.runCli(
+      ["account", "login-complete", "--session", sessionId, "--code-stdin"],
+      {
+        experimental_stdinInputs: { code: `cli-code#${cliState}` },
+      },
+    );
     expect(cliCompleted).toMatchObject({
       exitCode: 0,
       stdout: expect.stringContaining("Added Logged-in Claude"),

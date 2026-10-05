@@ -34,7 +34,6 @@ printf '%s\n' "$CLAUDE_AUTH_CODE" | bb pool account login-complete --session <id
 bb pool account add --provider claude --import
 bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
-bb pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
 bb pool account list [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
@@ -80,10 +79,10 @@ unenrolled machines and shows token timestamps plus recently routed threads
 whose machines need a local Claude login before the pool can be disabled
 safely. Rotation keeps the prior token valid for ten minutes. Agents should use
 `--api-key-stdin`, which reads exactly one non-empty key from piped standard
-input. The compatibility form `--api-key <key>` exposes the key in process
-arguments, shell history, and agent transcripts. Prefer `--import` when Claude
-Code is already signed in. OAuth quota refreshes on add or enable and every
-five minutes while the account is idle. Use `bb pool account refresh <id>` to
+input. Secret options reject inline values and are accepted only from stdin.
+Prefer `--import` when Claude Code is already signed in. OAuth quota refreshes
+on add or enable and every five minutes while the account is idle. Use
+`bb pool account refresh <id>` to
 request an immediate refresh for one account. Account tables add columns for
 the family buckets Anthropic reports, and JSON status exposes the same
 observations under `familyWeekly`. Selection skips an account only for a spent

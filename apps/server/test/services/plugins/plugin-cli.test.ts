@@ -40,12 +40,13 @@ const CLI_SOURCE = `
           }
           return { exitCode: 0, stdout: "x".repeat(size) };
         }
-        const { signal, ...requestContext } = ctx;
+        const { signal, experimental_stdinInputs, ...requestContext } = ctx;
         return {
           exitCode: 0,
           stdout: JSON.stringify({
             argv,
             ctx: requestContext,
+            stdinInputNames: Object.keys(experimental_stdinInputs ?? {}),
             signalAborted: signal?.aborted,
           }),
         };
@@ -141,6 +142,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       cwd: "/tmp/somewhere",
       threadId: "thr_123",
       projectId: "proj_456",
+      experimental_stdinInputs: { code: "fixture-value" },
     });
     expect(response.status).toBe(200);
     const result = (await response.json()) as {
@@ -157,6 +159,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
         threadId: "thr_123",
         projectId: "proj_456",
       },
+      stdinInputNames: ["code"],
       signalAborted: false,
     });
   });

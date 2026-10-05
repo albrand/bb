@@ -564,7 +564,12 @@ describe("runPluginCliCommand", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(JSON.parse(bodies[0] ?? "{}").argv).toContain(code);
+    const request = JSON.parse(bodies[0] ?? "{}") as {
+      argv: string[];
+      experimental_stdinInputs: Record<string, string>;
+    };
+    expect(request.argv).not.toContain(code);
+    expect(request.experimental_stdinInputs.code).toBe(code);
     expect(stdout.join("")).not.toContain(code);
     expect(stderr.join("")).not.toContain(code);
     expect(log).not.toHaveBeenCalled();
@@ -769,12 +774,19 @@ describe("runPluginCliCommand", () => {
   });
 
   it("materializes an arbitrary stdin flag only in the proxied request", async () => {
-    const requests: string[][] = [];
+    const requests: Array<{
+      argv: string[];
+      experimental_stdinInputs?: Record<string, string>;
+    }> = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url, init: RequestInit | undefined) => {
-        const parsed = JSON.parse(String(init?.body)) as { argv: string[] };
-        requests.push(parsed.argv);
+        requests.push(
+          JSON.parse(String(init?.body)) as {
+            argv: string[];
+            experimental_stdinInputs?: Record<string, string>;
+          },
+        );
         return new Response(JSON.stringify({ exitCode: 0 }), { status: 200 });
       }),
     );
@@ -804,7 +816,11 @@ describe("runPluginCliCommand", () => {
     ).resolves.toBe(0);
     expect(argv).toEqual(["deploy", "--credential-stdin", "--format", "json"]);
     expect(requests).toEqual([
-      ["deploy", "--credential", "opaque-credential", "--format", "json"],
+      {
+        argv: ["deploy", "--credential-stdin", "--format", "json"],
+        experimental_stdinInputs: { credential: "opaque-credential" },
+        cwd: expect.any(String),
+      },
     ]);
     expect(writes).toEqual([]);
   });

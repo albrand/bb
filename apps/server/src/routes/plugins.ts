@@ -205,6 +205,25 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
+function isPluginCliStdinInputs(
+  value: unknown,
+): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.entries(value).length <= 1 &&
+    Object.entries(value).every(
+      ([name, input]) =>
+        /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(name) &&
+        typeof input === "string" &&
+        input.length > 0 &&
+        Buffer.byteLength(input, "utf8") <= 16 * 1024 &&
+        !/[\r\n]/u.test(input),
+    )
+  );
+}
+
 function timingSafeEqualStrings(a: string, b: string): boolean {
   const bufferA = Buffer.from(a, "utf8");
   const bufferB = Buffer.from(b, "utf8");
@@ -497,6 +516,7 @@ export function registerPluginRoutes(
     }
     const body = (await context.req.json().catch(() => null)) as {
       argv?: unknown;
+      experimental_stdinInputs?: unknown;
       cwd?: unknown;
       threadId?: unknown;
       projectId?: unknown;
@@ -508,15 +528,31 @@ export function registerPluginRoutes(
         400,
       );
     }
+    if (
+      body?.experimental_stdinInputs !== undefined &&
+      !isPluginCliStdinInputs(body.experimental_stdinInputs)
+    ) {
+      return context.json(
+        {
+          ok: false,
+          error: "expected experimental_stdinInputs with one short text value",
+        },
+        400,
+      );
+    }
     const ctx: {
       cwd?: string;
       threadId?: string;
       projectId?: string;
+      experimental_stdinInputs?: Record<string, string>;
       signal?: AbortSignal;
     } = {};
     if (typeof body?.cwd === "string") ctx.cwd = body.cwd;
     if (typeof body?.threadId === "string") ctx.threadId = body.threadId;
     if (typeof body?.projectId === "string") ctx.projectId = body.projectId;
+    if (isPluginCliStdinInputs(body?.experimental_stdinInputs)) {
+      ctx.experimental_stdinInputs = body.experimental_stdinInputs;
+    }
     ctx.signal = context.req.raw.signal;
     return pluginCliResponse(
       plugins.runCliCommand(context.req.param("id"), argv, ctx),
