@@ -147,6 +147,8 @@ export function createClaudeAdapter(options: {
         throw new Error("Usage refresh failed.");
       }
       const payload: unknown = await response.json().catch(() => null);
+      if (typeof payload !== "object" || payload === null)
+        throw new Error("Usage refresh returned unreadable data.");
       const quota = quotaFromUsage(
         context.account.id,
         payload,
