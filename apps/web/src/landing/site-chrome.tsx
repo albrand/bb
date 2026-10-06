@@ -1,9 +1,10 @@
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import GithubIcon from "@hugeicons/core-free-icons/GithubIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 
 import { DASHBOARD_PATH } from "../lib/connect-return-to";
+import { CONTENT_LINK_GROUPS } from "./content-links";
 import { DiscordLink, DownloadLink, GitHubLink, XLink } from "./cta";
 import { useDesktopPlatform } from "./desktop-platform";
 import { DESKTOP_DOWNLOADS } from "./site";
@@ -14,7 +15,10 @@ function PluginsMenu({ current }: { current?: SiteNavPage }) {
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menu.current?.contains(event.target)) {
+      if (
+        event.target instanceof Node &&
+        !menu.current?.contains(event.target)
+      ) {
         menu.current?.removeAttribute("open");
       }
     };
@@ -114,25 +118,38 @@ export function SiteFooter() {
   return (
     <footer className="footer">
       <span>bb is free and open source (MIT)</span>
-      <span>
-        <a href="/blog">Blog</a>
-        {" · "}
-        <a href="/changelog">Changelog</a>
-        {" · "}
-        <a href="/plugin-guide">Plugin Guide</a>
-        {" · "}
-        <a href="/privacy">Privacy</a>
-        {" · "}
-        <GitHubLink placement="footer">GitHub</GitHubLink>
-        {" · "}
-        <XLink placement="footer">X</XLink>
-        {" · "}
-        <DiscordLink placement="footer">Discord</DiscordLink>
-        {" · "}
-        <DownloadLink placement="footer" platform={platform}>
-          Download
-        </DownloadLink>
-      </span>
+      <div className="footer-links">
+        <span>
+          <a href="/blog">Blog</a>
+          {" · "}
+          <a href="/changelog">Changelog</a>
+          {" · "}
+          <a href="/plugin-guide">Plugin Guide</a>
+          {" · "}
+          <a href="/privacy">Privacy</a>
+          {" · "}
+          <GitHubLink placement="footer">GitHub</GitHubLink>
+          {" · "}
+          <XLink placement="footer">X</XLink>
+          {" · "}
+          <DiscordLink placement="footer">Discord</DiscordLink>
+          {" · "}
+          <DownloadLink placement="footer" platform={platform}>
+            Download
+          </DownloadLink>
+        </span>
+        {CONTENT_LINK_GROUPS.map((group) => (
+          <span key={group.title}>
+            {group.title}:{" "}
+            {group.links.map((link, index) => (
+              <Fragment key={link.href}>
+                {index > 0 ? " · " : null}
+                <a href={link.href}>{link.label}</a>
+              </Fragment>
+            ))}
+          </span>
+        ))}
+      </div>
     </footer>
   );
 }
