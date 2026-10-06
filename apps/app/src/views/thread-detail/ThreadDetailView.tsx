@@ -200,6 +200,7 @@ import {
   SIDE_CHAT_PLUGIN_ID,
   SIDE_CHAT_PLUGIN_PANEL_ACTION_ID,
 } from "@/lib/side-chat-plugin";
+import { useSendSideChatMessageToMain } from "./useSendSideChatMessageToMain";
 import { RightPanelFileTabIcon } from "@/components/secondary-panel/RightPanelFileTabIcon";
 import { COARSE_POINTER_COMPACT_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { PluginItemIcon } from "@/components/plugin/PluginIcon";
@@ -259,7 +260,6 @@ import type {
 } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
 import { useThreadGitActions } from "./useThreadGitActions";
-import { useSendSideChatMessageToMain } from "./useSendSideChatMessageToMain";
 import { useThreadReadTracking } from "@/hooks/useThreadReadTracking";
 import { useThreadUnreadDividerState } from "./useThreadUnreadDividerState";
 import {
@@ -1236,6 +1236,23 @@ function ThreadDetailViewInternal(
     isSideChatThread && threadSourceThreadId !== null
       ? sendSideChatMessageToMain
       : undefined;
+  const sendToMainConsumerMessageActions = useMemo(
+    () =>
+      handleSendToMainMessage
+        ? [
+            {
+              id: "send-to-main",
+              pluginId: null,
+              icon: "CornerUpLeft",
+              label: "Send to main thread",
+              roles: ["assistant"] as const,
+              run: (message: { text: string }) =>
+                handleSendToMainMessage({ messageText: message.text }),
+            },
+          ]
+        : undefined,
+    [handleSendToMainMessage],
+  );
   const canUseGitUi = !executionUnavailable && gitDiffTabStatus === "eligible";
   const canCreateTerminal =
     !executionUnavailable &&
@@ -2219,11 +2236,9 @@ function ThreadDetailViewInternal(
         ? {
             controller: storageBrowserController,
             filesError: threadStorageFilesError,
-            isFilesLoading: isThreadStorageFilesLoading,
           }
         : undefined,
     [
-      isThreadStorageFilesLoading,
       resolvedThreadEnvironmentHost?.status,
       storageBrowserController,
       threadStorageFilesError,
@@ -2522,15 +2537,20 @@ function ThreadDetailViewInternal(
           },
         }))
       : [];
-  const responsiveGitActions: ThreadActionsMenuResponsiveAction[] = (
-    executionUnavailable ? [] : gitActions.threadHeaderGitActions
-  ).map((action) => ({
-    icon: "GitBranch" as const,
-    label: action.label,
-    onSelect: () => {
-      gitActions.threadGitActionDialog.onOpen(action.target);
-    },
-  }));
+  const showGitChanges =
+    systemConfigQuery.data?.generalSettings.showGitChanges ?? false;
+  const threadHeaderGitActions =
+    executionUnavailable || !showGitChanges
+      ? []
+      : gitActions.threadHeaderGitActions;
+  const responsiveGitActions: ThreadActionsMenuResponsiveAction[] =
+    threadHeaderGitActions.map((action) => ({
+      icon: "GitBranch" as const,
+      label: action.label,
+      onSelect: () => {
+        gitActions.threadGitActionDialog.onOpen(action.target);
+      },
+    }));
   const responsiveHeaderActions = [
     ...responsiveWorkspaceActions,
     ...responsiveGitActions,
@@ -2570,9 +2590,7 @@ function ThreadDetailViewInternal(
           }
         />
       )}
-      childPillLabel={
-        isSideChatThread ? "side chat" : parentThreadId ? "child" : null
-      }
+      childPillLabel={isSideChatThread ? "side chat" : parentThreadId ? "child" : null}
       isSecondaryPanelOpen={isSecondaryPanelOpen}
       onClosePane={onRequestClose ?? undefined}
       onOpenThreadGitAction={gitActions.threadGitActionDialog.onOpen}
@@ -2583,9 +2601,7 @@ function ThreadDetailViewInternal(
           projectId={thread.projectId}
         />
       }
-      threadHeaderGitActions={
-        executionUnavailable ? [] : gitActions.threadHeaderGitActions
-      }
+      threadHeaderGitActions={threadHeaderGitActions}
       threadId={thread.id}
       threadTitle={threadTitle}
       workspaceOpenButton={workspaceOpenButton}
@@ -2622,6 +2638,7 @@ function ThreadDetailViewInternal(
       onChangedFileClick={handleChangedFileClick}
       projectId={projectId}
       resolveMentionLink={resolveMentionLink}
+      showGitChanges={showGitChanges}
       workspaceChangedFilesSection={
         canUseGitUi ? workspaceChangedFilesSection : null
       }
@@ -3007,6 +3024,9 @@ function ThreadDetailViewInternal(
               onCommitClick: canUseGitUi
                 ? openSecondaryPanelCommitDiff
                 : undefined,
+              onOpenChangedFile: canUseGitUi
+                ? handleOpenFilePreview
+                : undefined,
             }}
             secondaryPanel={{
               canNavigateTabs: isFocused,
@@ -3044,7 +3064,6 @@ function ThreadDetailViewInternal(
               activeThinking,
               canSpawnChild: thread.canSpawnChild,
               contextBoundarySeq,
-              threadOriginKind,
               hasOlderTimelineRows,
               hostConnectionNotice,
               isCatchingUpTimeline,
@@ -3057,7 +3076,7 @@ function ThreadDetailViewInternal(
                 : undefined,
               inlineMessageEditor,
               onMessageAddToChat: handleSelectionAddToChat,
-              onSendToMainMessage: handleSendToMainMessage,
+              consumerMessageActions: sendToMainConsumerMessageActions,
               onSelectionAddToChat: handleSelectionAddToChat,
               onLoadOlderRows: loadOlderTimelineRows,
               onOpenLink: handleOpenTimelineLink,

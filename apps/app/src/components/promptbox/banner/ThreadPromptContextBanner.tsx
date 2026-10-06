@@ -304,9 +304,9 @@ const PARENT_SECTION_COPY: Record<
     ariaPrefix: "Forked from",
   },
   "side-chat": {
-    verb: "Side chat of",
-    bodyLead: "This thread is a side chat of ",
-    ariaPrefix: "Side chat of",
+    verb: "Side chat for",
+    bodyLead: "This side chat is for ",
+    ariaPrefix: "Side chat for",
   },
 };
 
@@ -316,7 +316,7 @@ const PARENT_SECTION_ICON: Record<
 > = {
   parent: "UserRound",
   fork: "Fork",
-  "side-chat": "SideChat",
+  "side-chat": "MessageSquare",
 };
 
 function useParentSectionAriaLabel(
