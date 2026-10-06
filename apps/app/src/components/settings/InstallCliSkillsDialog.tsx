@@ -40,8 +40,10 @@ function machineStatusLabel(args: {
   status: CliSkillMachineStatus | undefined;
 }): string | null {
   if (!args.connected) return "Disconnected";
-  if (args.status === "unknown") return "Status unavailable";
-  return args.status === undefined ? null : MACHINE_STATUS_LABELS[args.status];
+  if (args.status === undefined || args.status === "unknown") {
+    return "Status unavailable";
+  }
+  return MACHINE_STATUS_LABELS[args.status];
 }
 
 function InstallCliSkillsDialogContent({
@@ -63,15 +65,13 @@ function InstallCliSkillsDialogContent({
   const missingHostIds = connectedHostIds.filter(
     (hostId) => statusByHostId.get(hostId) === "missing",
   );
-  const partialInstall = action === "install" && installedHostIds.length > 0;
   const targetHostIds = connectedHostIds.filter((hostId) => {
     const status = statusByHostId.get(hostId);
     if (action === "update") {
       return status === "outdated" || status === "missing";
     }
     if (action === "reinstall") return status === "installed";
-    if (partialInstall) return status === "missing";
-    return true;
+    return status === "missing";
   });
   const targetHostIdsKey = JSON.stringify([
     action,
@@ -104,7 +104,9 @@ function InstallCliSkillsDialogContent({
         <DialogDescription>
           {statusLoading
             ? "Checking machine statuses before choosing where to install the bb CLI skills."
-            : choosable
+            : targetHostIds.length === 0 && connectedHostIds.length > 0
+              ? "No connected machine has a confirmed status that can be installed to. Try again when machine status is available."
+              : choosable
             ? action === "update"
               ? missingHostIds.length > 0
                 ? "Choose outdated machines to update and missing machines to install. Selected machines get the latest skills in ~/.agents/skills and ~/.claude/skills."
@@ -140,7 +142,7 @@ function InstallCliSkillsDialogContent({
                   disabled={
                     !connected ||
                     pending ||
-                    (partialInstall &&
+                    (action === "install" &&
                       statusByHostId.get(host.id) !== "missing") ||
                     (action === "reinstall" &&
                       statusByHostId.get(host.id) !== "installed") ||

@@ -130,6 +130,7 @@ describe("InstallCliSkillsDialog", () => {
       hosts[0],
       hosts[1],
       host({ id: "host-unknown", name: "Unknown box" }),
+      host({ id: "host-unreported", name: "Unreported box" }),
     ];
     render(
       <InstallCliSkillsDialog
@@ -150,11 +151,41 @@ describe("InstallCliSkillsDialog", () => {
 
     expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
     expect(checkbox("Unknown box").hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Unreported box").hasAttribute("disabled")).toBe(true);
     fireEvent.click(checkbox("Laptop"));
     fireEvent.click(checkbox("Unknown box"));
+    fireEvent.click(checkbox("Unreported box"));
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
 
     expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
+  });
+
+  it("blocks install when status lookup failed and no host has a known missing status", () => {
+    const onInstall = vi.fn();
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts.slice(0, 2)}
+        statusByHostId={new Map()}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(
+        "No connected machine has a confirmed status that can be installed to. Try again when machine status is available.",
+      ),
+    ).toBeDefined();
+    const install = screen.getByRole("button", { name: "Install" });
+    expect(install.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(install);
+    expect(onInstall).not.toHaveBeenCalled();
   });
 
   it("blocks submission until partial statuses load, then targets only missing machines", () => {
@@ -173,8 +204,8 @@ describe("InstallCliSkillsDialog", () => {
       />,
     );
 
-    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
-    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
     expect(
       screen.getByText(
         "Checking machine statuses before choosing where to install the bb CLI skills.",
@@ -182,6 +213,8 @@ describe("InstallCliSkillsDialog", () => {
     ).toBeDefined();
     const unresolvedInstall = screen.getByRole("button", { name: "Install" });
     expect(unresolvedInstall.hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
     fireEvent.click(unresolvedInstall);
     expect(onInstall).not.toHaveBeenCalled();
 
@@ -240,7 +273,7 @@ describe("InstallCliSkillsDialog", () => {
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
   });
 
-  it("reselects only outdated machines after a pre-load choice", () => {
+  it("selects only outdated machines after status loads", () => {
     const onInstall = vi.fn();
     const { rerender } = render(
       <InstallCliSkillsDialog
@@ -255,8 +288,7 @@ describe("InstallCliSkillsDialog", () => {
       />,
     );
 
-    fireEvent.click(checkbox("Studio"));
-    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
 
     rerender(
       <InstallCliSkillsDialog
@@ -278,7 +310,7 @@ describe("InstallCliSkillsDialog", () => {
     expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
   });
 
-  it("reselects the only connected outdated machine after a pre-load choice", () => {
+  it("selects the only connected outdated machine after status loads", () => {
     const onInstall = vi.fn();
     const oneConnectedHost = [hosts[1], hosts[2]];
     const { rerender } = render(
@@ -294,8 +326,7 @@ describe("InstallCliSkillsDialog", () => {
       />,
     );
 
-    fireEvent.click(checkbox("Studio"));
-    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
 
     rerender(
       <InstallCliSkillsDialog
