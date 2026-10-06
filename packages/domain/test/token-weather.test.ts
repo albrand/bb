@@ -86,7 +86,34 @@ describe("token weather", () => {
     expect(result.turns[1]?.sameModelMedian).toBe(40);
     expect(result.turns[1]?.freshInputChange).toBe(1);
     expect(result.turns[1]?.weather).toBe("stormy");
-    expect(result.weather).toBe("stormy");
+    expect(result.weather).toBe("cloudy");
+    expect(
+      summarizeTokenWeather({
+        contextFill: 0.99,
+        turns: [
+          {
+            cachedInputTokens: 10,
+            inputTokens: 40,
+            model: "model-a",
+            outputTokens: 10,
+            providerId: "provider-a",
+            reasoningOutputTokens: 0,
+            totalTokens: 110,
+            turnId: "turn-1",
+          },
+          {
+            cachedInputTokens: 0,
+            inputTokens: 80,
+            model: "model-a",
+            outputTokens: 10,
+            providerId: "provider-a",
+            reasoningOutputTokens: 0,
+            totalTokens: 90,
+            turnId: "turn-2",
+          },
+        ],
+      }).weather,
+    ).toBe(result.weather);
     expect(result.medianFreshInput).toBe(60);
     expect(result.rangeFreshInput).toEqual({ min: 40, max: 80 });
     expect(result.totals.totalTokens).toBe(200);
