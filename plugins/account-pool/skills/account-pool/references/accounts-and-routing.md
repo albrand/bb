@@ -177,7 +177,9 @@ pooler routing through its environment. The parent contributes
 provider routing variables, and the nested server enables the pooler on first run
 when it sees them. The token is scoped to the launching thread, is accepted only
 for pooled provider requests and `/availability`, and stops working when that
-thread is archived or deleted or the machine token is rotated. A nested server
+thread is archived or deleted or the machine token is rotated. An archive or
+delete event missed while the plugin is down is not replayed, so rotate the
+machine token to revoke that thread's tokens. A nested server
 started before this scoping existed holds the machine token, which the hub no
 longer accepts; relaunch it so it receives a scoped token.
 

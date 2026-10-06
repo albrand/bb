@@ -8818,6 +8818,53 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, revokedNested, "/availability")).toBe(401);
   });
 
+  it("keeps the tokens of a thread archived while the plugin was down valid until the machine token rotates", async () => {
+    let now = 1_000;
+    const fixture = await scopedFixture({ now: () => now });
+    const missed = await claudeToken(fixture.host, "thread-missed");
+    const missedNested = await nestedToken(fixture.host, "thread-missed");
+    const host = await fixture.host.harness.lifecycle.reload(
+      createAccountPoolPlugin({
+        now: () => now,
+        usageUrl: EMPTY_USAGE_URL,
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      }),
+    );
+    const service = host.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      service.controller.abort();
+      await service.done;
+      await host.harness.lifecycle.dispose();
+    });
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    expect(await statusOf(host, missed, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, missedNested, "/availability")).toBe(200);
+    now = 2_000;
+    const rotate = await host.harness.behavior.runCli([
+      "token",
+      "rotate",
+      "--machine",
+      "One",
+    ]);
+    expect(rotate.exitCode).toBe(0);
+    now = 2_000 + 10 * 60_000 + 1;
+    expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, missedNested, "/availability")).toBe(401);
+  });
+
   it("keeps one thread's token from acting as another thread", async () => {
     const fixture = await scopedFixture();
     const { host } = fixture;

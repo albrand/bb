@@ -86,8 +86,9 @@ Tokens are never printed. `status` prunes tokens for
 unenrolled machines and shows token timestamps plus recently routed threads
 whose machines need a local Claude login before the pool can be disabled
 safely. Rotation keeps the prior token, and the thread-scoped tokens derived from
-it, valid for ten minutes; archiving or deleting a thread revokes its tokens
-immediately. Agents should use
+it, valid for ten minutes; archiving or deleting a thread revokes its tokens when
+the plugin receives the event, and one missed while the plugin is down is not
+replayed, so rotate the machine token to revoke them. Agents should use
 `--api-key-stdin`, which reads exactly one non-empty key from piped standard
 input. Secret options reject inline values and are accepted only from stdin.
 Prefer `--import` when Claude Code is already signed in. OAuth quota refreshes
