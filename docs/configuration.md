@@ -1230,7 +1230,8 @@ per-thread and nested-server tokens derived from it remain valid for ten
 minutes so in-flight requests can drain, then stop working. Archiving or
 deleting a thread revokes its tokens as soon as the plugin receives the event.
 An event missed while the plugin is down is not replayed, so those tokens stay
-valid until the ten-minute grace after you rotate that machine's token ends.
+valid until bb next resolves that archived thread's environment, which revokes
+them, or until the ten-minute grace after you rotate that machine's token ends.
 Bypass or restore routing for
 one thread with `bb pool bypass <thread-id>` or
 `bb pool bypass <thread-id> --off`. Account listing, enable, disable, removal,

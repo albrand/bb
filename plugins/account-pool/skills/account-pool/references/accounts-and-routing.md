@@ -179,8 +179,9 @@ when it sees them. The token is scoped to the launching thread, is accepted only
 for pooled provider requests and `/availability`, and stops working when that
 thread is archived or deleted, or ten minutes after the machine token is
 rotated. An archive or delete event missed while the plugin is down is not
-replayed, so rotate the machine token and wait out those ten minutes to end that
-thread's tokens. A nested server
+replayed, so those tokens end when bb next resolves that archived thread's
+environment, or when you rotate the machine token and wait out those ten
+minutes. A nested server
 started before this scoping existed holds the machine token, which the hub no
 longer accepts; relaunch it so it receives a scoped token.
 

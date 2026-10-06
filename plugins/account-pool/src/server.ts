@@ -369,6 +369,13 @@ export function createAccountPoolPlugin(
             { threadId: context.threadId, hostId: context.hostId },
             hostToken,
           );
+          const thread = await bb.sdk.threads.get({
+            threadId: context.threadId,
+          });
+          if (thread.archivedAt !== null) {
+            await threadTokens.removeThread(context.threadId);
+            return hasConfiguredParentPool ? neutralized(provider) : [];
+          }
           if (provider === "claude") {
             await routing.recordRouted(context.threadId, context.hostId);
           }

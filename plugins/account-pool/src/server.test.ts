@@ -85,6 +85,10 @@ function sdkStubs() {
     system: {
       providerStates: async () => ({ providers: [] }),
     },
+    threads: {
+      get: async ({ threadId }: { threadId: string }) =>
+        makeThreadResponse({ id: threadId }),
+    },
     plugins: {
       list: async () => ({
         plugins: [{ id: "account-pool", enabled: true }],
@@ -8863,6 +8867,39 @@ describe("Account Pool credential scoping", () => {
     now = 2_000 + 10 * 60_000 + 1;
     expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
     expect(await statusOf(host, missedNested, "/availability")).toBe(401);
+  });
+
+  it("exports nothing for an archived thread and revokes any token it already held", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const archived = async ({ threadId }: { threadId: string }) =>
+      makeThreadResponse({ id: threadId, archivedAt: 1_000 });
+    const entries = (threadId: string) =>
+      host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId,
+        projectId: "project-one",
+        hostId: "host-one",
+      });
+    const credentialFiles = async (threadId: string) =>
+      (await fs.readdir(path.join(fixture.dataDir, ...POOL_SECRETS))).filter(
+        (name) => name.includes(threadId),
+      );
+    const held = await claudeToken(host, "thread-held");
+    const heldNested = await nestedToken(host, "thread-held");
+    expect(await statusOf(host, held, "/v1/messages")).toBe(200);
+    host.harness.sdk.stub("threads.get", archived);
+    expect(await entries("thread-late")).toEqual([]);
+    expect(await credentialFiles("thread-late")).toEqual([]);
+    expect(await entries("thread-held")).toEqual([]);
+    expect(await credentialFiles("thread-held")).toEqual([]);
+    expect(await statusOf(host, held, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, heldNested, "/availability")).toBe(401);
+    host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({ id: threadId }),
+    );
+    const restored = await claudeToken(host, "thread-held");
+    expect(restored).not.toBe(held);
+    expect(await statusOf(host, restored, "/v1/messages")).toBe(200);
   });
 
   it("keeps one thread's token from acting as another thread", async () => {

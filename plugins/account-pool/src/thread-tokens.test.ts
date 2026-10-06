@@ -242,6 +242,44 @@ it("loads past unreadable or unrecognised credential files and discards them", a
   expect(await reloaded.authenticateNested(nested)).toEqual(nestedRoute);
 });
 
+it("starts even when a credential entry cannot be read or removed", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const nestedRoute = { hostId: route.hostId, threadId: route.threadId };
+  const provider = await threads.forThread(route, hostToken);
+  const nested = await threads.forNested(nestedRoute, hostToken);
+  await fs.mkdir(path.join(directory, "thread-route-folder.json"));
+  await fs.mkdir(path.join(directory, "nested-route-folder.json"));
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await expect(reloaded.initialize([route.hostId])).resolves.toBeUndefined();
+  expect(await reloaded.authenticate(provider)).toEqual(route);
+  expect(await reloaded.authenticateNested(nested)).toEqual(nestedRoute);
+});
+
+it("keeps routes apart when identifiers contain the separator", async () => {
+  const { directory, hosts, threads } = await fixture();
+  const first = { hostId: "host-a", threadId: "b-c" };
+  const second = { hostId: "host-a-b", threadId: "c" };
+  const firstNested = await threads.forNested(
+    first,
+    await hosts.forHost(first.hostId),
+  );
+  const secondNested = await threads.forNested(
+    second,
+    await hosts.forHost(second.hostId),
+  );
+  expect(firstNested).not.toBe(secondNested);
+  expect(await threads.authenticateNested(firstNested)).toEqual(first);
+  expect(await threads.authenticateNested(secondNested)).toEqual(second);
+  expect(
+    (await fs.readdir(directory)).filter((name) =>
+      name.startsWith("nested-route-"),
+    ),
+  ).toHaveLength(2);
+  await threads.removeThread("c");
+  expect(await threads.authenticateNested(secondNested)).toBeNull();
+  expect(await threads.authenticateNested(firstNested)).toEqual(first);
+});
+
 it("reclaims expired-generation credentials for a thread when minting, and keeps live ones", async () => {
   const { directory, hosts, threads, route, hostToken, advance } =
     await fixture();

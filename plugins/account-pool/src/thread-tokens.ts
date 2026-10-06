@@ -60,24 +60,31 @@ export class ThreadTokenStore {
     await fs.chmod(this.directory, 0o700);
     const enrolled = new Set(hostIds);
     for (const name of await fs.readdir(this.directory)) {
-      if (!name.endsWith(".json")) continue;
-      const file = path.join(this.directory, name);
-      if (name.startsWith(THREAD_ROUTE_PREFIX)) {
-        const record = await readRecord(file, routeSchema);
-        if (record !== null && (await this.isLive(record, enrolled))) {
-          this.routes.set(this.key(record, record.hostTokenDigest), record);
-          this.tokenIndex.set(digest(record.token), record);
-        } else await fs.rm(file, { force: true });
-      } else if (name.startsWith(NESTED_ROUTE_PREFIX)) {
-        const record = await readRecord(file, nestedRouteSchema);
-        if (record !== null && (await this.isLive(record, enrolled))) {
-          this.nestedRoutes.set(
-            this.nestedKey(record, record.hostTokenDigest),
-            record,
-          );
-          this.nestedTokenIndex.set(digest(record.token), record);
-        } else await fs.rm(file, { force: true });
-      }
+      await this.loadFile(name, enrolled).catch(() => undefined);
+    }
+  }
+
+  private async loadFile(
+    name: string,
+    enrolled: ReadonlySet<string>,
+  ): Promise<void> {
+    if (!name.endsWith(".json")) return;
+    const file = path.join(this.directory, name);
+    if (name.startsWith(THREAD_ROUTE_PREFIX)) {
+      const record = await readRecord(file, routeSchema);
+      if (record !== null && (await this.isLive(record, enrolled))) {
+        this.routes.set(this.key(record, record.hostTokenDigest), record);
+        this.tokenIndex.set(digest(record.token), record);
+      } else await fs.rm(file, { force: true });
+    } else if (name.startsWith(NESTED_ROUTE_PREFIX)) {
+      const record = await readRecord(file, nestedRouteSchema);
+      if (record !== null && (await this.isLive(record, enrolled))) {
+        this.nestedRoutes.set(
+          this.nestedKey(record, record.hostTokenDigest),
+          record,
+        );
+        this.nestedTokenIndex.set(digest(record.token), record);
+      } else await fs.rm(file, { force: true });
     }
   }
 
