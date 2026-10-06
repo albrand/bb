@@ -157,7 +157,7 @@ function seedStreamedHistory(
           ? [backgroundTask("item/started", `task-${i}`, turnId)]
           : []),
         ...(options.backgroundTasks && i % 7 === 3
-          ? [backgroundTask("item/backgroundTask/progress", `task-${i}`, turnId)]
+          ? [backgroundTask("item/backgroundTask/progress", `task-${i}`)]
           : []),
         delta(turnId, "Answer"),
         delta(turnId, ` ${i}`),
