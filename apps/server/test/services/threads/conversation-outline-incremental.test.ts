@@ -9,11 +9,14 @@ import {
   noopNotifier,
   getLatestStoredConversationOutlineSequence,
   getLatestThreadSequence,
+  listStoredConversationOutlineEventRows,
 } from "@bb/db";
 import {
   buildThreadConversationOutline,
   loadThreadConversationOutline,
+  toThreadEventWithMeta,
 } from "../../../src/services/threads/timeline.js";
+import { projectConversationOutlineIncrementally } from "../../../src/services/threads/conversation-outline-cache.js";
 import {
   appendRows,
   withTestThread,
@@ -102,7 +105,11 @@ function accepted(requestId: string, turnId: string): RowSpec {
   };
 }
 
-function seed(testThread: TestThread, count = 3): void {
+function seed(
+  testThread: TestThread,
+  count = 3,
+  nestedWork?: RowSpec,
+): void {
   appendRows(
     testThread,
     Array.from({ length: count }, (_, i) => {
@@ -113,6 +120,7 @@ function seed(testThread: TestThread, count = 3): void {
         started(turnId),
         accepted(requestId, turnId),
         message(turnId, `Answer ${i}`),
+        ...(i === 0 && nestedWork !== undefined ? [nestedWork] : []),
         completed(turnId),
       ];
     }).flat(),
@@ -210,6 +218,48 @@ function countSelectedEventRows(
     raw.prepare = originalPrepare;
   }
   return count;
+}
+
+function expectCheckpointFallbackForTailEvent(tailEvent: RowSpec): void {
+  withTestThread((testThread) => {
+    seed(testThread, 100, parentCall("turn-0", "historical-call"));
+    const sequenceStarts: number[] = [];
+    const project = () =>
+      projectConversationOutlineIncrementally({
+        db: testThread.db,
+        threadId: testThread.thread.id,
+        key: "checkpoint-parent-reference",
+        maxSeq: getLatestThreadSequence(testThread.db, {
+          threadId: testThread.thread.id,
+        }),
+        contextBoundarySeq: 0,
+        orderingBoundarySequence: null,
+        resolveProjectionState: () => ({
+          includeNestedEvents: true,
+          summaryCompactionEnabled: false,
+        }),
+        select: (sequenceStart) => {
+          sequenceStarts.push(sequenceStart);
+          const rows = listStoredConversationOutlineEventRows(testThread.db, {
+            sequenceStart,
+            threadId: testThread.thread.id,
+          });
+          return {
+            events: rows.map(toThreadEventWithMeta),
+            project: () => [],
+          };
+        },
+      });
+
+    project();
+    sequenceStarts.length = 0;
+    appendRows(testThread, [tailEvent]);
+
+    project();
+
+    expect(sequenceStarts).toEqual([502, 0]);
+    expectMatchesFull(testThread);
+  });
 }
 
 describe("incremental conversation outlines", () => {
@@ -463,6 +513,147 @@ describe("incremental conversation outlines", () => {
         expect(count).toBeLessThan(20);
         expectMatchesFull(testThread);
       }
+    });
+  });
+
+  it("reuses a completed prefix after nested history and a live-tail update", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      testThread.db.$client
+        .prepare(
+          "UPDATE events SET parent_tool_call_id = ?, data = json_set(data, '$.item.parentToolCallId', ?) WHERE thread_id = ? AND sequence = 4",
+        )
+        .run(
+          "historical-parent",
+          "historical-parent",
+          testThread.thread.id,
+        );
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [delta("live", " continuation")]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBe(3);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("rebuilds when a new nested item points into the completed prefix", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100, parentCall("turn-0", "historical-call"));
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        {
+          type: "item/completed",
+          turnId: "live",
+          itemId: "message-child",
+          itemKind: "agentMessage",
+          parentToolCallId: "historical-call",
+          data: {
+            item: {
+              id: "message-child",
+              type: "agentMessage",
+              text: "Nested continuation",
+              parentToolCallId: "historical-call",
+            },
+          },
+        },
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("invalidates a checkpoint when a tail event references a checkpointed item", () => {
+    expectCheckpointFallbackForTailEvent({
+      type: "item/completed",
+      turnId: "live",
+      itemId: "message-child",
+      itemKind: "agentMessage",
+      parentToolCallId: "historical-call",
+      data: {
+        item: {
+          id: "message-child",
+          type: "agentMessage",
+          text: "Nested continuation",
+          parentToolCallId: "historical-call",
+        },
+      },
+    });
+  });
+
+  it("invalidates a checkpoint when a tail tool call reuses a completed item id", () => {
+    expectCheckpointFallbackForTailEvent({
+      type: "item/started",
+      turnId: "live",
+      itemId: "historical-call",
+      itemKind: "toolCall",
+      data: {
+        item: {
+          id: "historical-call",
+          type: "toolCall",
+          tool: "Agent",
+          arguments: {},
+          status: "pending",
+        },
+      },
+    });
+  });
+
+  it("rebuilds when a late nested update targets an item in the completed prefix", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100, {
+        type: "item/backgroundTask/progress",
+        providerThreadId: "provider-memo",
+        itemId: "workflow-task",
+        itemKind: "backgroundTask",
+        data: {
+          item: {
+            id: "workflow-task",
+            type: "backgroundTask",
+            taskType: "local_workflow",
+            description: "Complete workflow",
+            status: "pending",
+            taskStatus: "pending",
+            skipTranscript: false,
+          },
+        },
+      });
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        {
+          type: "item/backgroundTask/completed",
+          providerThreadId: "provider-memo",
+          itemId: "workflow-task",
+          itemKind: "backgroundTask",
+          data: {
+            item: {
+              id: "workflow-task",
+              type: "backgroundTask",
+              taskType: "local_workflow",
+              description: "Complete workflow",
+              status: "completed",
+              taskStatus: "completed",
+              skipTranscript: false,
+              summary: "Workflow finished",
+            },
+          },
+        },
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
     });
   });
 
