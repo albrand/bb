@@ -9122,11 +9122,7 @@ describe("Account Pool subscription sign-in repair", () => {
           return error instanceof Error ? error.message : String(error);
         },
       );
-    for (
-      let turn = 0;
-      turn < 100 && log.length === contestedFrom;
-      turn += 1
-    ) {
+    for (let turn = 0; turn < 100 && log.length === contestedFrom; turn += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
     expect(log.slice(contestedFrom)).toEqual(["queued behind held write"]);
@@ -9349,6 +9345,7 @@ describe("Account Pool subscription sign-in repair", () => {
 
   it("signs in again to an expired Codex subscription only as the same ChatGPT account", async () => {
     const identity = { accountId: "chatgpt-account-1" };
+    let now = 1_800_000_000_000;
     const auth = await startUpstream(async (request, response) => {
       await readRequestBody(request);
       response.setHeader("content-type", "application/json");
@@ -9399,6 +9396,7 @@ describe("Account Pool subscription sign-in repair", () => {
       sdk: sdkStubs(),
     });
     await createAccountPoolPlugin({
+      now: () => now,
       codexAuthBaseUrl: auth.url,
       codexUsageUrl: EMPTY_USAGE_URL,
       usageUrl: "data:application/json,{}",
@@ -9411,16 +9409,17 @@ describe("Account Pool subscription sign-in repair", () => {
       const started = codexLoginStartSchema.parse(
         await host.harness.behavior.callRpc("codexLogin.start", target),
       );
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, started.intervalMs));
-        const polled = codexLoginPollSchema.parse(
-          await host.harness.behavior.callRpc("codexLogin.poll", {
-            sessionId: started.sessionId,
-          }),
-        );
-        if (polled.status !== "pending") return polled;
-      }
-      throw new Error("Codex sign-in stayed pending.");
+      expect(
+        await host.harness.behavior.callRpc("codexLogin.poll", {
+          sessionId: started.sessionId,
+        }),
+      ).toEqual({ status: "pending" });
+      now += started.intervalMs;
+      return codexLoginPollSchema.parse(
+        await host.harness.behavior.callRpc("codexLogin.poll", {
+          sessionId: started.sessionId,
+        }),
+      );
     };
     const added = await signIn(null);
     if (added.status !== "complete") throw new Error("Codex login failed.");

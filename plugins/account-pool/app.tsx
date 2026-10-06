@@ -444,7 +444,7 @@ function SubscriptionRow({
             <Input
               autoFocus
               aria-label="Subscription name"
-              className="h-7 min-w-0 flex-1 basis-48 @[40rem]:max-w-80 pointer-coarse:h-11"
+              className="h-7 min-w-0 flex-1 basis-48 @[40rem]:max-w-80 pointer-coarse:h-11 pointer-coarse:min-h-11"
               value={draft}
               onFocus={(event) => event.currentTarget.select()}
               onChange={(event) => setDraft(event.target.value)}
@@ -1011,7 +1011,8 @@ function ConfigFieldRow({
     <div
       className={cn(
         "flex items-start justify-between gap-4 py-2.5",
-        control === "field" && "flex-col gap-2 @[28rem]:flex-row @[28rem]:gap-4",
+        control === "field" &&
+          "flex-col gap-2 @[28rem]:flex-row @[28rem]:gap-4",
       )}
     >
       <div className="min-w-0">
@@ -2116,7 +2117,9 @@ function AccountDialog({
         {account.email === null ? null : (
           <>
             <dt className="text-muted-foreground">Email</dt>
-            <dd className="break-all">{account.email}</dd>
+            <dd className="min-w-0 truncate" title={account.email}>
+              {account.email}
+            </dd>
           </>
         )}
         <dt className="text-muted-foreground">Kind</dt>

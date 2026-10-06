@@ -4,6 +4,7 @@ import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { usePortalScopeProps } from "@bb/shared-ui/lib/portal-scope";
+import { readWindowFindTopOffset } from "@/lib/bb-desktop";
 
 interface ComposerPopupHostProps {
   open: boolean;
@@ -85,7 +86,10 @@ function ComposerPopupContent({
     const position = () => {
       const anchor = composer.getBoundingClientRect();
       const left = viewport?.offsetLeft ?? 0;
-      const top = (viewport?.offsetTop ?? 0) + (compact ? 56 : 0) + 8;
+      const top =
+        (viewport?.offsetTop ?? 0) +
+        Math.max(compact ? 56 : 0, readWindowFindTopOffset()) +
+        8;
       const right = left + (viewport?.width ?? window.innerWidth) - 8;
       const bottom =
         (viewport?.offsetTop ?? 0) +
