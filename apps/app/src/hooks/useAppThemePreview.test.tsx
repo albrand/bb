@@ -2,20 +2,28 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultResolvedCodeTheme, type AppTheme } from "@bb/domain";
-import { applyAppThemeCss, clearAppThemePreview } from "@/lib/themes";
+import { applyAppThemeCss, clearAppThemePreview } from "@/lib/app-theme-css";
 import { useAppThemePreview } from "./useAppThemePreview";
 
-const resolveMock = vi.hoisted(() => vi.fn());
+const mocks = vi.hoisted(() => ({
+  resolveTheme: vi.fn(),
+  resolveThemeCss: vi.fn(),
+}));
 
 vi.mock("@/lib/sdk", () => ({
-  sdk: { theme: { resolve: resolveMock } },
+  sdk: { theme: { resolve: mocks.resolveTheme } },
+}));
+
+vi.mock("@/lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/themes")>()),
+  resolveAppThemeCss: mocks.resolveThemeCss,
 }));
 
 const COMMITTED = ":root { --canvas: white; }";
 
-function customTheme(themeId: string, customCss: string): AppTheme {
+function customTheme(themeId: string, customCss: string | null): AppTheme {
   return {
     themeId,
     customCss,
@@ -48,6 +56,12 @@ function renderPreviewHook() {
   return renderHook(() => useAppThemePreview(), { wrapper });
 }
 
+beforeEach(() => {
+  mocks.resolveThemeCss.mockImplementation((theme: AppTheme) =>
+    Promise.resolve(theme.customCss ?? ""),
+  );
+});
+
 async function flush() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -58,19 +72,20 @@ afterEach(() => {
   cleanup();
   clearAppThemePreview();
   applyAppThemeCss("");
-  resolveMock.mockReset();
+  mocks.resolveTheme.mockReset();
+  mocks.resolveThemeCss.mockReset();
 });
 
 describe("useAppThemePreview", () => {
   it("previews a resolved theme and restores the committed one on clear", async () => {
     applyAppThemeCss(COMMITTED);
-    resolveMock.mockResolvedValue(customTheme("mine", ".mine {}"));
+    mocks.resolveTheme.mockResolvedValue(customTheme("mine", ".mine {}"));
     const { result } = renderPreviewHook();
 
     act(() => result.current.previewTheme("mine"));
     await flush();
     expect(styleText()).toBe(".mine {}");
-    expect(resolveMock).toHaveBeenCalledWith(
+    expect(mocks.resolveTheme).toHaveBeenCalledWith(
       expect.objectContaining({ themeId: "mine" }),
     );
 
@@ -81,7 +96,7 @@ describe("useAppThemePreview", () => {
   it("ignores a resolution that lands after the pointer left", async () => {
     applyAppThemeCss(COMMITTED);
     const slow = deferred<AppTheme>();
-    resolveMock.mockReturnValue(slow.promise);
+    mocks.resolveTheme.mockReturnValue(slow.promise);
     const { result } = renderPreviewHook();
 
     act(() => result.current.previewTheme("slow"));
@@ -96,7 +111,7 @@ describe("useAppThemePreview", () => {
     applyAppThemeCss(COMMITTED);
     const first = deferred<AppTheme>();
     const second = deferred<AppTheme>();
-    resolveMock
+    mocks.resolveTheme
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
     const { result } = renderPreviewHook();
@@ -113,7 +128,7 @@ describe("useAppThemePreview", () => {
 
   it("serves repeat hovers from the query cache and retries after a failure", async () => {
     applyAppThemeCss(COMMITTED);
-    resolveMock
+    mocks.resolveTheme
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValue(customTheme("mine", ".mine {}"));
     const { result } = renderPreviewHook();
@@ -129,30 +144,30 @@ describe("useAppThemePreview", () => {
     act(() => result.current.previewTheme(null));
     act(() => result.current.previewTheme("mine"));
     await flush();
-    expect(resolveMock).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveTheme).toHaveBeenCalledTimes(2);
     expect(styleText()).toBe(".mine {}");
   });
 
   it("prefetches palettes so the first hover applies from the query cache", async () => {
     applyAppThemeCss(COMMITTED);
-    resolveMock.mockImplementation(({ themeId }: { themeId: string }) =>
+    mocks.resolveTheme.mockImplementation(({ themeId }: { themeId: string }) =>
       Promise.resolve(customTheme(themeId, `.${themeId} {}`)),
     );
     const { result } = renderPreviewHook();
 
     act(() => result.current.prefetchThemes(["one", "two"]));
     await flush();
-    expect(resolveMock).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveTheme).toHaveBeenCalledTimes(2);
 
     act(() => result.current.previewTheme("two"));
     await flush();
     expect(styleText()).toBe(".two {}");
-    expect(resolveMock).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveTheme).toHaveBeenCalledTimes(2);
   });
 
   it("clears the preview when the owner unmounts", async () => {
     applyAppThemeCss(COMMITTED);
-    resolveMock.mockResolvedValue(customTheme("mine", ".mine {}"));
+    mocks.resolveTheme.mockResolvedValue(customTheme("mine", ".mine {}"));
     const { result, unmount } = renderPreviewHook();
 
     act(() => result.current.previewTheme("mine"));
@@ -160,6 +175,24 @@ describe("useAppThemePreview", () => {
     expect(styleText()).toBe(".mine {}");
 
     unmount();
+    expect(styleText()).toBe(COMMITTED);
+  });
+
+  it("ignores a theme stylesheet that resolves after the preview is cleared", async () => {
+    applyAppThemeCss(COMMITTED);
+    const css = deferred<string>();
+    mocks.resolveTheme.mockResolvedValue(customTheme("conductor", null));
+    mocks.resolveThemeCss.mockReturnValueOnce(css.promise);
+    const { result } = renderPreviewHook();
+
+    act(() => result.current.previewTheme("conductor"));
+    await flush();
+    expect(mocks.resolveThemeCss).toHaveBeenCalledOnce();
+
+    act(() => result.current.previewTheme(null));
+    css.resolve(".conductor {}");
+    await flush();
+
     expect(styleText()).toBe(COMMITTED);
   });
 });

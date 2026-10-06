@@ -11,60 +11,80 @@ const VENDORED_FONT_FAMILIES: Record<string, string> = {
   "Geist Mono Variable": "@fontsource-variable/geist-mono",
 };
 
-function cssFor(themeId: string): string {
+async function cssFor(themeId: string): Promise<string> {
   return resolveAppThemeCss({ ...defaultAppTheme, themeId });
 }
 
 describe("built-in themes", () => {
-  it("every registered id has a stylesheet and a menu entry", () => {
+  it("every registered id has a stylesheet and a menu entry", async () => {
     for (const id of BUILTIN_THEME_IDS) {
-      expect(typeof cssFor(id), id).toBe("string");
-      expect(builtInThemes.some((theme) => theme.id === id), id).toBe(true);
+      expect(typeof (await cssFor(id)), id).toBe("string");
+      expect(
+        builtInThemes.some((theme) => theme.id === id),
+        id,
+      ).toBe(true);
     }
-    expect(cssFor("conductor")).toContain("--canvas: #151110");
-    expect(cssFor("conductor-black")).toContain("--canvas: #000000");
+    expect(await cssFor("conductor")).toContain("--canvas: #151110");
+    expect(await cssFor("conductor-black")).toContain("--canvas: #000000");
   });
 
-  it("never reaches the network: no @import, no url(), no scheme in any stylesheet", () => {
+  it("never reaches the network: no @import, no url(), no scheme in any stylesheet", async () => {
     for (const id of BUILTIN_THEME_IDS) {
-      const css = cssFor(id);
+      const css = await cssFor(id);
       expect(css, id).not.toMatch(/@import/u);
       expect(css, id).not.toMatch(/url\(/iu);
       expect(css, id).not.toMatch(/https?:\/\/(?!github\.com\/bottlebrushes)/u);
     }
   });
 
-  it("never paints a fill with the surface it sits on: muted, secondary and recessed differ from card and popover", () => {
+  it("never paints a fill with the surface it sits on: muted, secondary and recessed differ from card and popover", async () => {
     const blocks = (css: string) =>
-      [...css.matchAll(/(?::root,\s*\.light|\.dark)\s*\{([^}]*)\}/gu)].map((m) => m[1]);
+      [...css.matchAll(/(?::root,\s*\.light|\.dark)\s*\{([^}]*)\}/gu)].map(
+        (m) => m[1],
+      );
     const read = (block: string, token: string) =>
-      block.match(new RegExp(`--${token}:\\s*([^;]+);`, "u"))?.[1].trim() ?? null;
+      block.match(new RegExp(`--${token}:\\s*([^;]+);`, "u"))?.[1].trim() ??
+      null;
     for (const id of BUILTIN_THEME_IDS) {
-      for (const block of blocks(cssFor(id))) {
+      for (const block of blocks(await cssFor(id))) {
         for (const surface of ["card", "popover"]) {
           const surfaceValue = read(block, surface);
           if (surfaceValue === null) continue;
-          for (const fill of ["muted", "secondary", "surface-recessed", "surface-recessed-solid", "surface-selected"]) {
+          for (const fill of [
+            "muted",
+            "secondary",
+            "surface-recessed",
+            "surface-recessed-solid",
+            "surface-selected",
+          ]) {
             const fillValue = read(block, fill);
             if (fillValue === null) continue;
-            expect(fillValue, `${id}: --${fill} equals --${surface}`).not.toBe(surfaceValue);
+            expect(fillValue, `${id}: --${fill} equals --${surface}`).not.toBe(
+              surfaceValue,
+            );
           }
         }
       }
     }
   });
 
-  it("names only font families the app bundles, and app.css imports each of them", () => {
+  it("names only font families the app bundles, and app.css imports each of them", async () => {
     const appCss = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
     for (const id of ["conductor", "conductor-black"]) {
-      const quoted = [...cssFor(id).matchAll(/--font-(?:sans|mono):\s*([^;]+);/gu)]
-        .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/gu)].map((m) => m[1]))
+      const quoted = [
+        ...(await cssFor(id)).matchAll(/--font-(?:sans|mono):\s*([^;]+);/gu),
+      ]
+        .flatMap((match) =>
+          [...match[1].matchAll(/"([^"]+)"/gu)].map((m) => m[1]),
+        )
         .filter((family) => family.includes("Variable"));
       expect(quoted.length, id).toBeGreaterThan(0);
       for (const family of quoted) {
         const pkg = VENDORED_FONT_FAMILIES[family];
         expect(pkg, `${id}: ${family} is not a vendored family`).toBeDefined();
-        expect(appCss, `${family} must be imported in app.css`).toContain(`@import "${pkg}";`);
+        expect(appCss, `${family} must be imported in app.css`).toContain(
+          `@import "${pkg}";`,
+        );
       }
     }
   });

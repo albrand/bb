@@ -233,6 +233,8 @@
       "ThreadPage",
       "NewThreadPage"
     ],
+    "src/lib/themes/conductor.ts": ["boot"],
+    "src/lib/themes/conductor-black.ts": ["boot"],
     "src/components/dialogs/ProjectPathDialog.tsx": [
       "boot",
       "ThreadPage",

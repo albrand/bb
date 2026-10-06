@@ -36,7 +36,7 @@ import {
 } from "./plugin-thread-row-status";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { PLUGIN_PANEL_ROUTE_PATH } from "./route-paths";
-import { applyAppThemeCss } from "./themes";
+import { applyAppThemeCss } from "./app-theme-css";
 import { PluginPanelView } from "@/views/PluginPanelView";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
 
