@@ -542,6 +542,7 @@ function ThreadDetailViewInternal(
     isFetching,
     isLoadingError,
     error,
+    refetch: refetchThread,
   } = useThread(threadId, {
     enabled: hasThreadDetailBootstrapSettled,
     refetchOnMount: didThreadDetailBootstrapRefreshAfterMount(
@@ -647,10 +648,13 @@ function ThreadDetailViewInternal(
   const toggleDefaultPersistedSecondaryPanel =
     useToggleThreadSecondaryPanelSelection(threadId, threadId);
   const threadQueryState = useConnectionAwareQueryState({
+    enabled: hasThreadDetailBootstrapSettled,
     hasResolvedData: thread !== undefined,
     isFetching: threadDetailBootstrapQuery.isFetching || isFetching,
     isLoadingError,
     isRecoverableLoadingError: isTransientReadError(error),
+    refetch: refetchThread,
+    retryKey: threadId,
   });
   const threadOriginKind = thread?.originKind ?? null;
   const isSideChatThread =

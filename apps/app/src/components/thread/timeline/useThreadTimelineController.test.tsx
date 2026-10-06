@@ -39,6 +39,7 @@ import { BbHttpError, sdk } from "@/lib/sdk";
 import { appToast } from "@/components/ui/app-toast";
 import { OPTIMISTIC_TIMELINE_ROW_ID_PREFIX } from "@bb/client-core";
 import { threadTimelineQueryKey } from "@/hooks/queries/query-keys";
+import { RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS } from "@/hooks/queries/connection-aware-query-state";
 import {
   hasThreadTimelineUnseenEvents,
   markThreadTimelineUnseenEvents,
@@ -1364,6 +1365,61 @@ describe("useThreadTimelineController commits", () => {
     await waitFor(() => {
       expect(view.latest().timelineLoading).toBe(true);
     });
+  });
+
+  it("refetches an uncached timeline after its transient retries run out while connected", async () => {
+    const networkFailure = new TypeError("Failed to fetch");
+    vi.mocked(sdk.threads.timeline)
+      .mockRejectedValueOnce(networkFailure)
+      .mockRejectedValueOnce(networkFailure)
+      .mockRejectedValueOnce(networkFailure)
+      .mockResolvedValueOnce(
+        makeTimelineResponse({ rows: [newestLoadedRow], maxSeq: 1 }),
+      );
+    const { wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => useThreadTimelineController({ threadId: "thread-1" }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(sdk.threads.timeline).toHaveBeenCalledTimes(3);
+    });
+    expect(result.current.timelineLoading).toBe(true);
+    expect(result.current.timelineError).toBeNull();
+
+    await waitFor(
+      () => {
+        expect(rowIds(result.current)).toEqual([newestLoadedRow.id]);
+      },
+      { timeout: RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 4 },
+    );
+    expect(sdk.threads.timeline).toHaveBeenCalledTimes(4);
+    expect(result.current.timelineLoading).toBe(false);
+  });
+
+  it("does not refetch a failed timeline while its pane is hidden", async () => {
+    vi.mocked(sdk.threads.timeline).mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    );
+    const { wrapper } = createQueryClientTestHarness();
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useThreadTimelineController({ enabled, threadId: "thread-1" }),
+      { initialProps: { enabled: true }, wrapper },
+    );
+
+    await waitFor(() => {
+      expect(sdk.threads.timeline).toHaveBeenCalledTimes(3);
+    });
+    rerender({ enabled: false });
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 1.5),
+      );
+    });
+
+    expect(sdk.threads.timeline).toHaveBeenCalledTimes(3);
   });
 
   it("reads only query result properties covered by the notify lists", async () => {
