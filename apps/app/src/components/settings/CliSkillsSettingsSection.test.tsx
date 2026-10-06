@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
+import type { Host } from "@bb/domain";
+import { makeHost } from "@bb/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CliSkillsSettingsSectionContent,
+  getCliSkillsStatusItems,
   getCliSkillsPresentation,
   summarizeMachineStatuses,
 } from "./CliSkillsSettingsSection";
@@ -11,6 +14,16 @@ import {
 afterEach(() => {
   cleanup();
 });
+
+function host(id: string, name: string): Host {
+  return makeHost({
+    id,
+    name,
+    lastSeenAt: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  });
+}
 
 function installButton(): HTMLButtonElement {
   const button = screen.getByRole("button", { name: /bb CLI skills/ });
@@ -340,6 +353,57 @@ describe("getCliSkillsPresentation", () => {
         "Installed in ~/.agents/skills and ~/.claude/skills on every connected machine with a reported status; status unavailable on Unknown box; disconnected machines: Studio.",
       ),
     ).toBeDefined();
+  });
+
+  it("shows a connected host missing from the response as unavailable", () => {
+    const statusItems = getCliSkillsStatusItems(
+      [host("host-laptop", "Laptop"), host("host-studio", "Studio")],
+      {
+        machines: [
+          { hostId: "host-laptop", hostName: "Laptop", status: "installed" },
+        ],
+      },
+    );
+    const presentation = getCliSkillsPresentation(statusItems);
+
+    expect(presentation).toEqual({
+      action: "reinstall",
+      statusBadge: "Installed; status unavailable on Studio",
+    });
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge={presentation.statusBadge}
+        action={presentation.action}
+      />,
+    );
+
+    expect(installButton().textContent).toBe("Reinstall");
+    expect(
+      screen.getByText(
+        "Installed in ~/.agents/skills and ~/.claude/skills on every connected machine with a reported status; status unavailable on Studio.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("ignores cached statuses after a status query error", () => {
+    const statusItems = getCliSkillsStatusItems(
+      [host("host-laptop", "Laptop"), host("host-studio", "Studio")],
+      {
+        machines: [
+          { hostId: "host-laptop", hostName: "Laptop", status: "installed" },
+          { hostId: "host-studio", hostName: "Studio", status: "installed" },
+        ],
+      },
+      true,
+    );
+
+    expect(getCliSkillsPresentation(statusItems)).toEqual({
+      action: "install",
+      statusBadge: "Status unavailable on Laptop, Studio",
+    });
   });
 
   it("keeps first-install copy when no machine has the skills or the status is unknown", () => {

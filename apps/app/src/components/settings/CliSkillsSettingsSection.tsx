@@ -147,6 +147,27 @@ export function summarizeMachineStatuses(
   return `Not installed${unknownSummary}${offlineSummary}`;
 }
 
+export function getCliSkillsStatusItems(
+  hosts: readonly Host[],
+  status: SystemCliSkillsStatusResponse | undefined,
+  statusUnavailable = false,
+): CliSkillStatusItem[] {
+  const reported = new Map(
+    (statusUnavailable ? [] : (status?.machines ?? [])).map((machine) => [
+      machine.hostId,
+      machine,
+    ]),
+  );
+  return hosts.map((host) => {
+    const machine = reported.get(host.id);
+    return {
+      name: machine?.hostName ?? host.name,
+      status: machine?.status ?? "unknown",
+      connected: host.status === "connected",
+    };
+  });
+}
+
 export function getCliSkillsPresentation(
   statuses: readonly CliSkillStatusItem[],
   hasConnectedMachine = true,
@@ -261,12 +282,11 @@ export function CliSkillsSettingsSection() {
     [hostsQuery.data],
   );
   const statuses = statusByHostId(statusQuery.data);
-  const statusItems = statusQuery.data?.machines.map((machine) => ({
-    name: machine.hostName,
-    status: machine.status,
-    connected:
-      hosts.find((host) => host.id === machine.hostId)?.status === "connected",
-  })) ?? [];
+  const statusItems = getCliSkillsStatusItems(
+    hosts,
+    statusQuery.data,
+    statusQuery.isError,
+  );
   const hasConnectedMachine = hosts.some((host) => host.status === "connected");
   const { action, actionLabel, statusBadge } =
     getCliSkillsPresentation(statusItems, hasConnectedMachine);
@@ -288,6 +308,7 @@ export function CliSkillsSettingsSection() {
         statusByHostId={statuses}
         action={action}
         statusLoading={statusQuery.isPending}
+        statusUnavailable={statusQuery.isError}
         pending={installCliSkills.isPending}
         onCancel={() => setPickerOpen(false)}
         onInstall={(hostIds) =>

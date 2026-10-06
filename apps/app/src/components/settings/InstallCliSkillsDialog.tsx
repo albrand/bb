@@ -21,6 +21,7 @@ interface InstallCliSkillsDialogContentProps {
   onInstall: (hostIds: string[]) => void;
   pending: boolean;
   statusLoading?: boolean;
+  statusUnavailable?: boolean;
   statusByHostId: ReadonlyMap<string, CliSkillMachineStatus>;
 }
 
@@ -38,9 +39,14 @@ function isConnected(host: Host): boolean {
 function machineStatusLabel(args: {
   connected: boolean;
   status: CliSkillMachineStatus | undefined;
+  statusUnavailable: boolean;
 }): string | null {
   if (!args.connected) return "Disconnected";
-  if (args.status === undefined || args.status === "unknown") {
+  if (
+    args.statusUnavailable ||
+    args.status === undefined ||
+    args.status === "unknown"
+  ) {
     return "Status unavailable";
   }
   return MACHINE_STATUS_LABELS[args.status];
@@ -53,6 +59,7 @@ function InstallCliSkillsDialogContent({
   onInstall,
   pending,
   statusLoading = false,
+  statusUnavailable = false,
   statusByHostId,
 }: InstallCliSkillsDialogContentProps) {
   const connectedHostIds = useMemo(
@@ -65,14 +72,16 @@ function InstallCliSkillsDialogContent({
   const missingHostIds = connectedHostIds.filter(
     (hostId) => statusByHostId.get(hostId) === "missing",
   );
-  const targetHostIds = connectedHostIds.filter((hostId) => {
+  const targetHostIds = statusUnavailable
+    ? []
+    : connectedHostIds.filter((hostId) => {
     const status = statusByHostId.get(hostId);
     if (action === "update") {
       return status === "outdated" || status === "missing";
     }
     if (action === "reinstall") return status === "installed";
     return status === "missing";
-  });
+      });
   const targetHostIdsKey = JSON.stringify([
     action,
     connectedHostIds,
@@ -104,7 +113,9 @@ function InstallCliSkillsDialogContent({
         <DialogDescription>
           {statusLoading
             ? "Checking machine statuses before choosing where to install the bb CLI skills."
-            : targetHostIds.length === 0 && connectedHostIds.length > 0
+            : statusUnavailable
+              ? "Could not confirm machine status. Try again before installing the bb CLI skills."
+              : targetHostIds.length === 0 && connectedHostIds.length > 0
               ? "No connected machine has a confirmed status that can be installed to. Try again when machine status is available."
               : choosable
             ? action === "update"
@@ -131,6 +142,7 @@ function InstallCliSkillsDialogContent({
             const statusLabel = machineStatusLabel({
               connected,
               status: statusByHostId.get(host.id),
+              statusUnavailable,
             });
             return (
               <label
@@ -142,6 +154,7 @@ function InstallCliSkillsDialogContent({
                   disabled={
                     !connected ||
                     pending ||
+                    statusUnavailable ||
                     (action === "install" &&
                       statusByHostId.get(host.id) !== "missing") ||
                     (action === "reinstall" &&
@@ -192,7 +205,9 @@ function InstallCliSkillsDialogContent({
         <Button
           type="button"
           variant={action === "reinstall" ? "secondary" : "default"}
-          disabled={statusLoading || pending || selected.length === 0}
+          disabled={
+            statusLoading || statusUnavailable || pending || selected.length === 0
+          }
           onClick={() => onInstall([...selected])}
         >
           {pending

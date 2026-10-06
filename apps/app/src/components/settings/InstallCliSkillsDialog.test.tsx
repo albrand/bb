@@ -188,6 +188,39 @@ describe("InstallCliSkillsDialog", () => {
     expect(onInstall).not.toHaveBeenCalled();
   });
 
+  it("does not let cached statuses authorize targets after a query error", () => {
+    const onInstall = vi.fn();
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts.slice(0, 2)}
+        statusByHostId={new Map([
+          ["host-laptop", "installed"],
+          ["host-studio", "installed"],
+        ])}
+        action="reinstall"
+        statusUnavailable={true}
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(screen.getAllByText("Status unavailable")).toHaveLength(2);
+    expect(
+      screen.getByText(
+        "Could not confirm machine status. Try again before installing the bb CLI skills.",
+      ),
+    ).toBeDefined();
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
+    const reinstall = screen.getByRole("button", { name: "Reinstall" });
+    expect(reinstall.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(reinstall);
+    expect(onInstall).not.toHaveBeenCalled();
+  });
+
   it("blocks submission until partial statuses load, then targets only missing machines", () => {
     const onInstall = vi.fn();
     const { rerender } = render(
