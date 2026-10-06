@@ -385,11 +385,13 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
 
 export function repairThreadTurnSpendFromStoredEvents(
   db: DbConnection,
-  args: { providerId: string; threadId: string },
+  args: {
+    completedTurnIds: ReadonlySet<string>;
+    providerId: string;
+    threadId: string;
+  },
 ): void {
-  const completedTurnIds = new Set(
-    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
-  );
+  const { completedTurnIds } = args;
   const repairedTurnIds = new Set(
     db.$client
       .prepare<[string], { turnId: string }>(

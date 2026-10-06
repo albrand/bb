@@ -471,7 +471,13 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
   get(routes.spendSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureSpendTables(deps.db);
+    const completedTurnIds = new Set(
+      listCompletedTurnsByThreadIds(deps.db, [thread.id]).map(
+        (turn) => turn.turnId,
+      ),
+    );
     repairThreadTurnSpendFromStoredEvents(deps.db, {
+      completedTurnIds,
       providerId: thread.providerId,
       threadId: thread.id,
     });
@@ -479,12 +485,12 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     const recordedTurns = listThreadTurnSpend(deps.db, { threadId: thread.id });
     const recordedTurnIds = new Set(recordedTurns.map((turn) => turn.turnId));
     const unavailableTurns = new Map(
-      listCompletedTurnsByThreadIds(deps.db, [thread.id])
-        .filter((turn) => !recordedTurnIds.has(turn.turnId))
-        .map((turn) => [
-          turn.turnId,
+      [...completedTurnIds]
+        .filter((turnId) => !recordedTurnIds.has(turnId))
+        .map((turnId) => [
+          turnId,
           {
-            turnId: turn.turnId,
+            turnId,
             inputTokens: null,
             cachedInputTokens: null,
             outputTokens: null,
