@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -9,7 +11,12 @@ import {
   type ReactNode,
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { DropdownMenu, DropdownMenuContent } from "@bb/shared-ui/dropdown-menu";
+
+const CompactLongPressMenuSurface = lazy(() =>
+  import("./compact-long-press-menu-surface").then((module) => ({
+    default: module.CompactLongPressMenuSurface,
+  })),
+);
 
 const LONG_PRESS_MS = 700;
 const LONG_PRESS_MOVE_SLOP_PX = 10;
@@ -192,21 +199,18 @@ export function CompactLongPressMenu({
         {children}
       </Slot>
       {hasOpened ? (
-        <DropdownMenu open={open} onOpenChange={handleOpenChange}>
-          <DropdownMenuContent
-            mobileTitle={label}
-            aria-label={label}
-            onPointerDownCapture={() => {
+        <Suspense fallback={null}>
+          <CompactLongPressMenuSurface
+            open={open}
+            label={label}
+            items={items}
+            onOpenChange={handleOpenChange}
+            onClearSuppressedClick={() => {
               suppressClickRef.current = false;
             }}
             onClickCapture={handleClickCapture}
-            onKeyDownCapture={() => {
-              suppressClickRef.current = false;
-            }}
-          >
-            {items}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          />
+        </Suspense>
       ) : null}
     </>
   );

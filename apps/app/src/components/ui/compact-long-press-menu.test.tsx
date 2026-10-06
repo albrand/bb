@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
@@ -87,7 +88,7 @@ describe("CompactLongPressMenu", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it("mounts nothing for the menu until a long press, then opens the drawer without a modal takeover", () => {
+  it("mounts nothing for the menu until a long press, then opens the drawer without a modal takeover", async () => {
     vi.useFakeTimers();
     const { row, onOpenChange } = renderRow();
 
@@ -107,7 +108,10 @@ describe("CompactLongPressMenu", () => {
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    vi.useRealTimers();
+    expect(
+      await screen.findByRole("menuitem", { name: "Rename" }),
+    ).toBeTruthy();
 
     const root = document.getElementById("root");
     expect(root?.getAttribute("aria-hidden")).toBeNull();
@@ -131,14 +135,14 @@ describe("CompactLongPressMenu", () => {
     expect(onRowClick).toHaveBeenCalledTimes(1);
   });
 
-  it("ignores the opening release on a menu item but allows a new tap", () => {
+  it("ignores the opening release on a menu item but allows a new tap", async () => {
     vi.useFakeTimers();
     const { row, onRename } = renderRow();
     touchPointerDown(row);
     act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
     act(() => vi.advanceTimersByTime(500));
-    const item = screen.getByRole("menuitem", { name: "Rename" });
-    act(() => vi.advanceTimersByTime(2000));
+    vi.useRealTimers();
+    const item = await screen.findByRole("menuitem", { name: "Rename" });
     fireEvent.click(item);
     expect(onRename).not.toHaveBeenCalled();
     touchPointerDown(item);
@@ -146,15 +150,19 @@ describe("CompactLongPressMenu", () => {
     expect(onRename).toHaveBeenCalledOnce();
   });
 
-  it("ignores the opening release on the drawer backdrop but allows a fresh tap to dismiss", () => {
+  it("ignores the opening release on the drawer backdrop but allows a fresh tap to dismiss", async () => {
     vi.useFakeTimers();
     const { row, onOpenChange } = renderRow();
     touchPointerDown(row);
     act(() => vi.advanceTimersByTime(LONG_PRESS_MS + 500));
-    const backdrop = document.querySelector(
-      "[data-persistent-drawer-backdrop][data-state='open']",
-    );
-    expect(backdrop).not.toBeNull();
+    vi.useRealTimers();
+    const backdrop = await waitFor(() => {
+      const element = document.querySelector(
+        "[data-persistent-drawer-backdrop][data-state='open']",
+      );
+      expect(element).not.toBeNull();
+      return element as Element;
+    });
     fireEvent.click(backdrop!);
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
 
