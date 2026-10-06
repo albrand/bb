@@ -1157,6 +1157,7 @@ describe("slow query index plans", () => {
       thread.id,
       0,
       "client/turn/requested",
+      "client/turn/rejected",
       "turn/input/accepted",
       "turn/started",
       "turn/completed",

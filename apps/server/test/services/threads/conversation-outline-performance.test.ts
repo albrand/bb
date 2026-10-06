@@ -266,9 +266,10 @@ describe("thread conversation outline performance", () => {
     const eventSelectQueries = queries.filter((query) =>
       query.sql.includes('"events"."type" in'),
     );
-    expect(eventSelectQueries).toHaveLength(1);
-    expect(eventSelectQueries[0]?.sql).toContain('"events"."type" in');
-    expect(eventSelectQueries[0]?.sql).not.toContain('"events"."type" not in');
+    expect(eventSelectQueries).toHaveLength(2);
+    for (const query of eventSelectQueries) {
+      expect(query.sql).not.toContain('"events"."type" not in');
+    }
     db.$client.close();
   });
 

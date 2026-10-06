@@ -177,7 +177,6 @@ function canReuse(
 function nextCheckpoint(
   projection: ConversationOutlineProjection,
   previous: Checkpoint,
-  orderingBoundarySequence: number | null,
   backgroundTaskSpans: readonly SequenceSpan[],
 ): Checkpoint {
   const activeTurns = new Set<string>();
@@ -202,8 +201,6 @@ function nextCheckpoint(
     if (event.type === "turn/started") {
       if (
         activeTurns.size === 0 &&
-        (orderingBoundarySequence === null ||
-          completedBoundary <= orderingBoundarySequence) &&
         isOutsideSpans(backgroundTaskSpans, completedBoundary)
       )
         boundary = completedBoundary;
@@ -276,7 +273,6 @@ export function projectConversationOutlineIncrementally(args: {
   key: string;
   maxSeq: number;
   contextBoundarySeq: number;
-  orderingBoundarySequence: number | null;
   resolveProjectionState: (
     sequenceStart: number,
     previous: ConversationOutlineProjectionState | null,
@@ -316,8 +312,6 @@ export function projectConversationOutlineIncrementally(args: {
     entry.dataVersion === dataVersion &&
     entry.generation === generation &&
     entry.contextBoundarySeq === args.contextBoundarySeq &&
-    (args.orderingBoundarySequence === null ||
-      entry.checkpoint.sequenceStart <= args.orderingBoundarySequence) &&
     entry.maxSeq <= args.maxSeq;
   const previousState = canReuseEntry ? entry.projectionState : null;
   const projectionState = args.resolveProjectionState(
@@ -365,7 +359,6 @@ export function projectConversationOutlineIncrementally(args: {
   const next = nextCheckpoint(
     projection,
     checkpoint,
-    args.orderingBoundarySequence,
     projection.events.some(({ event }) => backgroundTaskItemId(event) !== null)
       ? mergeBackgroundTaskSpans(
           listConversationOutlineBackgroundTaskSpans(args.db, {
@@ -385,10 +378,7 @@ export function projectConversationOutlineIncrementally(args: {
             ...next.requestIds,
             ...next.parentItemIds,
             ...next.backgroundItemIds,
-          ].reduce(
-            (sum, id) => sum + id.length,
-            0,
-          );
+          ].reduce((sum, id) => sum + id.length, 0);
     if (chars <= MAX_CHARS) {
       cache.entries.set(args.threadId, {
         agentMessageDeltaCount,

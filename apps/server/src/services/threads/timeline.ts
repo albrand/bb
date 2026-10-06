@@ -1632,7 +1632,7 @@ interface LoadThreadConversationOutlineOptions extends BuildThreadConversationOu
 }
 
 const CONVERSATION_OUTLINE_PREVIEW_MAX_LENGTH = 200;
-const CONVERSATION_OUTLINE_PROJECTION_VERSION = 2;
+const CONVERSATION_OUTLINE_PROJECTION_VERSION = 3;
 const conversationOutlineItemsSchema =
   threadConversationOutlineItemSchema.array();
 
@@ -1750,6 +1750,7 @@ function selectThreadConversationOutline(
   options: BuildThreadConversationOutlineOptions,
   sequenceStart: number,
   precedingAgentMessageDeltaCount: number,
+  orderingBoundarySequence: number | null,
   rootProjection: { summaryCompactionEnabled: boolean } | null,
 ): ConversationOutlineSelection {
   const selectRows =
@@ -1803,7 +1804,10 @@ function selectThreadConversationOutline(
         },
       });
       const items: ReturnType<ConversationOutlineSelection["project"]> = [];
-      for (const row of timeline.rows) {
+      for (const row of orderTimelineRowsUsingContext(
+        timeline.rows,
+        orderingBoundarySequence,
+      )) {
         if (row.kind !== "conversation") {
           continue;
         }
@@ -1836,12 +1840,18 @@ export function buildThreadConversationOutline(
         atOrBeforeSequence: options.maxSeq,
         threadId: thread.id,
       }) ?? 0;
+    const { orderingBoundarySequence } = getTimelineGroupingContext(db, {
+      maxSeq: options.maxSeq,
+      sequenceStart,
+      threadId: thread.id,
+    });
     const selection = selectThreadConversationOutline(
       db,
       thread,
       options,
       sequenceStart,
       0,
+      orderingBoundarySequence,
       null,
     );
     return {
@@ -1900,6 +1910,20 @@ export function buildThreadConversationOutlineProjectionKey(
   ]);
 }
 
+function buildThreadConversationOutlineCheckpointKey(
+  thread: Thread,
+  options: BuildThreadConversationOutlineOptions,
+): string {
+  return JSON.stringify([
+    CONVERSATION_OUTLINE_PROJECTION_VERSION,
+    thread.providerId,
+    options.providerDisplayName ?? null,
+    thread.title,
+    thread.titleFallback,
+    options.completedTurnDisplay,
+  ]);
+}
+
 function parseThreadConversationOutlineItems(
   itemsJson: string,
 ): ThreadConversationOutlineItem[] | null {
@@ -1952,10 +1976,9 @@ export function loadThreadConversationOutline(
         items: projectConversationOutlineIncrementally({
           db,
           threadId: thread.id,
-          key: buildThreadConversationOutlineProjectionKey(thread, 0, options),
+          key: buildThreadConversationOutlineCheckpointKey(thread, options),
           maxSeq: options.maxSeq,
           contextBoundarySeq,
-          orderingBoundarySequence,
           resolveProjectionState: (classificationSequenceStart, previous) => {
             const state = getStoredConversationOutlineProjectionState(db, {
               threadId: thread.id,
@@ -1979,6 +2002,7 @@ export function loadThreadConversationOutline(
               options,
               sequenceStart,
               precedingAgentMessageDeltaCount,
+              orderingBoundarySequence,
               state.includeNestedEvents
                 ? null
                 : { summaryCompactionEnabled: state.summaryCompactionEnabled },

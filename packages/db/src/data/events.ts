@@ -2657,6 +2657,7 @@ export function findLastRootStoredTurnStarted(
 
 const conversationOutlineLifecycleTypes = [
   "client/turn/requested",
+  "client/turn/rejected",
   "turn/input/accepted",
   "turn/started",
   "turn/completed",
