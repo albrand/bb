@@ -109,6 +109,9 @@ function Harness() {
 
 async function openDialog() {
   fireEvent.click(screen.getByRole("button", { name: "Search prompts" }));
+  await act(async () => {
+    await import("./PromptHistorySearchBody");
+  });
   await screen.findByRole("option");
 }
 
@@ -125,6 +128,7 @@ afterAll(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.copy.mockReset();
 });
 
 describe("PromptHistorySearchDialog", () => {
