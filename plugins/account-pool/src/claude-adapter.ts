@@ -55,6 +55,9 @@ export function createClaudeAdapter(options: {
   return {
     provider: "claude",
     upstreamName: "Anthropic",
+    async localPlanLabel() {
+      return null;
+    },
     async importAccount() {
       const imported = await (
         options.importCredentials ?? importClaudeCredentials

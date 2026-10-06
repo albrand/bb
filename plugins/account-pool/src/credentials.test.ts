@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { chatgptPlanLabel } from "./codex-adapter.js";
 import {
   parseClaudeAccountIdentity,
   parseCodexCredentials,
@@ -34,7 +35,35 @@ describe("Codex credential import", () => {
       accountId: "account-123",
       email: "codex@example.com",
       expiresAt: expiresAtSeconds * 1_000,
+      planType: null,
     });
+  });
+
+  it("reads the ChatGPT plan from the ID token, else the access token", () => {
+    const parse = (claims: { id?: object; access?: object }) =>
+      parseCodexCredentials(
+        JSON.stringify({
+          tokens: {
+            access_token: token({ exp: 2_000_000_000, ...claims.access }),
+            refresh_token: "refresh-token",
+            account_id: "account-123",
+            id_token: token({ ...claims.id }),
+          },
+        }),
+      ).planType;
+    const plan = (value: unknown) => ({
+      "https://api.openai.com/auth": { chatgpt_plan_type: value },
+    });
+    expect(parse({ id: plan("pro"), access: plan("plus") })).toBe("pro");
+    expect(parse({ access: plan("plus") })).toBe("plus");
+    expect(parse({ id: plan(7) })).toBeNull();
+    expect(parse({})).toBeNull();
+    expect(chatgptPlanLabel("pro")).toBe("ChatGPT Pro");
+    expect(chatgptPlanLabel("PLUS")).toBe("ChatGPT Plus");
+    expect(chatgptPlanLabel("edu")).toBe("ChatGPT Education");
+    expect(chatgptPlanLabel("prolite")).toBe("ChatGPT Prolite");
+    expect(chatgptPlanLabel(" ")).toBeNull();
+    expect(chatgptPlanLabel(null)).toBeNull();
   });
 
   it("rejects credentials that cannot identify the ChatGPT account", () => {

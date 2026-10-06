@@ -2,6 +2,7 @@ import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
   accountAddInputSchema,
+  accountDisableSubscriptionInputSchema,
   accountPoolConfigSchema,
   accountPoolConfigSetInputSchema,
   accountIdInputSchema,
@@ -68,7 +69,7 @@ export const accountPoolRpcContract = defineRpcContract({
     output: z.object({ account: accountSchema.nullable() }).strict(),
   },
   "account.disableSubscription": {
-    input: accountIdInputSchema,
+    input: accountDisableSubscriptionInputSchema,
     output: z.object({ accounts: z.array(accountSchema).nullable() }).strict(),
   },
   "account.setPriority": {
@@ -200,8 +201,8 @@ export function createRpcHandlers(
     "account.disable": async ({ id }) => ({
       account: await operations.disable(id),
     }),
-    "account.disableSubscription": async ({ id }) => ({
-      accounts: await operations.disableSubscription(id),
+    "account.disableSubscription": async ({ id, expectedIds }) => ({
+      accounts: await operations.disableSubscription(id, expectedIds),
     }),
     "account.setPriority": async ({ accountId, priority }) => ({
       account: await operations.setPriority(accountId, priority),

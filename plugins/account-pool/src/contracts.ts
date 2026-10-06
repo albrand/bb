@@ -457,6 +457,13 @@ export const accountIdInputSchema = z
   .object({ id: z.string().uuid() })
   .strict();
 
+export const accountDisableSubscriptionInputSchema = z
+  .object({
+    id: z.string().uuid(),
+    expectedIds: z.array(z.string().uuid()).optional(),
+  })
+  .strict();
+
 export const accountRenameInputSchema = z
   .object({ id: z.string().uuid(), label: z.string().trim().min(1).max(120) })
   .strict();

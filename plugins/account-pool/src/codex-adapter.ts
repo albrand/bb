@@ -383,6 +383,24 @@ export function codexQuotaFromUsage(
   };
 }
 
+const CHATGPT_PLANS: Record<string, string> = {
+  free: "Free",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro",
+  team: "Team",
+  business: "Business",
+  education: "Education",
+  edu: "Education",
+  enterprise: "Enterprise",
+};
+
+export function chatgptPlanLabel(plan: string | null): string | null {
+  const id = plan?.trim().toLowerCase() ?? "";
+  if (id === "") return null;
+  return `ChatGPT ${CHATGPT_PLANS[id] ?? id.charAt(0).toUpperCase() + id.slice(1)}`;
+}
+
 export function createCodexAdapter(options: {
   refreshUrl: string;
   usageUrl: string;
@@ -391,6 +409,12 @@ export function createCodexAdapter(options: {
   return {
     provider: "codex",
     upstreamName: "ChatGPT",
+    async localPlanLabel() {
+      const imported = await (
+        options.importCredentials ?? importCodexCredentials
+      )().catch(() => null);
+      return imported === null ? null : chatgptPlanLabel(imported.planType);
+    },
     async importAccount() {
       const imported = await (
         options.importCredentials ?? importCodexCredentials

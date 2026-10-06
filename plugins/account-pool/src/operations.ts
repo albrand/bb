@@ -372,6 +372,13 @@ export class PoolOperations {
       this.providerStates(null),
       this.accounts.list(),
     ]);
+    const codexPlan = states.some(
+      (state) =>
+        poolProviderFor(state.providerId) === "codex" &&
+        state.planLabel === null,
+    )
+      ? await this.hub.localPlanLabel("codex").catch(() => null)
+      : null;
     return states.flatMap((state): LocalLogin[] => {
       if (state.status !== "ready" && state.status !== "expired") return [];
       if (state.planLabel === "Proxied") return [];
@@ -391,7 +398,8 @@ export class PoolOperations {
           providerId: state.providerId,
           displayName: state.displayName,
           email: state.accountEmail,
-          planLabel: state.planLabel,
+          planLabel:
+            state.planLabel ?? (poolProvider === "codex" ? codexPlan : null),
           status: state.status,
           poolProvider,
         },
@@ -428,20 +436,33 @@ export class PoolOperations {
     return account;
   }
 
-  async disableSubscription(id: string): Promise<Account[] | null> {
+  async disableSubscription(
+    id: string,
+    expectedIds?: readonly string[],
+  ): Promise<Account[] | null> {
     const accounts = await this.accounts.list();
     if (!accounts.some((account) => account.id === id)) return null;
     const organizations = await this.accounts.organizations();
-    const members = subscriptionMembers(
+    const targets = subscriptionMembers(
       accounts.map((account) => ({
         ...account,
         organizationUuid: organizations.get(account.id) ?? null,
       })),
       id,
-    );
-    const disabled = await this.accounts.disableAll(
-      members.filter((account) => account.enabled).map(({ id }) => id),
-    );
+    )
+      .filter((account) => account.enabled)
+      .map((account) => account.id);
+    const expected = new Set(expectedIds);
+    if (
+      expectedIds !== undefined &&
+      (expected.size !== targets.length ||
+        targets.some((target) => !expected.has(target)))
+    ) {
+      throw new Error(
+        "The records of this subscription changed. Review the updated list; nothing was turned off.",
+      );
+    }
+    const disabled = await this.accounts.disableAll(targets);
     if (disabled.length > 0) this.onAccountsChanged();
     return disabled;
   }

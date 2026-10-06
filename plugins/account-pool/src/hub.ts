@@ -213,6 +213,10 @@ export class AccountPoolHub {
     return this.adapter(provider).importAccount();
   }
 
+  async localPlanLabel(provider: PoolProvider): Promise<string | null> {
+    return this.adapter(provider).localPlanLabel();
+  }
+
   async handle(
     request: Request,
     provider: PoolProvider,

@@ -69,6 +69,7 @@ export interface ImportedCodexCredentials {
   accountId: string;
   email: string | null;
   expiresAt: number | null;
+  planType: string | null;
 }
 
 function jwtPayload(token: string | null): JwtPayload | null {
@@ -131,6 +132,9 @@ export function parseCodexCredentials(raw: string): ImportedCodexCredentials {
     accountId,
     email,
     expiresAt,
+    planType:
+      nestedString(idPayload, CHATGPT_AUTH_CLAIM, "chatgpt_plan_type") ??
+      nestedString(accessPayload, CHATGPT_AUTH_CLAIM, "chatgpt_plan_type"),
   };
 }
 

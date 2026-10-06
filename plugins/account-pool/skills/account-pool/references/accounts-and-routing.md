@@ -109,7 +109,8 @@ accounts cannot sign in again. The RPCs are `login.start` and
 `codexLogin.start` with `{accountId}` instead of `null`.
 `bb pool account local` (RPC `local.logins`) lists the bb server host's own
 provider logins that are not in the pool, and which ones `add --import` can
-pool. A 401 or 403 on a
+pool. A Codex login's plan (such as ChatGPT Pro) comes from the
+`chatgpt_plan_type` claim of that login's tokens. A 401 or 403 on a
 freshly refreshed OAuth token is treated as an upstream failure instead: the
 request gets HTTP 503, and that token is held out of routing for one minute.
 Account tables add columns for observed model-family buckets; JSON status
@@ -173,6 +174,8 @@ cancels), a plan badge from the stored tier, and a state word. A row whose
 sign-in expired shows Sign in again instead of the switch. Its menu holds Usage
 details, Refresh usage, Set priority, Sign in again, and Remove, which asks for
 confirmation first. Below the pool, On this Mac lists `account local`.
+A provider with no record in the pool has no section; its Route threads switch
+(`bb pool routing <claude|codex> [--off]`) moves under Advanced.
 Records that share a login fold into one subscription: Claude records with the
 same email and organization (a record without an email joins the login with its
 account UUID), and Codex records with the same email and ChatGPT account. A plan change never
@@ -193,6 +196,10 @@ turning a subscription on enables only its representative.
 `bb pool account disable <id> --subscription` (RPC
 `account.disableSubscription`) does the same from the CLI and SDK; without
 `--subscription`, `account disable` and `account enable` act on one record.
+The RPC's optional `expectedIds` names the records the caller confirmed; when
+the subscription's enabled records differ by the time it runs, it refuses and
+turns nothing off. Settings pass the names shown in the dialog, then show the
+refusal and the updated list.
 `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.

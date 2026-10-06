@@ -510,6 +510,7 @@ async function createOAuthRequestFixture(
         refreshToken: "oauth-refresh",
         idToken: null,
         accountId: "chatgpt-account",
+        planType: null,
         email: "codex@example.com",
         expiresAt: now() + 60 * 60 * 1_000,
       }),
@@ -943,6 +944,7 @@ describe("Account Pool plugin", () => {
           refreshToken: `refresh-${imported}`,
           idToken: "id-token",
           accountId: `chatgpt-account-${imported}`,
+          planType: null,
           email: `codex-${imported}@example.com`,
           expiresAt: Date.now() - 1,
         };
@@ -1245,6 +1247,7 @@ describe("Account Pool plugin", () => {
         refreshToken: "refresh",
         idToken: null,
         accountId: "account",
+        planType: null,
         email: null,
         expiresAt: null,
       }),
@@ -4044,6 +4047,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "refresh",
             idToken: null,
             accountId: `codex-account-${imported}`,
+            planType: null,
             email: null,
             expiresAt: now() + 24 * 60 * 60 * 1_000,
           }),
@@ -5799,6 +5803,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "old-refresh",
             idToken: null,
             accountId: "chatgpt-account",
+            planType: null,
             email: "codex@example.com",
             expiresAt,
           }),
@@ -5983,6 +5988,7 @@ describe("Account Pool plugin", () => {
           refreshToken: "codex-refresh",
           idToken: "codex-id",
           accountId: "chatgpt-account",
+          planType: null,
           email: "codex@example.com",
           expiresAt: Date.now() + 60_000,
         }),
@@ -6114,6 +6120,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "oauth-refresh",
             idToken: null,
             accountId: "chatgpt-account",
+            planType: null,
             email: "codex@example.test",
             expiresAt: Date.now() + 3_600_000,
           }),
@@ -7245,6 +7252,7 @@ describe("sequential pool recovery", () => {
           refreshToken: "refresh",
           idToken: null,
           accountId: `review-codex-account-${imported}`,
+          planType: null,
           email: null,
           expiresAt: Date.now() + 24 * 60 * 60 * 1_000,
         }),
@@ -7336,6 +7344,7 @@ describe("sequential pool recovery", () => {
             expiresAt: Date.now() + 3600000,
             idToken: null,
             accountId: "codex-qa",
+            planType: null,
             email: null,
           }),
           fetch: async (input) => {
@@ -7387,6 +7396,7 @@ describe("sequential pool recovery", () => {
         expiresAt: now + 3600000,
         idToken: null,
         accountId: `codex-qa-${imports}`,
+        planType: null,
         email: null,
       }),
       fetch: async (input, init) => {
@@ -8606,7 +8616,10 @@ describe("Account Pool subscription sign-in repair", () => {
     },
   };
 
-  async function claudeLoginHost(profile: { current: object }) {
+  async function claudeLoginHost(
+    profile: { current: object },
+    codexLogin: ImportedCodexCredentials | null = null,
+  ) {
     let issued = 0;
     const oauth = await startUpstream(async (request, response) => {
       await readRequestBody(request);
@@ -8641,6 +8654,11 @@ describe("Account Pool subscription sign-in repair", () => {
       oauthTokenUrl: `${oauth.url}/token`,
       oauthProfileUrl: `${oauth.url}/profile`,
       usageUrl: "data:application/json,{}",
+      importCodexCredentials: async () => {
+        if (codexLogin === null)
+          throw new Error("No Codex login on this test host.");
+        return codexLogin;
+      },
     })(host.bb);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
@@ -8965,6 +8983,51 @@ describe("Account Pool subscription sign-in repair", () => {
     ).toEqual(protectedBefore);
   });
 
+  it("refuses a stale subscription turn off that would disable a record it never named", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    const named = [pool.principal.id, twin.id];
+    await pool.host.harness.behavior.callRpc("account.enable", {
+      id: pool.previous.id,
+    });
+    const enabled = async () =>
+      (await pool.list()).map(({ id, enabled }) => ({ id, enabled }));
+    const before = await enabled();
+    expect(before).toEqual([
+      { id: pool.principal.id, enabled: true },
+      { id: pool.previous.id, enabled: true },
+      { id: twin.id, enabled: true },
+    ]);
+
+    await expect(
+      pool.host.harness.behavior.callRpc("account.disableSubscription", {
+        id: pool.principal.id,
+        expectedIds: named,
+      }),
+    ).rejects.toThrow(
+      "The records of this subscription changed. Review the updated list; nothing was turned off.",
+    );
+    expect(await enabled()).toEqual(before);
+
+    const confirmed = z
+      .object({ accounts: z.array(accountSchema).nullable() })
+      .parse(
+        await pool.host.harness.behavior.callRpc(
+          "account.disableSubscription",
+          {
+            id: pool.principal.id,
+            expectedIds: [twin.id, pool.previous.id, pool.principal.id],
+          },
+        ),
+      );
+    expect(confirmed.accounts?.map(({ id }) => id)).toEqual([
+      pool.principal.id,
+      pool.previous.id,
+      twin.id,
+    ]);
+  });
+
   it("stores the organization of an imported Claude login", async () => {
     const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-import-org-"));
@@ -9256,7 +9319,18 @@ describe("Account Pool subscription sign-in repair", () => {
   });
 
   it("lists this Mac's own logins that are not in the pool", async () => {
-    const pool = await claudeLoginHost({ current: SHARED_LOGIN });
+    const pool = await claudeLoginHost(
+      { current: SHARED_LOGIN },
+      {
+        accessToken: "codex-access",
+        refreshToken: "codex-refresh",
+        idToken: null,
+        accountId: "chatgpt-account",
+        email: "codex@example.com",
+        expiresAt: null,
+        planType: "pro",
+      },
+    );
     await pool.signIn(null);
     pool.host.harness.sdk.stub("system.providerStates", async (input) => {
       expect(input).toEqual({});
@@ -9308,7 +9382,7 @@ describe("Account Pool subscription sign-in repair", () => {
         providerId: "codex",
         displayName: "Codex",
         email: "codex@example.com",
-        planLabel: null,
+        planLabel: "ChatGPT Pro",
         status: "ready",
         poolProvider: "codex",
       },
@@ -9324,6 +9398,9 @@ describe("Account Pool subscription sign-in repair", () => {
     const cli = await pool.host.harness.behavior.runCli(["account", "local"]);
     expect(cli.exitCode).toBe(0);
     expect(cli.stdout).toContain("pool account add --provider codex --import");
+    expect(cli.stdout).toContain(
+      "Codex\tChatGPT Pro\tready\tcodex@example.com",
+    );
     expect(cli.stdout).toContain(
       "Cursor\tPro\texpired\tcursor@example.com\tcan't be pooled",
     );

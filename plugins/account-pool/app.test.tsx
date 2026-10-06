@@ -919,10 +919,83 @@ describe("Account Pool settings", () => {
       expect(accountCalls()).toEqual([
         {
           method: "account.disableSubscription",
-          input: { id: "a1111111-1111-4111-8111-111111111111" },
+          input: {
+            id: "a1111111-1111-4111-8111-111111111111",
+            expectedIds: [
+              "b2222222-2222-4222-8222-222222222222",
+              "a1111111-1111-4111-8111-111111111111",
+            ],
+          },
         },
       ]),
     );
+  });
+
+  it("refuses a stale turn off, shows the updated list and turns off only what it named", async () => {
+    let accounts = foldedTwins(true);
+    const third = account({
+      id: "e5555555-5555-4555-8555-555555555555",
+      label: "Gmail third",
+      email: "twin@example.com",
+      lastUsedAt: 0,
+    });
+    let confirms = 0;
+    const slot = render(accounts, {
+      "status.get": () => status(accounts),
+      "account.disableSubscription": () => {
+        confirms += 1;
+        if (confirms > 1) return { accounts: [] };
+        accounts = [...accounts, third];
+        throw new Error(
+          "The records of this subscription changed. Review the updated list; nothing was turned off.",
+        );
+      },
+    });
+    fireEvent.click(
+      await slot.findByRole("switch", { name: "Use Gmail twin" }),
+    );
+    const dialog = await slot.findByRole("dialog", {
+      name: "Turn off Gmail twin?",
+    });
+    expect(dialog.textContent).toContain("Also on for this login: Gmail copy.");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Turn off all" }),
+    );
+    expect(
+      await within(dialog).findByText(
+        "The records of this subscription changed. Review the updated list; nothing was turned off.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(dialog.textContent).toContain(
+        "Also on for this login: Gmail copy, Gmail third.",
+      ),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Turn off all" }),
+    );
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    expect(
+      slot.rpcCalls
+        .filter((call) => call.method === "account.disableSubscription")
+        .map((call) => call.input),
+    ).toEqual([
+      {
+        id: "a1111111-1111-4111-8111-111111111111",
+        expectedIds: [
+          "b2222222-2222-4222-8222-222222222222",
+          "a1111111-1111-4111-8111-111111111111",
+        ],
+      },
+      {
+        id: "a1111111-1111-4111-8111-111111111111",
+        expectedIds: [
+          "b2222222-2222-4222-8222-222222222222",
+          "a1111111-1111-4111-8111-111111111111",
+          "e5555555-5555-4555-8555-555555555555",
+        ],
+      },
+    ]);
   });
 
   it("turns a subscription off without asking when its other enabled record can't send", async () => {
@@ -1310,6 +1383,106 @@ describe("Account Pool settings", () => {
     expect(
       within(dialog).queryByRole("textbox", { name: "Account label" }),
     ).toBeNull();
+  });
+
+  function renderOwnerPool() {
+    const gmail = "gmail.owner@example.com";
+    return render(
+      [
+        account({
+          id: "f5c490bc-0000-4000-8000-000000000000",
+          label: "Claude Max 20x (previous token, disabled)",
+          email: gmail,
+          rateLimitTier: "default_claude_max_20x",
+          enabled: false,
+          signInExpired: true,
+          status: "error",
+          error: "OAuth refresh failed with HTTP 400.",
+          priority: 1,
+          lastUsedAt: 1,
+        }),
+        account({
+          id: "567f46ec-0000-4000-8000-000000000000",
+          label: "Claude Max 20x (principal)",
+          email: gmail,
+          rateLimitTier: "default_claude_max_20x",
+          status: "exhausted",
+          sevenDayUtilization: 1,
+          priority: 1,
+          lastUsedAt: 5,
+        }),
+        account({
+          id: "6b45fa7d-0000-4000-8000-000000000000",
+          label: "Alexandre",
+          email: "icloud.owner@example.com",
+          accountUuid: "44444444-4444-4444-8444-444444444444",
+          active: true,
+          priority: 2,
+        }),
+      ],
+      {
+        "local.logins": () => [
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            email: "codex.owner@example.com",
+            planLabel: "ChatGPT Pro",
+            status: "ready",
+            poolProvider: "codex",
+          },
+        ],
+        "routing.set": () => ({ provider: "codex", enabled: false }),
+      },
+    );
+  }
+
+  it("shows the owner's two records of one Claude login as one subscription beside their other login", async () => {
+    const slot = renderOwnerPool();
+    await slot.findAllByText("Claude Max 20x (principal)");
+    expect(
+      slot.queryByText("Claude Max 20x (previous token, disabled)"),
+    ).toBeNull();
+    const claude = slot.getByRole("group", { name: "Claude subscriptions" });
+    expect(within(claude).getByText("2 subscriptions · 2 on")).toBeTruthy();
+    expect(
+      within(claude)
+        .getAllByRole("switch", { name: /^Use / })
+        .map((control) => control.getAttribute("aria-label")),
+    ).toEqual(["Use Claude Max 20x (principal)", "Use Alexandre"]);
+  });
+
+  it("shows the owner's own Codex login under On this Mac instead of an empty Codex pool section", async () => {
+    const slot = renderOwnerPool();
+    await slot.findAllByText("Claude Max 20x (principal)");
+    expect(slot.queryByText(/No accounts yet/)).toBeNull();
+    expect(
+      slot.queryByRole("switch", { name: "Route Codex threads" }),
+    ).toBeNull();
+    expect(
+      slot.queryByRole("group", { name: "Codex subscriptions" }),
+    ).toBeNull();
+    const mac = await slot.findByRole("group", { name: "On this Mac" });
+    expect(within(mac).getByText("Codex")).toBeTruthy();
+    expect(within(mac).getByText("ChatGPT Pro")).toBeTruthy();
+    expect(within(mac).getByText("Ready")).toBeTruthy();
+    expect(
+      within(mac).getByRole("button", {
+        name: "Add this Mac's Codex login to the pool",
+      }),
+    ).toBeTruthy();
+    fireEvent.click(slot.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(
+      await slot.findByRole("switch", { name: "Route Codex threads" }),
+    );
+    expect(
+      slot.getAllByRole("switch", { name: "Route Claude threads" }),
+    ).toHaveLength(1);
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "routing.set",
+        input: { provider: "codex", enabled: false },
+      }),
+    );
   });
 
   it("lists this Mac's own logins outside the pool and adds a poolable one", async () => {

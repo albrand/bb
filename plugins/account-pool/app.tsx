@@ -340,6 +340,8 @@ function turnOffCopy(
   account: AccountSummary,
   twins: readonly AccountSummary[],
 ): string {
+  if (twins.length === 0)
+    return `No other record of this login is on now, so this turns off ${account.label} only.`;
   const names = twins.map((twin) => twin.label).join(", ");
   const one = twins.length === 1;
   return `Also on for this login: ${names}. ${account.label} keeps sending through ${one ? "it" : "them"} unless ${one ? "it is" : "they are"} turned off too. ${one ? "It stays" : "They stay"} in the pool, and turning ${account.label} on again uses it only.`;
@@ -1318,6 +1320,7 @@ function AccountPoolSettings() {
       account.enabled &&
       enabledTwins(account).some((twin) => !twin.signInExpired)
     ) {
+      setError(null);
       setDialog({ kind: "turn-off", accountId: account.id });
       return;
     }
@@ -1596,6 +1599,37 @@ function AccountPoolSettings() {
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="divide-y divide-border border-t border-border">
+              {status === null
+                ? null
+                : PROVIDERS.filter(
+                    (provider) =>
+                      !accounts.some(
+                        (account) => account.provider === provider.id,
+                      ),
+                  ).map((provider) => (
+                    <ConfigFieldRow
+                      key={provider.id}
+                      label={`Route ${provider.title} threads`}
+                      description={`No ${provider.title} subscription is in the pool, so ${provider.title} threads use this Mac's own login. This applies once one is added.`}
+                      error={null}
+                    >
+                      <div className="flex justify-end">
+                        <Switch
+                          checked={status.routing[provider.id]}
+                          disabled={pending !== null}
+                          aria-label={`Route ${provider.title} threads`}
+                          onCheckedChange={(enabled) =>
+                            void run(`routing-${provider.id}`, async () => {
+                              await rpc.call("routing.set", {
+                                provider: provider.id,
+                                enabled,
+                              });
+                            })
+                          }
+                        />
+                      </div>
+                    </ConfigFieldRow>
+                  ))}
               <ConfigFieldRow
                 label="Anthropic upstream base URL"
                 description="QA override for Anthropic traffic."
@@ -1844,9 +1878,20 @@ function AccountPoolSettings() {
                   disabled={pending !== null}
                   onClick={() =>
                     void run(`toggle-${selectedAccount.id}`, async () => {
-                      await rpc.call("account.disableSubscription", {
-                        id: selectedAccount.id,
-                      });
+                      await rpc
+                        .call("account.disableSubscription", {
+                          id: selectedAccount.id,
+                          expectedIds: subscriptionMembers(
+                            accounts,
+                            selectedAccount.id,
+                          )
+                            .filter((member) => member.enabled)
+                            .map((member) => member.id),
+                        })
+                        .catch(async (stale: unknown) => {
+                          await refresh();
+                          throw stale;
+                        });
                       setDialog(null);
                     })
                   }
@@ -1859,6 +1904,11 @@ function AccountPoolSettings() {
             <p className="text-sm text-muted-foreground">
               {turnOffCopy(selectedAccount, enabledTwins(selectedAccount))}
             </p>
+            {error === null ? null : (
+              <p role="alert" className="text-sm text-destructive-text">
+                {error}
+              </p>
+            )}
           </DialogFrame>
         ) : null}
         {dialog?.kind === "claude-login" ? (

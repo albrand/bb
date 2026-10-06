@@ -91,6 +91,7 @@ export interface ProviderAdapter {
   provider: PoolProvider;
   upstreamName: string;
   importAccount(): Promise<ImportedProviderAccount>;
+  localPlanLabel(): Promise<string | null>;
   parseRequest(
     body: Uint8Array,
     headers: Headers,
