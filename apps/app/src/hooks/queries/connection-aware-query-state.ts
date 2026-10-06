@@ -117,7 +117,11 @@ function useRecoverableLoadingRetry({
   serverConnectionState: WebSocketConnectionState;
 }): void {
   const [retry, setRetry] = useState({ attempt: 0, key: retryKey });
-  if (retry.key !== retryKey || (hasResolvedData && retry.attempt !== 0)) {
+  if (
+    retry.key !== retryKey ||
+    (retry.attempt !== 0 &&
+      (hasResolvedData || serverConnectionState !== "connected"))
+  ) {
     setRetry({ attempt: 0, key: retryKey });
   }
   const isAwaitingRetry =

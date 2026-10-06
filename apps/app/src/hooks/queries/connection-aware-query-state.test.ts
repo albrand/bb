@@ -215,6 +215,23 @@ describe("useConnectionAwareQueryState retry", () => {
     expectNextRetryAfter(refetch, 1_000);
   });
 
+  it("restarts the backoff after the server reconnects", () => {
+    const { refetch, rerender } = renderRetry(awaitingRetry);
+    for (const delayMs of [
+      1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000, 120_000, 240_000,
+      300_000,
+    ]) {
+      expectNextRetryAfter(refetch, delayMs);
+    }
+
+    connection.state = "reconnecting";
+    rerender(awaitingRetry);
+    connection.state = "connected";
+    rerender(awaitingRetry);
+
+    expectNextRetryAfter(refetch, 1_000);
+  });
+
   it("does not retry after unmount", () => {
     const { refetch, unmount } = renderRetry(awaitingRetry);
     advance(500);
