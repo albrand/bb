@@ -126,7 +126,11 @@ export interface BindingPreview {
   boundAccountId: string | null;
   nextAccountId: string | null;
   reason: string;
-  headroom: Array<{ accountId: string; balance: AccountBalance }>;
+  headroom: Array<{
+    accountId: string;
+    balance: AccountBalance;
+    eligible: boolean;
+  }>;
 }
 
 export interface NextAccountPreview {
@@ -494,20 +498,24 @@ export class AccountPoolHub {
     const account =
       binding === null
         ? null
-        : status.find(
-            (candidate) =>
-              candidate.id === binding?.accountId &&
-              candidate.provider === "claude" &&
-              candidate.enabled &&
-              this.options.quotas.get(candidate.id).error === null &&
-              !isUsageRestricted(this.options.quotas.get(candidate.id), now) &&
-              !isQuotaExhausted(
-                this.options.quotas.get(candidate.id),
-                "other",
-                this.options.getSettings().switchThreshold,
-                now,
-              ),
-          );
+        : status.find((candidate) => {
+            if (
+              candidate.id !== binding?.accountId ||
+              candidate.provider !== "claude" ||
+              !candidate.enabled
+            )
+              return false;
+            const quota = this.options.quotas.get(candidate.id);
+            const threshold = this.options.getSettings().switchThreshold;
+            return (
+              quota.error === null &&
+              !isUsageRestricted(quota, now) &&
+              (!isSharedQuotaExhausted(quota, threshold, now) ||
+                hasExtraUsage(quota)) &&
+              (!isQuotaExhausted(quota, "other", threshold, now) ||
+                hasExtraUsage(quota))
+            );
+          });
     const headroom = preview.headroom;
     return {
       boundAccountId: account?.id ?? null,
@@ -519,14 +527,23 @@ export class AccountPoolHub {
 
   async nextAccountPreview(provider: PoolProvider): Promise<
     NextAccountPreview & {
-      headroom: Array<{ accountId: string; balance: AccountBalance }>;
+      headroom: Array<{
+        accountId: string;
+        balance: AccountBalance;
+        eligible: boolean;
+      }>;
     }
   > {
     const now = this.options.now();
     const threshold = this.options.getSettings().switchThreshold;
-    const accounts = (await this.options.accounts.list())
-      .filter((account) => account.provider === provider && account.enabled)
-      .map((account) => ({ account, quota: this.options.quotas.get(account.id) }))
+    const enabled = (await this.options.accounts.list()).filter(
+      (account) => account.provider === provider && account.enabled,
+    );
+    const available = enabled
+      .map((account) => ({
+        account,
+        quota: this.options.quotas.get(account.id),
+      }))
       .filter(
         ({ quota }) =>
           quota.error === null &&
@@ -534,7 +551,7 @@ export class AccountPoolHub {
           (!isSharedQuotaExhausted(quota, threshold, now) ||
             hasExtraUsage(quota)),
       );
-    let eligible = accounts.filter(
+    let eligible = available.filter(
       ({ quota }) =>
         !isQuotaExhausted(quota, "other", threshold, now) ||
         hasExtraUsage(quota),
@@ -542,7 +559,16 @@ export class AccountPoolHub {
     const included = eligible.filter(
       ({ quota }) => !isQuotaExhausted(quota, "other", threshold, now),
     );
-    if (included.length > 0) eligible = included;
+    if (
+      included.some(
+        ({ quota }) => quota.heldUntil === null || quota.heldUntil <= now,
+      )
+    )
+      eligible = included;
+    eligible = eligible.filter(
+      ({ quota }) => quota.heldUntil === null || quota.heldUntil <= now,
+    );
+    const eligibleIds = new Set(eligible.map(({ account }) => account.id));
     const choice = chooseBalancedCandidate(
       eligible,
       "other",
@@ -552,9 +578,10 @@ export class AccountPoolHub {
     return {
       nextAccountId: choice.candidate?.account.id ?? null,
       reason: choice.reason,
-      headroom: eligible.map(({ account, quota }) => ({
+      headroom: enabled.map((account) => ({
         accountId: account.id,
-        balance: accountBalance(quota, null, now),
+        balance: accountBalance(this.options.quotas.get(account.id), null, now),
+        eligible: eligibleIds.has(account.id),
       })),
     };
   }

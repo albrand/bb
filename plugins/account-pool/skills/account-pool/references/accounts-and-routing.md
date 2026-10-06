@@ -158,10 +158,16 @@ at the end of the provider's priority order unless an explicit priority is set.
 The Fleet binding RPCs are read-only. `routing.binding.get` takes
 `{threadId, provider: "claude"}` and returns `boundAccountId`, `nextAccountId`,
 `reason`, and per-account `headroom` entries with the binding window, headroom,
-reset recovery, and contributing windows. `routing.binding.next` takes
+reset recovery, contributing windows, and an `eligible` boolean. The list covers
+every enabled Claude account, including accounts at the quota threshold.
+`routing.binding.next` takes
 `{provider: "claude"}` and returns only `nextAccountId` and `reason`. Inputs
 reject extra fields and invalid thread IDs. Older cores return `unknown_method`
 for these methods.
+
+The Fleet preview currently evaluates model-neutral quota windows. A request
+family is not part of these RPC inputs, so a family-specific quota may change
+the account selected for an actual request.
 
 ## Nested bb servers
 

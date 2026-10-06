@@ -38,6 +38,18 @@ function makeWindow(args: {
     args.resetAt === null
   )
     return null;
+  if (args.resetAt !== null && args.resetAt <= args.now) {
+    return {
+      kind: args.kind,
+      key: args.key,
+      family: args.family,
+      utilization: 0,
+      headroom: 1,
+      resetAt: args.resetAt,
+      hoursUntilReset: 0,
+      resetRecoveryPerHour: null,
+    };
+  }
   const hoursUntilReset =
     args.resetAt === null
       ? null
@@ -138,16 +150,18 @@ export function accountBalance(
   };
 }
 
-function effectiveHeadroom(candidate: BalancedCandidate): number {
-  return candidate.balance.bindingHeadroom ?? 1;
-}
-
 function compareCandidates(
   left: BalancedCandidate,
   right: BalancedCandidate,
 ): number {
-  const headroomDifference = effectiveHeadroom(right) - effectiveHeadroom(left);
-  if (headroomDifference !== 0) return headroomDifference;
+  const leftHeadroom = left.balance.bindingHeadroom;
+  const rightHeadroom = right.balance.bindingHeadroom;
+  if (leftHeadroom === null && rightHeadroom !== null) return 1;
+  if (leftHeadroom !== null && rightHeadroom === null) return -1;
+  if (leftHeadroom !== null && rightHeadroom !== null) {
+    const headroomDifference = rightHeadroom - leftHeadroom;
+    if (headroomDifference !== 0) return headroomDifference;
+  }
   const recoveryDifference =
     (right.balance.resetRecoveryPerHour ?? -1) -
     (left.balance.resetRecoveryPerHour ?? -1);
@@ -163,14 +177,20 @@ function topReason(
   best: BalancedCandidate,
   runnerUp: BalancedCandidate | undefined,
 ): string {
+  if (best.balance.bindingHeadroom === null) {
+    if (runnerUp === undefined) return "priority tie-break";
+    if (
+      best.balance.resetRecoveryPerHour !==
+      runnerUp.balance.resetRecoveryPerHour
+    )
+      return "earliest reset";
+    return "priority tie-break";
+  }
   if (runnerUp === undefined) return "most headroom";
-  if (
-    effectiveHeadroom(best) !== effectiveHeadroom(runnerUp)
-  )
+  if (best.balance.bindingHeadroom !== runnerUp.balance.bindingHeadroom)
     return "most headroom";
   if (
-    best.balance.resetRecoveryPerHour !==
-    runnerUp.balance.resetRecoveryPerHour
+    best.balance.resetRecoveryPerHour !== runnerUp.balance.resetRecoveryPerHour
   )
     return "earliest reset";
   return "priority tie-break";
@@ -196,8 +216,10 @@ export function chooseBalancedCandidate(
   if (
     incumbent !== undefined &&
     incumbent.account.id !== best.account.id &&
-    effectiveHeadroom(best) - effectiveHeadroom(incumbent) <
-      BALANCING_HYSTERESIS
+    (best.balance.bindingHeadroom === null ||
+      (incumbent.balance.bindingHeadroom !== null &&
+        best.balance.bindingHeadroom - incumbent.balance.bindingHeadroom <
+          BALANCING_HYSTERESIS))
   ) {
     return { candidate: incumbent, reason: "hysteresis" };
   }

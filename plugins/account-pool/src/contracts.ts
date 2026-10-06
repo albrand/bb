@@ -132,7 +132,7 @@ export type LimitWindow = z.infer<typeof limitWindowSchema>;
 
 export const threadSelectionInputSchema = z
   .object({
-    threadId: z.string().regex(/^thr_[A-Za-z0-9_-]+$/u),
+    threadId: z.string().regex(/^thr_[A-Za-z0-9]+$/u),
     provider: providerSchema,
   })
   .strict();
@@ -286,6 +286,7 @@ export const routingBindingHeadroomSchema = z
   .object({
     accountId: z.string().uuid(),
     balance: accountBalanceSchema,
+    eligible: z.boolean(),
   })
   .strict();
 

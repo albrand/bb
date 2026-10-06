@@ -41,7 +41,7 @@ const DESCRIPTION = [
   "Automatic routing prefers the account with the most remaining headroom across its binding quota windows. Equal headroom prefers the account whose used quota resets faster, then lower priority. A 10-point headroom hysteresis keeps new conversations on the active account until another leads by at least 10 points.",
   "Conversation affinity stays on its account until that account becomes ineligible; explicit thread selections remain pinned.",
   "When this bb server runs inside another bb server's thread, parent proxy routes its pooled traffic through that parent; isolate neutralises the inherited routing.",
-  "Reorder includes every account for the provider and changes the next failover sequence; existing conversations stay pinned.",
+  "Reorder changes account priority, which breaks ties after quota headroom and reset recovery; existing conversations stay pinned.",
 ].join("\n");
 
 const JSON_OPTION = {

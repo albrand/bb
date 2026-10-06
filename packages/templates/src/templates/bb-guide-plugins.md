@@ -135,9 +135,15 @@ same fields are returned by the SDK `status.get` method.
 The Fleet binding RPCs are read-only. `routing.binding.get` takes
 `{threadId, provider: "claude"}` and returns `boundAccountId`, `nextAccountId`,
 `reason`, and per-account `headroom` entries with the binding window, headroom,
-reset recovery, and contributing windows. `routing.binding.next` takes
+reset recovery, contributing windows, and an `eligible` boolean. The list covers
+every enabled Claude account, including accounts at the quota threshold.
+`routing.binding.next` takes
 `{provider: "claude"}` and returns only `nextAccountId` and `reason`. Older
 cores return `unknown_method` for these methods.
+
+The Fleet preview currently evaluates model-neutral quota windows. A request
+family is not part of these RPC inputs, so a family-specific quota may change
+the account selected for an actual request.
 
 The builtin Keep Awake plugin prevents macOS idle sleep while bb is running.
 Its settings page lets you target all hosts or selected hosts. The CLI
