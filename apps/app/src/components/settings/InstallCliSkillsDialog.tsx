@@ -65,14 +65,18 @@ function InstallCliSkillsDialogContent({
     }
     return true;
   });
-  const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<
-    readonly string[] | null
-  >(null);
+  const targetHostIdsKey = targetHostIds.join("\0");
+  const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<{
+    targetsKey: string;
+    hostIds: readonly string[];
+  } | null>(null);
+  const selectedHostIds =
+    selectedHostIdsOverride?.targetsKey === targetHostIdsKey
+      ? selectedHostIdsOverride.hostIds
+      : targetHostIds;
   const choosable = hosts.length > 1;
   const selected = choosable
-    ? (selectedHostIdsOverride ?? targetHostIds).filter((hostId) =>
-        connectedHostIds.includes(hostId),
-      )
+    ? selectedHostIds.filter((hostId) => connectedHostIds.includes(hostId))
     : targetHostIds;
   const actionTitle =
     action === "update"
@@ -117,13 +121,25 @@ function InstallCliSkillsDialogContent({
               >
                 <Checkbox
                   checked={selected.includes(host.id)}
-                  disabled={!connected || pending}
+                  disabled={
+                    !connected ||
+                    pending ||
+                    (action === "update" &&
+                      statusByHostId.get(host.id) !== "outdated")
+                  }
                   onCheckedChange={(checked) =>
                     setSelectedHostIdsOverride((current) => {
-                      const selection = current ?? targetHostIds;
-                      return checked === true
-                        ? [...selection, host.id]
-                        : selection.filter((hostId) => hostId !== host.id);
+                      const selection =
+                        current?.targetsKey === targetHostIdsKey
+                          ? current.hostIds
+                          : targetHostIds;
+                      return {
+                        targetsKey: targetHostIdsKey,
+                        hostIds:
+                          checked === true
+                            ? [...selection, host.id]
+                            : selection.filter((hostId) => hostId !== host.id),
+                      };
                     })
                   }
                   aria-label={host.name}

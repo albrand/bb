@@ -192,6 +192,44 @@ describe("InstallCliSkillsDialog", () => {
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
   });
 
+  it("reselects only outdated machines after a pre-load choice", () => {
+    const onInstall = vi.fn();
+    const { rerender } = render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={new Map()}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    fireEvent.click(checkbox("Studio"));
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={statuses}
+        action="update"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
+  });
+
   it("replaces Update when its only outdated machine disconnects", () => {
     const { rerender } = render(
       <InstallCliSkillsDialog
