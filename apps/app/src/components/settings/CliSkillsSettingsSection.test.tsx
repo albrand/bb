@@ -58,6 +58,37 @@ describe("CliSkillsSettingsSectionContent", () => {
     ).toBeDefined();
   });
 
+  it("qualifies installed machines when another machine's status is unknown", () => {
+    const presentation = getCliSkillsPresentation([
+      { name: "Laptop", status: "installed" },
+      { name: "Old Studio", status: "unknown" },
+    ]);
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge={presentation.statusBadge}
+        action={presentation.action}
+      />,
+    );
+
+    expect(installButton().textContent).toBe("Reinstall");
+    expect(
+      screen.getByText("Installed; status unavailable on Old Studio"),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        "Installed in ~/.agents/skills and ~/.claude/skills on every machine with a reported status; status unavailable on Old Studio.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen.queryByText(
+        "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI.",
+      ),
+    ).toBeNull();
+  });
+
   it("counts remaining machines and gives outdated machines an update action", () => {
     const onOpenPicker = () => undefined;
     const { rerender } = render(
@@ -157,13 +188,13 @@ describe("summarizeMachineStatuses", () => {
     ).toBe("Installed on 2 machines");
   });
 
-  it("ignores machines it could not ask, and shows nothing if that is all of them", () => {
+  it("names machines it could not ask while reporting known machine status", () => {
     expect(
       summarizeMachineStatuses([
         { status: "installed", name: "Laptop" },
         { status: "unknown", name: "Studio" },
       ]),
-    ).toBe("Installed");
+    ).toBe("Installed; status unavailable on Studio");
     expect(
       summarizeMachineStatuses([
         { status: "unknown", name: "Laptop" },
@@ -184,7 +215,8 @@ describe("getCliSkillsPresentation", () => {
       ]),
     ).toEqual({
       action: "reinstall",
-      statusBadge: "Installed on 2 machines",
+      statusBadge:
+        "Installed on 2 machines; status unavailable on Unknown box",
     });
   });
 

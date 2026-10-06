@@ -38,10 +38,17 @@ function installDescription(
     return "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.";
   }
   if (action === "reinstall") {
-    return "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI.";
+    const unknownMachines = statusBadge?.split("; status unavailable on ")[1];
+    return unknownMachines === undefined
+      ? "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI."
+      : `Installed in ~/.agents/skills and ~/.claude/skills on every machine with a reported status; status unavailable on ${unknownMachines}.`;
   }
   if (action === "update") {
     return "Update the bb CLI skills in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version.";
+  }
+  const unknownMachines = statusBadge?.split("; status unavailable on ")[1];
+  if (statusBadge?.startsWith("Installed on ") && unknownMachines !== undefined) {
+    return `Install them into ~/.agents/skills and ~/.claude/skills on machines marked Not installed; status unavailable on ${unknownMachines}.`;
   }
   return statusBadge?.startsWith("Installed on ")
     ? "Install them into ~/.agents/skills and ~/.claude/skills on the remaining machines, so agents outside bb can use the bb CLI."
@@ -51,22 +58,27 @@ function installDescription(
 export function summarizeMachineStatuses(
   statuses: readonly { name: string; status: CliSkillMachineStatus }[],
 ): string | null {
+  const unknown = statuses.filter(({ status }) => status === "unknown");
+  const unknownSummary =
+    unknown.length === 0
+      ? ""
+      : `; status unavailable on ${unknown.map(({ name }) => name).join(", ")}`;
   const known = statuses.filter(({ status }) => status !== "unknown");
   if (known.length === 0) return null;
   const outdated = known.filter(({ status }) => status === "outdated");
   if (outdated.length > 0) {
-    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}`;
+    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${unknownSummary}`;
   }
   const installed = known.filter(({ status }) => status === "installed").length;
   if (installed === known.length) {
-    return known.length > 1
+    return `${known.length > 1
       ? `Installed on ${known.length} machines`
-      : "Installed";
+      : "Installed"}${unknownSummary}`;
   }
   if (installed > 0) {
-    return `Installed on ${installed} of ${known.length} machines`;
+    return `Installed on ${installed} of ${known.length} machines${unknownSummary}`;
   }
-  return "Not installed";
+  return `Not installed${unknownSummary}`;
 }
 
 export function getCliSkillsPresentation(
