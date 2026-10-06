@@ -766,6 +766,19 @@ function isApprovalInteraction(message: BridgeJsonRpcOutputMessage): boolean {
   return interactionPayload(message)?.kind === "approval";
 }
 
+async function waitForBridgeRequest(
+  bridge: BridgeJsonRpcTestHarness,
+  matches: (message: BridgeJsonRpcOutputMessage) => boolean,
+): Promise<BridgeJsonRpcOutputMessage> {
+  return vi.waitFor(() => {
+    const request = bridge.messages.find(matches);
+    if (request?.id === undefined) {
+      throw new Error("Expected bridge request");
+    }
+    return request;
+  });
+}
+
 function isUserQuestionInteraction(
   message: BridgeJsonRpcOutputMessage,
 ): boolean {
@@ -783,9 +796,7 @@ async function forwardAskUserQuestion({
     signal: new AbortController().signal,
     toolUseID,
   });
-  await bridge.flushWork();
-
-  const questionRequest = bridge.messages.find((message) =>
+  const questionRequest = await waitForBridgeRequest(bridge, (message) =>
     isUserQuestionInteraction(message),
   );
   if (questionRequest?.id === undefined) {
@@ -4982,9 +4993,7 @@ describe("bridge", () => {
           toolUseID,
         },
       );
-      await bridge.flushWork();
-
-      const permissionRequest = bridge.messages.find((message) =>
+      const permissionRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (permissionRequest?.id === undefined) {
@@ -5053,9 +5062,7 @@ describe("bridge", () => {
           toolUseID,
         },
       );
-      await bridge.flushWork();
-
-      const permissionRequest = bridge.messages.find((message) =>
+      const permissionRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (permissionRequest?.id === undefined) {
@@ -5126,8 +5133,7 @@ describe("bridge", () => {
           toolUseID: "tool-npm",
         },
       );
-      await bridge.flushWork();
-      const npmRequest = bridge.messages.find((message) =>
+      const npmRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (npmRequest?.id === undefined) {
@@ -5196,8 +5202,8 @@ describe("bridge", () => {
           toolUseID: "tool-python",
         },
       );
-      await bridge.flushWork();
-      const pythonRequest = bridge.messages.find(
+      const pythonRequest = await waitForBridgeRequest(
+        bridge,
         (message) =>
           isApprovalInteraction(message) && message.id !== npmRequest.id,
       );
@@ -5246,9 +5252,7 @@ describe("bridge", () => {
           toolUseID,
         },
       );
-      await bridge.flushWork();
-
-      const permissionRequest = bridge.messages.find((message) =>
+      const permissionRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (permissionRequest?.id === undefined) {
@@ -5304,8 +5308,7 @@ describe("bridge", () => {
           toolUseID: "tool-path-grant",
         },
       );
-      await bridge.flushWork();
-      const pathRequest = bridge.messages.find((message) =>
+      const pathRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (pathRequest?.id === undefined) {
@@ -5338,8 +5341,8 @@ describe("bridge", () => {
           toolUseID: "tool-escalation",
         },
       );
-      await bridge.flushWork();
-      const escalationRequest = bridge.messages.find(
+      const escalationRequest = await waitForBridgeRequest(
+        bridge,
         (message) =>
           isApprovalInteraction(message) && message.id !== pathRequest.id,
       );
@@ -5390,8 +5393,8 @@ describe("bridge", () => {
         { file_path: "/tmp/outside/notes.txt" },
         cachedRequestOptions,
       );
-      await bridge.flushWork();
-      const renewedRequest = bridge.messages.find(
+      const renewedRequest = await waitForBridgeRequest(
+        bridge,
         (message) =>
           isApprovalInteraction(message) &&
           message.id !== pathRequest.id &&
@@ -5711,9 +5714,7 @@ describe("bridge", () => {
         signal: new AbortController().signal,
         toolUseID,
       });
-      await bridge.flushWork();
-
-      const approvalRequest = bridge.messages.find((message) =>
+      const approvalRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (approvalRequest?.id === undefined) {
@@ -5887,8 +5888,7 @@ describe("bridge", () => {
             toolUseID: "tool-plan",
           },
         );
-        await bridge.flushWork();
-        const approvalRequest = bridge.messages.find((message) =>
+        const approvalRequest = await waitForBridgeRequest(bridge, (message) =>
           isApprovalInteraction(message),
         );
         if (approvalRequest?.id === undefined) {
@@ -6095,8 +6095,7 @@ describe("bridge", () => {
           toolUseID: "tool-plan",
         },
       );
-      await bridge.flushWork();
-      const approvalRequest = bridge.messages.find((message) =>
+      const approvalRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (approvalRequest?.id === undefined) {
@@ -6191,8 +6190,7 @@ describe("bridge", () => {
           toolUseID: "tool-plan",
         },
       );
-      await bridge.flushWork();
-      const approvalRequest = bridge.messages.find((message) =>
+      const approvalRequest = await waitForBridgeRequest(bridge, (message) =>
         isApprovalInteraction(message),
       );
       if (approvalRequest?.id === undefined) {
@@ -8031,9 +8029,8 @@ describe("bridge", () => {
           toolUseID: askToolUseId,
         },
       );
-      await bridge.flushWork();
-
-      const permissionRequest = bridge.messages.find(
+      const permissionRequest = await waitForBridgeRequest(
+        bridge,
         (message) =>
           isApprovalInteraction(message) &&
           isRecord(interactionPayload(message)?.subject) &&

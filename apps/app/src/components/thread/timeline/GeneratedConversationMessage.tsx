@@ -12,7 +12,6 @@ import type {
   PromptTextMention,
   SystemMessageKind,
   SystemMessageSubject,
-  ThreadOriginKind,
 } from "@bb/domain";
 import type { TimelineTitle, TimelineTitleSegment } from "@bb/thread-view";
 import { type IconName } from "@bb/shared-ui/icon";
@@ -60,7 +59,6 @@ interface AutomationLink {
 interface GeneratedConversationMessageProps {
   attachmentItems: ConversationAttachmentItems;
   automationLink: AutomationLink | null;
-  originKind: ThreadOriginKind | null;
   mentions: readonly PromptTextMention[];
   onOpenLink?: ThreadTimelineLinkHandler;
   onOpenLocalFileLink?: ThreadTimelineLocalFileLinkHandler;
@@ -115,7 +113,6 @@ interface TimelineTitleSegmentArgs {
 }
 
 interface GeneratedConversationTitleArgs {
-  originKind: ThreadOriginKind | null;
   sourceKind: GeneratedConversationSourceKind;
   sourceName: string;
   sourceThreadId: string | null;
@@ -280,7 +277,6 @@ function systemMessageTitleSegments(
 }
 
 export function generatedConversationTitle({
-  originKind,
   sourceKind,
   sourceName,
   sourceThreadId,
@@ -289,13 +285,7 @@ export function generatedConversationTitle({
   systemMessageSubject,
 }: GeneratedConversationTitleArgs): TimelineTitle {
   const agentLeadIn =
-    sourceKind === "agent-recipient"
-      ? "Sent to"
-      : sourceIsPluginSideChat
-        ? "Replying to"
-        : originKind === "fork"
-          ? "Forked from"
-          : "Message from";
+    sourceKind === "agent-recipient" ? "Sent to" : "Message from";
   const sideChatAction =
     sourceIsPluginSideChat && sourceThreadId !== null
       ? ({ kind: "open-plugin-side-chat", threadId: sourceThreadId } as const)
@@ -376,12 +366,8 @@ function systemMessageIconName(systemMessageKind: SystemMessageKind): IconName {
 
 function generatedConversationIconName(
   sourceKind: GeneratedConversationSourceKind,
-  originKind: ThreadOriginKind | null,
   systemMessageKind: SystemMessageKind,
 ): IconName {
-  if (originKind === "fork") {
-    return "Fork";
-  }
   switch (sourceKind) {
     case "agent":
       return "MessageSquare";
@@ -528,7 +514,6 @@ export const GeneratedConversationMessage = memo(
   function GeneratedConversationMessage({
     attachmentItems,
     automationLink,
-    originKind,
     mentions,
     onOpenLink,
     onOpenLocalFileLink,
@@ -578,7 +563,6 @@ export const GeneratedConversationMessage = memo(
     const title = useMemo(
       () =>
         generatedConversationTitle({
-          originKind,
           sourceKind,
           sourceName,
           sourceThreadId,
@@ -587,7 +571,6 @@ export const GeneratedConversationMessage = memo(
           systemMessageSubject,
         }),
       [
-        originKind,
         sourceKind,
         sourceName,
         sourceThreadId,
@@ -615,7 +598,6 @@ export const GeneratedConversationMessage = memo(
       ) : undefined;
     const leadingIcon = generatedConversationIconName(
       sourceKind,
-      originKind,
       systemMessageKind,
     );
     const titleOnly = systemMessageIsTitleOnly(sourceKind, systemMessageKind);
