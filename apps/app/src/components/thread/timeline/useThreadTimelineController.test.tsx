@@ -1398,6 +1398,30 @@ describe("useThreadTimelineController commits", () => {
     expect(result.current.timelineLoading).toBe(false);
   });
 
+  it("does not refetch a failed timeline while its pane is hidden", async () => {
+    vi.mocked(sdk.threads.timeline).mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    );
+    const { wrapper } = createQueryClientTestHarness();
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useThreadTimelineController({ enabled, threadId: "thread-1" }),
+      { initialProps: { enabled: true }, wrapper },
+    );
+
+    await waitFor(() => {
+      expect(sdk.threads.timeline).toHaveBeenCalledTimes(3);
+    });
+    rerender({ enabled: false });
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 1.5),
+      );
+    });
+
+    expect(sdk.threads.timeline).toHaveBeenCalledTimes(3);
+  });
+
   it("reads only query result properties covered by the notify lists", async () => {
     vi.mocked(sdk.threads.timeline).mockResolvedValueOnce(
       makeTimelineResponse({ rows: [newestLoadedRow], maxSeq: 1 }),

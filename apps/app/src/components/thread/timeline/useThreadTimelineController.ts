@@ -300,12 +300,14 @@ export function useThreadTimelineController({
       ? loadedTimeline.rows
       : (latestTimeline?.rows ?? []);
   const timelineQueryState = useConnectionAwareQueryState({
+    enabled,
     hasResolvedData:
       latestTimelineQuery.data !== undefined || timelineRows.length > 0,
     isFetching: latestTimelineQuery.isFetching,
     isLoadingError: latestTimelineQuery.isLoadingError,
     isRecoverableLoadingError: isTransientReadError(latestTimelineQuery.error),
     refetch: refetchLatestTimeline,
+    retryKey: threadId,
   });
   const timelineLoading =
     latestTimelineQuery.isLoading ||
