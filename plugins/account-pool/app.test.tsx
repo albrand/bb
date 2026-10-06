@@ -861,17 +861,18 @@ describe("Account Pool settings", () => {
   function foldedTwins(enabled: boolean) {
     return [
       account({
-        id: "a1111111-1111-4111-8111-111111111111",
-        label: "Gmail twin",
-        email: "Twin@Example.com",
-        enabled,
-        active: true,
-      }),
-      account({
         id: "b2222222-2222-4222-8222-222222222222",
         label: "Gmail copy",
         email: "twin@example.com",
         enabled,
+        lastUsedAt: 1,
+      }),
+      account({
+        id: "a1111111-1111-4111-8111-111111111111",
+        label: "Gmail twin",
+        email: "Twin@Example.com",
+        enabled,
+        lastUsedAt: 5,
       }),
       account({
         id: "c3333333-3333-4333-8333-333333333333",
@@ -903,11 +904,11 @@ describe("Account Pool settings", () => {
       ).toEqual([
         {
           method: "account.disable",
-          input: { id: "a1111111-1111-4111-8111-111111111111" },
+          input: { id: "b2222222-2222-4222-8222-222222222222" },
         },
         {
           method: "account.disable",
-          input: { id: "b2222222-2222-4222-8222-222222222222" },
+          input: { id: "a1111111-1111-4111-8111-111111111111" },
         },
       ]),
     );
@@ -921,6 +922,7 @@ describe("Account Pool settings", () => {
       "account.enable": () => ({ account: null }),
     });
     expect(await slot.findByText("2 subscriptions · 1 on")).toBeTruthy();
+    expect(slot.queryByRole("switch", { name: "Use Gmail copy" })).toBeNull();
     fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
     await waitFor(() =>
       expect(

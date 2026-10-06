@@ -179,7 +179,7 @@ account UUID), and Codex records with the same email and ChatGPT account. A plan
 splits a subscription. A Claude record whose organization is not known yet,
 such as one whose sign-in expired, joins its login's subscription; when that
 login has several known organizations, it joins the one with its plan. The
-healthiest record represents the subscription in settings, in
+healthiest record (then the active one, then the most recently used) represents the subscription in settings, in
 the provider usage sources, and in the Subscription selector. The selector
 still shows a folded record while a conversation is set to it. The other records
 stay in the pool unchanged and still appear in `account list`, `status`, and

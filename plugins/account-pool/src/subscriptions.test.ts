@@ -22,6 +22,7 @@ function record(overrides: Partial<Record> & Pick<Record, "id">): Record {
     enabled: true,
     status: "ready",
     active: false,
+    lastUsedAt: null,
     ...overrides,
   };
 }
@@ -57,6 +58,20 @@ describe("subscription folding", () => {
     ).toEqual(["second"]);
     expect(ids([record({ id: "first" }), record({ id: "second" })])).toEqual([
       "first",
+    ]);
+  });
+
+  it("keeps the most recently used record when every record of a login is off", () => {
+    const off = { enabled: false, status: "disabled" } as const;
+    const twin = record({ id: "twin", lastUsedAt: 100, ...off });
+    const principal = record({ id: "principal", lastUsedAt: 200, ...off });
+    const unused = record({ id: "unused", ...off });
+    expect(ids([twin, principal, unused])).toEqual(["principal"]);
+    expect(subscriptionRepresentative([twin, principal], "twin")?.id).toBe(
+      "principal",
+    );
+    expect(ids([unused, record({ id: "also-unused", ...off })])).toEqual([
+      "unused",
     ]);
   });
 

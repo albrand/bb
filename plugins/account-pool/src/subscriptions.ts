@@ -14,6 +14,7 @@ type SubscriptionRecord = Pick<
   | "enabled"
   | "status"
   | "active"
+  | "lastUsedAt"
 >;
 
 function normalizedEmail(account: SubscriptionRecord): string {
@@ -101,9 +102,9 @@ function represents(
   current: SubscriptionRecord,
 ): boolean {
   const difference = health(candidate) - health(current);
-  return difference === 0
-    ? candidate.active && !current.active
-    : difference < 0;
+  if (difference !== 0) return difference < 0;
+  if (candidate.active !== current.active) return candidate.active;
+  return (candidate.lastUsedAt ?? -1) > (current.lastUsedAt ?? -1);
 }
 
 function representatives<T extends SubscriptionRecord>(
