@@ -34,6 +34,13 @@ type CliSkillStatusItem = {
   connected?: boolean;
 };
 
+function namesAfterStatusLabel(
+  statusBadge: string | null,
+  label: string,
+): string | undefined {
+  return statusBadge?.match(new RegExp(`; ${label} ([^;]+)`))?.[1];
+}
+
 function installDescription(
   hasConnectedMachine: boolean,
   action: CliSkillsAction,
@@ -43,19 +50,50 @@ function installDescription(
     return "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.";
   }
   if (action === "reinstall") {
-    const unknownMachines = statusBadge?.split("; status unavailable on ")[1];
-    return unknownMachines === undefined
-      ? "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI."
-      : `Installed in ~/.agents/skills and ~/.claude/skills on every machine with a reported status; status unavailable on ${unknownMachines}.`;
+    const unknownMachines = namesAfterStatusLabel(
+      statusBadge,
+      "status unavailable on",
+    );
+    const unavailableMachines = namesAfterStatusLabel(
+      statusBadge,
+      "Disconnected:",
+    );
+    const qualifiers = [
+      ...(unknownMachines === undefined
+        ? []
+        : [`status unavailable on ${unknownMachines}`]),
+      ...(unavailableMachines === undefined
+        ? []
+        : [`disconnected machines: ${unavailableMachines}`]),
+    ];
+    if (qualifiers.length > 0) {
+      return `Installed in ~/.agents/skills and ~/.claude/skills on every connected machine with a reported status; ${qualifiers.join("; ")}.`;
+    }
+    return "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI.";
   }
   if (action === "update") {
     return statusBadge?.includes("; not installed on ")
       ? "Update the outdated bb CLI skills and install them on the missing machines in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version."
       : "Update the bb CLI skills in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version.";
   }
-  const unknownMachines = statusBadge?.split("; status unavailable on ")[1];
-  if (statusBadge?.startsWith("Installed on ") && unknownMachines !== undefined) {
-    return `Install them into ~/.agents/skills and ~/.claude/skills on machines marked Not installed; status unavailable on ${unknownMachines}.`;
+  const unknownMachines = namesAfterStatusLabel(
+    statusBadge,
+    "status unavailable on",
+  );
+  const unavailableMachines = namesAfterStatusLabel(statusBadge, "Disconnected:");
+  if (
+    statusBadge?.startsWith("Installed on ") &&
+    (unknownMachines !== undefined || unavailableMachines !== undefined)
+  ) {
+    const qualifiers = [
+      ...(unknownMachines === undefined
+        ? []
+        : [`status unavailable on ${unknownMachines}`]),
+      ...(unavailableMachines === undefined
+        ? []
+        : [`status unavailable on disconnected machines: ${unavailableMachines}`]),
+    ];
+    return `Install them into ~/.agents/skills and ~/.claude/skills on machines marked Not installed; ${qualifiers.join("; ")}.`;
   }
   return statusBadge?.startsWith("Installed on ")
     ? "Install them into ~/.agents/skills and ~/.claude/skills on the remaining machines, so agents outside bb can use the bb CLI."
@@ -69,11 +107,13 @@ export function summarizeMachineStatuses(
   const offline = statuses.filter(({ connected }) => connected === false);
   const unknown = available.filter(({ status }) => status === "unknown");
   const unknownSummary =
-    unknown.length === 0 && offline.length === 0
+    unknown.length === 0
       ? ""
-      : `; status unavailable on ${[...unknown, ...offline]
-          .map(({ name }) => name)
-          .join(", ")}`;
+      : `; status unavailable on ${unknown.map(({ name }) => name).join(", ")}`;
+  const offlineSummary =
+    offline.length === 0
+      ? ""
+      : `; Disconnected: ${offline.map(({ name }) => name).join(", ")}`;
   const known = available.filter(({ status }) => status !== "unknown");
   if (known.length === 0) {
     const unavailable = [
@@ -93,18 +133,18 @@ export function summarizeMachineStatuses(
       missing.length === 0
         ? ""
         : `; not installed on ${missing.map(({ name }) => name).join(", ")}`;
-    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${missingSummary}${unknownSummary}`;
+    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${missingSummary}${unknownSummary}${offlineSummary}`;
   }
   const installed = known.filter(({ status }) => status === "installed").length;
   if (installed === known.length) {
     return `${known.length > 1
       ? `Installed on ${known.length} machines`
-      : "Installed"}${unknownSummary}`;
+      : "Installed"}${unknownSummary}${offlineSummary}`;
   }
   if (installed > 0) {
-    return `Installed on ${installed} of ${known.length} machines${unknownSummary}`;
+    return `Installed on ${installed} of ${known.length} machines${unknownSummary}${offlineSummary}`;
   }
-  return `Not installed${unknownSummary}`;
+  return `Not installed${unknownSummary}${offlineSummary}`;
 }
 
 export function getCliSkillsPresentation(

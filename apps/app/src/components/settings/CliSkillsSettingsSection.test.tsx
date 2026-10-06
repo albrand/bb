@@ -75,11 +75,11 @@ describe("CliSkillsSettingsSectionContent", () => {
 
     expect(installButton().textContent).toBe("Reinstall");
     expect(
-      screen.getByText("Installed; status unavailable on Old Studio"),
+      screen.getByText("Installed; Disconnected: Old Studio"),
     ).toBeDefined();
     expect(
       screen.getByText(
-        "Installed in ~/.agents/skills and ~/.claude/skills on every machine with a reported status; status unavailable on Old Studio.",
+        "Installed in ~/.agents/skills and ~/.claude/skills on every connected machine with a reported status; disconnected machines: Old Studio.",
       ),
     ).toBeDefined();
     expect(
@@ -309,8 +309,37 @@ describe("getCliSkillsPresentation", () => {
       ]),
     ).toEqual({
       action: "reinstall",
-      statusBadge: "Installed; status unavailable on Studio",
+      statusBadge: "Installed; Disconnected: Studio",
     });
+  });
+
+  it("keeps disconnected machines distinct from unknown status in a mixed fleet", () => {
+    const presentation = getCliSkillsPresentation([
+      { name: "Laptop", status: "installed", connected: true },
+      { name: "Unknown box", status: "unknown", connected: true },
+      { name: "Studio", status: "outdated", connected: false },
+    ]);
+
+    expect(presentation).toEqual({
+      action: "reinstall",
+      statusBadge:
+        "Installed; status unavailable on Unknown box; Disconnected: Studio",
+    });
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge={presentation.statusBadge}
+        action={presentation.action}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Installed in ~/.agents/skills and ~/.claude/skills on every connected machine with a reported status; status unavailable on Unknown box; disconnected machines: Studio.",
+      ),
+    ).toBeDefined();
   });
 
   it("keeps first-install copy when no machine has the skills or the status is unknown", () => {
