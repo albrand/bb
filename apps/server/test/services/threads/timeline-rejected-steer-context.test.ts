@@ -69,9 +69,14 @@ function rejected(): RowSpec {
   };
 }
 
-function load(testThread: TestThread, eventBudget = 64, segmentLimit = 1) {
+function load(
+  testThread: TestThread,
+  eventBudget = 64,
+  segmentLimit = 1,
+  completedTurnDisplay: "flat" | "collapse" = "flat",
+) {
   return buildThreadTimelineWithProfile(testThread.db, testThread.thread, {
-    completedTurnDisplay: "flat",
+    completedTurnDisplay,
     eventBudget,
     includeNestedRows: true,
     includeDiagnosticOperations: false,
@@ -97,6 +102,68 @@ function steer(result: ReturnType<typeof load>) {
 }
 
 describe("rejected steer turn context", () => {
+  it.each(["agent", "system", "user"] as const)(
+    "keeps a rejected %s steer visible without replacing a historical summary",
+    (initiator) => {
+      withTestThread((testThread) => {
+        const [start, answer, completed] = turn(targetTurnId);
+        appendRows(testThread, [
+          start,
+          {
+            type: "item/completed",
+            turnId: targetTurnId,
+            itemId: "old-command",
+            itemKind: "commandExecution",
+            data: {
+              item: {
+                type: "commandExecution",
+                id: "old-command",
+                command: "echo done",
+                cwd: "/tmp",
+                status: "completed",
+                aggregatedOutput: "done",
+                approvalStatus: null,
+                exitCode: 0,
+                durationMs: 1000,
+              },
+            },
+          },
+          answer,
+          completed,
+          ...Array.from({ length: 100 }, (_, index) =>
+            turn(`later-${index}`),
+          ).flat(),
+        ]);
+        const requested = request();
+        const [liveStart, ...liveRest] = turn("live");
+        appendRows(testThread, [
+          liveStart,
+          { ...requested, data: { ...requested.data, initiator } },
+          rejected(),
+          ...liveRest,
+        ]);
+        const latest = load(testThread, 64, 1, "collapse");
+        const full = load(testThread, 10_000, 200, "collapse");
+        const fullSteer = steer(full)[0];
+        expect(fullSteer).toMatchObject({
+          turnId: targetTurnId,
+          turnRequest: { status: "rejected" },
+        });
+        expect(latest.response.rows).toContainEqual(fullSteer);
+        const historicalSummary = full.response.rows.find(
+          (row) => row.kind === "turn" && row.turnId === targetTurnId,
+        );
+        expect(historicalSummary).toBeDefined();
+        expect(latest.response.timelinePage.olderRowUpdates ?? []).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: historicalSummary?.id }),
+          ]),
+        );
+        expect(latest.profile.eventRowCount).toBeLessThan(30);
+      });
+    },
+  );
+
   it.each(["steer", "auto"] as const)(
     "retains the historical target in a bounded latest window (%s)",
     (kind) => {

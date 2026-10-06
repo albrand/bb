@@ -173,6 +173,19 @@ function groupCompletedTurnSummaryMessages(
   summaryMessages: EventProjectionMessage[],
   terminalMessage: EventProjectionMessage | undefined,
 ): CompletedTurnSummaryItem[] {
+  if (
+    !terminalMessage &&
+    summaryMessages.length > 0 &&
+    summaryMessages.every(
+      (message) =>
+        message.kind === "user" && message.turnRequest.kind === "steer",
+    )
+  ) {
+    return summaryMessages.map((message) => ({
+      kind: "ungrouped-message",
+      message,
+    }));
+  }
   const externalBoundarySeqs = turn.externalUserBoundarySeqs ?? [];
   const visibleResponseIds = findVisibleResponseMessageIds(
     summaryMessages,
