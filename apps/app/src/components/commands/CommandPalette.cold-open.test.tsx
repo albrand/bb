@@ -20,16 +20,22 @@ import { CommandPalette } from "./CommandPalette";
 
 const body = vi.hoisted(() => ({
   imports: 0,
-  release: () => {},
+  release: async () => {},
 }));
 const calls = vi.hoisted(() => [] as AppCommandId[]);
 
 vi.mock("./CommandPaletteBody", async (importOriginal) => {
   body.imports += 1;
-  await new Promise<void>((resolve) => {
-    body.release = resolve;
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  return importOriginal();
+  const loaded = released.then(() => importOriginal());
+  body.release = async () => {
+    release();
+    await loaded;
+  };
+  return loaded;
 });
 
 function binding(
