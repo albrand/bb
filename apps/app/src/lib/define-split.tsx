@@ -82,7 +82,7 @@ export function defineSplit<P extends object>({
     await loadModule().catch(() => undefined);
   };
   const onIntent = () => {
-    void warm();
+    void warm().catch(() => undefined);
   };
   if (tier === "preload") queueSplitPreload(warm);
 
