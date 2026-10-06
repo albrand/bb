@@ -1172,11 +1172,9 @@ function buildTimelineRows(
     appendRows(rows, materializeTimelinePlan(item, options));
   }
 
-  return placeRejectedSteerRows(
-    orderRowsAfterExternalUserBoundary(
-      rows,
-      collectExternalUserBoundarySeqs(projection),
-    ),
+  return orderRowsAfterExternalUserBoundary(
+    rows,
+    collectExternalUserBoundarySeqs(projection),
   );
 }
 
@@ -1196,7 +1194,7 @@ export function buildThreadTimelineFromEvents(
   } satisfies Parameters<typeof buildEventProjection>[1];
   const projection = buildEventProjection(args.events, projectionOptions);
 
-  const rows = [
+  const rows = placeRejectedSteerRows([
     ...buildTimelineRows(projection, {
       completedTurnDisplay: args.options.completedTurnDisplay,
       includeNestedRows: args.options.includeNestedRows,
@@ -1208,7 +1206,7 @@ export function buildThreadTimelineFromEvents(
       args.events,
       args.options,
     ),
-  ];
+  ]);
 
   return {
     activePromptMode: !args.options.isLatestPage

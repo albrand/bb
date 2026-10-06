@@ -10,6 +10,7 @@ import {
   buildThreadConversationOutline,
   buildThreadConversationOutlineProjectionKey,
   buildThreadTimelineWithProfile,
+  getThreadMessage,
   loadThreadConversationOutline,
 } from "../../../src/services/threads/timeline.js";
 import {
@@ -124,6 +125,106 @@ function outlineOptions(testThread: TestThread) {
 }
 
 describe("rejected steer turn context", () => {
+  it.each([
+    ["user", "flat"],
+    ["user", "collapse"],
+    ["agent", "flat"],
+    ["agent", "collapse"],
+  ] as const)(
+    "places an interleaved rejected %s steer consistently in %s views and message context",
+    (initiator, display) => {
+      withTestThread((testThread) => {
+        const [liveStart, liveAnswer, liveCompleted] = turn("live");
+        appendRows(testThread, [
+          ...turn(targetTurnId),
+          ...turn("filler"),
+          liveStart,
+          {
+            ...liveAnswer,
+            itemId: "first-live-answer",
+            data: {
+              item: {
+                id: "first-live-answer",
+                type: "agentMessage",
+                text: "First live answer",
+              },
+            },
+          },
+        ]);
+        loadThreadConversationOutline(testThread.db, testThread.thread, {
+          ...outlineOptions(testThread),
+          completedTurnDisplay: display,
+        });
+        const requested = request();
+        appendRows(testThread, [
+          { ...requested, data: { ...requested.data, initiator } },
+          rejected(),
+          liveAnswer,
+          liveCompleted,
+        ]);
+        const full = load(testThread, 10_000, 100, display);
+        const rejectedRow = steer(full)[0];
+        expect(rejectedRow).toBeDefined();
+        const relevant = (rows: readonly TimelineRow[]) =>
+          rows.filter(
+            (row) =>
+              row.kind === "conversation" &&
+              [
+                "First live answer",
+                "Late rejected steer",
+                "Answer live",
+              ].includes(row.text),
+          );
+        const expected = relevant(full.response.rows);
+        expect(
+          expected.map((row) => row.kind === "conversation" && row.text),
+        ).toEqual(["First live answer", "Late rejected steer", "Answer live"]);
+        const latest = relevant(load(testThread, 64, 1, display).response.rows);
+        expect(latest).toContainEqual(rejectedRow);
+        expect(latest.map((row) => row.id)).toEqual(
+          expected
+            .filter((row) => latest.some((item) => item.id === row.id))
+            .map((row) => row.id),
+        );
+        const options = {
+          ...outlineOptions(testThread),
+          completedTurnDisplay: display,
+        };
+        const warm = loadThreadConversationOutline(
+          testThread.db,
+          testThread.thread,
+          options,
+        );
+        const cold = buildThreadConversationOutline(
+          testThread.db,
+          testThread.thread,
+          options,
+        );
+        const expectedIds = expected.map((row) => row.id);
+        for (const outline of [cold, warm]) {
+          expect(
+            outline.items
+              .filter((item) => expectedIds.includes(item.id))
+              .map((item) => item.id),
+          ).toEqual(expectedIds);
+        }
+        const context = getThreadMessage(testThread.db, testThread.thread, {
+          ...options,
+          seq: rejectedRow!.messageSeq!,
+          before: 1,
+          after: 1,
+        });
+        expect(
+          [
+            ...(context.before ?? []),
+            context.message,
+            ...(context.after ?? []),
+          ].map((row) => row.id),
+        ).toEqual(expectedIds);
+      });
+    },
+  );
+
   it.each(["flat", "collapse"] as const)(
     "preserves unrelated accepted agent message order across full and paged %s views",
     (display) => {
