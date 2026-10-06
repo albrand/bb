@@ -60,9 +60,7 @@ describe("InstallCliSkillsDialog", () => {
 
     for (const name of ["Cancel", "Reinstall"]) {
       const button = screen.getByRole("button", { name });
-      expect(button.classList.contains("max-md:pointer-coarse:min-h-11")).toBe(
-        true,
-      );
+      expect(button.classList.contains("pointer-coarse:min-h-11")).toBe(true);
       expect(button.classList.contains("min-h-11")).toBe(false);
       expect(button.classList.contains("h-11")).toBe(false);
     }
