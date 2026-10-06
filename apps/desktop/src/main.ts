@@ -341,7 +341,6 @@ interface LoadLogViewerWindowArgs {
   preloadPath: string;
 }
 
-
 interface ResolveDataDirFromEnvArgs {
   env: NodeJS.ProcessEnv;
   homeDir: string;

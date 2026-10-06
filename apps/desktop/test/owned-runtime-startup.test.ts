@@ -22,7 +22,10 @@ function serverListeningAfter(delayMs: number): ServerProbeFetch {
     }
     return new URL(input).pathname === "/health"
       ? Response.json({ ok: true })
-      : Response.json({ hostDaemonPort: 4_242, voiceTranscriptionEnabled: false });
+      : Response.json({
+          hostDaemonPort: 4_242,
+          voiceTranscriptionEnabled: false,
+        });
   };
 }
 
