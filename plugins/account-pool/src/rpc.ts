@@ -23,6 +23,10 @@ import {
   statusSchema,
   tokenRotateInputSchema,
   routingSetInputSchema,
+  routingBindingGetInputSchema,
+  routingBindingGetSchema,
+  routingBindingNextInputSchema,
+  routingBindingNextSchema,
   threadSelectionInputSchema,
   threadSelectionSetSchema,
   threadSelectionSchema,
@@ -137,6 +141,32 @@ export const accountPoolBypassReadRpcContract = defineRpcContract({
       "Reads whether Account Pooler routing is bypassed for one thread. This is read-only and does not change routing.",
   },
 });
+
+export const accountPoolBindingReadRpcContract = defineRpcContract({
+  "routing.binding.get": {
+    input: routingBindingGetInputSchema,
+    output: routingBindingGetSchema,
+    experimental_description:
+      "Reads one Claude thread's automatic account affinity, the next automatic account choice, and per-account headroom. It never changes routing.",
+  },
+  "routing.binding.next": {
+    input: routingBindingNextInputSchema,
+    output: routingBindingNextSchema,
+    experimental_description:
+      "Reads the next automatic Claude account choice for a new conversation. It never changes routing.",
+  },
+});
+
+export function createBindingReadRpcHandlers(
+  operations: PoolOperations,
+): PluginRpcHandlers<typeof accountPoolBindingReadRpcContract> {
+  return {
+    "routing.binding.get": ({ threadId }) =>
+      operations.bindingPreview(threadId),
+    "routing.binding.next": ({ provider }) =>
+      operations.nextAccountPreview(provider),
+  };
+}
 
 export function createRpcHandlers(
   operations: PoolOperations,

@@ -255,6 +255,15 @@ export class PoolOperations {
     };
   }
 
+  bindingPreview(threadId: string) {
+    return this.hub.bindingPreview(threadId);
+  }
+
+  async nextAccountPreview(provider: PoolProvider) {
+    const { nextAccountId, reason } = await this.hub.nextAccountPreview(provider);
+    return { nextAccountId, reason };
+  }
+
   async selectAccount(
     threadId: string,
     provider: PoolProvider,

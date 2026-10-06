@@ -38,7 +38,8 @@ import type { ClaudeOAuthLogin } from "./oauth-login.js";
 import type { CodexDeviceLogin } from "./codex-device-login.js";
 
 const DESCRIPTION = [
-  "Accounts run sequentially by priority, then order added. The current fallback stays active until unavailable.",
+  "Automatic routing prefers the account with the most remaining headroom across its binding quota windows. Equal headroom prefers the account whose used quota resets faster, then lower priority. A 10-point headroom hysteresis keeps new conversations on the active account until another leads by at least 10 points.",
+  "Conversation affinity stays on its account until that account becomes ineligible; explicit thread selections remain pinned.",
   "When this bb server runs inside another bb server's thread, parent proxy routes its pooled traffic through that parent; isolate neutralises the inherited routing.",
   "Reorder includes every account for the provider and changes the next failover sequence; existing conversations stay pinned.",
 ].join("\n");
@@ -130,6 +131,10 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
       "7d",
       "7d reset",
       "Windows",
+      "Binding window",
+      "Headroom",
+      "Reset recovery/h",
+      "Last automatic choice",
       "Extra usage",
       ...families.map(familyLabel),
       "Status",
@@ -149,6 +154,12 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
         formatUtilization(account.sevenDayUtilization),
         formatReset(account.sevenDayResetAt),
         formatLimitWindows(account.limitWindows),
+        account.balance.bindingWindow ?? "-",
+        formatUtilization(account.balance.bindingHeadroom),
+        account.balance.resetRecoveryPerHour === null
+          ? "-"
+          : `${(account.balance.resetRecoveryPerHour * 100).toFixed(1)}%/h`,
+        account.lastAutomaticChoice?.reason ?? "-",
         account.extraUsage?.status ?? "-",
         ...families.map((family) =>
           formatFamilyQuota(account.familyWeekly[family]),

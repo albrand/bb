@@ -89,6 +89,13 @@ function summary(account: CodexDeviceAccount): AccountSummary {
       haiku: null,
       other: null,
     },
+    balance: {
+      bindingWindow: null,
+      bindingHeadroom: null,
+      resetRecoveryPerHour: null,
+      windows: [],
+    },
+    lastAutomaticChoice: null,
     limitWindows: [],
     extraUsage: null,
     usageRestriction: null,

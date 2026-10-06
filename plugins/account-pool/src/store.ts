@@ -10,6 +10,7 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { PluginKvStorage } from "@get-bb/plugin-sdk";
 import {
+  accountBalanceSchema,
   accountSchema,
   accountSecretSchema,
   EMPTY_FAMILY_WEEKLY,
@@ -19,6 +20,7 @@ import {
   type Account,
   type AccountQuota,
   type AccountSecret,
+  type LastAutomaticChoice,
   type HubTokenSummary,
   type PoolProvider,
 } from "./contracts.js";
@@ -787,6 +789,58 @@ export class PoolAffinityStore {
       )
       .run(provider, accountId);
   }
+
+  loadAutomaticChoices(): Map<string, LastAutomaticChoice> {
+    const rows = z
+      .array(
+        z.object({
+          provider: providerSchema,
+          account_id: z.string().uuid(),
+          chosen_at: z.number().int().nonnegative(),
+          reason: z.string().min(1),
+          family: z.enum(["fable", "sonnet", "opus", "haiku", "other"]),
+          balance_json: z.string(),
+        }),
+      )
+      .parse(this.db.prepare("SELECT * FROM pool_automatic_choice").all());
+    return new Map(
+      rows.map((row) => [
+        `${row.provider}:${row.account_id}`,
+        {
+          chosenAt: row.chosen_at,
+          reason: row.reason,
+          family: row.family,
+          balance: accountBalanceSchema.parse(JSON.parse(row.balance_json)),
+        },
+      ]),
+    );
+  }
+
+  putAutomaticChoice(
+    provider: PoolProvider,
+    accountId: string,
+    choice: LastAutomaticChoice,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO pool_automatic_choice
+          (provider, account_id, chosen_at, reason, family, balance_json)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(provider, account_id) DO UPDATE SET
+          chosen_at = excluded.chosen_at,
+          reason = excluded.reason,
+          family = excluded.family,
+          balance_json = excluded.balance_json`,
+      )
+      .run(
+        provider,
+        accountId,
+        choice.chosenAt,
+        choice.reason,
+        choice.family,
+        JSON.stringify(choice.balance),
+      );
+  }
 }
 
 export const QUOTA_MIGRATIONS = [
@@ -817,4 +871,13 @@ export const QUOTA_MIGRATIONS = [
   )`,
   `ALTER TABLE account_quota ADD COLUMN extra_usage_json TEXT NOT NULL DEFAULT 'null'`,
   `ALTER TABLE account_quota ADD COLUMN usage_restriction_json TEXT NOT NULL DEFAULT 'null'`,
+  `CREATE TABLE pool_automatic_choice (
+    provider TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    chosen_at INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    family TEXT NOT NULL,
+    balance_json TEXT NOT NULL,
+    PRIMARY KEY(provider, account_id)
+  )`,
 ];

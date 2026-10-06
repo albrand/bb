@@ -132,7 +132,7 @@ export type LimitWindow = z.infer<typeof limitWindowSchema>;
 
 export const threadSelectionInputSchema = z
   .object({
-    threadId: z.string().regex(/^thr_[A-Za-z0-9]+$/u),
+    threadId: z.string().regex(/^thr_[A-Za-z0-9_-]+$/u),
     provider: providerSchema,
   })
   .strict();
@@ -236,9 +236,80 @@ export const quotaSchema = z
 
 export type AccountQuota = z.infer<typeof quotaSchema>;
 
+export const balanceWindowSchema = z
+  .object({
+    kind: z.enum(["five-hour", "weekly", "family", "limit"]),
+    key: z.string().min(1),
+    family: modelFamilySchema.nullable(),
+    utilization: z.number().nonnegative().nullable(),
+    headroom: z.number().min(0).max(1).nullable(),
+    resetAt: z.number().int().nullable(),
+    hoursUntilReset: z.number().nonnegative().nullable(),
+    resetRecoveryPerHour: z.number().nonnegative().nullable(),
+  })
+  .strict();
+
+export const accountBalanceSchema = z
+  .object({
+    bindingWindow: z.string().min(1).nullable(),
+    bindingHeadroom: z.number().min(0).max(1).nullable(),
+    resetRecoveryPerHour: z.number().nonnegative().nullable(),
+    windows: z.array(balanceWindowSchema),
+  })
+  .strict();
+
+export const lastAutomaticChoiceSchema = z
+  .object({
+    chosenAt: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    family: modelFamilySchema,
+    balance: accountBalanceSchema,
+  })
+  .strict();
+
+export type BalanceWindow = z.infer<typeof balanceWindowSchema>;
+export type AccountBalance = z.infer<typeof accountBalanceSchema>;
+export type LastAutomaticChoice = z.infer<typeof lastAutomaticChoiceSchema>;
+
+export const routingBindingGetInputSchema = z
+  .object({
+    threadId: z.string().regex(/^thr_[A-Za-z0-9_-]+$/u),
+    provider: z.literal("claude"),
+  })
+  .strict();
+
+export const routingBindingNextInputSchema = z
+  .object({ provider: z.literal("claude") })
+  .strict();
+
+export const routingBindingHeadroomSchema = z
+  .object({
+    accountId: z.string().uuid(),
+    balance: accountBalanceSchema,
+  })
+  .strict();
+
+export const routingBindingGetSchema = z
+  .object({
+    boundAccountId: z.string().uuid().nullable(),
+    nextAccountId: z.string().uuid().nullable(),
+    reason: z.string().min(1),
+    headroom: z.array(routingBindingHeadroomSchema),
+  })
+  .strict();
+
+export const routingBindingNextSchema = z
+  .object({
+    nextAccountId: z.string().uuid().nullable(),
+    reason: z.string().min(1),
+  })
+  .strict();
+
 export const accountSummarySchema = accountSchema.extend({
   lastUsedHostName: z.string().min(1).nullable(),
   active: z.boolean().default(false),
+  balance: accountBalanceSchema,
+  lastAutomaticChoice: lastAutomaticChoiceSchema.nullable(),
   ...quotaFieldsShape,
   inFlight: z.number().int().nonnegative(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),

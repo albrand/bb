@@ -83,6 +83,13 @@ function account(overrides: Partial<AccountSummary> = {}): AccountSummary {
       haiku: null,
       other: null,
     },
+    balance: {
+      bindingWindow: null,
+      bindingHeadroom: null,
+      resetRecoveryPerHour: null,
+      windows: [],
+    },
+    lastAutomaticChoice: null,
     limitWindows: [],
     extraUsage: null,
     usageRestriction: null,

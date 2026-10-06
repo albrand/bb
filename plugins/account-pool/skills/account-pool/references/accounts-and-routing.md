@@ -100,17 +100,18 @@ inspect the full routing configuration and
 `bb pool config set <key> <value>` to update one value. The upstream URL keys
 are QA-only overrides; `switchThreshold` must be greater than 0 and at most 1.
 
-Accounts run sequentially per provider: lower priority numbers first, with ties
-following the order accounts were added. New conversations use the current
-account until it reaches the switch threshold or fails; the pool then advances
-to the next eligible account and wraps at the end. It keeps using that fallback
-even when an earlier account recovers. Existing conversations stay pinned while
-their account remains eligible. Short temporary rate limits wait on the same
-account once; longer holds return Retry-After for pinned conversations while new
-conversations can advance. A model-family limit detours only requests for that
-family without moving the session's main pin or the provider cursor. The cursor
-and session pins survive hub restarts. Session pins expire after 30 idle minutes,
-and the pool retains the 4,096 most recently used pins.
+Automatic routing chooses the eligible account with the most headroom: the
+minimum remaining quota across known five-hour, weekly, and applicable
+model-family windows. Equal headroom prefers the account whose limiting quota
+recovers more used quota per hour until reset, then the lower priority number.
+The active account stays preferred while another account leads by less than 10
+headroom points. Existing conversations keep their affinity until that account
+becomes ineligible. Short temporary rate limits wait on the same account once;
+longer holds return Retry-After for pinned conversations while new conversations
+can use another eligible account. A model-family limit detours only requests for
+that family without moving the session's main pin. Session pins survive hub
+restarts, expire after 30 idle minutes, and the pool retains the 4,096 most
+recently used pins.
 
 Claude accounts with an exhausted subscription window remain eligible as a
 fallback when Anthropic reports extra usage enabled with remaining allowance,
@@ -141,14 +142,26 @@ billing activity.
 Drag an account’s handle in Account Pooler settings (or focus the handle and use
 Space, arrow keys, and Space again), or
 `bb pool account reorder <claude|codex> <id>...`, to set the complete order for
-one provider. Include disabled accounts too. Reordering changes the next failover
-sequence without moving the current account. `bb pool account priority <id> <n>`
+one provider. Include disabled accounts too. For Claude, priority breaks ties
+after headroom and reset recovery; for Codex, the order controls sequential
+failover. Reordering does not move an existing conversation.
+`bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.
 
-`bb pool status --json` and `bb pool account list --json` include `active` for
-the account currently selected by the provider cursor. New accounts are added
+`bb pool status` and `bb pool account list` show each account's binding window,
+headroom, reset recovery per hour, and the reason it was last selected
+automatically. JSON includes these as `balance` and `lastAutomaticChoice`; the
+same fields are returned by the SDK `status.get` method. New accounts are added
 at the end of the provider's priority order unless an explicit priority is set.
+
+The Fleet binding RPCs are read-only. `routing.binding.get` takes
+`{threadId, provider: "claude"}` and returns `boundAccountId`, `nextAccountId`,
+`reason`, and per-account `headroom` entries with the binding window, headroom,
+reset recovery, and contributing windows. `routing.binding.next` takes
+`{provider: "claude"}` and returns only `nextAccountId` and `reason`. Inputs
+reject extra fields and invalid thread IDs. Older cores return `unknown_method`
+for these methods.
 
 ## Nested bb servers
 
