@@ -315,20 +315,20 @@ export class HubTokenStore {
     });
   }
 
+  async isGenerationLive(hostId: string, digest: string): Promise<boolean> {
+    await this.initialize();
+    const record = this.read(hostId);
+    return record !== null && generationMatches(record, digest);
+  }
+
   async authenticateGeneration(
     hostId: string,
     digest: string,
   ): Promise<boolean> {
     await this.initialize();
     const record = this.read(hostId);
-    if (record === null) return false;
-    const valid = [
-      record.value,
-      ...record.previous.map((previous) => previous.value),
-    ].some((value) =>
-      safeTokenEqual(createHash("sha256").update(value).digest("hex"), digest),
-    );
-    return valid && (await this.authenticate(record.value)) === hostId;
+    if (record === null || !generationMatches(record, digest)) return false;
+    return (await this.authenticate(record.value)) === hostId;
   }
 
   async authenticate(presented: string | null): Promise<string | null> {
@@ -478,6 +478,15 @@ export class HubTokenStore {
       if (this.hostLocks.get(hostId) === tail) this.hostLocks.delete(hostId);
     }
   }
+}
+
+function generationMatches(token: StoredHubToken, digest: string): boolean {
+  return [
+    token.value,
+    ...token.previous.map((previous) => previous.value),
+  ].some((value) =>
+    safeTokenEqual(createHash("sha256").update(value).digest("hex"), digest),
+  );
 }
 
 function matchesStoredToken(

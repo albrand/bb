@@ -80,7 +80,7 @@ interface HubOptions {
   affinity: PoolAffinityStore;
   maxAffinityBindings: number;
   hubTokens: HubTokenStore;
-  threadTokens: ThreadTokenStore | null;
+  threadTokens: ThreadTokenStore;
   routing: RoutingStore | null;
   getSettings: () => AccountPoolConfig;
   adapters: ReadonlyMap<PoolProvider, ProviderAdapter>;
@@ -198,12 +198,11 @@ export class AccountPoolHub {
     await this.stop();
   }
 
-  async authenticate(request: Request): Promise<string | null> {
-    const token =
-      request.headers.get("x-bb-account-pool-token") ??
-      readBearer(request.headers.get("authorization"));
-    const route = await this.options.threadTokens?.authenticate(token);
-    return route?.hostId ?? this.options.hubTokens.authenticate(token);
+  async authenticateNested(request: Request): Promise<string | null> {
+    const route = await this.options.threadTokens.authenticateNested(
+      presentedToken(request),
+    );
+    return route?.hostId ?? null;
   }
 
   async importAccount(
@@ -218,13 +217,15 @@ export class AccountPoolHub {
     routePath: string,
   ): Promise<Response> {
     const adapter = this.adapter(provider);
-    const token =
-      request.headers.get("x-bb-account-pool-token") ??
-      readBearer(request.headers.get("authorization"));
-    const threadRoute =
-      (await this.options.threadTokens?.authenticate(token, provider)) ?? null;
+    const token = presentedToken(request);
+    const threadRoute = await this.options.threadTokens.authenticate(
+      token,
+      provider,
+    );
     const hostId =
-      threadRoute?.hostId ?? (await this.options.hubTokens.authenticate(token));
+      threadRoute?.hostId ??
+      (await this.options.threadTokens.authenticateNested(token))?.hostId ??
+      null;
     if (hostId === null) {
       return adapter.errorResponse(401, "Invalid Account Pooler bearer token.");
     }
@@ -1626,7 +1627,7 @@ export function createHub(options: {
   quotas: QuotaStore;
   affinity: PoolAffinityStore;
   hubTokens: HubTokenStore;
-  threadTokens?: ThreadTokenStore;
+  threadTokens: ThreadTokenStore;
   routing?: RoutingStore;
   getSettings: () => AccountPoolConfig;
   fetch?: typeof fetch;
@@ -1670,7 +1671,7 @@ export function createHub(options: {
     affinity: options.affinity,
     maxAffinityBindings: options.maxAffinityBindings ?? MAX_AFFINITY_BINDINGS,
     hubTokens: options.hubTokens,
-    threadTokens: options.threadTokens ?? null,
+    threadTokens: options.threadTokens,
     routing: options.routing ?? null,
     getSettings: options.getSettings,
     adapters,
@@ -1682,6 +1683,13 @@ export function createHub(options: {
     onUpstreamError: options.onUpstreamError ?? (() => {}),
     onOAuthRefresh: options.onOAuthRefresh ?? (() => {}),
   });
+}
+
+function presentedToken(request: Request): string | null {
+  return (
+    request.headers.get("x-bb-account-pool-token") ??
+    readBearer(request.headers.get("authorization"))
+  );
 }
 
 function readBearer(value: string | null): string | null {

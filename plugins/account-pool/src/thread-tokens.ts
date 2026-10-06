@@ -10,25 +10,44 @@ import { z } from "zod";
 import { providerSchema } from "./contracts.js";
 import type { HubTokenStore } from "./store.js";
 
+const THREAD_ROUTE_PREFIX = "thread-route-";
+const NESTED_ROUTE_PREFIX = "nested-route-";
+
+const identifierSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u);
+const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+
 const routeSchema = z
   .object({
-    hostId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
-    threadId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
+    hostId: identifierSchema,
+    threadId: identifierSchema,
     provider: providerSchema,
     accountId: z.string().uuid().nullable(),
-    token: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
-    hostTokenDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    token: tokenSchema,
+    hostTokenDigest: digestSchema,
   })
   .strict();
 
-export type ThreadRoute = Omit<
-  z.infer<typeof routeSchema>,
-  "token" | "hostTokenDigest"
->;
+const nestedRouteSchema = z
+  .object({
+    hostId: identifierSchema,
+    threadId: identifierSchema,
+    token: tokenSchema,
+    hostTokenDigest: digestSchema,
+  })
+  .strict();
+
+type RouteRecord = z.infer<typeof routeSchema>;
+type NestedRouteRecord = z.infer<typeof nestedRouteSchema>;
+
+export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
+export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
 export class ThreadTokenStore {
-  private readonly routes = new Map<string, z.infer<typeof routeSchema>>();
-  private readonly tokenIndex = new Map<string, z.infer<typeof routeSchema>>();
+  private readonly routes = new Map<string, RouteRecord>();
+  private readonly tokenIndex = new Map<string, RouteRecord>();
+  private readonly nestedRoutes = new Map<string, NestedRouteRecord>();
+  private readonly nestedTokenIndex = new Map<string, NestedRouteRecord>();
   private tail: Promise<void> = Promise.resolve();
 
   constructor(
@@ -39,17 +58,26 @@ export class ThreadTokenStore {
   async initialize(hostIds: readonly string[]): Promise<void> {
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
     await fs.chmod(this.directory, 0o700);
-    const hosts = new Set(hostIds);
-    for (const file of await fs.readdir(this.directory)) {
-      if (!file.startsWith("thread-route-") || !file.endsWith(".json"))
-        continue;
-      const record = routeSchema.parse(
-        JSON.parse(await fs.readFile(path.join(this.directory, file), "utf8")),
-      );
-      if (hosts.has(record.hostId)) {
-        this.routes.set(this.key(record, record.hostTokenDigest), record);
-        this.tokenIndex.set(this.digest(record.token), record);
-      } else await fs.rm(path.join(this.directory, file));
+    const enrolled = new Set(hostIds);
+    for (const name of await fs.readdir(this.directory)) {
+      if (!name.endsWith(".json")) continue;
+      const file = path.join(this.directory, name);
+      if (name.startsWith(THREAD_ROUTE_PREFIX)) {
+        const record = routeSchema.parse(await readJson(file));
+        if (await this.isLive(record, enrolled)) {
+          this.routes.set(this.key(record, record.hostTokenDigest), record);
+          this.tokenIndex.set(digest(record.token), record);
+        } else await fs.rm(file);
+      } else if (name.startsWith(NESTED_ROUTE_PREFIX)) {
+        const record = nestedRouteSchema.parse(await readJson(file));
+        if (await this.isLive(record, enrolled)) {
+          this.nestedRoutes.set(
+            this.nestedKey(record, record.hostTokenDigest),
+            record,
+          );
+          this.nestedTokenIndex.set(digest(record.token), record);
+        } else await fs.rm(file);
+      }
     }
   }
 
@@ -57,8 +85,8 @@ export class ThreadTokenStore {
     const parsed = routeSchema
       .omit({ token: true, hostTokenDigest: true })
       .parse(route);
-    const hostTokenDigest = this.digest(hostToken);
-    const result = this.tail.then(async () => {
+    const hostTokenDigest = digest(hostToken);
+    return this.serialize(async () => {
       const key = this.key(parsed, hostTokenDigest);
       const existing = this.routes.get(key);
       if (existing !== undefined) return existing.token;
@@ -67,33 +95,40 @@ export class ThreadTokenStore {
         hostTokenDigest,
         token: randomBytes(32).toString("base64url"),
       };
-      const destination = this.file(record);
-      const temporary = `${destination}.${randomUUID()}.tmp`;
-      await fs.writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
-      await fs.rename(temporary, destination);
+      await this.persist(this.file(record), record);
       this.routes.set(key, record);
-      this.tokenIndex.set(this.digest(record.token), record);
+      this.tokenIndex.set(digest(record.token), record);
       return record.token;
     });
-    this.tail = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
+  }
+
+  async forNested(route: NestedRoute, hostToken: string): Promise<string> {
+    const parsed = nestedRouteSchema
+      .omit({ token: true, hostTokenDigest: true })
+      .parse(route);
+    const hostTokenDigest = digest(hostToken);
+    return this.serialize(async () => {
+      const key = this.nestedKey(parsed, hostTokenDigest);
+      const existing = this.nestedRoutes.get(key);
+      if (existing !== undefined) return existing.token;
+      const record = {
+        ...parsed,
+        hostTokenDigest,
+        token: randomBytes(32).toString("base64url"),
+      };
+      await this.persist(this.nestedFile(record), record);
+      this.nestedRoutes.set(key, record);
+      this.nestedTokenIndex.set(digest(record.token), record);
+      return record.token;
+    });
   }
 
   async authenticate(
     token: string | null,
     provider?: ThreadRoute["provider"],
   ): Promise<ThreadRoute | null> {
-    if (token === null || token.length !== 43) return null;
-    const presented = Buffer.from(token);
-    const record = this.tokenIndex.get(this.digest(token));
-    if (
-      record === undefined ||
-      !timingSafeEqual(presented, Buffer.from(record.token))
-    )
-      return null;
+    const record = lookup(this.tokenIndex, token);
+    if (record === null) return null;
     if (provider !== undefined && provider !== record.provider) return null;
     if (
       !(await this.hosts.authenticateGeneration(
@@ -110,17 +145,59 @@ export class ThreadTokenStore {
     };
   }
 
+  async authenticateNested(token: string | null): Promise<NestedRoute | null> {
+    const record = lookup(this.nestedTokenIndex, token);
+    if (record === null) return null;
+    if (
+      !(await this.hosts.authenticateGeneration(
+        record.hostId,
+        record.hostTokenDigest,
+      ))
+    )
+      return null;
+    return { hostId: record.hostId, threadId: record.threadId };
+  }
+
   async removeThread(threadId: string): Promise<void> {
-    const result = this.tail.then(async () => {
+    await this.serialize(async () => {
       for (const [key, record] of this.routes) {
         if (record.threadId !== threadId) continue;
         await fs.rm(this.file(record), { force: true });
         this.routes.delete(key);
-        this.tokenIndex.delete(this.digest(record.token));
+        this.tokenIndex.delete(digest(record.token));
+      }
+      for (const [key, record] of this.nestedRoutes) {
+        if (record.threadId !== threadId) continue;
+        await fs.rm(this.nestedFile(record), { force: true });
+        this.nestedRoutes.delete(key);
+        this.nestedTokenIndex.delete(digest(record.token));
       }
     });
-    this.tail = result.catch(() => {});
-    await result;
+  }
+
+  private serialize<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(action);
+    this.tail = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  }
+
+  private async isLive(
+    record: { hostId: string; hostTokenDigest: string },
+    enrolled: ReadonlySet<string>,
+  ): Promise<boolean> {
+    return (
+      enrolled.has(record.hostId) &&
+      (await this.hosts.isGenerationLive(record.hostId, record.hostTokenDigest))
+    );
+  }
+
+  private async persist(file: string, record: object): Promise<void> {
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
+    await fs.rename(temporary, file);
   }
 
   private key(route: ThreadRoute, hostTokenDigest: string): string {
@@ -130,11 +207,40 @@ export class ThreadTokenStore {
   private file(route: ThreadRoute & { hostTokenDigest: string }): string {
     return path.join(
       this.directory,
-      `thread-route-${this.key(route, route.hostTokenDigest)}.json`,
+      `${THREAD_ROUTE_PREFIX}${this.key(route, route.hostTokenDigest)}.json`,
     );
   }
 
-  private digest(value: string): string {
-    return createHash("sha256").update(value).digest("hex");
+  private nestedKey(route: NestedRoute, hostTokenDigest: string): string {
+    return `${route.hostId}-${route.threadId}-${hostTokenDigest}`;
   }
+
+  private nestedFile(route: NestedRoute & { hostTokenDigest: string }): string {
+    return path.join(
+      this.directory,
+      `${NESTED_ROUTE_PREFIX}${this.nestedKey(route, route.hostTokenDigest)}.json`,
+    );
+  }
+}
+
+function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function lookup<T extends { token: string }>(
+  index: ReadonlyMap<string, T>,
+  token: string | null,
+): T | null {
+  if (token === null || token.length !== 43) return null;
+  const record = index.get(digest(token));
+  if (
+    record === undefined ||
+    !timingSafeEqual(Buffer.from(token), Buffer.from(record.token))
+  )
+    return null;
+  return record;
+}
+
+async function readJson(file: string): Promise<unknown> {
+  return JSON.parse(await fs.readFile(file, "utf8"));
 }

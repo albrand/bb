@@ -34,7 +34,12 @@ import type {
   ImportedCodexCredentials,
 } from "./credentials.js";
 import { PARENT_TOKEN_ENV, PARENT_URL_ENV } from "./parent-pool.js";
-import { AccountStore, HubTokenStore, QuotaStore } from "./store.js";
+import {
+  AccountStore,
+  HubTokenStore,
+  PoolAffinityStore,
+  QuotaStore,
+} from "./store.js";
 import {
   createAccountPoolPlugin,
   helloResponse,
@@ -2005,7 +2010,7 @@ describe("Account Pool plugin", () => {
       {
         name: "ANTHROPIC_AUTH_TOKEN",
         value: fixture.key,
-        reason: "Account Pooler hub token for this machine",
+        reason: "Account Pooler token scoped to this thread",
       },
       {
         name: "ENABLE_TOOL_SEARCH",
@@ -2026,8 +2031,9 @@ describe("Account Pool plugin", () => {
       },
       {
         name: "BB_ACCOUNT_POOL_PARENT_TOKEN",
-        value: expect.any(String),
-        reason: "Account Pooler hub token for this machine",
+        value: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+        reason:
+          "Account Pooler token scoped to this thread for nested bb servers it launches",
       },
     ]);
     await expect(
@@ -8434,7 +8440,7 @@ describe("Account Pool nested proxy", () => {
     ).toHaveLength(0);
   });
 
-  it("serves availability only to hub token holders", async () => {
+  it("serves availability only to nested-server tokens", async () => {
     const upstream = await startUpstream(async (request, response) => {
       await readRequestBody(request);
       response.writeHead(200, { "content-type": "application/json" });
@@ -8442,18 +8448,473 @@ describe("Account Pool nested proxy", () => {
     });
     cleanups.push(upstream.close);
     const fixture = await createFixture({ upstreamUrl: upstream.url });
+    const nestedToken = z.string().parse(
+      (
+        await fixture.host.harness.behavior.resolveProviderEnv("claude-code", {
+          threadId: "thread-one",
+          projectId: "project-one",
+          hostId: "host-one",
+        })
+      ).find((entry) => entry.name === PARENT_TOKEN_ENV)?.value,
+    );
     const denied = await fixture.host.harness.behavior.fetchHttp(
       "GET",
       "/availability",
       {},
     );
     expect(denied.status).toBe(401);
-    const allowed = await fixture.host.harness.behavior.fetchHttp(
+    const threadScoped = await fixture.host.harness.behavior.fetchHttp(
       "GET",
       "/availability",
       { headers: { "x-bb-account-pool-token": fixture.key } },
     );
+    expect(threadScoped.status).toBe(401);
+    const allowed = await fixture.host.harness.behavior.fetchHttp(
+      "GET",
+      "/availability",
+      { headers: { "x-bb-account-pool-token": nestedToken } },
+    );
     expect(allowed.status).toBe(200);
     expect(await allowed.json()).toEqual({ claude: true, codex: false });
+  });
+});
+
+describe("Account Pool credential scoping", () => {
+  const POOL_SECRETS = ["plugins", "account-pool", "secrets", "accounts"];
+  const HUB_ROUTES = [
+    "/v1/messages",
+    "/v1/messages/count_tokens",
+    "/v1/responses",
+    "/v1/images/generations",
+    "/v1/images/edits",
+    "/v1/alpha/search",
+    "/v1/models",
+    "/availability",
+  ];
+
+  async function scopedFixture(
+    options?: AccountPoolPluginOptions,
+  ): Promise<Fixture> {
+    const upstream = await startUpstream(async (request, response) => {
+      await readRequestBody(request);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    });
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      options: {
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+        ...options,
+      },
+    });
+    await fixture.host.harness.behavior.callRpc("account.add", {
+      provider: "codex",
+      source: { kind: "import" },
+      label: null,
+      priority: 100,
+    });
+    return fixture;
+  }
+
+  async function envToken(
+    host: Fixture["host"],
+    providerId: "claude-code" | "codex",
+    name: string,
+    threadId = "thread-one",
+    hostId = "host-one",
+  ): Promise<string> {
+    const entries = await host.harness.behavior.resolveProviderEnv(providerId, {
+      threadId,
+      projectId: "project-one",
+      hostId,
+    });
+    const entry = entries.find((candidate) => candidate.name === name);
+    if (entry === undefined || typeof entry.value !== "string") {
+      throw new Error(`${name} was not resolved.`);
+    }
+    return entry.value;
+  }
+
+  const claudeToken = (
+    host: Fixture["host"],
+    threadId?: string,
+    hostId?: string,
+  ) => envToken(host, "claude-code", "ANTHROPIC_AUTH_TOKEN", threadId, hostId);
+  const nestedToken = (
+    host: Fixture["host"],
+    threadId?: string,
+    hostId?: string,
+  ) => envToken(host, "claude-code", PARENT_TOKEN_ENV, threadId, hostId);
+
+  async function readHostToken(
+    fixture: Fixture,
+    hostId = "host-one",
+  ): Promise<string> {
+    const file = path.join(
+      fixture.dataDir,
+      ...POOL_SECRETS,
+      `hub-token-${hostId}.json`,
+    );
+    return z
+      .object({ value: z.string() })
+      .parse(JSON.parse(await fs.readFile(file, "utf8"))).value;
+  }
+
+  async function statusOf(
+    host: Fixture["host"],
+    token: string,
+    route: string,
+    via: "bearer" | "header" = "bearer",
+  ): Promise<number> {
+    const read = route === "/availability" || route === "/v1/models";
+    const response = await host.harness.behavior.fetchHttp(
+      read ? "GET" : "POST",
+      route,
+      {
+        headers:
+          via === "bearer"
+            ? authHeaders(token)
+            : {
+                "x-bb-account-pool-token": token,
+                "content-type": "application/json",
+              },
+        ...(read ? {} : { body: "{}" }),
+      },
+    );
+    await response.text();
+    return response.status;
+  }
+
+  it("never exports the machine token and rejects it on every hub route", async () => {
+    const fixture = await scopedFixture();
+    const hostToken = await readHostToken(fixture);
+    const nested = await nestedToken(fixture.host);
+    const exported = JSON.stringify([
+      await fixture.host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-one",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+      await fixture.host.harness.behavior.resolveProviderEnv("codex", {
+        threadId: "thread-codex",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+    ]);
+    expect(exported).toContain(PARENT_TOKEN_ENV);
+    expect(exported).toContain("CODEX_POOL_AUTH_TOKEN");
+    expect(exported).not.toContain(hostToken);
+    expect(nested).not.toBe(hostToken);
+    for (const via of ["bearer", "header"] as const) {
+      for (const route of HUB_ROUTES) {
+        expect(await statusOf(fixture.host, hostToken, route, via)).toBe(401);
+        expect(await statusOf(fixture.host, nested, route, via)).not.toBe(401);
+      }
+    }
+  });
+
+  it("accepts each credential only on the routes it is scoped to", async () => {
+    const fixture = await scopedFixture();
+    const claude = fixture.key;
+    const codex = await envToken(
+      fixture.host,
+      "codex",
+      "CODEX_POOL_AUTH_TOKEN",
+      "thread-codex",
+    );
+    const nested = await nestedToken(fixture.host);
+    expect(new Set([claude, codex, nested]).size).toBe(3);
+    expect(
+      await envToken(fixture.host, "codex", PARENT_TOKEN_ENV, "thread-one"),
+    ).toBe(nested);
+    const matrix: Array<[string, string, string, number]> = [
+      ["claude", claude, "/v1/messages", 200],
+      ["claude", claude, "/v1/responses", 401],
+      ["claude", claude, "/availability", 401],
+      ["codex", codex, "/v1/responses", 200],
+      ["codex", codex, "/v1/messages", 401],
+      ["codex", codex, "/availability", 401],
+      ["nested", nested, "/v1/messages", 200],
+      ["nested", nested, "/v1/responses", 200],
+      ["nested", nested, "/availability", 200],
+    ];
+    for (const [kind, token, route, expected] of matrix) {
+      expect([kind, route, await statusOf(fixture.host, token, route)]).toEqual(
+        [kind, route, expected],
+      );
+    }
+  });
+
+  it("keeps nested traffic attributed to the machine and thread traffic to its thread", async () => {
+    const fixture = await scopedFixture();
+    const nested = await nestedToken(fixture.host);
+    const body = (id: string) =>
+      JSON.stringify({
+        model: "claude-fable-5",
+        metadata: {
+          user_id: JSON.stringify({
+            account_uuid: "invalid-account-uuid",
+            device_id: "device",
+            parent_session_id: "parent",
+            session_id: id,
+          }),
+        },
+      });
+    for (const [token, id] of [
+      [nested, "nested-session"],
+      [fixture.key, "thread-session"],
+    ] as const) {
+      const response = await fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        "/v1/messages",
+        {
+          headers: { ...authHeaders(token), "session-id": id },
+          body: body(id),
+        },
+      );
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+    const keys = [
+      ...new PoolAffinityStore(fixture.host.bb.storage.database())
+        .loadBindings(0, 100)
+        .keys(),
+    ].map((key) => z.array(z.string()).parse(JSON.parse(key)));
+    expect(keys).toEqual([
+      ["claude", "host-one", "session:nested-session"],
+      ["claude", "host-one", "thread-one", "session:thread-session"],
+    ]);
+    const status = statusSchema.parse(
+      await fixture.host.harness.behavior.callRpc("status.get", null),
+    );
+    expect(
+      status.accounts.find((account) => account.provider === "claude")
+        ?.lastUsedHostId,
+    ).toBe("host-one");
+  });
+
+  it("revokes thread and nested tokens with their machine token generation", async () => {
+    let now = 1_000;
+    const fixture = await scopedFixture({ now: () => now });
+    const { host } = fixture;
+    const claude = fixture.key;
+    const nested = await nestedToken(host);
+    const otherHost = await claudeToken(host, "thread-two", "host-two");
+    now = 2_000;
+    const rotate = await host.harness.behavior.runCli([
+      "token",
+      "rotate",
+      "--machine",
+      "One",
+    ]);
+    expect(rotate.exitCode).toBe(0);
+    now += 9 * 60_000;
+    expect(await statusOf(host, claude, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, nested, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, nested, "/availability")).toBe(200);
+    now = 2_000 + 10 * 60_000 + 1;
+    expect(await statusOf(host, claude, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, nested, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, nested, "/availability")).toBe(401);
+    const nextClaude = await claudeToken(host);
+    const nextNested = await nestedToken(host);
+    expect(nextClaude).not.toBe(claude);
+    expect(nextNested).not.toBe(nested);
+    expect(await statusOf(host, nextClaude, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, nextNested, "/availability")).toBe(200);
+    expect(await statusOf(host, otherHost, "/v1/messages")).toBe(200);
+  });
+
+  it("revokes on archive and delete and issues fresh tokens on the next env resolution", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const archive = (event: "thread.archived" | "thread.deleted") =>
+      host.harness.behavior.emitThreadEvent(event, {
+        thread: makeThreadResponse({ id: "thread-one" }),
+      });
+    const claude = fixture.key;
+    const nested = await nestedToken(host);
+    const sibling = await claudeToken(host, "thread-two");
+    await host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-one",
+      bypassed: true,
+    });
+    expect(await archive("thread.archived")).toEqual({ errors: [] });
+    expect(await statusOf(host, claude, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, nested, "/availability")).toBe(401);
+    expect(await statusOf(host, sibling, "/v1/messages")).toBe(200);
+    await expect(
+      host.harness.behavior.callRpc("bypass.get", { threadId: "thread-one" }),
+    ).resolves.toEqual({ threadId: "thread-one", bypassed: true });
+    await host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-one",
+      bypassed: false,
+    });
+    const reissued = await claudeToken(host);
+    const reissuedNested = await nestedToken(host);
+    expect(reissued).not.toBe(claude);
+    expect(reissuedNested).not.toBe(nested);
+    expect(await statusOf(host, reissued, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, reissuedNested, "/availability")).toBe(200);
+    await host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-one",
+      bypassed: true,
+    });
+    expect(await archive("thread.deleted")).toEqual({ errors: [] });
+    expect(await statusOf(host, reissued, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, reissuedNested, "/availability")).toBe(401);
+    await expect(
+      host.harness.behavior.callRpc("bypass.get", { threadId: "thread-one" }),
+    ).resolves.toEqual({ threadId: "thread-one", bypassed: false });
+  });
+
+  it("keeps valid tokens valid and revoked tokens revoked across a plugin restart", async () => {
+    const fixture = await scopedFixture();
+    const claude = fixture.key;
+    const nested = await nestedToken(fixture.host);
+    const revoked = await claudeToken(fixture.host, "thread-gone");
+    const revokedNested = await nestedToken(fixture.host, "thread-gone");
+    await fixture.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-gone" }),
+    });
+    const host = await fixture.host.harness.lifecycle.reload(
+      createAccountPoolPlugin({
+        usageUrl: EMPTY_USAGE_URL,
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      }),
+    );
+    const service = host.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      service.controller.abort();
+      await service.done;
+      await host.harness.lifecycle.dispose();
+    });
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    expect(await statusOf(host, claude, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, nested, "/availability")).toBe(200);
+    expect(await statusOf(host, revoked, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, revokedNested, "/availability")).toBe(401);
+  });
+
+  it("keeps one thread's token from acting as another thread", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const second = accountSchema.parse(
+      await host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-second" },
+        label: "Second subscription",
+        priority: 200,
+      }),
+    );
+    const configure =
+      host.harness.registrations.hooks["experimental_thread.configure"];
+    if (configure === null) throw new Error("Configuration hook is missing.");
+    await configure({
+      thread: { id: "thr_pinned", providerId: "claude-code" },
+      data: { provider: "claude", accountId: second.id },
+    });
+    const pinned = await claudeToken(host, "thr_pinned");
+    const automatic = await claudeToken(host, "thr_automatic");
+    const nested = await nestedToken(host, "thr_automatic");
+    await host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thr_pinned",
+      bypassed: true,
+    });
+    expect(await statusOf(host, pinned, "/v1/messages")).toBe(409);
+    expect(await statusOf(host, automatic, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, nested, "/v1/messages")).toBe(200);
+  });
+
+  it("lets a nested server proxy through its parent with the scoped token until the thread is archived", async () => {
+    const parent = await scopedFixture();
+    const scoped = await nestedToken(parent.host);
+    const parentBase = "http://parent.test/api/v1/plugins/account-pool/http";
+    const viaParent: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const route = url.pathname.slice(new URL(parentBase).pathname.length);
+      const body =
+        init?.body instanceof ArrayBuffer
+          ? new TextDecoder().decode(init.body)
+          : undefined;
+      return parent.host.harness.behavior.fetchHttp(
+        init?.method ?? "GET",
+        `${route}${url.search}`,
+        {
+          headers: Object.fromEntries(new Headers(init?.headers)),
+          ...(body === undefined ? {} : { body }),
+        },
+      );
+    };
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-pool-nest-"));
+    const child = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      fetch: viaParent,
+      availabilityTtlMs: 0,
+      usageUrl: EMPTY_USAGE_URL,
+      env: {
+        [PARENT_URL_ENV]: parentBase,
+        [PARENT_TOKEN_ENV]: scoped,
+      },
+    })(child.bb);
+    const service = child.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      service.controller.abort();
+      await service.done;
+      await child.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await child.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    const childToken = await claudeToken(child, "thread-nested");
+    expect(await statusOf(child, childToken, "/v1/messages")).toBe(200);
+    expect(await statusOf(parent.host, scoped, "/availability")).toBe(200);
+    await parent.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-one" }),
+    });
+    expect(await statusOf(child, childToken, "/v1/messages")).toBe(401);
+    expect(await statusOf(parent.host, scoped, "/availability")).toBe(401);
+    const neutralised = await child.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      {
+        threadId: "thread-nested",
+        projectId: "project-one",
+        hostId: "host-one",
+      },
+    );
+    expect(neutralised.map((entry) => [entry.name, entry.value])).toEqual([
+      ["ANTHROPIC_BASE_URL", ""],
+      ["ANTHROPIC_AUTH_TOKEN", ""],
+    ]);
   });
 });
