@@ -4,6 +4,7 @@ import {
 } from "./public-thread-test-harness.js";
 
 import {
+  archiveThread,
   createProjectSource,
   getProjectExecutionDefaults,
   listThreadsWithPendingInteractionState,
@@ -25,7 +26,7 @@ import {
   seedThreadRuntimeState,
   seedThread,
 } from "../helpers/seed.js";
-import { withTestHarness } from "../helpers/test-app.js";
+import { type TestAppHarness, withTestHarness } from "../helpers/test-app.js";
 import { installFakeGitWorktreeProvider } from "../helpers/environment-provider.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -366,23 +367,25 @@ describe("public thread default routes", () => {
       expected: "claude-opus-5-5",
     },
     {
-      name: "top-level thread another thread spawned, naming Opus",
+      name: "top-level thread a mid-turn thread spawned, naming Opus",
       parent: false,
-      spawnedBy: "parent",
+      spawnedBy: "active",
       model: "claude-opus-5-5",
       expected: "claude-sonnet-5-5",
     },
-    {
-      name: "top-level thread naming a spawner that does not exist",
-      parent: false,
-      spawnedBy: "thr_missing",
-      model: "claude-opus-5-5",
-      expected: "claude-opus-5-5",
-    },
+    ...(["missing", "idle", "other-project", "archived"] as const).map(
+      (spawnedBy) => ({
+        name: `top-level thread naming a ${spawnedBy} spawner`,
+        parent: false,
+        spawnedBy,
+        model: "claude-opus-5-5",
+        expected: "claude-opus-5-5",
+      }),
+    ),
   ] as Array<{
     name: string;
     parent: boolean;
-    spawnedBy?: string;
+    spawnedBy?: "active" | "missing" | "idle" | "other-project" | "archived";
     model: string | undefined;
     expected: string;
   }>)(
@@ -411,6 +414,11 @@ describe("public thread default routes", () => {
           environmentId: environment.id,
           projectId: project.id,
         });
+        const spawnedByThreadId = seedSpawner(harness, {
+          kind: spawnedBy,
+          projectId: project.id,
+          hostId: host.id,
+        });
 
         const response = await harness.app.request("/api/v1/threads", {
           method: "POST",
@@ -423,12 +431,7 @@ describe("public thread default routes", () => {
             input: [{ type: "text", text: "Review the change" }],
             environment: { type: "reuse", environmentId: environment.id },
             ...(parent ? { parentThreadId: parentThread.id } : {}),
-            ...(spawnedBy === undefined
-              ? {}
-              : {
-                  spawnedByThreadId:
-                    spawnedBy === "parent" ? parentThread.id : spawnedBy,
-                }),
+            ...(spawnedByThreadId === undefined ? {} : { spawnedByThreadId }),
           }),
         });
 
@@ -1074,3 +1077,44 @@ describe("public thread default routes", () => {
     });
   });
 });
+
+// A spawner the server should believe (mid-turn, same project) or one of the
+// kinds it must ignore.
+function seedSpawner(
+  harness: TestAppHarness,
+  args: {
+    kind: "active" | "missing" | "idle" | "other-project" | "archived" | undefined;
+    projectId: string;
+    hostId: string;
+  },
+): string | undefined {
+  switch (args.kind) {
+    case undefined:
+      return undefined;
+    case "missing":
+      return "thr_missing";
+    case "other-project": {
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: args.hostId,
+        path: "/tmp/thread-defaults-other-project",
+      });
+      return seedThread(harness.deps, {
+        projectId: project.id,
+        status: "active",
+      }).id;
+    }
+    case "archived": {
+      const spawner = seedThread(harness.deps, {
+        projectId: args.projectId,
+        status: "active",
+      });
+      archiveThread(harness.db, harness.deps.hub, spawner.id);
+      return spawner.id;
+    }
+    default:
+      return seedThread(harness.deps, {
+        projectId: args.projectId,
+        status: args.kind,
+      }).id;
+  }
+}
