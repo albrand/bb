@@ -144,6 +144,34 @@ describe("CliSkillsSettingsSectionContent", () => {
     ).toBeDefined();
   });
 
+  it("shows disconnected machines while keeping install disabled and the connect copy", () => {
+    const presentation = getCliSkillsPresentation(
+      [
+        { name: "Laptop", status: "outdated", connected: false },
+        { name: "Studio", status: "installed", connected: false },
+      ],
+      false,
+    );
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={false}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge={presentation.statusBadge}
+        action={presentation.action}
+      />,
+    );
+
+    expect(installButton().disabled).toBe(true);
+    expect(installButton().textContent).toBe("Install");
+    expect(screen.getByText("Disconnected: Laptop, Studio")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.",
+      ),
+    ).toBeDefined();
+  });
+
   it("blocks reopening the picker while an install is running", () => {
     render(
       <CliSkillsSettingsSectionContent

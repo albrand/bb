@@ -73,7 +73,11 @@ export function summarizeMachineStatuses(
           .map(({ name }) => name)
           .join(", ")}`;
   const known = available.filter(({ status }) => status !== "unknown");
-  if (known.length === 0) return null;
+  if (known.length === 0) {
+    return offline.length === 0
+      ? null
+      : `Disconnected: ${offline.map(({ name }) => name).join(", ")}`;
+  }
   const outdated = known.filter(({ status }) => status === "outdated");
   if (outdated.length > 0) {
     return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${unknownSummary}`;
