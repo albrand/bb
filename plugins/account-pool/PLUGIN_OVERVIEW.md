@@ -24,7 +24,7 @@ A bb server started inside another bb server's thread detects the parent's poole
 - **proxy** (default): keep a local hub with its own machine tokens and forward pooled traffic to the parent, so the parent's token never reaches this server's agents. Routing is contributed only for providers the parent can serve.
 - **isolate**: neutralise the inherited routing and use this instance's own accounts, or each provider's own credentials.
 
-Proxied traffic authenticates with a nested token scoped to the launching thread, and the parent attributes it to that thread's machine.
+Proxied traffic carries a token scoped to the launching thread; the parent attributes it to the machine.
 
 ## Requirements
 

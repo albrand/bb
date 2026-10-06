@@ -204,3 +204,73 @@ it("preserves machine rotation grace and revokes expired or unenrolled credentia
   await hosts.prune([]);
   expect(await reloaded.authenticate(current)).toBeNull();
 });
+
+it("loads past unreadable or unrecognised credential files and discards them", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const nestedRoute = { hostId: route.hostId, threadId: route.threadId };
+  const provider = await threads.forThread(route, hostToken);
+  const nested = await threads.forNested(nestedRoute, hostToken);
+  const [validNested] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("nested-route-"),
+  );
+  const newerNested = {
+    ...z
+      .record(z.string(), z.unknown())
+      .parse(
+        JSON.parse(
+          await fs.readFile(path.join(directory, validNested ?? ""), "utf8"),
+        ),
+      ),
+    addedLater: true,
+  };
+  const damaged = [
+    ["thread-route-empty.json", ""],
+    ["thread-route-garbage.json", "{not json"],
+    ["thread-route-wrong-shape.json", JSON.stringify({ hostId: 7 })],
+    ["nested-route-empty.json", ""],
+    ["nested-route-newer.json", JSON.stringify(newerNested)],
+  ] as const;
+  for (const [name, content] of damaged)
+    await fs.writeFile(path.join(directory, name), content);
+  await fs.writeFile(path.join(directory, "account-keep.json"), "{}");
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await expect(reloaded.initialize([route.hostId])).resolves.toBeUndefined();
+  const remaining = await fs.readdir(directory);
+  for (const [name] of damaged) expect(remaining).not.toContain(name);
+  expect(remaining).toContain("account-keep.json");
+  expect(await reloaded.authenticate(provider)).toEqual(route);
+  expect(await reloaded.authenticateNested(nested)).toEqual(nestedRoute);
+});
+
+it("reclaims expired-generation credentials for a thread when minting, and keeps live ones", async () => {
+  const { directory, hosts, threads, route, hostToken, advance } =
+    await fixture();
+  const nestedRoute = { hostId: route.hostId, threadId: route.threadId };
+  const otherNested = { hostId: route.hostId, threadId: "thr_two" };
+  await threads.forThread(route, hostToken);
+  await threads.forNested(nestedRoute, hostToken);
+  await threads.forNested(otherNested, hostToken);
+  await hosts.rotate(route.hostId);
+  const nextHostToken = await hosts.forHost(route.hostId);
+  const credentialFiles = async (prefix: string) =>
+    (await fs.readdir(directory)).filter((name) => name.startsWith(prefix));
+  await threads.forNested(nestedRoute, nextHostToken);
+  expect(await credentialFiles("nested-route-")).toHaveLength(3);
+  expect(await credentialFiles("thread-route-")).toHaveLength(1);
+  advance(10 * 60_000 + 1);
+  const current = await threads.forThread(route, nextHostToken);
+  expect(await credentialFiles("thread-route-")).toHaveLength(1);
+  expect(await credentialFiles("nested-route-")).toHaveLength(2);
+  expect(await threads.authenticate(current)).toEqual(route);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await credentialFiles("thread-route-")).toHaveLength(1);
+  expect(await credentialFiles("nested-route-")).toHaveLength(1);
+  await hosts.rotate(route.hostId);
+  const thirdHostToken = await hosts.forHost(route.hostId);
+  advance(10 * 60_000 + 1);
+  const nextNested = await threads.forNested(nestedRoute, thirdHostToken);
+  expect(await credentialFiles("thread-route-")).toHaveLength(0);
+  expect(await credentialFiles("nested-route-")).toHaveLength(1);
+  expect(await threads.authenticateNested(nextNested)).toEqual(nestedRoute);
+});

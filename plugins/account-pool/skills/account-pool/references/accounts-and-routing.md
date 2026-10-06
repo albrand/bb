@@ -181,6 +181,11 @@ thread is archived or deleted or the machine token is rotated. A nested server
 started before this scoping existed holds the machine token, which the hub no
 longer accepts; relaunch it so it receives a scoped token.
 
+The nested token is scoped to the thread, not to a provider or an account. It
+reaches both providers' pooled routes, ignores the thread's pinned account and
+bypass setting, and stays in the environment a nested server's threads inherit
+even when that server isolates or cannot route.
+
 `bb pool parent` reports the detected parent, the current mode, and which
 providers the parent can serve. `bb pool parent proxy` and `bb pool parent
 isolate` set the mode; `bb pool config` shows it as `parentMode`.

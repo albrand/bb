@@ -63,20 +63,20 @@ export class ThreadTokenStore {
       if (!name.endsWith(".json")) continue;
       const file = path.join(this.directory, name);
       if (name.startsWith(THREAD_ROUTE_PREFIX)) {
-        const record = routeSchema.parse(await readJson(file));
-        if (await this.isLive(record, enrolled)) {
+        const record = await readRecord(file, routeSchema);
+        if (record !== null && (await this.isLive(record, enrolled))) {
           this.routes.set(this.key(record, record.hostTokenDigest), record);
           this.tokenIndex.set(digest(record.token), record);
-        } else await fs.rm(file);
+        } else await fs.rm(file, { force: true });
       } else if (name.startsWith(NESTED_ROUTE_PREFIX)) {
-        const record = nestedRouteSchema.parse(await readJson(file));
-        if (await this.isLive(record, enrolled)) {
+        const record = await readRecord(file, nestedRouteSchema);
+        if (record !== null && (await this.isLive(record, enrolled))) {
           this.nestedRoutes.set(
             this.nestedKey(record, record.hostTokenDigest),
             record,
           );
           this.nestedTokenIndex.set(digest(record.token), record);
-        } else await fs.rm(file);
+        } else await fs.rm(file, { force: true });
       }
     }
   }
@@ -98,6 +98,7 @@ export class ThreadTokenStore {
       await this.persist(this.file(record), record);
       this.routes.set(key, record);
       this.tokenIndex.set(digest(record.token), record);
+      await this.reclaimDead(record);
       return record.token;
     });
   }
@@ -119,6 +120,7 @@ export class ThreadTokenStore {
       await this.persist(this.nestedFile(record), record);
       this.nestedRoutes.set(key, record);
       this.nestedTokenIndex.set(digest(record.token), record);
+      await this.reclaimDead(record);
       return record.token;
     });
   }
@@ -175,6 +177,40 @@ export class ThreadTokenStore {
     });
   }
 
+  private async reclaimDead(minted: {
+    hostId: string;
+    threadId: string;
+    hostTokenDigest: string;
+  }): Promise<void> {
+    const stale = (record: {
+      hostId: string;
+      threadId: string;
+      hostTokenDigest: string;
+    }) =>
+      record.hostId === minted.hostId &&
+      record.threadId === minted.threadId &&
+      record.hostTokenDigest !== minted.hostTokenDigest;
+    for (const [key, record] of this.routes) {
+      if (!stale(record) || (await this.isGenerationLive(record))) continue;
+      await fs.rm(this.file(record), { force: true });
+      this.routes.delete(key);
+      this.tokenIndex.delete(digest(record.token));
+    }
+    for (const [key, record] of this.nestedRoutes) {
+      if (!stale(record) || (await this.isGenerationLive(record))) continue;
+      await fs.rm(this.nestedFile(record), { force: true });
+      this.nestedRoutes.delete(key);
+      this.nestedTokenIndex.delete(digest(record.token));
+    }
+  }
+
+  private isGenerationLive(record: {
+    hostId: string;
+    hostTokenDigest: string;
+  }): Promise<boolean> {
+    return this.hosts.isGenerationLive(record.hostId, record.hostTokenDigest);
+  }
+
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     const result = this.tail.then(action);
     this.tail = result.then(
@@ -188,10 +224,7 @@ export class ThreadTokenStore {
     record: { hostId: string; hostTokenDigest: string },
     enrolled: ReadonlySet<string>,
   ): Promise<boolean> {
-    return (
-      enrolled.has(record.hostId) &&
-      (await this.hosts.isGenerationLive(record.hostId, record.hostTokenDigest))
-    );
+    return enrolled.has(record.hostId) && (await this.isGenerationLive(record));
   }
 
   private async persist(file: string, record: object): Promise<void> {
@@ -241,6 +274,16 @@ function lookup<T extends { token: string }>(
   return record;
 }
 
-async function readJson(file: string): Promise<unknown> {
-  return JSON.parse(await fs.readFile(file, "utf8"));
+async function readRecord<T>(
+  file: string,
+  schema: z.ZodType<T>,
+): Promise<T | null> {
+  try {
+    const parsed = schema.safeParse(
+      JSON.parse(await fs.readFile(file, "utf8")),
+    );
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
