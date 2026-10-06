@@ -228,7 +228,7 @@ export function AppSidebar({
           onNavigate={closeOnMobile}
         />
       </SidebarContent>
-      <SidebarFooter className="relative">
+      <SidebarFooter className="relative min-h-0">
         <OverflowFade placement="above" tone="sidebar" size="sm" />
         {isFooterCustomizing ? (
           <div className="max-h-[50svh] overflow-y-auto">

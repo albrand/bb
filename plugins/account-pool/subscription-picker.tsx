@@ -218,7 +218,7 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
         <span className="text-muted-foreground">Subscription</span>
         <select
           aria-label="Subscription"
-          className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          className="w-full text-ellipsis rounded-md border border-border bg-background px-2 py-1 text-sm pointer-coarse:min-h-11"
           value={selected ?? "automatic"}
           disabled={disabled}
           onChange={(event) => {

@@ -3147,7 +3147,12 @@ export function PromptBoxInternal({
 
   const handlePromptBoxMouseDown = useCallback(
     (event: PromptBoxMouseDownEvent) => {
-      if (!isPromptBoxChromeTarget(event.target)) return;
+      if (
+        !(event.target instanceof Node) ||
+        !event.currentTarget.contains(event.target) ||
+        !isPromptBoxChromeTarget(event.target)
+      )
+        return;
 
       const currentEditor = editorRef.current;
       if (!currentEditor || currentEditor.isDestroyed) return;
