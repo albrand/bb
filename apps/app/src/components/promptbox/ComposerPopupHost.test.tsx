@@ -17,6 +17,7 @@ vi.mock("@/lib/bb-desktop", () => ({
 
 afterEach(() => {
   cleanup();
+  window.getSelection()?.removeAllRanges();
   vi.restoreAllMocks();
 });
 
@@ -114,6 +115,25 @@ it.each([true, false])(
       .getByRole("textbox", { name: "Prompt" })
       .closest("form");
     if (!composer) throw new Error("Missing composer");
+    const caret = document.createRange();
+    caret.selectNodeContents(composer);
+    caret.collapse(false);
+    Object.defineProperty(caret, "getBoundingClientRect", {
+      value: () =>
+        new DOMRect(
+          32,
+          composer.getBoundingClientRect().bottom + 90 - composer.scrollTop,
+          0,
+          20,
+        ),
+    });
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(caret);
+    fireEvent(window, new Event("resize"));
+    expect(caret.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      composer.getBoundingClientRect().bottom - 8,
+    );
     expect(
       Number.parseFloat(menu.style.top) + menu.offsetHeight + 8,
     ).toBeLessThanOrEqual(composer.getBoundingClientRect().top);

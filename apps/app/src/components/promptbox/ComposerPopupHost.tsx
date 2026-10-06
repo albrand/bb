@@ -146,6 +146,19 @@ function ComposerPopupContent({
         : anchor.bottom + 8;
       menu.style.top = `${Math.max(top, Math.min(preferredTop, bottom - menu.offsetHeight))}px`;
       menu.style.visibility = "visible";
+      const selection = window.getSelection();
+      if (selection?.isCollapsed && selection.rangeCount > 0) {
+        const caret = selection.getRangeAt(0);
+        if (composer.contains(caret.commonAncestorContainer)) {
+          const caretBounds = caret.getBoundingClientRect();
+          const composerBounds = composer.getBoundingClientRect();
+          if (caretBounds.bottom > composerBounds.bottom - 8)
+            composer.scrollTop +=
+              caretBounds.bottom - composerBounds.bottom + 8;
+          else if (caretBounds.top < composerBounds.top + 8)
+            composer.scrollTop -= composerBounds.top + 8 - caretBounds.top;
+        }
+      }
     };
     position();
     const observer =
