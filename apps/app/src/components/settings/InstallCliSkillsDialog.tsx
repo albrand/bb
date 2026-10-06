@@ -65,7 +65,11 @@ function InstallCliSkillsDialogContent({
     }
     return true;
   });
-  const targetHostIdsKey = targetHostIds.join("\0");
+  const targetHostIdsKey = JSON.stringify([
+    action,
+    connectedHostIds,
+    targetHostIds,
+  ]);
   const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<{
     targetsKey: string;
     hostIds: readonly string[];

@@ -230,6 +230,43 @@ describe("InstallCliSkillsDialog", () => {
     expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
   });
 
+  it("reselects the only connected outdated machine after a pre-load choice", () => {
+    const onInstall = vi.fn();
+    const oneConnectedHost = [hosts[1], hosts[2]];
+    const { rerender } = render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={oneConnectedHost}
+        statusByHostId={new Map()}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    fireEvent.click(checkbox("Studio"));
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={oneConnectedHost}
+        statusByHostId={new Map([["host-studio", "outdated"]])}
+        action="update"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
+  });
+
   it("replaces Update when its only outdated machine disconnects", () => {
     const { rerender } = render(
       <InstallCliSkillsDialog
