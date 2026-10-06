@@ -30,7 +30,13 @@ function indexMasterRow(db: DbConnection): IndexMasterRow | undefined {
 }
 
 function schemaVersion(db: DbConnection): number {
-  return db.$client.pragma("schema_version", { simple: true }) as number;
+  const version: unknown = db.$client.pragma("schema_version", {
+    simple: true,
+  });
+  if (typeof version !== "number") {
+    throw new Error("PRAGMA schema_version did not return a number");
+  }
+  return version;
 }
 
 describe("fork item-completion lookup index", () => {
