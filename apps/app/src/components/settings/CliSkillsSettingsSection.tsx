@@ -28,6 +28,11 @@ interface CliSkillsSettingsSectionContentProps {
 }
 
 export type CliSkillsAction = "install" | "update" | "reinstall";
+type CliSkillStatusItem = {
+  name: string;
+  status: CliSkillMachineStatus;
+  connected?: boolean;
+};
 
 function installDescription(
   hasConnectedMachine: boolean,
@@ -56,14 +61,18 @@ function installDescription(
 }
 
 export function summarizeMachineStatuses(
-  statuses: readonly { name: string; status: CliSkillMachineStatus }[],
+  statuses: readonly CliSkillStatusItem[],
 ): string | null {
-  const unknown = statuses.filter(({ status }) => status === "unknown");
+  const available = statuses.filter(({ connected }) => connected !== false);
+  const offline = statuses.filter(({ connected }) => connected === false);
+  const unknown = available.filter(({ status }) => status === "unknown");
   const unknownSummary =
-    unknown.length === 0
+    unknown.length === 0 && offline.length === 0
       ? ""
-      : `; status unavailable on ${unknown.map(({ name }) => name).join(", ")}`;
-  const known = statuses.filter(({ status }) => status !== "unknown");
+      : `; status unavailable on ${[...unknown, ...offline]
+          .map(({ name }) => name)
+          .join(", ")}`;
+  const known = available.filter(({ status }) => status !== "unknown");
   if (known.length === 0) return null;
   const outdated = known.filter(({ status }) => status === "outdated");
   if (outdated.length > 0) {
@@ -82,14 +91,16 @@ export function summarizeMachineStatuses(
 }
 
 export function getCliSkillsPresentation(
-  statuses: readonly { name: string; status: CliSkillMachineStatus }[],
+  statuses: readonly CliSkillStatusItem[],
   hasConnectedMachine = true,
 ): {
   action: CliSkillsAction;
   actionLabel?: string;
   statusBadge: string | null;
 } {
-  const knownStatuses = statuses.filter(({ status }) => status !== "unknown");
+  const knownStatuses = statuses.filter(
+    ({ status, connected }) => status !== "unknown" && connected !== false,
+  );
   const installedCount = knownStatuses.filter(
     ({ status }) => status === "installed",
   ).length;
@@ -196,6 +207,8 @@ export function CliSkillsSettingsSection() {
   const statusItems = statusQuery.data?.machines.map((machine) => ({
     name: machine.hostName,
     status: machine.status,
+    connected:
+      hosts.find((host) => host.id === machine.hostId)?.status === "connected",
   })) ?? [];
   const hasConnectedMachine = hosts.some((host) => host.status === "connected");
   const { action, actionLabel, statusBadge } =

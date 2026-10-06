@@ -192,6 +192,42 @@ describe("InstallCliSkillsDialog", () => {
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
   });
 
+  it("replaces Update when its only outdated machine disconnects", () => {
+    const { rerender } = render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts.slice(0, 2)}
+        statusByHostId={statuses}
+        action="update"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Update" }).hasAttribute("disabled")).toBe(false);
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={[hosts[0], host({ id: "host-studio", name: "Studio", status: "disconnected" })]}
+        statusByHostId={statuses}
+        action="reinstall"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Reinstall" }).hasAttribute("disabled")).toBe(false);
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
+  });
+
   it("updates only outdated machines and uses matching dialog copy", () => {
     render(
       <InstallCliSkillsDialog

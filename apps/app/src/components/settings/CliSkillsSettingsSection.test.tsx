@@ -60,8 +60,8 @@ describe("CliSkillsSettingsSectionContent", () => {
 
   it("qualifies installed machines when another machine's status is unknown", () => {
     const presentation = getCliSkillsPresentation([
-      { name: "Laptop", status: "installed" },
-      { name: "Old Studio", status: "unknown" },
+      { name: "Laptop", status: "installed", connected: true },
+      { name: "Old Studio", status: "outdated", connected: false },
     ]);
     render(
       <CliSkillsSettingsSectionContent
@@ -245,6 +245,18 @@ describe("getCliSkillsPresentation", () => {
     ).toEqual({
       action: "update",
       statusBadge: "Out of date on Studio, Build Mac",
+    });
+  });
+
+  it("does not offer Update for an outdated disconnected machine", () => {
+    expect(
+      getCliSkillsPresentation([
+        { name: "Laptop", status: "installed", connected: true },
+        { name: "Studio", status: "outdated", connected: false },
+      ]),
+    ).toEqual({
+      action: "reinstall",
+      statusBadge: "Installed; status unavailable on Studio",
     });
   });
 
