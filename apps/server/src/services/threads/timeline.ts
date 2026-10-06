@@ -1632,7 +1632,7 @@ interface LoadThreadConversationOutlineOptions extends BuildThreadConversationOu
 }
 
 const CONVERSATION_OUTLINE_PREVIEW_MAX_LENGTH = 200;
-const CONVERSATION_OUTLINE_PROJECTION_VERSION = 2;
+const CONVERSATION_OUTLINE_PROJECTION_VERSION = 3;
 const conversationOutlineItemsSchema =
   threadConversationOutlineItemSchema.array();
 
@@ -1775,22 +1775,16 @@ function selectThreadConversationOutline(
     rows: rawEventRows,
     threadId: thread.id,
   });
-  const rejectedClientRequestEvents = clientRequestContextRows.rejectedRows.map(
-    (row) => toThreadEventWithMeta(row),
-  );
   const acceptedClientRequestContext: AcceptedClientRequestContext = {
     acceptedClientRequestEvents: clientRequestContextRows.acceptedRows.map(
       (row) => toThreadEventWithMeta(row),
     ),
-    rejectedClientRequestEvents,
+    rejectedClientRequestEvents: clientRequestContextRows.rejectedRows.map(
+      (row) => toThreadEventWithMeta(row),
+    ),
   };
   return {
-    events:
-      rejectedClientRequestEvents.length === 0
-        ? decodedRawEvents
-        : [...decodedRawEvents, ...rejectedClientRequestEvents].sort(
-            (left, right) => left.meta.seq - right.meta.seq,
-          ),
+    events: decodedRawEvents,
     project: () => {
       const timeline = buildThreadTimelineFromEvents({
         acceptedClientRequestContext,
