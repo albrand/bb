@@ -211,23 +211,40 @@ describe("AccountStore", () => {
     const principal = await add("principal");
     const twin = await add("twin");
     writes.length = 0;
-    const lock = AccountStore.prototype as unknown as {
+    type Locked = {
+      mutationLock: Promise<void> | null;
       serialized(action: () => Promise<unknown>): Promise<unknown>;
     };
+    const lock = AccountStore.prototype as unknown as Locked;
     const serialized = lock.serialized;
+    let holding: Promise<void> | null = null;
     const queue = vi.spyOn(lock, "serialized").mockImplementation(function (
-      this: unknown,
+      this: Locked,
       action: () => Promise<unknown>,
     ) {
-      writes.push("queued");
-      return serialized.call(this, action);
+      const before = this.mutationLock;
+      const pending = serialized.call(this, action);
+      const registered =
+        this.mutationLock !== null && this.mutationLock !== before;
+      writes.push(
+        !registered
+          ? "lock not registered"
+          : before === null
+            ? "lock taken"
+            : before === holding
+              ? "queued behind held write"
+              : "queued behind another call",
+      );
+      return pending;
     });
     cleanups.push(async () => queue.mockRestore());
 
     holdNextAccountsWrite = true;
     const concurrent = store.setEnabled(twin.id, false);
     await writeHeld;
-    expect(writes).toEqual(["queued", "set accounts:v1"]);
+    expect(writes).toEqual(["lock taken", "set accounts:v1"]);
+    holding = (store as unknown as Locked).mutationLock;
+    expect(holding).not.toBeNull();
     const seen: Array<Array<{ id: string; enabled: boolean }>> = [];
     const turnOff = store
       .disableWhere((accounts) => {
@@ -251,7 +268,11 @@ describe("AccountStore", () => {
     }
     expect(seen).toEqual([]);
     expect(turnOffSettled).toBe(false);
-    expect(writes).toEqual(["queued", "set accounts:v1", "queued"]);
+    expect(writes).toEqual([
+      "lock taken",
+      "set accounts:v1",
+      "queued behind held write",
+    ]);
 
     release();
     await concurrent;
@@ -262,7 +283,11 @@ describe("AccountStore", () => {
         { id: twin.id, enabled: false },
       ],
     ]);
-    expect(writes).toEqual(["queued", "set accounts:v1", "queued"]);
+    expect(writes).toEqual([
+      "lock taken",
+      "set accounts:v1",
+      "queued behind held write",
+    ]);
     expect(
       (await store.list()).map(({ id, enabled }) => ({ id, enabled })),
     ).toEqual([

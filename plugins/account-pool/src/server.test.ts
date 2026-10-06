@@ -9066,16 +9066,33 @@ describe("Account Pool subscription sign-in repair", () => {
       log.push(`delete ${key}`);
       await remove(key);
     };
-    const store = AccountStore.prototype as unknown as {
+    type Locked = {
+      mutationLock: Promise<void> | null;
       serialized(action: () => Promise<unknown>): Promise<unknown>;
     };
+    const store = AccountStore.prototype as unknown as Locked;
     const serialized = store.serialized;
+    let instance: Locked | null = null;
+    let holding: Promise<void> | null = null;
     const queue = vi.spyOn(store, "serialized").mockImplementation(function (
-      this: unknown,
+      this: Locked,
       action: () => Promise<unknown>,
     ) {
-      log.push("queued");
-      return serialized.call(this, action);
+      instance = this;
+      const before = this.mutationLock;
+      const pending = serialized.call(this, action);
+      const registered =
+        this.mutationLock !== null && this.mutationLock !== before;
+      log.push(
+        !registered
+          ? "lock not registered"
+          : before === null
+            ? "lock taken"
+            : before === holding
+              ? "queued behind held write"
+              : "queued behind another call",
+      );
+      return pending;
     });
     cleanups.push(async () => queue.mockRestore());
 
@@ -9084,6 +9101,10 @@ describe("Account Pool subscription sign-in repair", () => {
       id: pool.previous.id,
     });
     await writeHeld;
+    expect(log.at(-1)).toBe("set accounts:v1");
+    expect(log).toContain("lock taken");
+    holding = (instance as Locked | null)?.mutationLock ?? null;
+    expect(holding).not.toBeNull();
     const contestedFrom = log.length;
     let settledAt = -1;
     const turningOff = pool.host.harness.behavior
@@ -9103,17 +9124,17 @@ describe("Account Pool subscription sign-in repair", () => {
       );
     for (
       let turn = 0;
-      turn < 100 && !log.slice(contestedFrom).includes("queued");
+      turn < 100 && log.length === contestedFrom;
       turn += 1
     ) {
       await new Promise((resolve) => setImmediate(resolve));
     }
-    expect(log.slice(contestedFrom)).toEqual(["queued"]);
+    expect(log.slice(contestedFrom)).toEqual(["queued behind held write"]);
     for (let turn = 0; turn < 5; turn += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
     expect(settledAt).toBe(-1);
-    expect(log.slice(contestedFrom)).toEqual(["queued"]);
+    expect(log.slice(contestedFrom)).toEqual(["queued behind held write"]);
 
     release();
     await enabling;
