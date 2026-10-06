@@ -4107,7 +4107,7 @@ describe("Account Pool plugin", () => {
     );
 
     it.each(["claude", "codex"] as const)(
-      "lets new %s conversations bypass long holds while preserving established pins",
+      "routes %s conversations around long holds according to provider affinity",
       async (provider) => {
         let now = 1_800_000_000_000;
         let limited = false;
@@ -4159,7 +4159,7 @@ describe("Account Pool plugin", () => {
                 "sk-second",
                 "sk-second",
                 "sk-second",
-                "sk-second",
+                "sk-first",
                 "sk-second",
               ]
             : [
@@ -6684,14 +6684,10 @@ describe("Account Pool plugin", () => {
       });
     });
 
-    it("moves an Automatic conversation to another account after a long hold", async () => {
+    it("keeps an Automatic conversation bound through a hold and returns to it afterward", async () => {
       const pool = await fixtureWithAccounts();
       setQuota(pool.fixture, pool.fixture.account.id, {
         sevenDayUtilization: 0.2,
-        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
-      });
-      setQuota(pool.fixture, pool.second.id, {
-        sevenDayUtilization: 0.4,
         sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
       });
       await pool.send("thr_longholdrebalance", "session-longholdrebalance");
@@ -6722,9 +6718,24 @@ describe("Account Pool plugin", () => {
         { threadId: "thr_longholdrebalance", provider: "claude" },
       );
       expect(after).toMatchObject({
-        boundAccountId: pool.second.id,
+        boundAccountId: pool.fixture.account.id,
         nextAccountId: pool.second.id,
       });
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: null,
+      });
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      expect(pool.seen).toEqual([
+        "sk-first",
+        "sk-second",
+        "sk-first",
+        "sk-first",
+      ]);
     });
 
     it("keeps an explicitly pinned conversation on its account during a long hold", async () => {

@@ -1108,6 +1108,10 @@ export class AccountPoolHub {
       boundAccountId !== null
         ? eligible.find(({ account }) => account.id === boundAccountId)
         : undefined;
+    const boundIsHeld =
+      bound !== undefined &&
+      bound.quota.heldUntil !== null &&
+      bound.quota.heldUntil > now;
     let inherited: (typeof candidates)[number] | undefined;
     if (bound === undefined && parentAffinityKey !== null) {
       const parent = this.affinityBindings.get(parentAffinityKey);
@@ -1217,7 +1221,9 @@ export class AccountPoolHub {
       !familyDetour(boundAccountId) &&
       (bound === undefined ||
         bound.account.id === selected.account.id ||
-        (binding === routing.binding && attempted.has(bound.account.id)));
+        (binding === routing.binding &&
+          attempted.has(bound.account.id) &&
+          !boundIsHeld));
     const advance =
       routing.selectionAccountId === null &&
       !familyDetour(active.accountId) &&
