@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { threadScope, turnScope } from "@bb/domain";
 import type { DbConnection } from "../../src/connection.js";
-import { getThreadEventRewriteGeneration } from "../../src/data/event-rewrite-generation.js";
+import {
+  getThreadConversationOutlineRewriteGeneration,
+  getThreadEventRewriteGeneration,
+} from "../../src/data/event-rewrite-generation.js";
 import {
   appendDaemonEventsInTransaction,
   deleteThreadEventSuffixInTransaction,
@@ -23,6 +26,7 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 interface RewriteCase {
   between?: (threadId: string) => InsertEventInput[];
+  conversationOutline: boolean;
   name: string;
   noop: (db: DbConnection, threadId: string) => number;
   rewrite: (db: DbConnection, threadId: string) => number;
@@ -65,10 +69,43 @@ function expectGenerationBump(
   threadId: string,
   bumped: boolean,
   mutate: () => void,
+  conversationOutlineBumped = bumped,
 ): void {
   const before = getThreadEventRewriteGeneration(threadId);
+  const outlineBefore = getThreadConversationOutlineRewriteGeneration(threadId);
   mutate();
   expect(getThreadEventRewriteGeneration(threadId) !== before).toBe(bumped);
+  expect(
+    getThreadConversationOutlineRewriteGeneration(threadId) !== outlineBefore,
+  ).toBe(conversationOutlineBumped);
+}
+
+function resolvedDeltaCase(name: string, text: string): RewriteCase {
+  return {
+    name,
+    conversationOutline: text.length === 0,
+    seed: (threadId) =>
+      [1, 2, 3].map((sequence) =>
+        row(
+          threadId,
+          sequence,
+          "item/agentMessage/delta",
+          { delta: `chunk ${sequence}`, itemId: "msg-1" },
+          { itemId: "msg-1" },
+        ),
+      ),
+    noop: (db) => pruneThreadEvents(db, "resolved-items"),
+    between: (threadId) => [
+      row(
+        threadId,
+        4,
+        "item/completed",
+        { item: { id: "msg-1", text, type: "agentMessage" } },
+        { itemId: "msg-1", itemKind: "agentMessage" },
+      ),
+    ],
+    rewrite: (db) => pruneThreadEvents(db, "resolved-items"),
+  };
 }
 
 function row(
@@ -107,6 +144,18 @@ function tokenUsage(threadId: string, sequence: number): InsertEventInput {
       modelContextWindow: sequence === 1 ? 200_000 : null,
       total: { totalTokens: sequence * 10 },
     },
+  });
+}
+
+function rateLimits(threadId: string, sequence: number): InsertEventInput {
+  return row(threadId, sequence, "provider/rateLimits/updated", {
+    rateLimits: { providerId: "codex" },
+  });
+}
+
+function turnDiff(threadId: string, sequence: number): InsertEventInput {
+  return row(threadId, sequence, "turn/diff/updated", {
+    diff: `diff ${sequence}`,
   });
 }
 
@@ -184,6 +233,7 @@ describe("thread event rewrite generation", () => {
   it.each<RewriteCase>([
     {
       name: "a suffix delete",
+      conversationOutline: true,
       seed: (threadId) =>
         [1, 2, 3].map((sequence) => message(threadId, sequence)),
       noop: (db, threadId) => deleteSuffix(db, threadId, 10),
@@ -191,6 +241,7 @@ describe("thread event rewrite generation", () => {
     },
     {
       name: "a usage prune",
+      conversationOutline: false,
       seed: (threadId) => [tokenUsage(threadId, 1)],
       noop: (db) => pruneThreadEvents(db, "usage"),
       between: (threadId) =>
@@ -199,38 +250,30 @@ describe("thread event rewrite generation", () => {
         ),
       rewrite: (db) => pruneThreadEvents(db, "usage"),
     },
+    resolvedDeltaCase("a resolved delta prune", "chunk 1chunk 2chunk 3"),
+    resolvedDeltaCase("a resolved delta prune without final text", ""),
     {
-      name: "a resolved delta prune",
-      seed: (threadId) =>
-        [1, 2, 3].map((sequence) =>
-          row(
-            threadId,
-            sequence,
-            "item/agentMessage/delta",
-            { delta: `chunk ${sequence}`, itemId: "msg-1" },
-            { itemId: "msg-1" },
-          ),
+      name: "a rate-limit prune",
+      conversationOutline: false,
+      seed: (threadId) => [rateLimits(threadId, 1)],
+      noop: (db) => pruneThreadEvents(db, "rate-limits"),
+      between: (threadId) => [rateLimits(threadId, 2)],
+      rewrite: (db) => pruneThreadEvents(db, "rate-limits"),
+    },
+    {
+      name: "a turn-diff prune",
+      conversationOutline: false,
+      seed: (threadId) => [turnDiff(threadId, 1)],
+      noop: (db) => pruneThreadEvents(db, "turn-diffs"),
+      between: (threadId) =>
+        Array.from({ length: 302 }, (_, index) =>
+          turnDiff(threadId, index + 2),
         ),
-      noop: (db) => pruneThreadEvents(db, "resolved-items"),
-      between: (threadId) => [
-        row(
-          threadId,
-          4,
-          "item/completed",
-          {
-            item: {
-              id: "msg-1",
-              text: "chunk 1chunk 2chunk 3",
-              type: "agentMessage",
-            },
-          },
-          { itemId: "msg-1", itemKind: "agentMessage" },
-        ),
-      ],
-      rewrite: (db) => pruneThreadEvents(db, "resolved-items"),
+      rewrite: (db) => pruneThreadEvents(db, "turn-diffs"),
     },
     {
       name: "a background task progress prune",
+      conversationOutline: false,
       seed: (threadId) => [taskProgress(threadId, 1)],
       noop: (db) => pruneThreadEvents(db, "resolved-items"),
       between: (threadId) => [taskProgress(threadId, 2)],
@@ -248,9 +291,14 @@ describe("thread event rewrite generation", () => {
     });
     insertEvents(db, noopNotifier, testCase.between?.(threadId) ?? []);
     const otherBefore = getThreadEventRewriteGeneration(otherThreadId);
-    expectGenerationBump(threadId, true, () => {
-      expect(testCase.rewrite(db, threadId)).toBeGreaterThan(0);
-    });
+    expectGenerationBump(
+      threadId,
+      true,
+      () => {
+        expect(testCase.rewrite(db, threadId)).toBeGreaterThan(0);
+      },
+      testCase.conversationOutline,
+    );
     expect(getThreadEventRewriteGeneration(otherThreadId)).toBe(otherBefore);
   });
 

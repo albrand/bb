@@ -120,6 +120,18 @@ function getEventLoopWorkSnapshot(): EventLoopWorkSnapshot {
   };
 }
 
+export function getCurrentEventLoopWorkLabel(): string | null {
+  const labels: string[] = [];
+  const currentId = currentFrameId.getStore();
+  let frame = currentId === undefined ? undefined : activeFrames.get(currentId);
+  while (frame !== undefined) {
+    labels.unshift(frame.label);
+    frame =
+      frame.parentId === null ? undefined : activeFrames.get(frame.parentId);
+  }
+  return labels.length === 0 ? null : labels.join(" > ");
+}
+
 export function takeEventLoopWorkWindowSnapshot(): EventLoopWorkSnapshot {
   const snapshot = getEventLoopWorkSnapshot();
   completedInWindow.length = 0;

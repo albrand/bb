@@ -4,6 +4,7 @@ import {
   type CompletedTurnDisplay,
 } from "@bb/domain";
 import {
+  advanceThreadPruning,
   deleteThreadEventSuffixInTransaction,
   createThread,
   noopNotifier,
@@ -105,6 +106,119 @@ function accepted(requestId: string, turnId: string): RowSpec {
   };
 }
 
+function requestIdAt(index: number): string {
+  return `creq_${index.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+}
+
+function backgroundTask(
+  type:
+    | "item/started"
+    | "item/backgroundTask/progress"
+    | "item/backgroundTask/completed",
+  taskId: string,
+  turnId?: string,
+): RowSpec {
+  const settled = type === "item/backgroundTask/completed";
+  return {
+    type,
+    turnId,
+    providerThreadId: "provider-memo",
+    itemId: taskId,
+    itemKind: "backgroundTask",
+    data: {
+      item: {
+        id: taskId,
+        type: "backgroundTask",
+        taskType: "local_bash",
+        description: `Background ${taskId}`,
+        status: settled ? "completed" : "pending",
+        taskStatus: settled ? "completed" : "running",
+        skipTranscript: false,
+      },
+    },
+  };
+}
+
+function seedStreamedHistory(
+  testThread: TestThread,
+  options: { backgroundTasks: boolean; openTaskTurn: number | null },
+): void {
+  appendRows(
+    testThread,
+    Array.from({ length: 100 }, (_, i) => {
+      const turnId = `turn-${i}`;
+      const taskStarts =
+        (options.backgroundTasks && i % 7 === 3) || i === options.openTaskTurn;
+      return [
+        request(requestIdAt(i)),
+        started(turnId),
+        accepted(requestIdAt(i), turnId),
+        ...(taskStarts
+          ? [backgroundTask("item/started", `task-${i}`, turnId)]
+          : []),
+        ...(options.backgroundTasks && i % 7 === 3
+          ? [backgroundTask("item/backgroundTask/progress", `task-${i}`)]
+          : []),
+        delta(turnId, "Answer"),
+        delta(turnId, ` ${i}`),
+        message(turnId, `Answer ${i}`),
+        completed(turnId),
+        ...(options.backgroundTasks && i % 7 === 5
+          ? [backgroundTask("item/backgroundTask/completed", `task-${i - 2}`)]
+          : []),
+      ];
+    }).flat(),
+  );
+  appendRows(testThread, [started("live"), delta("live", "Live")]);
+}
+
+function backgroundDelegation(
+  type: "item/started" | "item/delegation/completed",
+  delegationId: string,
+  turnId?: string,
+): RowSpec {
+  return {
+    type,
+    turnId,
+    itemId: delegationId,
+    itemKind: "delegation",
+    data: {
+      item: {
+        id: delegationId,
+        type: "delegation",
+        childRef: "toolu_background",
+        label: "Background audit",
+        status: type === "item/started" ? "pending" : "completed",
+        background: true,
+      },
+    },
+  };
+}
+
+function pruneUntilResolvedItemsComplete(testThread: TestThread): number {
+  const threadId = testThread.thread.id;
+  let removed = 0;
+  for (let pass = 0; pass < 2_000; pass += 1) {
+    const result = advanceThreadPruning(testThread.db, { threadId });
+    removed += result.removed;
+    if (result.policy === "resolved-items" && result.action !== "advanced")
+      return removed;
+  }
+  throw new Error("Resolved-item pruning did not finish a thread pass");
+}
+
+function listEventSequences(
+  testThread: TestThread,
+  types: readonly string[],
+): number[] {
+  return testThread.db.$client
+    .prepare<[string], { sequence: number }>(
+      `SELECT sequence FROM events WHERE thread_id = ? AND type IN (${types.map((type) => `'${type}'`).join(", ")}) ORDER BY sequence`,
+    )
+    .all(testThread.thread.id)
+    .map((row) => row.sequence);
+}
+
 function seed(
   testThread: TestThread,
   count = 3,
@@ -114,7 +228,7 @@ function seed(
     testThread,
     Array.from({ length: count }, (_, i) => {
       const turnId = `turn-${i}`;
-      const requestId = `creq_${i.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+      const requestId = requestIdAt(i);
       return [
         request(requestId),
         started(turnId),
@@ -654,6 +768,179 @@ describe("incremental conversation outlines", () => {
 
       expect(selectedRows).toBeGreaterThan(500);
       expectMatchesFull(testThread);
+    });
+  });
+
+  it.each([
+    { display: "collapse", nestedChild: false },
+    { display: "collapse", nestedChild: true },
+    { display: "flat", nestedChild: false },
+    { display: "flat", nestedChild: true },
+  ] as const)(
+    "matches a full build when a background delegation from the prefix completes later ($display, nested child: $nestedChild)",
+    ({ display, nestedChild }) => {
+      withTestThread((testThread) => {
+        seed(
+          testThread,
+          100,
+          backgroundDelegation("item/started", "delegation-1", "turn-0"),
+        );
+        expectMatchesFull(testThread, display);
+        appendRows(testThread, [
+          ...(nestedChild
+            ? [
+                started("delegated-child", "delegation-1"),
+                message("delegated-child", "Delegated answer", "delegation-1"),
+                {
+                  ...completed("delegated-child"),
+                  parentToolCallId: "delegation-1",
+                },
+              ]
+            : []),
+          backgroundDelegation("item/delegation/completed", "delegation-1"),
+        ]);
+        expectMatchesFull(testThread, display);
+      });
+    },
+  );
+
+  it("reuses the prefix before a still-open background task after settled ones", () => {
+    withTestThread((testThread) => {
+      seedStreamedHistory(testThread, {
+        backgroundTasks: true,
+        openTaskTurn: 99,
+      });
+      expectMatchesFull(testThread);
+      for (const rows of [
+        [delta("live", " continuation")],
+        [message("live", "Final answer"), completed("live")],
+        [started("next"), delta("next", "Next")],
+      ]) {
+        appendRows(testThread, rows);
+        const selectedRows = countSelectedEventRows(testThread, () => {
+          load(testThread);
+        });
+        expect(selectedRows).toBeGreaterThan(0);
+        expect(selectedRows).toBeLessThan(25);
+        expectMatchesFull(testThread);
+      }
+    });
+  });
+
+  it("rebuilds when a late update targets a settled background task in the prefix", () => {
+    withTestThread((testThread) => {
+      seedStreamedHistory(testThread, {
+        backgroundTasks: true,
+        openTaskTurn: null,
+      });
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        backgroundTask("item/backgroundTask/progress", "task-3"),
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it.each([false, true])(
+    "keeps the prefix when live pruning removes resolved rows below it (background tasks: %s)",
+    (backgroundTasks) => {
+      withTestThread((testThread) => {
+        seedStreamedHistory(testThread, {
+          backgroundTasks,
+          openTaskTurn: null,
+        });
+        expectMatchesFull(testThread);
+        const [liveStart] = listEventSequences(testThread, ["turn/started"]).slice(-1);
+        const prunable = [
+          "item/agentMessage/delta",
+          "item/backgroundTask/progress",
+        ];
+        const before = listEventSequences(testThread, prunable);
+
+        expect(pruneUntilResolvedItemsComplete(testThread)).toBeGreaterThan(0);
+
+        const after = new Set(listEventSequences(testThread, prunable));
+        const removed = before.filter((sequence) => !after.has(sequence));
+        expect(removed).toHaveLength(backgroundTasks ? 114 : 100);
+        expect(removed.every((sequence) => sequence < liveStart!)).toBe(true);
+
+        appendRows(testThread, [delta("live", " continuation")]);
+        const selectedRows = countSelectedEventRows(testThread, () => {
+          load(testThread);
+        });
+        expect(selectedRows).toBeLessThan(25);
+        expectMatchesFull(testThread);
+      });
+    },
+  );
+
+  it("rebuilds when pruning removes deltas of a message without final text", () => {
+    withTestThread((testThread) => {
+      appendRows(testThread, [
+        request("creq_nexttextab"),
+        started("textless"),
+        accepted("creq_nexttextab", "textless"),
+        delta("textless", "First"),
+        delta("textless", " second"),
+        delta("textless", " third"),
+        message("textless", ""),
+        completed("textless"),
+      ]);
+      seedStreamedHistory(testThread, {
+        backgroundTasks: false,
+        openTaskTurn: null,
+      });
+      const before = expectMatchesFull(testThread);
+      expect(before.items.map((item) => item.preview)).toContain(
+        "First second third",
+      );
+
+      pruneUntilResolvedItemsComplete(testThread);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("rebuilds when pruning drops historical deltas below the compaction threshold", () => {
+    withTestThread((testThread) => {
+      appendRows(testThread, [
+        started("old"),
+        backgroundTask("item/started", "task-old", "old"),
+        ...Array.from({ length: 1_001 }, () => delta("old", "word ")),
+        message("old", "Complete"),
+        backgroundTask("item/backgroundTask/completed", "task-old", "old"),
+        completed("old"),
+        started("live"),
+        delta("live", "First"),
+        delta("live", " second"),
+      ]);
+      expectMatchesFull(testThread);
+      expect(
+        countSelectedEventRows(testThread, () => {
+          load(testThread);
+        }),
+      ).toBeLessThan(25);
+
+      pruneUntilResolvedItemsComplete(testThread);
+      expect(
+        listEventSequences(testThread, ["item/agentMessage/delta"]),
+      ).toHaveLength(3);
+      appendRows(testThread, [message("live", ""), completed("live")]);
+
+      const result = expectMatchesFull(testThread);
+      expect(result.items.map((item) => item.preview)).toContain(
+        "First second",
+      );
     });
   });
 
