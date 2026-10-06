@@ -125,6 +125,7 @@ import { applyThreadOpenToLayout } from "@/views/thread-detail/splitThreadNaviga
 import { useAppSettingsRouteMemory } from "@/hooks/useAppSettingsRouteMemory";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
 import { BackToAppCommandHandler } from "./BackToAppCommandHandler";
+import { HistoryCommandHandlers } from "./HistoryCommandHandlers";
 
 const ProjectPathDialog = lazy(() =>
   import("@/components/dialogs/ProjectPathDialog").then((module) => ({
@@ -793,6 +794,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 {backToAppRoutePath !== null && !isSidebarResizing ? (
                   <BackToAppCommandHandler routePath={backToAppRoutePath} />
                 ) : null}
+                <HistoryCommandHandlers />
                 <AppLayoutSidebar
                   mode={
                     isGlobalSettingsView

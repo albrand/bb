@@ -1,22 +1,10 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import { useCallback, useRef, useState, type ComponentProps } from "react";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { Button } from "@bb/shared-ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
 import { Icon } from "@bb/shared-ui/icon";
 import { Popover, PopoverAnchor, PopoverContent } from "@bb/shared-ui/popover";
-
-const MicrophonePreferences = lazy(() =>
-  import("@/components/settings/MicrophonePreferences").then((module) => ({
-    default: module.MicrophonePreferences,
-  })),
-);
+import { MicrophonePreferencesSplit } from "@/components/settings/MicrophonePreferencesSplit";
 
 export function VoiceInputButton({
   warning,
@@ -36,7 +24,10 @@ export function VoiceInputButton({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <span className="relative inline-flex shrink-0">
+        <span
+          className="relative inline-flex shrink-0"
+          {...MicrophonePreferencesSplit.intentProps}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -121,13 +112,11 @@ export function VoiceInputButton({
               {visibleWarning}
             </p>
           ) : null}
-          <Suspense fallback={null}>
-            <MicrophonePreferences
-              open={open}
-              activeStream={null}
-              onCaptureReady={handleCaptureReady}
-            />
-          </Suspense>
+          <MicrophonePreferencesSplit
+            open={open}
+            activeStream={null}
+            onCaptureReady={handleCaptureReady}
+          />
         </div>
       </PopoverContent>
     </Popover>

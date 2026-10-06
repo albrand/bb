@@ -1,4 +1,5 @@
 import { LazyThreadDetailView } from "./views/thread-detail/LazyThreadDetailView";
+import { LazyRootComposeView } from "./views/LazyRootComposeView";
 import { useRouteState } from "./hooks/useRouteState";
 import { lazy, Suspense, useEffect } from "react";
 import {
@@ -58,6 +59,7 @@ import {
   TOOLS_REGISTRY_SKILL_DETAIL_ROUTE_PATH,
   TOOLS_REGISTRY_SKILLS_ROUTE_PATH,
   TOOLS_ROUTE_PATH,
+  APP_ROOT_ROUTE_PATH,
   TOOLS_SKILL_DETAIL_ROUTE_PATH,
   TOOLS_SKILLS_ROUTE_PATH,
   getAutomationDetailRoutePath,
@@ -74,6 +76,11 @@ import { ProviderCliInstallLogDialogHost } from "./components/provider-cli/provi
 import { ServerMoveOverlay } from "./components/machines/ServerMoveOverlay";
 import { AppUpdateHost } from "./components/app-update/AppUpdateHost";
 import { RouteLoadingSkeleton } from "./components/ui/route-loading-skeleton";
+import {
+  startSplitPreloading,
+  trackCriticalLoad,
+  whenCriticalLoadsSettled,
+} from "./lib/split-prefetch";
 
 const SettingsView = lazy(() =>
   import("./views/SettingsView").then((m) => ({
@@ -100,7 +107,9 @@ const MachineSettingsView = lazy(() =>
     default: m.MachineSettingsView,
   })),
 );
-const splitWorkspaceRouteModule = import("./views/SplitWorkspaceRoute");
+const splitWorkspaceRouteModule = trackCriticalLoad(
+  import("./views/SplitWorkspaceRoute"),
+);
 splitWorkspaceRouteModule.catch(() => {});
 const SplitWorkspaceRoute = lazy(() => splitWorkspaceRouteModule);
 
@@ -300,9 +309,13 @@ export function HashNavigationScroll() {
 
 export function AppRoutes() {
   const { isThreadView } = useRouteState();
+  const isRootComposeView = useLocation().pathname === APP_ROOT_ROUTE_PATH;
   useEffect(() => {
-    if (isThreadView) void LazyThreadDetailView.preload();
+    if (isThreadView) void trackCriticalLoad(LazyThreadDetailView.preload());
   }, [isThreadView]);
+  useEffect(() => {
+    if (isRootComposeView) void trackCriticalLoad(LazyRootComposeView.preload());
+  }, [isRootComposeView]);
   return (
     <AppLayout>
       <Suspense fallback={null}>
@@ -446,7 +459,8 @@ export function AppRoutes() {
 
 function RouteContentPaintSignal() {
   useEffect(() => {
-    markRouteContentPainted();
+    void whenCriticalLoadsSettled().then(markRouteContentPainted);
+    startSplitPreloading();
   }, []);
   return null;
 }
