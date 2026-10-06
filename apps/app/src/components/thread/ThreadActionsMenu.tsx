@@ -5,7 +5,7 @@ import {
   ActionMenuSub,
 } from "@/components/ui/action-menu-items";
 import type { Thread } from "@bb/domain";
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,7 +28,6 @@ import { getThreadRoutePath } from "@/lib/route-paths";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { useThreadActions } from "./ThreadActionsProvider";
 import { useThreadSectionMove } from "./ThreadSectionMoveProvider";
-import { ThreadProjectMovePicker } from "./ThreadProjectMovePicker";
 import { useAtomValue } from "jotai";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import {
@@ -38,6 +37,12 @@ import {
   PANE_LIMIT_TITLE,
   type SplitSide,
 } from "@/lib/split-layout";
+
+const ThreadProjectMovePicker = lazy(() =>
+  import("./ThreadProjectMovePicker").then((module) => ({
+    default: module.ThreadProjectMovePicker,
+  })),
+);
 
 interface ThreadActionsMenuBaseProps {
   thread: Thread;
@@ -200,13 +205,15 @@ function ThreadActionsMenuItems({
 
   if (isDrawer && compactStep === "project" && onMoveToProject) {
     return (
-      <ThreadProjectMovePicker
-        inline
-        thread={thread}
-        onBack={() => onCompactStepChange?.("actions")}
-        onCloseMenu={onCloseMenu}
-        onMoveToProject={onMoveToProject}
-      />
+      <Suspense fallback={null}>
+        <ThreadProjectMovePicker
+          inline
+          thread={thread}
+          onBack={() => onCompactStepChange?.("actions")}
+          onCloseMenu={onCloseMenu}
+          onMoveToProject={onMoveToProject}
+        />
+      </Suspense>
     );
   }
 
@@ -252,11 +259,13 @@ function ThreadActionsMenuItems({
             <span className="min-w-0 flex-1 truncate">Move to project…</span>
           </DropdownMenuItem>
         ) : (
-          <ThreadProjectMovePicker
-            thread={thread}
-            onCloseMenu={onCloseMenu}
-            onMoveToProject={onMoveToProject}
-          />
+          <Suspense fallback={null}>
+            <ThreadProjectMovePicker
+              thread={thread}
+              onCloseMenu={onCloseMenu}
+              onMoveToProject={onMoveToProject}
+            />
+          </Suspense>
         )
       ) : null}
       {onOpenInSplit ? (
