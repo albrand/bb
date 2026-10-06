@@ -143,4 +143,45 @@ describe("thread turn spend runtime table", () => {
       db.$client.close();
     }
   });
+
+  it("keeps mixed-model turns unknown after later contributions", () => {
+    const db = createConnection(":memory:");
+    try {
+      migrate(db);
+      const host = upsertHost(db, noopNotifier, { name: "test-host" });
+      const { project } = createProject(db, noopNotifier, {
+        name: "test-project",
+        source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
+      });
+      const thread = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+      });
+      const record = (model: string, at: number) =>
+        recordThreadTurnSpendContribution(db, {
+          at,
+          model,
+          providerThreadId: "provider-thread-1",
+          threadId: thread.id,
+          turnId: "turn-mixed",
+          usage: {
+            cachedInputTokens: 0,
+            inputTokens: 100,
+            outputTokens: 20,
+            reasoningOutputTokens: 0,
+            totalTokens: 120,
+          },
+        });
+
+      record("model-a", 10);
+      record("model-b", 11);
+      record("model-b", 12);
+
+      expect(listThreadTurnSpend(db, { threadId: thread.id })[0]?.model).toBe(
+        null,
+      );
+    } finally {
+      db.$client.close();
+    }
+  });
 });

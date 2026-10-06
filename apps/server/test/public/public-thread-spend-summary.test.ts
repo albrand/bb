@@ -180,6 +180,7 @@ describe("public thread spend summaries", () => {
       expect(spend.turns).toEqual([
         {
           turnId: "turn-b",
+          model: null,
           inputTokens: 45,
           cachedInputTokens: 0,
           outputTokens: 11,
@@ -188,6 +189,7 @@ describe("public thread spend summaries", () => {
         },
         {
           turnId: "turn-a",
+          model: null,
           inputTokens: 60,
           cachedInputTokens: 4,
           outputTokens: 23,
@@ -272,6 +274,7 @@ describe("public thread spend summaries", () => {
         turns: [
           {
             turnId: "recent-turn",
+            model: null,
             inputTokens: 50,
             cachedInputTokens: 2_000_000,
             outputTokens: 2_000,
@@ -368,6 +371,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend.turns).toContainEqual({
         turnId,
+        model: null,
         inputTokens: 20,
         cachedInputTokens: 10,
         outputTokens: 15,
@@ -394,6 +398,7 @@ describe("public thread spend summaries", () => {
       ).toEqual([
         {
           turnId,
+          model: null,
           inputTokens: 20,
           cachedInputTokens: 10,
           outputTokens: 15,
@@ -531,6 +536,7 @@ describe("public thread spend summaries", () => {
           .turns,
       ).toContainEqual({
         turnId: "turn-repaired",
+        model: null,
         inputTokens: 20,
         cachedInputTokens: 10,
         outputTokens: 15,
@@ -622,6 +628,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend.turns).toContainEqual({
         turnId,
+        model: null,
         inputTokens: 20,
         cachedInputTokens: 10,
         outputTokens: 15,
@@ -665,6 +672,7 @@ describe("public thread spend summaries", () => {
 
         expect(spend.turns).toContainEqual({
           turnId,
+          model: null,
           inputTokens: null,
           cachedInputTokens: null,
           outputTokens: null,

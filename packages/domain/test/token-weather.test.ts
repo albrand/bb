@@ -182,6 +182,55 @@ describe("token weather", () => {
     ]);
   });
 
+  it("includes cached input when estimating compaction context and savings", () => {
+    const result = estimateCompactionSavings({
+      compactionTurnIds: ["compact"],
+      turns: [
+        {
+          cachedInputTokens: 120_000,
+          inputTokens: 45_000,
+          model: "model-a",
+          outputTokens: 0,
+          providerId: "provider-a",
+          reasoningOutputTokens: null,
+          totalTokens: 165_000,
+          turnId: "before",
+        },
+        {
+          cachedInputTokens: 20_000,
+          inputTokens: 4_500,
+          model: "model-a",
+          outputTokens: 500,
+          providerId: "provider-a",
+          reasoningOutputTokens: null,
+          totalTokens: 25_000,
+          turnId: "compact",
+        },
+        {
+          cachedInputTokens: 22_000,
+          inputTokens: 8_000,
+          model: "model-a",
+          outputTokens: 500,
+          providerId: "provider-a",
+          reasoningOutputTokens: null,
+          totalTokens: 30_500,
+          turnId: "after",
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        afterTokens: 30_000,
+        beforeTokens: 165_000,
+        compactionCostTokens: 25_000,
+        likelyPaidForItself: true,
+        observedSavingsTokens: 135_000,
+        turnId: "compact",
+      },
+    ]);
+  });
+
   it("keeps incomplete compaction estimates visible as unknown", () => {
     const result = estimateCompactionSavings({
       compactionTurnIds: ["compact"],

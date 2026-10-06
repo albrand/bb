@@ -500,9 +500,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           },
         ]),
     );
-    const turns = [...recordedTurns, ...unavailableTurns.values()].map(
-      ({ model, ...turn }) => (model === null ? turn : { ...turn, model }),
-    );
+    const turns = [...recordedTurns, ...unavailableTurns.values()];
     const sumDaily = (
       field:
         | "inputTokens"

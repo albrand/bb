@@ -144,6 +144,35 @@ describe("thread usage summary", () => {
       "parent",
       expect.objectContaining({ enabled: true }),
     );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+    expect(
+      document.querySelector("[data-persistent-drawer-content]"),
+    ).toBeTruthy();
+  });
+
+  it("leaves collapsed token previews available for row expansion", () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary
+            openAnalysisOnClick={false}
+            threadId="parent"
+            turnId="da385f7e5d-t1"
+          />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    const tokenPreview = container.querySelector("[data-thread-turn-tokens]");
+    expect(tokenPreview?.tagName).toBe("SPAN");
+    fireEvent.click(tokenPreview!);
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Token weather and compaction savings",
+      }),
+    ).toBeNull();
   });
 
   it("shows reasoning in the footer only when a turn reports it", () => {

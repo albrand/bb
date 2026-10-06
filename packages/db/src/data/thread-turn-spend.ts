@@ -13,6 +13,7 @@ function ensureThreadTurnSpendTable(db: DbConnection): void {
       turn_id TEXT NOT NULL,
       provider_thread_id TEXT NOT NULL,
       model TEXT,
+      model_mixed INTEGER NOT NULL DEFAULT 0,
       input_tokens INTEGER,
       cached_input_tokens INTEGER,
       output_tokens INTEGER,
@@ -28,6 +29,11 @@ function ensureThreadTurnSpendTable(db: DbConnection): void {
   if (!columns.some((column) => column.name === "model")) {
     db.$client.exec(
       `ALTER TABLE ${THREAD_TURN_SPEND_TABLE} ADD COLUMN model TEXT`,
+    );
+  }
+  if (!columns.some((column) => column.name === "model_mixed")) {
+    db.$client.exec(
+      `ALTER TABLE ${THREAD_TURN_SPEND_TABLE} ADD COLUMN model_mixed INTEGER NOT NULL DEFAULT 0`,
     );
   }
   db.$client.exec(`
@@ -78,9 +84,15 @@ export function recordThreadTurnSpendContribution(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (thread_id, turn_id, provider_thread_id) DO UPDATE SET
         model = CASE
+          WHEN model_mixed = 1 THEN NULL
           WHEN model IS NULL THEN excluded.model
           WHEN excluded.model IS NULL OR model = excluded.model THEN model
           ELSE NULL
+        END,
+        model_mixed = CASE
+          WHEN model_mixed = 1 THEN 1
+          WHEN model IS NOT NULL AND excluded.model IS NOT NULL AND model <> excluded.model THEN 1
+          ELSE 0
         END,
         input_tokens = CASE WHEN input_tokens IS NULL OR excluded.input_tokens IS NULL
           THEN NULL ELSE input_tokens + excluded.input_tokens END,
@@ -115,7 +127,7 @@ export function listThreadTurnSpend(
   return db
     .$client.prepare<[string], ThreadTurnSpendRow>(
       `SELECT turn_id AS turnId,
-        CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(model) = COUNT(*)
+        CASE WHEN SUM(model_mixed) = 0 AND COUNT(DISTINCT model) = 1 AND COUNT(model) = COUNT(*)
           THEN MIN(model) ELSE NULL END AS model,
         CASE WHEN COUNT(*) = COUNT(input_tokens)
           THEN SUM(input_tokens) ELSE NULL END AS inputTokens,

@@ -670,7 +670,7 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("invalidates cached thread search results only once a turn completes, not on every appended batch", () => {
+  it("invalidates token usage and compaction history only once a turn completes", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadSearchKey = threadSearchQueryKey({
@@ -696,6 +696,12 @@ describe("createRealtimeCacheEffects", () => {
     vi.advanceTimersByTime(50);
 
     expect(queryClient.getQueryState(threadSearchKey)?.isInvalidated).toBe(
+      false,
+    );
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      false,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
       false,
     );
 

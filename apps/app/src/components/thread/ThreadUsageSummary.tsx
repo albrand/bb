@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { Icon } from "@bb/shared-ui/icon";
 import type {
   ThreadChildSummaryResponse,
-  ThreadSpendBreakdownResponse,
+  ThreadSpendSummaryResponse,
+  ThreadSpendTurnBreakdownResponse,
 } from "@bb/server-contract";
 import { tokenBreakdownLabels } from "@bb/domain";
 import { estimateCompactionSavings, summarizeTokenWeather } from "@bb/domain";
@@ -37,13 +38,39 @@ function exactTokens(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString("en");
 }
 
+const turnWeatherBySpendSummary = new WeakMap<
+  ThreadSpendSummaryResponse,
+  Map<string, ReturnType<typeof summarizeTokenWeather>["turns"][number]>
+>();
+
+function getTurnWeatherMetrics(data: ThreadSpendSummaryResponse) {
+  const cached = turnWeatherBySpendSummary.get(data);
+  if (cached) return cached;
+  const metrics = new Map(
+    summarizeTokenWeather({
+      turns: [...data.turns].reverse().map((item) => ({
+        cachedInputTokens: item.cachedInputTokens,
+        inputTokens: item.inputTokens,
+        model: item.model,
+        outputTokens: item.outputTokens,
+        providerId: data.providerId,
+        reasoningOutputTokens: item.reasoningOutputTokens,
+        totalTokens: item.totalTokens,
+        turnId: item.turnId,
+      })),
+    }).turns.map((item) => [item.turnId, item]),
+  );
+  turnWeatherBySpendSummary.set(data, metrics);
+  return metrics;
+}
+
 export function ThreadTurnTokenTooltipContent({
   turn,
   reasoningDisplayValue,
   providerId = "Unknown",
   weatherMetrics,
 }: {
-  turn: ThreadSpendBreakdownResponse;
+  turn: ThreadSpendTurnBreakdownResponse;
   reasoningDisplayValue: number | null;
   providerId?: string;
   weatherMetrics?: {
@@ -114,14 +141,17 @@ function formatPercent(value: number | null): string {
 }
 
 export function ThreadTurnTokenSummary({
+  openAnalysisOnClick = true,
   threadId,
   turnId,
 }: {
+  openAnalysisOnClick?: boolean;
   threadId: string;
   turnId: string;
 }) {
   const { data } = useThreadSpendSummary(threadId);
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
+  const [hasOpenedAnalysis, setHasOpenedAnalysis] = useState(false);
   const turn = data?.turns.find((item) => item.turnId === turnId);
   if (!turn) return null;
   const hasTokens = (value: number | null): value is number =>
@@ -140,18 +170,7 @@ export function ThreadTurnTokenSummary({
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
   const weatherMetrics = data
-    ? summarizeTokenWeather({
-        turns: [...data.turns].reverse().map((item) => ({
-          cachedInputTokens: item.cachedInputTokens,
-          inputTokens: item.inputTokens,
-          model: item.model ?? null,
-          outputTokens: item.outputTokens,
-          providerId: data.providerId ?? "unknown",
-          reasoningOutputTokens: item.reasoningOutputTokens,
-          totalTokens: item.totalTokens,
-          turnId: item.turnId,
-        })),
-      }).turns.find((item) => item.turnId === turnId)
+    ? getTurnWeatherMetrics(data).get(turnId)
     : undefined;
   const compact = (value: number) => compactTokens(value);
   const hasTotalTokens = hasTokens(turn.totalTokens);
@@ -160,59 +179,73 @@ export function ThreadTurnTokenSummary({
     : hasTokens(turn.cachedInputTokens)
       ? turn.cachedInputTokens
       : null;
+  const summaryContent = (
+    <>
+      {hasTokens(turn.inputTokens) ? (
+        <span data-token-part="input">in {compact(turn.inputTokens)}</span>
+      ) : null}
+      {hasTokens(turn.outputTokens) ? (
+        <span data-token-part="output">out {compact(turn.outputTokens)}</span>
+      ) : null}
+      {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
+        <span data-token-part="reasoning">
+          reason {compact(reasoningDisplayValue)}
+        </span>
+      ) : null}
+      {hasTokens(turn.cachedInputTokens) || tightSummaryValue !== null ? (
+        <span data-token-trailing-group="">
+          {hasTokens(turn.cachedInputTokens) ? (
+            <span data-token-part="cached">
+              cached {compact(turn.cachedInputTokens)}
+            </span>
+          ) : null}
+          {hasTotalTokens && tightSummaryValue !== null ? (
+            <span data-token-part="total">
+              <span data-token-total-full>
+                Σ {compact(tightSummaryValue)}
+              </span>
+              <span
+                data-token-total-tight
+                aria-label={`Total ${exactTokens(tightSummaryValue)} tokens`}
+              >
+                {compactTokens(tightSummaryValue, 0)}
+              </span>
+            </span>
+          ) : tightSummaryValue !== null ? (
+            <span
+              data-token-total-tight
+              aria-label={`Cached ${exactTokens(tightSummaryValue)} tokens`}
+            >
+              {compactTokens(tightSummaryValue, 0)}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  );
+  const summaryClassName =
+    "thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal rounded-md border-0 bg-transparent p-0 text-left font-mono text-xs tabular-nums tracking-tight text-muted-foreground";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          data-thread-turn-tokens=""
-          aria-label={`Open thread token analysis. Fresh input ${exactTokens(turn.inputTokens)}, cached input ${exactTokens(turn.cachedInputTokens)}, output ${exactTokens(turn.outputTokens)}, reasoning ${exactTokens(reasoningDisplayValue)}, total ${exactTokens(turn.totalTokens)}`}
-          className="thread-turn-token-breakdown min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal rounded-md border-0 bg-transparent p-0 text-left font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
-          onClick={() => setIsAnalysisOpen(true)}
-        >
-          {hasTokens(turn.inputTokens) ? (
-            <span data-token-part="input">in {compact(turn.inputTokens)}</span>
-          ) : null}
-          {hasTokens(turn.outputTokens) ? (
-            <span data-token-part="output">
-              out {compact(turn.outputTokens)}
-            </span>
-          ) : null}
-          {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
-            <span data-token-part="reasoning">
-              reason {compact(reasoningDisplayValue)}
-            </span>
-          ) : null}
-          {hasTokens(turn.cachedInputTokens) || tightSummaryValue !== null ? (
-            <span data-token-trailing-group="">
-              {hasTokens(turn.cachedInputTokens) ? (
-                <span data-token-part="cached">
-                  cached {compact(turn.cachedInputTokens)}
-                </span>
-              ) : null}
-              {hasTotalTokens && tightSummaryValue !== null ? (
-                <span data-token-part="total">
-                  <span data-token-total-full>
-                    Σ {compact(tightSummaryValue)}
-                  </span>
-                  <span
-                    data-token-total-tight
-                    aria-label={`Total ${exactTokens(tightSummaryValue)} tokens`}
-                  >
-                    {compactTokens(tightSummaryValue, 0)}
-                  </span>
-                </span>
-              ) : tightSummaryValue !== null ? (
-                <span
-                  data-token-total-tight
-                  aria-label={`Cached ${exactTokens(tightSummaryValue)} tokens`}
-                >
-                  {compactTokens(tightSummaryValue, 0)}
-                </span>
-              ) : null}
-            </span>
-          ) : null}
-        </button>
+        {openAnalysisOnClick ? (
+          <button
+            type="button"
+            data-thread-turn-tokens=""
+            aria-label={`Open thread token analysis. Fresh input ${exactTokens(turn.inputTokens)}, cached input ${exactTokens(turn.cachedInputTokens)}, output ${exactTokens(turn.outputTokens)}, reasoning ${exactTokens(reasoningDisplayValue)}, total ${exactTokens(turn.totalTokens)}`}
+            className={`${summaryClassName} thread-turn-token-analysis-trigger`}
+            onClick={() => {
+              setHasOpenedAnalysis(true);
+              setIsAnalysisOpen(true);
+            }}
+          >
+            {summaryContent}
+          </button>
+        ) : (
+          <span data-thread-turn-tokens="" className={summaryClassName}>
+            {summaryContent}
+          </span>
+        )}
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent
         turn={turn}
@@ -220,7 +253,7 @@ export function ThreadTurnTokenSummary({
         providerId={data?.providerId ?? "Unknown"}
         weatherMetrics={weatherMetrics}
       />
-      {isAnalysisOpen ? (
+      {hasOpenedAnalysis ? (
         <ThreadTokenWeatherPanel
           open={isAnalysisOpen}
           onOpenChange={setIsAnalysisOpen}

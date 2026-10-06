@@ -1886,6 +1886,7 @@ function TimelineExpandableRowView({
         row.kind === "turn" && row.status !== "pending" ? (
           <TooltipProvider>
             <ThreadTurnTokenSummary
+              openAnalysisOnClick={false}
               threadId={row.threadId}
               turnId={row.turnId}
             />

@@ -355,8 +355,8 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadDetailQueriesForBackgroundActivity,
       dirtyThreadSearchQueriesForCompletedTurn,
       dirtyThreadTimelineQueries,
-      dirtyThreadCompactionTurnIdsQueries,
-      dirtyThreadSpendSummaryQueries,
+      dirtyThreadCompactionTurnIdsQueriesForCompletedTurn,
+      dirtyThreadSpendSummaryQueriesForCompletedTurn,
       dirtyThreadPullRequestQueryForCompletedTurn,
       dirtyThreadTurnRequestQueries,
     ],
@@ -816,16 +816,34 @@ function dirtyThreadDetailQueries({
   return getThreadDetailInvalidationQueryKeys({ threadId });
 }
 
-function dirtyThreadSpendSummaryQueries({
+function dirtyThreadSpendSummaryQueriesForCompletedTurn({
+  eventTypes,
+  flushOnce,
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
-  return threadId ? [threadSpendSummaryQueryKey(threadId)] : [];
+  if (
+    !threadId ||
+    !eventTypes?.includes("turn/completed") ||
+    !flushOnce("thread-spend-summary:turn-completed")
+  ) {
+    return [];
+  }
+  return [threadSpendSummaryQueryKey(threadId)];
 }
 
-function dirtyThreadCompactionTurnIdsQueries({
+function dirtyThreadCompactionTurnIdsQueriesForCompletedTurn({
+  eventTypes,
+  flushOnce,
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
-  return threadId ? [threadCompactionTurnIdsQueryKey(threadId)] : [];
+  if (
+    !threadId ||
+    !eventTypes?.includes("turn/completed") ||
+    !flushOnce("thread-compaction-turn-ids:turn-completed")
+  ) {
+    return [];
+  }
+  return [threadCompactionTurnIdsQueryKey(threadId)];
 }
 
 function dirtyThreadDefaultExecutionOptionsQueries({

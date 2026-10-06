@@ -431,9 +431,7 @@ export function registerShowCommand(
           sdk.threads.spendSummary({ threadId }).catch(() => null),
           opts.usage
             ? fetchThreadUsageTimeline(sdk, threadId).catch(() => null)
-            : sdk.threads
-                .timeline({ threadId, summaryOnly: "true" })
-                .catch(() => null),
+            : null,
         ]);
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {
