@@ -6639,6 +6639,39 @@ describe("Account Pool plugin", () => {
       expect(next).toMatchObject({ nextAccountId: pool.second.id });
     });
 
+    it("keeps a held account bound while previewing another account for new work", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_heldbindingpreview", "session-heldbindingpreview");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_heldbindingpreview", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+    });
+
     it("keeps an extra-usage eligible bound account in the binding preview", async () => {
       const pool = await fixtureWithAccounts();
       setQuota(pool.fixture, pool.fixture.account.id, {
