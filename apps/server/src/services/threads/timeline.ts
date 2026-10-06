@@ -1775,16 +1775,22 @@ function selectThreadConversationOutline(
     rows: rawEventRows,
     threadId: thread.id,
   });
+  const rejectedClientRequestEvents = clientRequestContextRows.rejectedRows.map(
+    (row) => toThreadEventWithMeta(row),
+  );
   const acceptedClientRequestContext: AcceptedClientRequestContext = {
     acceptedClientRequestEvents: clientRequestContextRows.acceptedRows.map(
       (row) => toThreadEventWithMeta(row),
     ),
-    rejectedClientRequestEvents: clientRequestContextRows.rejectedRows.map(
-      (row) => toThreadEventWithMeta(row),
-    ),
+    rejectedClientRequestEvents,
   };
   return {
-    events: decodedRawEvents,
+    events:
+      rejectedClientRequestEvents.length === 0
+        ? decodedRawEvents
+        : [...decodedRawEvents, ...rejectedClientRequestEvents].sort(
+            (left, right) => left.meta.seq - right.meta.seq,
+          ),
     project: () => {
       const timeline = buildThreadTimelineFromEvents({
         acceptedClientRequestContext,
@@ -1900,6 +1906,20 @@ export function buildThreadConversationOutlineProjectionKey(
   ]);
 }
 
+function buildThreadConversationOutlineCheckpointKey(
+  thread: Thread,
+  options: BuildThreadConversationOutlineOptions,
+): string {
+  return JSON.stringify([
+    CONVERSATION_OUTLINE_PROJECTION_VERSION,
+    thread.providerId,
+    options.providerDisplayName ?? null,
+    thread.title,
+    thread.titleFallback,
+    options.completedTurnDisplay,
+  ]);
+}
+
 function parseThreadConversationOutlineItems(
   itemsJson: string,
 ): ThreadConversationOutlineItem[] | null {
@@ -1952,7 +1972,7 @@ export function loadThreadConversationOutline(
         items: projectConversationOutlineIncrementally({
           db,
           threadId: thread.id,
-          key: buildThreadConversationOutlineProjectionKey(thread, 0, options),
+          key: buildThreadConversationOutlineCheckpointKey(thread, options),
           maxSeq: options.maxSeq,
           contextBoundarySeq,
           orderingBoundarySequence,
