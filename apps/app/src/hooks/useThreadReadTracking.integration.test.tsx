@@ -174,6 +174,82 @@ it("does not undo a newer manual unread when an older read is cancelled", async 
   ).toBeNull();
 });
 
+it("keeps a manual unread made during a read after that read fails", async () => {
+  const { requests, result, queryClient } = setup(true);
+  await waitFor(() => expect(requests).toHaveLength(1));
+  vi.mocked(sdk.threads.markUnread).mockResolvedValue(
+    makeThreadResponse({ id: "A", lastReadAt: null, latestAttentionAt: 20 }),
+  );
+  await act(async () => {
+    await result.current.mutateAsync({ threadId: "A" });
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await act(async () => requests[0]?.reject());
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  expect(requests).toHaveLength(1);
+  expect(
+    queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey("A"))
+      ?.lastReadAt,
+  ).toBeNull();
+});
+
+it("keeps a manual unread made after a failed read was retried", async () => {
+  const { requests, result, queryClient } = setup(true);
+  await waitFor(() => expect(requests).toHaveLength(1));
+  await act(async () => requests[0]?.reject());
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  await act(async () => requests[1]?.resolve());
+  vi.mocked(sdk.threads.markUnread).mockResolvedValue(
+    makeThreadResponse({ id: "A", lastReadAt: null, latestAttentionAt: 20 }),
+  );
+  await act(async () => {
+    await result.current.mutateAsync({ threadId: "A" });
+  });
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  expect(requests).toHaveLength(2);
+  expect(
+    queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey("A"))
+      ?.lastReadAt,
+  ).toBeNull();
+});
+
+it("keeps a manual unread after a cancelled read is retried", async () => {
+  const { requests, result, rerender, queryClient } = setup();
+  await waitFor(() => expect(requests).toHaveLength(1));
+  rerender({ id: "B" });
+  await waitFor(() => expect(requests[0]?.signal?.aborted).toBe(true));
+  rerender({ id: "A" });
+  await waitFor(() => expect(requests).toHaveLength(3));
+  await act(async () => requests[2]?.resolve());
+  vi.mocked(sdk.threads.markUnread).mockResolvedValue(
+    makeThreadResponse({ id: "A", lastReadAt: null, latestAttentionAt: 20 }),
+  );
+  await act(async () => {
+    await result.current.mutateAsync({ threadId: "A" });
+  });
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  expect(requests).toHaveLength(3);
+  expect(
+    queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey("A"))
+      ?.lastReadAt,
+  ).toBeNull();
+});
+
 it("cancels every attention request without rolling back newer thread data", async () => {
   const { requests, queryClient, unmount } = setup();
   await waitFor(() => expect(requests).toHaveLength(1));
@@ -206,7 +282,7 @@ it("does not retry a failed read until the page is shown again", async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   const failedAttempts = requests.length;
-  expect(failedAttempts).toBeLessThanOrEqual(2);
+  expect(failedAttempts).toBe(1);
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });

@@ -127,6 +127,40 @@ describe("useThreadReadTracking", () => {
     expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a read that fails after the page was shown again during the request", async () => {
+    const markThreadRead = makeMarkThreadRead();
+    let failFirstRead: (error: Error) => void = () => undefined;
+    markThreadRead.mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failFirstRead = reject;
+        }),
+    );
+    const thread = {
+      id: "thr_side_chat",
+      lastReadAt: 10,
+      latestAttentionAt: 20,
+    };
+    const { rerender } = renderHook(
+      ({ mutation }: { mutation: MarkThreadReadMutation }) =>
+        useThreadReadTracking({ markThreadRead: mutation, thread }),
+      { initialProps: { mutation: markThreadRead } },
+    );
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      failFirstRead(new Error("Failed"));
+    });
+    rerender({ mutation: { mutateAsync: markThreadRead.mutateAsync } });
+
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
   it("does not undo marking the visible thread unread after tab refocus", () => {
     const markThreadRead = makeMarkThreadRead();
     type VisibleThreadProps = { lastReadAt: number | null };

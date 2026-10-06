@@ -128,6 +128,7 @@ export function useThreadReadTracking({
     failedReadRevisionsRef.current.delete(marker);
     cancelledReadKeysRef.current.delete(marker);
     const controller = new AbortController();
+    const requestVisibilityRevision = getDocumentVisibilityRevision();
     pendingReadControllersRef.current.set(marker, controller);
     void markThreadRead
       .mutateAsync({ signal: controller.signal, threadId: thread.id })
@@ -136,10 +137,7 @@ export function useThreadReadTracking({
           cancelledReadKeysRef.current.add(marker);
           return;
         }
-        failedReadRevisionsRef.current.set(
-          marker,
-          getDocumentVisibilityRevision(),
-        );
+        failedReadRevisionsRef.current.set(marker, requestVisibilityRevision);
       })
       .finally(() => {
         if (pendingReadControllersRef.current.get(marker) === controller) {
