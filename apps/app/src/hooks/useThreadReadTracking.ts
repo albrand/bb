@@ -31,13 +31,16 @@ export function useThreadReadTracking({
   markThreadRead,
   thread,
 }: UseThreadReadTrackingParams) {
-  const failedReadKeysRef = useRef<Set<string>>(new Set());
+  const failedReadRevisionsRef = useRef<Map<string, number>>(new Map());
+  const cancelledReadKeysRef = useRef<Set<string>>(new Set());
   const pendingReadControllersRef = useRef<Map<string, AbortController>>(
     new Map(),
   );
   const suppressedManualUnreadKeysRef = useRef<Set<string>>(new Set());
   const previousSnapshotRef = useRef<ReadTrackingSnapshot | null>(null);
   const visibilityRevision = useDocumentVisibilityRevision();
+  const visibilityRevisionRef = useRef(visibilityRevision);
+  visibilityRevisionRef.current = visibilityRevision;
   const isVisible = isDocumentVisible();
 
   useEffect(() => {
@@ -82,7 +85,8 @@ export function useThreadReadTracking({
     }
 
     if (threadIsRead) {
-      failedReadKeysRef.current.delete(marker);
+      failedReadRevisionsRef.current.delete(marker);
+      cancelledReadKeysRef.current.delete(marker);
       suppressedManualUnreadKeysRef.current.delete(marker);
       return;
     }
@@ -90,13 +94,19 @@ export function useThreadReadTracking({
     const becameVisible =
       previousSnapshot?.threadId === thread.id &&
       previousSnapshot.isVisible === false;
-    const isRetry = failedReadKeysRef.current.has(marker);
+    const failedReadRevision = failedReadRevisionsRef.current.get(marker);
+    const wasCancelled = cancelledReadKeysRef.current.has(marker);
+    const isRetry =
+      wasCancelled ||
+      (failedReadRevision !== undefined &&
+        failedReadRevision !== visibilityRevision);
     const becameManuallyUnread =
       previousSnapshot?.threadId === thread.id &&
       previousSnapshot.latestAttentionAt === thread.latestAttentionAt &&
       previousSnapshot.isVisible &&
       previousSnapshot.isRead === true &&
-      !isRetry;
+      !wasCancelled &&
+      failedReadRevision === undefined;
 
     if (becameManuallyUnread) {
       suppressedManualUnreadKeysRef.current.add(marker);
@@ -116,13 +126,21 @@ export function useThreadReadTracking({
       return;
     }
 
-    failedReadKeysRef.current.delete(marker);
+    failedReadRevisionsRef.current.delete(marker);
+    cancelledReadKeysRef.current.delete(marker);
     const controller = new AbortController();
     pendingReadControllersRef.current.set(marker, controller);
     void markThreadRead
       .mutateAsync({ signal: controller.signal, threadId: thread.id })
       .catch(() => {
-        failedReadKeysRef.current.add(marker);
+        if (controller.signal.aborted) {
+          cancelledReadKeysRef.current.add(marker);
+          return;
+        }
+        failedReadRevisionsRef.current.set(
+          marker,
+          visibilityRevisionRef.current,
+        );
       })
       .finally(() => {
         if (pendingReadControllersRef.current.get(marker) === controller) {

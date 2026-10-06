@@ -25,7 +25,7 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-function setup(deferAbort = false) {
+function setup(deferAbort = false, failure?: Error) {
   const harness = createQueryClientTestHarness();
   const requests: {
     signal: AbortSignal | undefined;
@@ -43,6 +43,16 @@ function setup(deferAbort = false) {
     ({ threadId, signal }) =>
       new Promise((resolve, reject) => {
         signal?.throwIfAborted();
+        if (failure !== undefined) {
+          requests.push({
+            signal,
+            threadId,
+            reject: () => undefined,
+            resolve: () => undefined,
+          });
+          reject(failure);
+          return;
+        }
         requests.push({
           signal,
           threadId,
@@ -188,6 +198,26 @@ it("cancels every attention request without rolling back newer thread data", asy
   expect(
     queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey("A")),
   ).toMatchObject({ title: "New title", latestAttentionAt: attention });
+});
+
+it("does not retry a failed read until the page is shown again", async () => {
+  const { requests } = setup(false, new Error("Service unavailable"));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  const failedAttempts = requests.length;
+  expect(failedAttempts).toBeLessThanOrEqual(2);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(requests).toHaveLength(failedAttempts);
+
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await waitFor(() => expect(requests).toHaveLength(failedAttempts + 1));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(requests).toHaveLength(failedAttempts + 1);
 });
 
 it("retries after returning before the cancelled request has finished", async () => {
