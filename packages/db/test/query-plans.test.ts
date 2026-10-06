@@ -1360,9 +1360,13 @@ describe("slow query index plans", () => {
 
   it("seeks outline background-task spans through the background-task index when an item-ordered index exists", () => {
     const { db, thread } = setup();
-    db.$client.exec(
-      "CREATE INDEX fork_events_item_completion_lookup_idx ON events (thread_id, item_id, type, parent_tool_call_id)",
-    );
+    expect(
+      db.$client
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'fork_events_item_completion_lookup_idx'",
+        )
+        .get(),
+    ).toEqual({ name: "fork_events_item_completion_lookup_idx" });
     const backgroundEvent = (
       sequence: number,
       itemId: string,
