@@ -57,8 +57,16 @@ describe("token weather", () => {
   });
 
   it("compares only same-provider, same-model turns and reports measured weather rules", () => {
+    const durableTotals = {
+      cachedInputTokens: 10,
+      inputTokens: 120,
+      outputTokens: 20,
+      reasoningOutputTokens: 0,
+      totalTokens: 200,
+    };
     const result = summarizeTokenWeather({
       contextFill: 0.72,
+      totals: durableTotals,
       turns: [
         {
           cachedInputTokens: 10,
@@ -90,28 +98,8 @@ describe("token weather", () => {
     expect(
       summarizeTokenWeather({
         contextFill: 0.99,
-        turns: [
-          {
-            cachedInputTokens: 10,
-            inputTokens: 40,
-            model: "model-a",
-            outputTokens: 10,
-            providerId: "provider-a",
-            reasoningOutputTokens: 0,
-            totalTokens: 110,
-            turnId: "turn-1",
-          },
-          {
-            cachedInputTokens: 0,
-            inputTokens: 80,
-            model: "model-a",
-            outputTokens: 10,
-            providerId: "provider-a",
-            reasoningOutputTokens: 0,
-            totalTokens: 90,
-            turnId: "turn-2",
-          },
-        ],
+        totals: durableTotals,
+        turns: [],
       }).weather,
     ).toBe(result.weather);
     expect(result.medianFreshInput).toBe(60);
