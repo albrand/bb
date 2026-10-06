@@ -8,7 +8,6 @@ import {
   getSpendThreadLatestSequence,
   hasStoredTokenUsageEvents,
   hasThreadRewind,
-  listCompletedTurnsByThreadIds,
   listSpendBackfillThreads,
   listSpendRollupRows,
   SPEND_PRUNE_SAFE_SEQUENCE,
@@ -196,6 +195,7 @@ function rollUpObservations(
       if (observation.turnId !== null) {
         recordThreadTurnSpendContribution(db, {
           at: observation.createdAt,
+          model: model || null,
           providerThreadId: observation.providerThreadId,
           threadId: observation.threadId,
           turnId: observation.turnId,
@@ -267,11 +267,13 @@ const THREAD_SPEND_REPAIR_TABLE = "fork_thread_spend_rollup_repair";
 
 function repairThreadTurnSpendFromStoredEventsInTransaction(
   db: DbConnection,
-  args: { providerId: string; threadId: string },
+  args: {
+    completedTurnIds: ReadonlySet<string>;
+    providerId: string;
+    threadId: string;
+  },
 ): void {
-  const completedTurnIds = new Set(
-    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
-  );
+  const { completedTurnIds } = args;
   const repairedTurnIds = new Set(
     db.$client
       .prepare<[string], { turnId: string }>(
@@ -287,8 +289,7 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   );
   const turnsToRepair = new Set(
     [...completedTurnIds].filter(
-      (turnId) =>
-        !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
+      (turnId) => !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
     ),
   );
   const dailyRepairRecorded = db.$client
@@ -304,7 +305,9 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   if (turnsToRepair.size === 0 && !repairDailyRollup) return;
   const states = new Map<string, SpendCursorState>();
   const dailyContributions: SpendContribution[] = [];
-  for (const row of listStoredTokenUsageEvents(db, { threadId: args.threadId })) {
+  for (const row of listStoredTokenUsageEvents(db, {
+    threadId: args.threadId,
+  })) {
     const record = JSON.parse(row.data) as Record<string, unknown>;
     const usage = (record.tokenUsage ?? {}) as Record<string, unknown>;
     const providerThreadId =
@@ -350,6 +353,7 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
     ) {
       recordThreadTurnSpendContribution(db, {
         at: row.createdAt,
+        model: model || null,
         providerThreadId,
         threadId: row.threadId,
         turnId: row.turnId,
@@ -385,11 +389,13 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
 
 export function repairThreadTurnSpendFromStoredEvents(
   db: DbConnection,
-  args: { providerId: string; threadId: string },
+  args: {
+    completedTurnIds: ReadonlySet<string>;
+    providerId: string;
+    threadId: string;
+  },
 ): void {
-  const completedTurnIds = new Set(
-    listCompletedTurnsByThreadIds(db, [args.threadId]).map((row) => row.turnId),
-  );
+  const { completedTurnIds } = args;
   const repairedTurnIds = new Set(
     db.$client
       .prepare<[string], { turnId: string }>(

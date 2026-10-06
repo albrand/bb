@@ -370,6 +370,16 @@ it with
 `bb settings general steerActiveThreadOnEnter <true|false>`, where `true` is
 "Steer".
 
+The "Show Git changes and Commit button" switch in Settings → General defaults to on.
+Turn it off to hide the untracked, uncommitted, and committed file summary and
+expanded file list above every thread composer, plus the Commit action in the
+thread header and overflow menu. PR status, thread relationships,
+and workspace warnings remain visible. This server-wide preference persists
+across reloads and applies to every connected app client. Set it with
+`bb settings general showGitChanges false` or read the current config and call
+`sdk.system.updateGeneralSettings({ ...config.generalSettings, showGitChanges: false })`.
+Older clients that omit the field preserve the saved value.
+
 The "Thread archive confirmation" switch in Settings → General defaults to on.
 Turn it off to archive a thread and its child threads immediately without a
 confirmation popup. The archive toast still offers Undo. This server-wide
@@ -513,9 +523,11 @@ untouched. Previous and next thread use `Mod+Shift+[/]` on desktop and
 as the sidebar's back and forward arrows: they move through the pages opened
 in the current window, like browser history. They use `Mod+[` / `Mod+]` on
 desktop and the web; in the browser, bb handles the key instead of the
-browser's own Back while it has somewhere to go. At either end the shortcut
-does nothing. Hovering an arrow shows its
-current shortcut.
+browser's own Back while it has somewhere to go. At either end the desktop app
+does nothing, while the web app leaves the key to the browser's own Back or
+Forward. The commands appear in the command palette only when there is
+somewhere to go, and they don't run while the in-app browser has focus.
+Hovering an arrow shows its current shortcut.
 
 On macOS, right-panel tabs use `panel.previousTab` / `panel.nextTab` with
 `Command+Control+ArrowLeft` / `Command+Control+ArrowRight`. They wrap through visible
@@ -926,7 +938,7 @@ a transient failure.
 
 ## Sidebar preferences
 
-Sidebar layout preferences are stored on the server in a keyed registry so
+Sidebar and Info panel layout preferences are stored on the server in a keyed registry so
 every window, device, and the CLI read the same value. Each key has a typed
 schema, a default, and a revision that increments on every write. Writes name
 the revision they expect and receive `409 ui_preference_conflict` when another
@@ -954,6 +966,7 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 | `sidebar.navigationProvider`         | Plugin key or `__automatic__` (default)                                                   |
 | `sidebar.headerProvider`             | Plugin key, or `__builtin__` for bb's header only                                         |
 | `sidebar.threadListProvider`         | Plugin key or `__automatic__` (default)                                                   |
+| `infoPanel.collapsedSections`        | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `forks`, `threadStorage`)                   |
 
 The sidebar thread list defaults to `__automatic__`: the first installed thread list
 plugin other than the bundled Thread list plugin (`thread-list/thread-list`), or the
@@ -1378,6 +1391,14 @@ Experimental surfaces are changed in Settings → Experiments or with
 bb stores only the experiments you set; the others follow the shipped default.
 The default-off `changelogPreview` experiment shows the latest release notes
 as a compact, dismissible card on Settings → Updates.
+The default-off `navigationRail` experiment keeps a vertical rail of
+destinations on the left edge of the sidebar on every screen. Home returns to
+the last thread, Settings sits at the bottom, and New thread moves into the
+sidebar header. The sidebar beside the rail still swaps between the thread
+list, Plugins, Skills, and Settings. While it is on, bb draws the navigation
+itself, so the Navigation and Header choices under Settings → Appearance are
+not used; they apply again when the experiment is turned off. Narrow windows
+and phones keep the regular drawer.
 
 BB releases restorable provider sessions after 30 idle minutes. The daemon
 checks for these sessions every five minutes. Active turns, commands, agents,
@@ -1726,6 +1747,14 @@ directory and reused by subsequent runs. Its generated command accepts
 
 ## Source Development
 
+`pnpm mobile:apk:dev` builds the standalone Android development app, **bb dev**,
+with orange icons and package `app.getbb.mobile.dev`. Output is
+`apps/mobile/build-output/bb-dev.apk`; append `-- x86_64` for an Intel emulator.
+The build command sets `BB_MOBILE_VARIANT=dev` for Expo configuration. Direct
+Expo commands accept `BB_MOBILE_VARIANT=production` (the default) or `dev`;
+other values fail validation. The dev variant omits production Firebase and
+HTTPS app-link registration. See [mobile build instructions](../apps/mobile/README.md#android-local-apk-and-verification).
+
 For source development only, `pnpm dev`, `pnpm start:worktree`,
 `pnpm start:worktree-remote`, `pnpm start:worktree --dryrun`,
 and `pnpm start` load the repo-root dotenv
@@ -2051,3 +2080,13 @@ experiment takes effect live on that server. Without startup permission it
 cannot start collection. Turning it off restores normal logging thresholds,
 stops the sampler and flushes the in-flight profile; existing files remain.
 The launch flag only grants permission and still requires a restart to change.
+
+## Prompt Library
+
+The bundled Prompt Library plugin is disabled by default. Enable it in
+Settings → Plugins or with `bb plugin enable bb--prompt-library`. Its
+**Search prompts** command defaults to Ctrl+R and can be rebound in Keyboard
+Settings. Search scope is remembered in browser local storage separately for
+new-thread and follow-up composers. Starred text and mentions persist in the
+plugin database. See the [Prompt Library skill](../plugins/prompt-library/skills/prompt-library/SKILL.md)
+for CLI and SDK commands.

@@ -49,6 +49,8 @@ import {
   threadTimelineQueryKey,
   threadTimelineQueryKeyPrefix,
   threadTimelineTurnSummaryDetailsQueryKey,
+  threadSpendSummaryQueryKey,
+  threadCompactionTurnIdsQueryKey,
 } from "./queries/query-keys";
 import { pluginContributionsQueryKey } from "./queries/query-keys";
 import { systemEnvironmentProvidersQueryKey } from "./queries/environment-provider-queries";
@@ -668,13 +670,17 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("invalidates cached thread search results only once a turn completes, not on every appended batch", () => {
+  it("invalidates token usage and compaction history only once a turn completes", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+    const spendSummaryKey = threadSpendSummaryQueryKey("thr_1");
+    const compactionTurnIdsKey = threadCompactionTurnIdsQueryKey("thr_1");
+    queryClient.setQueryData(spendSummaryKey, { total: {} });
+    queryClient.setQueryData(compactionTurnIdsKey, []);
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -692,6 +698,12 @@ describe("createRealtimeCacheEffects", () => {
     expect(queryClient.getQueryState(threadSearchKey)?.isInvalidated).toBe(
       false,
     );
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      false,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
+      false,
+    );
 
     effects.handleChanged({
       type: "changed",
@@ -707,6 +719,39 @@ describe("createRealtimeCacheEffects", () => {
 
     expect(queryClient.getQueryState(threadSearchKey)?.isInvalidated).toBe(
       true,
+    );
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
+      true,
+    );
+
+    effects.dispose();
+  });
+
+  it("refreshes token usage when usage arrives after the turn completes", () => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const spendSummaryKey = threadSpendSummaryQueryKey("thr_1");
+    const compactionTurnIdsKey = threadCompactionTurnIdsQueryKey("thr_1");
+    queryClient.setQueryData(spendSummaryKey, { total: {} });
+    queryClient.setQueryData(compactionTurnIdsKey, []);
+
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      metadata: { eventTypes: ["thread/tokenUsage/updated"] },
+      changes: ["events-appended"],
+    });
+    vi.advanceTimersByTime(50);
+
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
+      false,
     );
 
     effects.dispose();

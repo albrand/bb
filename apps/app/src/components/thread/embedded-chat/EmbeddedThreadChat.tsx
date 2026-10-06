@@ -460,10 +460,11 @@ function EmbeddedThreadChatWithComposer({
     () =>
       buildSideChatSubmitMode({
         childThreadId: threadId,
-        hasPendingInteraction: hasComposerBlockingPendingInteraction,
+        hasPendingInteraction:
+          hasComposerBlockingPendingInteraction ||
+          pendingInteractionsInitialLoading ||
+          pendingInteractionsUnavailable,
         isDefaultExecutionOptionsLoading,
-        isPendingInteractionsInitialLoading:
-          pendingInteractionsInitialLoading || pendingInteractionsUnavailable,
         isStopRequested,
         onStop: handleStopThread,
         runtimeDisplayStatus: displayStatus,

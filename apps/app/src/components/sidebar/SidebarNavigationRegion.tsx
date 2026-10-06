@@ -251,6 +251,7 @@ export function SidebarNavigationRegion({
     >
       {isCustomizing && isEditorShown ? (
         <SidebarNavigationCustomize
+          surface="sidebar"
           onClose={(restoreFocus) => {
             restoreFocusRef.current = restoreFocus;
             onCustomizingChange(false);

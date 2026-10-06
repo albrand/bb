@@ -54,7 +54,7 @@ import {
   getEnvironment,
   getLatestCompletedThreadContextClearSequence,
   getThreadConversationOutlineRecord,
-  getThreadEventRewriteGeneration,
+  getThreadConversationOutlineRewriteGeneration,
   listContextWindowUsageRows,
   isTimelineCursorSequencePresent,
   listStoredConversationOutlineEventRows,
@@ -735,6 +735,60 @@ function ensureTimelineWindowTurnStartedRows(
   return mergeStoredEventRowsById([...turnStartedRows, ...args.rows]);
 }
 
+function ensureRejectedRequestTurnContextRows(
+  db: DbConnection,
+  args: TimelineWindowRowsArgs & {
+    epochSequenceStart: number;
+    maxSeq: number;
+    decode: StoredEventDecoder;
+  },
+): StoredEventRow[] {
+  const rejectedRequestIds = new Set(
+    args.rows.flatMap((row) =>
+      row.type === "client/turn/rejected"
+        ? [parseRejectedClientRequestId(row, args.decode)]
+        : [],
+    ),
+  );
+  const targetTurnIds = [
+    ...new Set(
+      args.rows.flatMap((row) => {
+        if (row.type !== "client/turn/requested") return [];
+        const event = args.decode(row);
+        if (
+          event.type !== "client/turn/requested" ||
+          !rejectedRequestIds.has(event.requestId) ||
+          !("expectedTurnId" in event.target) ||
+          event.target.expectedTurnId === null
+        )
+          return [];
+        return [event.target.expectedTurnId];
+      }),
+    ),
+  ];
+  if (targetTurnIds.length === 0) return [...args.rows];
+  const starts = listStoredTurnStartedRowsByTurnIdsUpToSequence(db, {
+    threadId: args.threadId,
+    sequenceCutoff: args.maxSeq,
+    turnIds: targetTurnIds,
+  }).filter((row) => row.sequence >= args.epochSequenceStart);
+  const selectedTurnIds = starts.flatMap((row) =>
+    row.turnId === null ? [] : [row.turnId],
+  );
+  const completed =
+    selectedTurnIds.length === 0
+      ? []
+      : listStoredTurnCompletedRowsByTurnIds(db, {
+          threadId: args.threadId,
+          turnIds: selectedTurnIds,
+        }).filter(
+          (row) =>
+            row.sequence >= args.epochSequenceStart &&
+            row.sequence <= args.maxSeq,
+        );
+  return mergeStoredEventRowsById([...args.rows, ...starts, ...completed]);
+}
+
 function ensureTimelineSelectedItemLifecycleRows(
   db: DbConnection,
   args: TimelineWindowRowsArgs & {
@@ -1155,19 +1209,22 @@ function selectStandardTimelineEventRows(
         : [],
     ),
   );
-  const requestKeys = rows
-    .filter((row) => row.type === "turn/input/accepted")
-    .filter(
-      (row) =>
-        !existingRequests.has(parseAcceptedInputClientRequestId(row, decode)),
-    )
-    .map((row) => ({
-      threadId: thread.id,
-      requestId: parseAcceptedInputClientRequestId(row, decode),
-    }));
+  const requestKeys = rows.flatMap((row) => {
+    const requestId =
+      row.type === "turn/input/accepted"
+        ? parseAcceptedInputClientRequestId(row, decode)
+        : row.type === "client/turn/rejected"
+          ? parseRejectedClientRequestId(row, decode)
+          : null;
+    return requestId === null || existingRequests.has(requestId)
+      ? []
+      : [{ threadId: thread.id, requestId }];
+  });
   const requestedRows = listStoredClientTurnRequestRowsByKeys(db, {
     keys: requestKeys,
-  }).filter((row) => row.sequence <= maxSeq);
+  }).filter(
+    (row) => row.sequence >= epochSequenceStart && row.sequence <= maxSeq,
+  );
   const requestContext = [...contextRows, ...requestedRows, ...rows];
   const terminalRequestIds = new Set(
     requestContext.flatMap((row) =>
@@ -1233,13 +1290,19 @@ function selectStandardTimelineEventRows(
       responsePageKind: page.kind,
       rows: ensureTimelineWindowTurnStartedRows(db, {
         threadId: thread.id,
-        rows: mergeStoredEventRowsById([
-          ...interruptionRows,
-          ...terminalContext,
-          ...contextRows,
-          ...requestedRows,
-          ...rows,
-        ]),
+        rows: ensureRejectedRequestTurnContextRows(db, {
+          threadId: thread.id,
+          epochSequenceStart,
+          maxSeq,
+          decode,
+          rows: mergeStoredEventRowsById([
+            ...interruptionRows,
+            ...terminalContext,
+            ...contextRows,
+            ...requestedRows,
+            ...rows,
+          ]),
+        }),
       }),
       strategy:
         !hasOlder && page.kind === "latest" ? "full" : "standard-window",
@@ -1632,7 +1695,7 @@ interface LoadThreadConversationOutlineOptions extends BuildThreadConversationOu
 }
 
 const CONVERSATION_OUTLINE_PREVIEW_MAX_LENGTH = 200;
-const CONVERSATION_OUTLINE_PROJECTION_VERSION = 2;
+const CONVERSATION_OUTLINE_PROJECTION_VERSION = 4;
 const conversationOutlineItemsSchema =
   threadConversationOutlineItemSchema.array();
 
@@ -1750,6 +1813,7 @@ function selectThreadConversationOutline(
   options: BuildThreadConversationOutlineOptions,
   sequenceStart: number,
   precedingAgentMessageDeltaCount: number,
+  orderingBoundarySequence: number | null,
   rootProjection: { summaryCompactionEnabled: boolean } | null,
 ): ConversationOutlineSelection {
   const selectRows =
@@ -1803,7 +1867,10 @@ function selectThreadConversationOutline(
         },
       });
       const items: ReturnType<ConversationOutlineSelection["project"]> = [];
-      for (const row of timeline.rows) {
+      for (const row of orderTimelineRowsUsingContext(
+        timeline.rows,
+        orderingBoundarySequence,
+      )) {
         if (row.kind !== "conversation") {
           continue;
         }
@@ -1836,12 +1903,18 @@ export function buildThreadConversationOutline(
         atOrBeforeSequence: options.maxSeq,
         threadId: thread.id,
       }) ?? 0;
+    const { orderingBoundarySequence } = getTimelineGroupingContext(db, {
+      maxSeq: options.maxSeq,
+      sequenceStart,
+      threadId: thread.id,
+    });
     const selection = selectThreadConversationOutline(
       db,
       thread,
       options,
       sequenceStart,
       0,
+      orderingBoundarySequence,
       null,
     );
     return {
@@ -1889,11 +1962,25 @@ export function buildThreadConversationOutlineProjectionKey(
 ): string {
   return JSON.stringify([
     CONVERSATION_OUTLINE_PROJECTION_VERSION,
-    getThreadEventRewriteGeneration(thread.id),
+    getThreadConversationOutlineRewriteGeneration(thread.id),
     outlineSequence,
     thread.providerId,
     options.providerDisplayName ?? null,
     thread.status,
+    thread.title,
+    thread.titleFallback,
+    options.completedTurnDisplay,
+  ]);
+}
+
+function buildThreadConversationOutlineCheckpointKey(
+  thread: Thread,
+  options: BuildThreadConversationOutlineOptions,
+): string {
+  return JSON.stringify([
+    CONVERSATION_OUTLINE_PROJECTION_VERSION,
+    thread.providerId,
+    options.providerDisplayName ?? null,
     thread.title,
     thread.titleFallback,
     options.completedTurnDisplay,
@@ -1952,10 +2039,9 @@ export function loadThreadConversationOutline(
         items: projectConversationOutlineIncrementally({
           db,
           threadId: thread.id,
-          key: buildThreadConversationOutlineProjectionKey(thread, 0, options),
+          key: buildThreadConversationOutlineCheckpointKey(thread, options),
           maxSeq: options.maxSeq,
           contextBoundarySeq,
-          orderingBoundarySequence,
           resolveProjectionState: (classificationSequenceStart, previous) => {
             const state = getStoredConversationOutlineProjectionState(db, {
               threadId: thread.id,
@@ -1979,6 +2065,7 @@ export function loadThreadConversationOutline(
               options,
               sequenceStart,
               precedingAgentMessageDeltaCount,
+              orderingBoundarySequence,
               state.includeNestedEvents
                 ? null
                 : { summaryCompactionEnabled: state.summaryCompactionEnabled },

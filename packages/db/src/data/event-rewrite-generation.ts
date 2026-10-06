@@ -1,12 +1,29 @@
 import type { DbConnection } from "../connection.js";
 
 const generationsByThreadId = new Map<string, number>();
+const conversationOutlineGenerationsByThreadId = new Map<string, number>();
 
 export function getThreadEventRewriteGeneration(threadId: string): number {
   return generationsByThreadId.get(threadId) ?? 0;
 }
 
+export function getThreadConversationOutlineRewriteGeneration(
+  threadId: string,
+): number {
+  return conversationOutlineGenerationsByThreadId.get(threadId) ?? 0;
+}
+
 export function bumpThreadEventRewriteGeneration(threadId: string): void {
+  bumpThreadEventRewriteGenerationOutsideConversationOutline(threadId);
+  conversationOutlineGenerationsByThreadId.set(
+    threadId,
+    getThreadConversationOutlineRewriteGeneration(threadId) + 1,
+  );
+}
+
+export function bumpThreadEventRewriteGenerationOutsideConversationOutline(
+  threadId: string,
+): void {
   generationsByThreadId.set(
     threadId,
     getThreadEventRewriteGeneration(threadId) + 1,

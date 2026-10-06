@@ -130,6 +130,7 @@ import {
 const HOST_AUTH_FILE_NAME = "auth.json";
 const HOST_ID_FILE_NAME = "host-id";
 const HEALTH_CHECK_TIMEOUT_MS = 60_000;
+const SERVER_START_HEALTH_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_INTERVAL_MS = 100;
 const HEALTH_CHECK_REQUEST_TIMEOUT_MS = 1_000;
 const MANAGED_PROCESS_TERMINATION_TIMEOUT_MS = 5_000;
@@ -3088,6 +3089,7 @@ export async function startFullStackServerProcess(
     await waitForServerHealth({
       childProcess: serverRun.childProcess,
       expectedLaunchId: launchId,
+      timeoutMs: SERVER_START_HEALTH_TIMEOUT_MS,
       url: `${args.context.serverUrl}/health`,
     });
     return serverRun;

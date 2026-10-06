@@ -8,7 +8,7 @@ import {
   threadSpendSummaryResponseSchema,
 } from "@bb/server-contract";
 import { turnScope } from "@bb/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
   seedEvent,
@@ -180,6 +180,7 @@ describe("public thread spend summaries", () => {
       expect(spend.turns).toEqual([
         {
           turnId: "turn-b",
+          model: null,
           inputTokens: 45,
           cachedInputTokens: 0,
           outputTokens: 11,
@@ -188,6 +189,7 @@ describe("public thread spend summaries", () => {
         },
         {
           turnId: "turn-a",
+          model: null,
           inputTokens: 60,
           cachedInputTokens: 4,
           outputTokens: 23,
@@ -261,6 +263,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend).toEqual({
         historyComplete: false,
+        providerId: "claude-code",
         total: {
           cachedInputTokens: 9_000_000,
           inputTokens: 1_000,
@@ -271,6 +274,7 @@ describe("public thread spend summaries", () => {
         turns: [
           {
             turnId: "recent-turn",
+            model: null,
             inputTokens: 50,
             cachedInputTokens: 2_000_000,
             outputTokens: 2_000,
@@ -367,6 +371,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend.turns).toContainEqual({
         turnId,
+        model: null,
         inputTokens: 20,
         cachedInputTokens: 10,
         outputTokens: 15,
@@ -393,6 +398,7 @@ describe("public thread spend summaries", () => {
       ).toEqual([
         {
           turnId,
+          model: null,
           inputTokens: 20,
           cachedInputTokens: 10,
           outputTokens: 15,
@@ -438,6 +444,114 @@ describe("public thread spend summaries", () => {
       );
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  it("reads completed turns once per request, with or without a repair", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { providerId: "codex" },
+      });
+      ensureSpendTables(harness.db);
+      recordThreadTurnSpendContribution(harness.db, {
+        at: 1_780_000_000_200,
+        providerThreadId: "provider-read-count",
+        threadId: thread.id,
+        turnId: "turn-recorded",
+        usage: {
+          cachedInputTokens: 0,
+          inputTokens: 20,
+          outputTokens: 15,
+          reasoningOutputTokens: 0,
+          totalTokens: 35,
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-read-count",
+        sequence: 1,
+        type: "turn/completed",
+        scope: turnScope("turn-recorded"),
+        data: { providerThreadId: "provider-read-count", status: "completed" },
+      });
+      const prepareSpy = vi.spyOn(harness.db.$client, "prepare");
+      const countCompletedTurnReads = () =>
+        prepareSpy.mock.calls.filter(
+          ([source]) =>
+            typeof source === "string" &&
+            source.startsWith('select "thread_id", "turn_id" from "events"') &&
+            source.includes('"events"."turn_id" is not null'),
+        ).length;
+
+      const noRepairResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      expect(noRepairResponse.status).toBe(200);
+      expect(countCompletedTurnReads()).toBe(1);
+
+      const repairUsage = {
+        totalTokens: 45,
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        cacheReadInputTokens: 10,
+        cacheWriteInputTokens: 0,
+        outputTokens: 15,
+        reasoningOutputTokens: 0,
+      };
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-read-count",
+        sequence: 2,
+        type: "thread/tokenUsage/updated",
+        scope: turnScope("turn-repaired"),
+        data: {
+          providerThreadId: "provider-read-count",
+          tokenUsage: {
+            total: repairUsage,
+            last: repairUsage,
+            modelContextWindow: 200_000,
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-read-count",
+        sequence: 3,
+        type: "turn/completed",
+        scope: turnScope("turn-repaired"),
+        data: { providerThreadId: "provider-read-count", status: "completed" },
+      });
+      prepareSpy.mockClear();
+
+      const repairResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      expect(repairResponse.status).toBe(200);
+      expect(countCompletedTurnReads()).toBe(1);
+      expect(
+        threadSpendSummaryResponseSchema.parse(await readJson(repairResponse))
+          .turns,
+      ).toContainEqual({
+        turnId: "turn-repaired",
+        model: null,
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        outputTokens: 15,
+        reasoningOutputTokens: null,
+        totalTokens: 45,
+      });
+
+      prepareSpy.mockClear();
+      harness.db.$client.exec("PRAGMA query_only = ON");
+      const repairedResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      expect(repairedResponse.status).toBe(200);
+      expect(countCompletedTurnReads()).toBe(1);
+      prepareSpy.mockRestore();
     });
   });
 
@@ -514,6 +628,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend.turns).toContainEqual({
         turnId,
+        model: null,
         inputTokens: 20,
         cachedInputTokens: 10,
         outputTokens: 15,
@@ -557,6 +672,7 @@ describe("public thread spend summaries", () => {
 
         expect(spend.turns).toContainEqual({
           turnId,
+          model: null,
           inputTokens: null,
           cachedInputTokens: null,
           outputTokens: null,

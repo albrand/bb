@@ -4,6 +4,7 @@ import {
   type CompletedTurnDisplay,
 } from "@bb/domain";
 import {
+  advanceThreadPruning,
   deleteThreadEventSuffixInTransaction,
   createThread,
   noopNotifier,
@@ -105,16 +106,125 @@ function accepted(requestId: string, turnId: string): RowSpec {
   };
 }
 
-function seed(
+function requestIdAt(index: number): string {
+  return `creq_${index.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+}
+
+function backgroundTask(
+  type:
+    | "item/started"
+    | "item/backgroundTask/progress"
+    | "item/backgroundTask/completed",
+  taskId: string,
+  turnId?: string,
+): RowSpec {
+  const settled = type === "item/backgroundTask/completed";
+  return {
+    type,
+    turnId,
+    providerThreadId: "provider-memo",
+    itemId: taskId,
+    itemKind: "backgroundTask",
+    data: {
+      item: {
+        id: taskId,
+        type: "backgroundTask",
+        taskType: "local_bash",
+        description: `Background ${taskId}`,
+        status: settled ? "completed" : "pending",
+        taskStatus: settled ? "completed" : "running",
+        skipTranscript: false,
+      },
+    },
+  };
+}
+
+function seedStreamedHistory(
   testThread: TestThread,
-  count = 3,
-  nestedWork?: RowSpec,
+  options: { backgroundTasks: boolean; openTaskTurn: number | null },
 ): void {
+  appendRows(
+    testThread,
+    Array.from({ length: 100 }, (_, i) => {
+      const turnId = `turn-${i}`;
+      const taskStarts =
+        (options.backgroundTasks && i % 7 === 3) || i === options.openTaskTurn;
+      return [
+        request(requestIdAt(i)),
+        started(turnId),
+        accepted(requestIdAt(i), turnId),
+        ...(taskStarts
+          ? [backgroundTask("item/started", `task-${i}`, turnId)]
+          : []),
+        ...(options.backgroundTasks && i % 7 === 3
+          ? [backgroundTask("item/backgroundTask/progress", `task-${i}`)]
+          : []),
+        delta(turnId, "Answer"),
+        delta(turnId, ` ${i}`),
+        message(turnId, `Answer ${i}`),
+        completed(turnId),
+        ...(options.backgroundTasks && i % 7 === 5
+          ? [backgroundTask("item/backgroundTask/completed", `task-${i - 2}`)]
+          : []),
+      ];
+    }).flat(),
+  );
+  appendRows(testThread, [started("live"), delta("live", "Live")]);
+}
+
+function backgroundDelegation(
+  type: "item/started" | "item/delegation/completed",
+  delegationId: string,
+  turnId?: string,
+): RowSpec {
+  return {
+    type,
+    turnId,
+    itemId: delegationId,
+    itemKind: "delegation",
+    data: {
+      item: {
+        id: delegationId,
+        type: "delegation",
+        childRef: "toolu_background",
+        label: "Background audit",
+        status: type === "item/started" ? "pending" : "completed",
+        background: true,
+      },
+    },
+  };
+}
+
+function pruneUntilResolvedItemsComplete(testThread: TestThread): number {
+  const threadId = testThread.thread.id;
+  let removed = 0;
+  for (let pass = 0; pass < 2_000; pass += 1) {
+    const result = advanceThreadPruning(testThread.db, { threadId });
+    removed += result.removed;
+    if (result.policy === "resolved-items" && result.action !== "advanced")
+      return removed;
+  }
+  throw new Error("Resolved-item pruning did not finish a thread pass");
+}
+
+function listEventSequences(
+  testThread: TestThread,
+  types: readonly string[],
+): number[] {
+  return testThread.db.$client
+    .prepare<[string], { sequence: number }>(
+      `SELECT sequence FROM events WHERE thread_id = ? AND type IN (${types.map((type) => `'${type}'`).join(", ")}) ORDER BY sequence`,
+    )
+    .all(testThread.thread.id)
+    .map((row) => row.sequence);
+}
+
+function seed(testThread: TestThread, count = 3, nestedWork?: RowSpec): void {
   appendRows(
     testThread,
     Array.from({ length: count }, (_, i) => {
       const turnId = `turn-${i}`;
-      const requestId = `creq_${i.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+      const requestId = requestIdAt(i);
       return [
         request(requestId),
         started(turnId),
@@ -233,7 +343,6 @@ function expectCheckpointFallbackForTailEvent(tailEvent: RowSpec): void {
           threadId: testThread.thread.id,
         }),
         contextBoundarySeq: 0,
-        orderingBoundarySequence: null,
         resolveProjectionState: () => ({
           includeNestedEvents: true,
           summaryCompactionEnabled: false,
@@ -263,6 +372,164 @@ function expectCheckpointFallbackForTailEvent(tailEvent: RowSpec): void {
 }
 
 describe("incremental conversation outlines", () => {
+  it.each(["collapse", "flat"] as const)(
+    "preserves historical source ordering for a later rejected system request (%s)",
+    (display) => {
+      withTestThread((testThread) => {
+        const earlyRequest = "creq_abcdefghij";
+        appendRows(testThread, [
+          started("early"),
+          request(earlyRequest),
+          {
+            type: "client/turn/rejected",
+            data: {
+              requestId: earlyRequest,
+              reason: "competing_turn",
+              message: "Competing turn",
+            },
+          },
+          message("early", "Early answer"),
+          completed("early"),
+          ...Array.from({ length: 100 }, (_, index) => [
+            started(`history-${index}`),
+            message(`history-${index}`, `History ${index}`),
+            completed(`history-${index}`),
+          ]).flat(),
+          started("live"),
+        ]);
+        expectMatchesFull(testThread, display);
+        const laterRequest = "creq_bcdefghijk";
+        const systemRequest = request(laterRequest);
+        appendRows(testThread, [
+          {
+            ...systemRequest,
+            data: { ...systemRequest.data, initiator: "system" },
+          },
+          {
+            type: "client/turn/rejected",
+            data: {
+              requestId: laterRequest,
+              reason: "competing_turn",
+              message: "Competing turn",
+            },
+          },
+          message("live", "Later answer"),
+          completed("live"),
+        ]);
+        const selected = countSelectedEventRows(testThread, () =>
+          expectMatchesFull(testThread, display),
+        );
+        expect(selected).toBeLessThan(20);
+        expect(
+          load(testThread, display)
+            .items.slice(-2)
+            .map((item) => item.preview),
+        ).toEqual(["User request", "Later answer"]);
+      });
+    },
+  );
+
+  it("reuses completed history when the thread becomes active and idle", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      expectMatchesFull(testThread);
+      for (const status of ["idle", "active", "idle"] as const) {
+        testThread.thread = { ...testThread.thread, status };
+        appendRows(testThread, [delta("live", ` ${status}`)]);
+        const selected = countSelectedEventRows(testThread, () =>
+          expectMatchesFull(testThread),
+        );
+        expect(selected).toBeLessThan(20);
+      }
+    });
+  });
+
+  it("advances beyond a historical rejected steer without losing its message", () => {
+    withTestThread((testThread) => {
+      const requestId = "creq_abcdefghij";
+      const rejectedRequest = request(requestId, "earlier");
+      appendRows(testThread, [
+        started("earlier"),
+        {
+          ...rejectedRequest,
+          data: {
+            ...rejectedRequest.data,
+            input: [{ type: "text", text: "Rejected historical steer" }],
+          },
+        },
+        {
+          type: "client/turn/rejected",
+          data: {
+            requestId,
+            reason: "host_unavailable",
+            message: "Host disconnected",
+          },
+        },
+        message("earlier", "Earlier answer"),
+        completed("earlier"),
+      ]);
+      seed(testThread, 100);
+      expectMatchesFull(testThread);
+      appendRows(testThread, [delta("live", " continued")]);
+      const selected = countSelectedEventRows(testThread, () => {
+        const outline = expectMatchesFull(testThread);
+        expect(
+          outline.items.filter(
+            (item) => item.preview === "Rejected historical steer",
+          ),
+        ).toHaveLength(1);
+      });
+      expect(selected).toBeLessThan(20);
+    });
+  });
+
+  it("keeps a rejected system steer inside collapsed work and visible when flat", () => {
+    withTestThread((testThread) => {
+      const requestId = "creq_abcdefghij";
+      const systemRequest = request(requestId, "earlier");
+      appendRows(testThread, [
+        started("earlier"),
+        parentCall("earlier", "before"),
+        {
+          ...systemRequest,
+          data: {
+            ...systemRequest.data,
+            initiator: "system",
+            systemMessageKind: "child-completed",
+            systemMessageSubject: {
+              kind: "thread",
+              threadId: testThread.thread.id,
+              threadName: "Child",
+              outcomes: [
+                { threadId: testThread.thread.id, status: "completed" },
+              ],
+            },
+            input: [{ type: "text", text: "Rejected child notification" }],
+          },
+        },
+        {
+          type: "client/turn/rejected",
+          data: {
+            requestId,
+            reason: "host_unavailable",
+            message: "Host disconnected",
+          },
+        },
+        parentCall("earlier", "after"),
+        message("earlier", "Final answer"),
+        completed("earlier"),
+      ]);
+      expect(
+        expectMatchesFull(testThread, "collapse").items.map(
+          (item) => item.preview,
+        ),
+      ).toEqual(["Final answer"]);
+      expect(
+        expectMatchesFull(testThread, "flat").items.map((item) => item.preview),
+      ).toEqual(["Rejected child notification", "Final answer"]);
+    });
+  });
+
   it.each(["collapse", "flat"] as const)(
     "retains completed nested history while updating the live tail (%s)",
     (display) => {
@@ -523,11 +790,7 @@ describe("incremental conversation outlines", () => {
         .prepare(
           "UPDATE events SET parent_tool_call_id = ?, data = json_set(data, '$.item.parentToolCallId', ?) WHERE thread_id = ? AND sequence = 4",
         )
-        .run(
-          "historical-parent",
-          "historical-parent",
-          testThread.thread.id,
-        );
+        .run("historical-parent", "historical-parent", testThread.thread.id);
       expectMatchesFull(testThread);
 
       appendRows(testThread, [delta("live", " continuation")]);
@@ -654,6 +917,181 @@ describe("incremental conversation outlines", () => {
 
       expect(selectedRows).toBeGreaterThan(500);
       expectMatchesFull(testThread);
+    });
+  });
+
+  it.each([
+    { display: "collapse", nestedChild: false },
+    { display: "collapse", nestedChild: true },
+    { display: "flat", nestedChild: false },
+    { display: "flat", nestedChild: true },
+  ] as const)(
+    "matches a full build when a background delegation from the prefix completes later ($display, nested child: $nestedChild)",
+    ({ display, nestedChild }) => {
+      withTestThread((testThread) => {
+        seed(
+          testThread,
+          100,
+          backgroundDelegation("item/started", "delegation-1", "turn-0"),
+        );
+        expectMatchesFull(testThread, display);
+        appendRows(testThread, [
+          ...(nestedChild
+            ? [
+                started("delegated-child", "delegation-1"),
+                message("delegated-child", "Delegated answer", "delegation-1"),
+                {
+                  ...completed("delegated-child"),
+                  parentToolCallId: "delegation-1",
+                },
+              ]
+            : []),
+          backgroundDelegation("item/delegation/completed", "delegation-1"),
+        ]);
+        expectMatchesFull(testThread, display);
+      });
+    },
+  );
+
+  it("reuses the prefix before a still-open background task after settled ones", () => {
+    withTestThread((testThread) => {
+      seedStreamedHistory(testThread, {
+        backgroundTasks: true,
+        openTaskTurn: 99,
+      });
+      expectMatchesFull(testThread);
+      for (const rows of [
+        [delta("live", " continuation")],
+        [message("live", "Final answer"), completed("live")],
+        [started("next"), delta("next", "Next")],
+      ]) {
+        appendRows(testThread, rows);
+        const selectedRows = countSelectedEventRows(testThread, () => {
+          load(testThread);
+        });
+        expect(selectedRows).toBeGreaterThan(0);
+        expect(selectedRows).toBeLessThan(25);
+        expectMatchesFull(testThread);
+      }
+    });
+  });
+
+  it("rebuilds when a late update targets a settled background task in the prefix", () => {
+    withTestThread((testThread) => {
+      seedStreamedHistory(testThread, {
+        backgroundTasks: true,
+        openTaskTurn: null,
+      });
+      expectMatchesFull(testThread);
+
+      appendRows(testThread, [
+        backgroundTask("item/backgroundTask/progress", "task-3"),
+      ]);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it.each([false, true])(
+    "keeps the prefix when live pruning removes resolved rows below it (background tasks: %s)",
+    (backgroundTasks) => {
+      withTestThread((testThread) => {
+        seedStreamedHistory(testThread, {
+          backgroundTasks,
+          openTaskTurn: null,
+        });
+        expectMatchesFull(testThread);
+        const [liveStart] = listEventSequences(testThread, [
+          "turn/started",
+        ]).slice(-1);
+        const prunable = [
+          "item/agentMessage/delta",
+          "item/backgroundTask/progress",
+        ];
+        const before = listEventSequences(testThread, prunable);
+
+        expect(pruneUntilResolvedItemsComplete(testThread)).toBeGreaterThan(0);
+
+        const after = new Set(listEventSequences(testThread, prunable));
+        const removed = before.filter((sequence) => !after.has(sequence));
+        expect(removed).toHaveLength(backgroundTasks ? 114 : 100);
+        expect(removed.every((sequence) => sequence < liveStart!)).toBe(true);
+
+        appendRows(testThread, [delta("live", " continuation")]);
+        const selectedRows = countSelectedEventRows(testThread, () => {
+          load(testThread);
+        });
+        expect(selectedRows).toBeLessThan(25);
+        expectMatchesFull(testThread);
+      });
+    },
+  );
+
+  it("rebuilds when pruning removes deltas of a message without final text", () => {
+    withTestThread((testThread) => {
+      appendRows(testThread, [
+        request("creq_nexttextab"),
+        started("textless"),
+        accepted("creq_nexttextab", "textless"),
+        delta("textless", "First"),
+        delta("textless", " second"),
+        delta("textless", " third"),
+        message("textless", ""),
+        completed("textless"),
+      ]);
+      seedStreamedHistory(testThread, {
+        backgroundTasks: false,
+        openTaskTurn: null,
+      });
+      const before = expectMatchesFull(testThread);
+      expect(before.items.map((item) => item.preview)).toContain(
+        "First second third",
+      );
+
+      pruneUntilResolvedItemsComplete(testThread);
+      const selectedRows = countSelectedEventRows(testThread, () => {
+        load(testThread);
+      });
+
+      expect(selectedRows).toBeGreaterThan(500);
+      expectMatchesFull(testThread);
+    });
+  });
+
+  it("rebuilds when pruning drops historical deltas below the compaction threshold", () => {
+    withTestThread((testThread) => {
+      appendRows(testThread, [
+        started("old"),
+        backgroundTask("item/started", "task-old", "old"),
+        ...Array.from({ length: 1_001 }, () => delta("old", "word ")),
+        message("old", "Complete"),
+        backgroundTask("item/backgroundTask/completed", "task-old", "old"),
+        completed("old"),
+        started("live"),
+        delta("live", "First"),
+        delta("live", " second"),
+      ]);
+      expectMatchesFull(testThread);
+      expect(
+        countSelectedEventRows(testThread, () => {
+          load(testThread);
+        }),
+      ).toBeLessThan(25);
+
+      pruneUntilResolvedItemsComplete(testThread);
+      expect(
+        listEventSequences(testThread, ["item/agentMessage/delta"]),
+      ).toHaveLength(3);
+      appendRows(testThread, [message("live", ""), completed("live")]);
+
+      const result = expectMatchesFull(testThread);
+      expect(result.items.map((item) => item.preview)).toContain(
+        "First second",
+      );
     });
   });
 

@@ -8,7 +8,10 @@ import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { DbConnection } from "../connection.js";
 import { logDatabaseWriteBytes } from "../connection.js";
 import { events, threadPruningCursors, threads } from "../schema.js";
-import { bumpThreadEventRewriteGeneration } from "./event-rewrite-generation.js";
+import {
+  bumpThreadEventRewriteGeneration,
+  bumpThreadEventRewriteGenerationOutsideConversationOutline,
+} from "./event-rewrite-generation.js";
 import {
   getHighWaterMarks,
   pruneContextWindowUsageEventsInTransaction,
@@ -147,6 +150,7 @@ function advanceThreadPruningTransaction(
       let removed = 0;
       let scanned = 0;
       let removedBytes = 0;
+      let rewritesConversationOutline = true;
       if (cursor.currentThreadId === null) {
         const next = tx
           .select({
@@ -199,6 +203,7 @@ function advanceThreadPruningTransaction(
           scanned = batch.scanned;
           removed = batch.removed;
           removedBytes = batch.removedBytes;
+          rewritesConversationOutline = false;
           cursor.sequence = batch.nextSequence;
           if (batch.complete || cursor.sequence >= cursor.upperSequence)
             action = "thread-complete";
@@ -211,6 +216,7 @@ function advanceThreadPruningTransaction(
           scanned = batch.scanned;
           removed = batch.removed;
           removedBytes = batch.removedBytes;
+          rewritesConversationOutline = batch.rewritesConversationOutline;
           if (batch.complete) {
             if (cursor.step === 0) cursor.step = 1;
             else action = "thread-complete";
@@ -229,6 +235,7 @@ function advanceThreadPruningTransaction(
             ORDER BY sequence LIMIT ${batchSize}
           `);
           scanned = rows.length;
+          rewritesConversationOutline = false;
           const last = rows.at(-1);
           const throughSequence = last?.sequence ?? cursor.sequence;
           if (last) {
@@ -353,13 +360,20 @@ function advanceThreadPruningTransaction(
         scanned,
         removed,
         removedBytes,
+        rewritesConversationOutline,
         cursor,
       };
     },
     { behavior: "immediate" },
   );
-  if (result.removed > 0 && result.threadId !== null)
-    bumpThreadEventRewriteGeneration(result.threadId);
+  if (result.removed > 0 && result.threadId !== null) {
+    if (result.rewritesConversationOutline)
+      bumpThreadEventRewriteGeneration(result.threadId);
+    else
+      bumpThreadEventRewriteGenerationOutsideConversationOutline(
+        result.threadId,
+      );
+  }
   if (result.removedBytes > 0) {
     logDatabaseWriteBytes(db, {
       bytes: result.removedBytes,

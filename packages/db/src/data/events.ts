@@ -2657,6 +2657,7 @@ export function findLastRootStoredTurnStarted(
 
 const conversationOutlineLifecycleTypes = [
   "client/turn/requested",
+  "client/turn/rejected",
   "turn/input/accepted",
   "turn/started",
   "turn/completed",
@@ -2866,6 +2867,38 @@ export function getStoredConversationOutlineProjectionState(
       crossTurnState !== undefined || acceptedNestedRoot !== undefined,
     summaryCompactionEnabled: compactionDelta !== undefined,
   };
+}
+
+export interface ConversationOutlineBackgroundTaskSpan {
+  endSequence: number | null;
+  startSequence: number;
+}
+
+export function listConversationOutlineBackgroundTaskSpans(
+  db: DbConnection,
+  args: ListStoredConversationOutlineEventRowsArgs,
+): ConversationOutlineBackgroundTaskSpan[] {
+  return db
+    .select({
+      startSequence: sql<number>`min(${events.sequence})`,
+      endSequence: sql<
+        number | null
+      >`CASE WHEN max(${events.type} IN ('item/completed', 'item/backgroundTask/completed')) = 1 THEN max(${events.sequence}) END`,
+    })
+    .from(
+      sql`${events} INDEXED BY events_background_task_thread_type_item_sequence_idx`,
+    )
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        gte(events.sequence, args.sequenceStart),
+        inArray(events.type, conversationOutlineStructuralLifecycleTypes),
+        sql`${events.itemKind} = 'backgroundTask'`,
+        isNotNull(events.itemId),
+      ),
+    )
+    .groupBy(events.itemId)
+    .all();
 }
 
 function selectStoredConversationOutlineEventRows(

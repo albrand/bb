@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DbConnection } from "./connection.js";
+import { ensureItemCompletionLookupIndex } from "./fork-item-completion-index.js";
 import { restoreNativeThreadDraftsToDraftsQueue } from "./fork-restore-native-drafts.js";
 import {
   compatibleMigrationHashes,
@@ -1619,4 +1620,5 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
   warnAboutFutureAppliedMigrations(db, options);
   validateAppliedMigrationHistory(db, migrationsFolder);
   validatePendingInteractionsSchema(db);
+  ensureItemCompletionLookupIndex(db);
 }

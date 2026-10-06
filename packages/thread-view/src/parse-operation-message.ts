@@ -12,6 +12,7 @@ import {
   THREAD_CONTEXT_CLEAR_OPERATION,
   isApprovalInteractionLifecycle,
   isPluginInteractionLifecycle,
+  isReadableProviderEnvironmentEntry,
   isUserQuestionInteractionLifecycle,
   ownershipChangeOperationMetadataSchema,
 } from "@bb/domain";
@@ -579,7 +580,11 @@ export function parseOperationMessage(
             : "plugin" in entry.source
               ? entry.source.plugin
               : entry.source.core;
-        const value = typeof entry.value === "string" ? entry.value : "••••••";
+        const value =
+          isReadableProviderEnvironmentEntry(entry) &&
+          typeof entry.value === "string"
+            ? entry.value
+            : "••••••";
         const reason = entry.reason ? ` — ${entry.reason}` : "";
         return `${entry.name}=${value} (${source})${reason}`;
       })

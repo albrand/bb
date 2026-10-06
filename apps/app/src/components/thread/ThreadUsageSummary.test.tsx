@@ -18,19 +18,34 @@ import {
 } from "./ThreadUsageSummary";
 
 const useThreadSpendSummary = vi.hoisted(() => vi.fn());
+const useThreadTimeline = vi.hoisted(() => vi.fn());
 const childSummary = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThreadSpendSummary,
+  useThreadTimeline,
 }));
 vi.mock("@/lib/sdk", () => ({ sdk: { threads: { childSummary } } }));
 
 describe("thread usage summary", () => {
   afterEach(cleanup);
 
+  it("keeps token-summary taps above the composer resize handle on short viewports", () => {
+    const messageActionBarStyles = readFileSync(
+      "src/components/thread/timeline/message-action-bar.css",
+      "utf8",
+    );
+
+    expect(messageActionBarStyles).toMatch(
+      /@media \(max-height: 500px\) \{\s*\.thread-turn-token-analysis-trigger\s*\{\s*position: relative;\s*z-index: 21;\s*\}\s*\}/,
+    );
+  });
+
   beforeEach(() => {
     useThreadSpendSummary.mockReset();
+    useThreadTimeline.mockReset();
     childSummary.mockReset();
+    useThreadTimeline.mockReturnValue({ data: undefined });
     useThreadSpendSummary.mockReturnValue({
       data: {
         historyComplete: false,
@@ -113,6 +128,64 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Writer · idle")).toBeTruthy();
   });
 
+  it("opens thread analysis when the per-turn token summary is tapped", async () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadTurnTokenSummary threadId="parent" turnId="da385f7e5d-t1" />
+            <ThreadUsageAndAgents threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    expect(container.querySelector("[data-token-weather-open]")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Open thread token analysis/ }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Token weather and compaction savings",
+      }),
+    ).toBeTruthy();
+    expect(useThreadTimeline).toHaveBeenCalledWith(
+      "parent",
+      expect.objectContaining({ enabled: true }),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+    expect(
+      document.querySelector("[data-persistent-drawer-content]"),
+    ).toBeTruthy();
+  });
+
+  it("leaves collapsed token previews available for row expansion", () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary
+            openAnalysisOnClick={false}
+            threadId="parent"
+            turnId="da385f7e5d-t1"
+          />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    const tokenPreview = container.querySelector("[data-thread-turn-tokens]");
+    expect(tokenPreview?.tagName).toBe("SPAN");
+    fireEvent.click(tokenPreview!);
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Token weather and compaction savings",
+      }),
+    ).toBeNull();
+  });
+
   it("shows reasoning in the footer only when a turn reports it", () => {
     useThreadSpendSummary.mockReturnValue({
       data: {
@@ -167,16 +240,17 @@ describe("thread usage summary", () => {
       ),
     ).toBeTruthy();
     expect(
-      container.querySelector('[data-agent-summary-full]')?.textContent,
+      container.querySelector("[data-agent-summary-full]")?.textContent,
     ).toContain("Ran 2 agents");
     expect(
-      container.querySelector('[data-agent-summary-count]')?.textContent,
+      container.querySelector("[data-agent-summary-count]")?.textContent,
     ).toBe("2");
     fireEvent.click(screen.getByText("View ▸"));
     expect(await screen.findByText("Scout · active")).toBeTruthy();
     expect(screen.getByText("Writer · idle")).toBeTruthy();
-    expect(screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/))
-      .toBeTruthy();
+    expect(
+      screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/),
+    ).toBeTruthy();
   });
 
   it("keeps the full desktop rollup behind the roomy header container tier", () => {
@@ -205,7 +279,9 @@ describe("thread usage summary", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "View 2 agents: 1 working" }),
     );
-    await waitFor(() => expect(screen.getByText("Agent activity")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Agent activity")).toBeTruthy(),
+    );
 
     rerender(
       <TooltipProvider>

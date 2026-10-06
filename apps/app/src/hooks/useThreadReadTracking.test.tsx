@@ -1,8 +1,24 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  renderHook,
+  type RenderHookOptions,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { useThreadReadTracking } from "./useThreadReadTracking";
+
+function renderTrackingHook<Result, Props>(
+  callback: (props: Props) => Result,
+  options?: RenderHookOptions<Props>,
+) {
+  return renderHook(callback, {
+    ...options,
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+}
 
 type MarkThreadReadMutation = Parameters<
   typeof useThreadReadTracking
@@ -41,7 +57,7 @@ describe("useThreadReadTracking", () => {
   it("does not mark read without a visible thread", () => {
     const markThreadRead = makeMarkThreadRead();
 
-    renderHook(() =>
+    renderTrackingHook(() =>
       useThreadReadTracking({
         markThreadRead,
         thread: undefined,
@@ -55,7 +71,7 @@ describe("useThreadReadTracking", () => {
     setDocumentVisibilityState("hidden");
     const markThreadRead = makeMarkThreadRead();
 
-    renderHook(() =>
+    renderTrackingHook(() =>
       useThreadReadTracking({
         markThreadRead,
         thread: {
@@ -81,7 +97,7 @@ describe("useThreadReadTracking", () => {
 
   it("marks an unread thread once per attention timestamp", () => {
     const markThreadRead = makeMarkThreadRead();
-    const { rerender } = renderHook(
+    const { rerender } = renderTrackingHook(
       ({ latestAttentionAt }: { latestAttentionAt: number }) =>
         useThreadReadTracking({
           markThreadRead,
@@ -109,7 +125,7 @@ describe("useThreadReadTracking", () => {
   it("retries a failed read after pageshow while already visible", async () => {
     const markThreadRead = makeMarkThreadRead();
     markThreadRead.mutateAsync.mockRejectedValueOnce(new Error("Failed"));
-    renderHook(() =>
+    renderTrackingHook(() =>
       useThreadReadTracking({
         markThreadRead,
         thread: {
@@ -127,11 +143,45 @@ describe("useThreadReadTracking", () => {
     expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a read that fails after the page was shown again during the request", async () => {
+    const markThreadRead = makeMarkThreadRead();
+    let failFirstRead: (error: Error) => void = () => undefined;
+    markThreadRead.mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failFirstRead = reject;
+        }),
+    );
+    const thread = {
+      id: "thr_side_chat",
+      lastReadAt: 10,
+      latestAttentionAt: 20,
+    };
+    const { rerender } = renderTrackingHook(
+      ({ mutation }: { mutation: MarkThreadReadMutation }) =>
+        useThreadReadTracking({ markThreadRead: mutation, thread }),
+      { initialProps: { mutation: markThreadRead } },
+    );
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      failFirstRead(new Error("Failed"));
+    });
+    rerender({ mutation: { mutateAsync: markThreadRead.mutateAsync } });
+
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
   it("does not undo marking the visible thread unread after tab refocus", () => {
     const markThreadRead = makeMarkThreadRead();
     type VisibleThreadProps = { lastReadAt: number | null };
     const initialProps: VisibleThreadProps = { lastReadAt: 20 };
-    const { rerender } = renderHook(
+    const { rerender } = renderTrackingHook(
       ({ lastReadAt }: VisibleThreadProps) =>
         useThreadReadTracking({
           markThreadRead,
@@ -169,7 +219,7 @@ describe("useThreadReadTracking", () => {
       lastReadAt: 10,
       visible: true,
     };
-    const { rerender } = renderHook(
+    const { rerender } = renderTrackingHook(
       ({ lastReadAt, visible }: ReopenThreadProps) =>
         useThreadReadTracking({
           markThreadRead,

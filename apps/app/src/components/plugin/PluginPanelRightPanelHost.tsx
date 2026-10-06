@@ -46,6 +46,7 @@ import type {
   SecondaryPanelRenderableTab,
 } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useThreadFileTabs } from "@/components/secondary-panel/useThreadFileTabs";
+import type { BrowserAddressFocusRequest } from "@/components/secondary-panel/BrowserTabContent";
 import {
   useCloseFixedSecondaryPanel,
   useReconciledFixedPanelTabsState,
@@ -652,11 +653,30 @@ export function PluginPanelRightPanelHost({
     setTogglePortalTarget(findPluginRightPanelTogglePortal(panelStateId));
   }, [panel, panelStateId]);
 
+  const [browserAddressFocusRequest, setBrowserAddressFocusRequest] =
+    useState<BrowserAddressFocusRequest | null>(null);
+  const handleBrowserAddressFocusRequestConsumed = useCallback(
+    (request: BrowserAddressFocusRequest) => {
+      setBrowserAddressFocusRequest((current) =>
+        current?.requestId === request.requestId &&
+        current.tabId === request.tabId
+          ? null
+          : current,
+      );
+    },
+    [],
+  );
   const openBrowser = useCallback(
     (url = "") => {
       if (!isDesktopBrowserAvailable()) return;
       selectPersistedPanelTab();
-      openTab({ kind: "browser", url });
+      const tab = openTab({ kind: "browser", url });
+      if (url.length === 0 && tab?.kind === "browser") {
+        setBrowserAddressFocusRequest((current) => ({
+          requestId: (current?.requestId ?? 0) + 1,
+          tabId: tab.id,
+        }));
+      }
       revealPanel();
     },
     [openTab, revealPanel, selectPersistedPanelTab],
@@ -1151,6 +1171,10 @@ export function PluginPanelRightPanelHost({
           <LazyBrowserTabDeck
             browserTabs={browserTabs}
             activeBrowserTabId={activeBrowserTabId}
+            addressFocusRequest={browserAddressFocusRequest}
+            onAddressFocusRequestConsumed={
+              handleBrowserAddressFocusRequestConsumed
+            }
             environmentId={null}
             canShowNativeBrowserView={canShowNativeBrowserView}
             canHandleBrowserCommands={canHandleBrowserCommands}
@@ -1200,8 +1224,10 @@ export function PluginPanelRightPanelHost({
       activeBrowserTab,
       activePluginDetailId,
       activeTab,
+      browserAddressFocusRequest,
       browserTabs,
       fixedTabs,
+      handleBrowserAddressFocusRequestConsumed,
       hidePanel,
       isOpen,
       openNewTab,

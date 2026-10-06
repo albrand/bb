@@ -673,6 +673,9 @@ function dropEventParentToolCallIdColumn(db: DbConnection): void {
     db.$client.exec(
       "DROP INDEX IF EXISTS events_parent_tool_call_thread_parent_sequence_idx",
     );
+    db.$client.exec(
+      "DROP INDEX IF EXISTS fork_events_item_completion_lookup_idx",
+    );
     db.$client
       .prepare("ALTER TABLE events DROP COLUMN parent_tool_call_id")
       .run();
@@ -1759,6 +1762,7 @@ describe("migrate", () => {
 
       expect(getAppSettings(db)).toEqual({
         showKeyboardHints: false,
+        showGitChanges: true,
         steerActiveThreadOnEnter: true,
         confirmThreadArchive: true,
         showDiagnosticEvents: true,

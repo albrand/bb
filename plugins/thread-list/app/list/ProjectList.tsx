@@ -1006,7 +1006,7 @@ function MachineSidebarSection({
       {...props}
       disabled={props.disabled || rename.isEditing}
       labelEditor={rename.editor}
-      onRename={rename.startEditing}
+      onRename={rename.startEditingFromDoubleClick}
       actions={renderActions(
         props.id,
         props.label,
@@ -1542,6 +1542,7 @@ function ProjectListComponent({
       return;
     }
     setIsDeleteThreadSectionPending(true);
+    sectionDeleteDialog.onClose();
     void sdk.threadSections
       .delete({ id: section.id })
       .then(() => {

@@ -6,7 +6,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BbAppStartContext,
   ManagedFullStackProcesses,
@@ -66,6 +66,16 @@ server.on("error", () => process.exit(1));
 setTimeout(() => {
   server.listen(Number(process.env.BB_SERVER_PORT), "127.0.0.1");
 }, 300);
+`;
+
+const IMMEDIATE_SERVER_ENTRY_SOURCE = `
+import { createServer } from "node:http";
+const server = createServer((request, response) => {
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify({ ok: true, launchId: process.env.BB_SERVER_LAUNCH_ID }));
+});
+server.on("error", () => process.exit(1));
+server.listen(Number(process.env.BB_SERVER_PORT), "127.0.0.1");
 `;
 
 function createStartContext(args: {
@@ -158,6 +168,14 @@ describe("startFullStackServerProcess", () => {
     return entry;
   }
 
+  function writeImmediateServerEntry(): string {
+    const dir = mkdtempSync(join(tmpdir(), "bb-app-health-"));
+    scratchDirs.push(dir);
+    const entry = join(dir, "immediate-server.mjs");
+    writeFileSync(entry, IMMEDIATE_SERVER_ENTRY_SOURCE);
+    return entry;
+  }
+
   it("hands the child a launch id and accepts its /health once it listens", async () => {
     const serverPort = await reserveFreePort();
     const context = createStartContext({
@@ -190,6 +208,75 @@ describe("startFullStackServerProcess", () => {
       await serverRun.terminate("SIGTERM");
     }
   });
+
+  it.each([90_000, 150_000])(
+    "does not kill a server whose database migration delays /health for %i ms",
+    async (migrationMs) => {
+      const realFetch = globalThis.fetch;
+      const realSetTimeout = globalThis.setTimeout;
+      const serverPort = await reserveFreePort();
+      const context = createStartContext({
+        serverEntry: writeImmediateServerEntry(),
+        serverPort,
+      });
+      const processes: ManagedFullStackProcesses = {
+        daemonRun: null,
+        serverRun: null,
+      };
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      const fakeStartedAt = Date.now();
+      vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+        Date.now() - fakeStartedAt < migrationMs
+          ? Promise.reject(new TypeError("fetch failed"))
+          : realFetch(input, init),
+      );
+      let outcome: "pending" | "healthy" | "failed" = "pending";
+      const starting = startFullStackServerProcess({
+        context,
+        env: {
+          BB_SERVER_PORT: String(context.serverPort),
+          PATH: process.env.PATH,
+        },
+        processes,
+      }).then(
+        (run) => {
+          outcome = "healthy";
+          return run;
+        },
+        (error: unknown) => {
+          outcome = "failed";
+          throw error;
+        },
+      );
+      starting.catch(() => {});
+      try {
+        for (
+          let listening = false;
+          !listening;
+          await new Promise<void>((resolvePromise) =>
+            realSetTimeout(resolvePromise, 25),
+          )
+        ) {
+          listening = await realFetch(`${context.serverUrl}/health`).then(
+            (response) => response.ok,
+            () => false,
+          );
+        }
+        await vi.advanceTimersByTimeAsync(migrationMs - 1_000);
+        expect(outcome).toBe("pending");
+        await vi.advanceTimersByTimeAsync(2_000);
+        const serverRun = await starting;
+        expect(outcome).toBe("healthy");
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        await serverRun.terminate("SIGTERM");
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        await processes.serverRun?.terminate("SIGKILL");
+      }
+    },
+  );
 
   it("runs the server preflight before it starts a child", async () => {
     const serverPort = await reserveFreePort();

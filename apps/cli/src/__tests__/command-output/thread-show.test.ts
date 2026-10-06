@@ -29,6 +29,7 @@ describe("bb thread show command output", () => {
       })),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
         historyComplete: false,
+        providerId: "codex",
         total: {
           inputTokens: null,
           cachedInputTokens: null,
@@ -103,7 +104,7 @@ describe("bb thread show command output", () => {
         ...stamp,
       });
       const get = vi.fn(async () => thread);
-      const timelineGet = fixtures.makeEmptyTimelineGetMock();
+      const timelineGet = vi.fn(fixtures.makeEmptyTimelineGetMock());
       stubThreadApi({
         "v1.threads.:id.$get": get,
         "v1.threads.:id.timeline.$get": timelineGet,
@@ -114,6 +115,7 @@ describe("bb thread show command output", () => {
       expect(get).toHaveBeenCalledWith({
         param: { id: `thread-${flag}-1` },
       });
+      expect(timelineGet).toHaveBeenCalledTimes(1);
       expect(timelineGet).toHaveBeenCalledWith({
         param: { id: `thread-${flag}-1` },
         query: { summaryOnly: "true" },
@@ -191,6 +193,52 @@ describe("bb thread show command output", () => {
       param: { id: "thread-show-self" },
     });
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
+  });
+
+  it("loads timeline rows for the on-demand token usage analysis", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-usage-analysis",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    const latestTimeline = fixtures.makeTimelineResponse([]);
+    latestTimeline.timelinePage.olderCursor = {
+      anchorId: "older-anchor",
+      anchorSeq: 20,
+    };
+    const timelineGet = vi.fn(
+      async ({ query }: { query: Record<string, string> }) =>
+        query.beforeAnchorSeq === undefined
+          ? latestTimeline
+          : fixtures.makeTimelineResponse([]),
+    );
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": timelineGet,
+    });
+
+    await runCommand(["thread", "show", thread.id, "--usage"], register);
+
+    expect(timelineGet).toHaveBeenCalledWith({
+      param: { id: thread.id },
+      query: {},
+    });
+    expect(timelineGet).toHaveBeenCalledWith({
+      param: { id: thread.id },
+      query: {
+        beforeAnchorId: "older-anchor",
+        beforeAnchorSeq: "20",
+      },
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "  History: partial",
+    );
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
+      "  Rules: stormy at ≥85% context fill",
+    );
   });
 
   it("bb thread show --work-status prints non-git environment message", async () => {
@@ -489,6 +537,7 @@ describe("bb thread show command output", () => {
       "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
         historyComplete: true,
+        providerId: "codex",
         total: {
           inputTokens: 1_200,
           cachedInputTokens: 300,
@@ -499,6 +548,7 @@ describe("bb thread show command output", () => {
         turns: [
           {
             turnId: "turn-1",
+            model: null,
             inputTokens: 1_000,
             cachedInputTokens: null,
             outputTokens: 20,
@@ -548,6 +598,7 @@ describe("bb thread show command output", () => {
       "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
       "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
         historyComplete: false,
+        providerId: "claude-code",
         total: {
           inputTokens: 6_442,
           cachedInputTokens: 686_719_425,
@@ -558,6 +609,7 @@ describe("bb thread show command output", () => {
         turns: [
           {
             turnId: "da385f7e5d-t1",
+            model: null,
             inputTokens: 30,
             cachedInputTokens: 2_843_776,
             outputTokens: 6_149,
@@ -566,6 +618,7 @@ describe("bb thread show command output", () => {
           },
           {
             turnId: "da385f7e5d-t2",
+            model: null,
             inputTokens: 8,
             cachedInputTokens: 788_012,
             outputTokens: 831,
@@ -676,6 +729,7 @@ describe("bb thread show command output", () => {
       },
       spendSummary: {
         historyComplete: false,
+        providerId: "codex",
         total: {
           inputTokens: null,
           cachedInputTokens: null,
@@ -728,6 +782,7 @@ describe("bb thread show command output", () => {
       },
       spendSummary: {
         historyComplete: false,
+        providerId: "codex",
         total: {
           inputTokens: null,
           cachedInputTokens: null,

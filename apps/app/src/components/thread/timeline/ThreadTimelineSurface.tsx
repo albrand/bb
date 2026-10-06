@@ -1,9 +1,6 @@
+import type { LoadOlderTimelineRows } from "./load-older-timeline-rows.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type {
-  ActiveThinking,
-  ThreadOriginKind,
-  ThreadRuntimeDisplayStatus,
-} from "@bb/domain";
+import type { ActiveThinking, ThreadRuntimeDisplayStatus } from "@bb/domain";
 import type { TimelineRow } from "@bb/server-contract";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import { Button } from "@bb/shared-ui/button";
@@ -24,7 +21,6 @@ import type {
   ThreadTimelineEditMessageHandler,
   ThreadTimelineInlineMessageEditor,
   ThreadTimelineAddToChatHandler,
-  ThreadTimelineSendToMainMessageHandler,
   ThreadTimelineConsumerMessageAction,
   ThreadTimelineLinkHandler,
   ThreadTimelineLocalFileLinkHandler,
@@ -40,7 +36,6 @@ export interface ThreadTimelineSurfaceProps {
   activeThinking: ActiveThinking | null;
   canSpawnChild?: boolean;
   contextBoundarySeq: number | null;
-  threadOriginKind?: ThreadOriginKind | null;
   hasOlderTimelineRows?: boolean;
   hostConnectionNotice?: HostConnectionNotice | null;
   isCatchingUpTimeline?: boolean;
@@ -53,11 +48,10 @@ export interface ThreadTimelineSurfaceProps {
   onEditMessage?: ThreadTimelineEditMessageHandler;
   inlineMessageEditor?: ThreadTimelineInlineMessageEditor;
   onMessageAddToChat?: ThreadTimelineAddToChatHandler;
-  onSendToMainMessage?: ThreadTimelineSendToMainMessageHandler;
   onSelectionAddToChat?: ThreadTimelineAddToChatHandler;
   consumerMessageActions?: readonly ThreadTimelineConsumerMessageAction[];
   includePluginMessageActions?: boolean;
-  onLoadOlderRows?: () => Promise<void> | void;
+  onLoadOlderRows?: LoadOlderTimelineRows;
   onOpenLink?: ThreadTimelineLinkHandler;
   onOpenLocalFileLink?: ThreadTimelineLocalFileLinkHandler;
   onOpenPluginPanel?: ThreadTimelineOpenPluginPanelHandler;
@@ -144,7 +138,6 @@ export function ThreadTimelineSurface({
   activeThinking,
   canSpawnChild,
   contextBoundarySeq,
-  threadOriginKind = null,
   hasOlderTimelineRows = false,
   hostConnectionNotice,
   isCatchingUpTimeline = false,
@@ -157,7 +150,6 @@ export function ThreadTimelineSurface({
   onEditMessage,
   inlineMessageEditor,
   onMessageAddToChat,
-  onSendToMainMessage,
   onSelectionAddToChat,
   consumerMessageActions,
   includePluginMessageActions,
@@ -231,12 +223,10 @@ export function ThreadTimelineSurface({
         ) : timelineRowsWithPendingStop.length > 0 ? (
           <ThreadTimelineRows
             canSpawnChild={canSpawnChild}
-            threadOriginKind={threadOriginKind}
             onForkMessage={onForkMessage}
             onEditMessage={onEditMessage}
             inlineMessageEditor={inlineMessageEditor}
             onMessageAddToChat={onMessageAddToChat}
-            onSendToMainMessage={onSendToMainMessage}
             onSelectionAddToChat={onSelectionAddToChat}
             consumerMessageActions={consumerMessageActions}
             includePluginMessageActions={includePluginMessageActions}
@@ -299,7 +289,7 @@ function LoadOlderMessages({
 }: {
   hasOlderTimelineRows: boolean;
   isLoadingOlderTimelineRows: boolean;
-  onLoadOlderRows: () => Promise<void> | void;
+  onLoadOlderRows: LoadOlderTimelineRows;
 }) {
   const { sentinelRef, isAutoLoadEnabled, loadOlderRows } =
     useAutoLoadOlderRows({

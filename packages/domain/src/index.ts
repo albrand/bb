@@ -43,6 +43,7 @@ export * from "./protocol-ids.js";
 export * from "./queued-message.js";
 export * from "./system-message.js";
 export * from "./provider-event.js";
+export * from "./provider-environment.js";
 export * from "./provider-extension-kind.js";
 export * from "./provider-fork.js";
 export * from "./provider-model-catalog.js";
@@ -73,6 +74,7 @@ export * from "./thread-timeline-pending-todos.js";
 export * from "./thread-visibility.js";
 export * from "./thread.js";
 export * from "./token-breakdown.js";
+export * from "./token-weather.js";
 
 export * from "./project-attachment.js";
 

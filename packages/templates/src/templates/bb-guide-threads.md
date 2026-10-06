@@ -206,7 +206,7 @@ Sections:
 Inspecting:
 
   bb thread context [id]                   Show recorded context usage and available breakdown (--self, --json)
-  bb thread show [id]                      Show thread details, token usage, child agents, and pull request status
+  bb thread show [id] [--usage]            Show details, token usage, child agents, and pull request status; --usage adds token weather and compaction estimates
     --self                                 Target current thread
     --work-status                          Include git working-tree status
     --git-diff                             Include git diff
@@ -230,6 +230,9 @@ Inspecting:
   on stderr when more events exist beyond the printed page. Human-format --all
   walks a consistent history snapshot and joins paginated group contents.
   Appends stay outside that walk; rerun the command if a history edit invalidates it.
+  Every format masks provider environment values other than PATH and bb's own
+  BB_* variables: JSON reports them as {masked: true}, and the diagnostic
+  timeline prints NAME=••••••.
 
   bb thread output [id]                    Get the final output of a thread
     --self                                 Target current thread

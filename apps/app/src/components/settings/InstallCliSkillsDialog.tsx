@@ -12,12 +12,16 @@ import {
   DialogTitle,
 } from "@bb/shared-ui/dialog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
+import type { CliSkillsAction } from "@/components/settings/CliSkillsSettingsSection";
 
 interface InstallCliSkillsDialogContentProps {
+  action?: CliSkillsAction;
   hosts: readonly Host[];
   onCancel: () => void;
   onInstall: (hostIds: string[]) => void;
   pending: boolean;
+  statusLoading?: boolean;
+  statusUnavailable?: boolean;
   statusByHostId: ReadonlyMap<string, CliSkillMachineStatus>;
 }
 
@@ -35,37 +39,99 @@ function isConnected(host: Host): boolean {
 function machineStatusLabel(args: {
   connected: boolean;
   status: CliSkillMachineStatus | undefined;
+  statusUnavailable: boolean;
 }): string | null {
   if (!args.connected) return "Disconnected";
-  return args.status === undefined ? null : MACHINE_STATUS_LABELS[args.status];
+  if (
+    args.statusUnavailable ||
+    args.status === undefined ||
+    args.status === "unknown"
+  ) {
+    return "Status unavailable";
+  }
+  return MACHINE_STATUS_LABELS[args.status];
 }
 
 function InstallCliSkillsDialogContent({
+  action = "install",
   hosts,
   onCancel,
   onInstall,
   pending,
+  statusLoading = false,
+  statusUnavailable = false,
   statusByHostId,
 }: InstallCliSkillsDialogContentProps) {
   const connectedHostIds = useMemo(
     () => hosts.filter(isConnected).map((host) => host.id),
     [hosts],
   );
-  const [selectedHostIds, setSelectedHostIds] =
-    useState<readonly string[]>(connectedHostIds);
+  const installedHostIds = connectedHostIds.filter(
+    (hostId) => statusByHostId.get(hostId) === "installed",
+  );
+  const missingHostIds = connectedHostIds.filter(
+    (hostId) => statusByHostId.get(hostId) === "missing",
+  );
+  const targetHostIds = statusUnavailable
+    ? []
+    : connectedHostIds.filter((hostId) => {
+    const status = statusByHostId.get(hostId);
+    if (action === "update") {
+      return status === "outdated" || status === "missing";
+    }
+    if (action === "reinstall") return status === "installed";
+    return status === "missing";
+      });
+  const targetHostIdsKey = JSON.stringify([
+    action,
+    connectedHostIds,
+    targetHostIds,
+  ]);
+  const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<{
+    targetsKey: string;
+    hostIds: readonly string[];
+  } | null>(null);
+  const selectedHostIds =
+    selectedHostIdsOverride?.targetsKey === targetHostIdsKey
+      ? selectedHostIdsOverride.hostIds
+      : targetHostIds;
   const choosable = hosts.length > 1;
   const selected = choosable
     ? selectedHostIds.filter((hostId) => connectedHostIds.includes(hostId))
-    : connectedHostIds;
+    : targetHostIds;
+  const actionTitle =
+    action === "update"
+      ? "Update"
+      : action === "reinstall"
+        ? "Reinstall"
+        : "Install";
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Install bb CLI skills</DialogTitle>
+        <DialogTitle>{actionTitle} bb CLI skills</DialogTitle>
         <DialogDescription>
-          {choosable
-            ? "Choose the machines to install them onto. Each one gets the skills in ~/.agents/skills and ~/.claude/skills, replacing any copy already there."
-            : `The skills go in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}, replacing any copy already there.`}
+          {statusLoading
+            ? "Checking machine statuses before choosing where to install the bb CLI skills."
+            : statusUnavailable
+              ? "Could not confirm machine status. Try again before installing the bb CLI skills."
+              : targetHostIds.length === 0 && connectedHostIds.length > 0
+              ? "No connected machine has a confirmed status that can be installed to. Try again when machine status is available."
+              : choosable
+            ? action === "update"
+              ? missingHostIds.length > 0
+                ? "Choose outdated machines to update and missing machines to install. Selected machines get the latest skills in ~/.agents/skills and ~/.claude/skills."
+                : "Choose the machines to update. Their older copies in ~/.agents/skills and ~/.claude/skills will be replaced."
+              : action === "reinstall"
+                ? "Choose the machines to reinstall. Existing copies in ~/.agents/skills and ~/.claude/skills will be replaced."
+                : installedHostIds.length > 0
+                  ? "Choose the remaining machines to install them onto. Each selected machine gets the skills in ~/.agents/skills and ~/.claude/skills."
+                  : "Choose the machines to install them onto. Each one gets the skills in ~/.agents/skills and ~/.claude/skills, replacing any copy already there."
+            : action === "update"
+              ? `The latest skills will replace the older copies in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}.`
+              : action === "reinstall"
+                ? `The skills will be reinstalled into ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}.`
+                : `The skills go in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}, replacing any copy already there.`}
         </DialogDescription>
       </DialogHeader>
 
@@ -76,6 +142,7 @@ function InstallCliSkillsDialogContent({
             const statusLabel = machineStatusLabel({
               connected,
               status: statusByHostId.get(host.id),
+              statusUnavailable,
             });
             return (
               <label
@@ -84,13 +151,32 @@ function InstallCliSkillsDialogContent({
               >
                 <Checkbox
                   checked={selected.includes(host.id)}
-                  disabled={!connected || pending}
+                  disabled={
+                    !connected ||
+                    pending ||
+                    statusUnavailable ||
+                    (action === "install" &&
+                      statusByHostId.get(host.id) !== "missing") ||
+                    (action === "reinstall" &&
+                      statusByHostId.get(host.id) !== "installed") ||
+                    (action === "update" &&
+                      statusByHostId.get(host.id) !== "outdated" &&
+                      statusByHostId.get(host.id) !== "missing")
+                  }
                   onCheckedChange={(checked) =>
-                    setSelectedHostIds((current) =>
-                      checked === true
-                        ? [...current, host.id]
-                        : current.filter((hostId) => hostId !== host.id),
-                    )
+                    setSelectedHostIdsOverride((current) => {
+                      const selection =
+                        current?.targetsKey === targetHostIdsKey
+                          ? current.hostIds
+                          : targetHostIds;
+                      return {
+                        targetsKey: targetHostIdsKey,
+                        hostIds:
+                          checked === true
+                            ? [...selection, host.id]
+                            : selection.filter((hostId) => hostId !== host.id),
+                      };
+                    })
                   }
                   aria-label={host.name}
                 />
@@ -111,6 +197,7 @@ function InstallCliSkillsDialogContent({
         <Button
           type="button"
           variant="outline"
+          className="max-xl:pointer-coarse:min-h-11"
           disabled={pending}
           onClick={onCancel}
         >
@@ -118,10 +205,20 @@ function InstallCliSkillsDialogContent({
         </Button>
         <Button
           type="button"
-          disabled={pending || selected.length === 0}
+          variant={action === "reinstall" ? "secondary" : "default"}
+          className="max-xl:pointer-coarse:min-h-11"
+          disabled={
+            statusLoading || statusUnavailable || pending || selected.length === 0
+          }
           onClick={() => onInstall([...selected])}
         >
-          {pending ? "Installing…" : "Install"}
+          {pending
+            ? action === "update"
+              ? "Updating…"
+              : action === "reinstall"
+                ? "Reinstalling…"
+                : "Installing…"
+            : actionTitle}
         </Button>
       </DialogFooter>
     </>

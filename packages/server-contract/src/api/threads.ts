@@ -610,13 +610,22 @@ export const threadSpendBreakdownSchema = z.object({
   totalTokens: z.number().nullable(),
 });
 
+export const threadSpendTurnBreakdownSchema = threadSpendBreakdownSchema.extend({
+  turnId: z.string(),
+  model: z.string().nullable(),
+});
+
 export const threadSpendSummaryResponseSchema = z.object({
   historyComplete: z.boolean(),
+  providerId: z.string(),
   total: threadSpendBreakdownSchema,
-  turns: z.array(threadSpendBreakdownSchema.extend({ turnId: z.string() })),
+  turns: z.array(threadSpendTurnBreakdownSchema),
 });
 export type ThreadSpendBreakdownResponse = z.infer<
   typeof threadSpendBreakdownSchema
+>;
+export type ThreadSpendTurnBreakdownResponse = z.infer<
+  typeof threadSpendTurnBreakdownSchema
 >;
 export type ThreadSpendSummaryResponse = z.infer<
   typeof threadSpendSummaryResponseSchema

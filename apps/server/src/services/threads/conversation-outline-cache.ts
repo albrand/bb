@@ -1,6 +1,8 @@
 import {
   getDatabaseDataVersion,
-  getThreadEventRewriteGeneration,
+  getThreadConversationOutlineRewriteGeneration,
+  listConversationOutlineBackgroundTaskSpans,
+  type ConversationOutlineBackgroundTaskSpan,
   type DbConnection,
 } from "@bb/db";
 import type { ThreadConversationOutlineItem } from "@bb/server-contract";
@@ -35,6 +37,12 @@ interface Checkpoint {
   turnIds: Set<string>;
   requestIds: Set<string>;
   parentItemIds: Set<string>;
+  backgroundItemIds: Set<string>;
+}
+
+interface SequenceSpan {
+  start: number;
+  end: number;
 }
 
 interface Entry {
@@ -76,13 +84,43 @@ function parentItemId(event: ThreadEventWithMeta["event"]): string | null {
   return "parentToolCallId" in event ? (event.parentToolCallId ?? null) : null;
 }
 
-function hasBackgroundState(events: ThreadEventWithMeta[]): boolean {
-  return events.some(
-    ({ event }) =>
-      "item" in event &&
-      (event.item.type === "backgroundTask" ||
-        event.item.type === "delegation"),
-  );
+function backgroundTaskItemId(
+  event: ThreadEventWithMeta["event"],
+): string | null {
+  return "item" in event && event.item.type === "backgroundTask"
+    ? event.item.id
+    : null;
+}
+
+function mergeBackgroundTaskSpans(
+  spans: readonly ConversationOutlineBackgroundTaskSpan[],
+): SequenceSpan[] {
+  const merged: SequenceSpan[] = [];
+  const sorted = spans
+    .map(({ startSequence, endSequence }) => ({
+      start: startSequence,
+      end: endSequence ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) => left.start - right.start);
+  for (const span of sorted) {
+    const last = merged.at(-1);
+    if (last !== undefined && span.start <= last.end)
+      last.end = Math.max(last.end, span.end);
+    else merged.push(span);
+  }
+  return merged;
+}
+
+function isOutsideSpans(spans: readonly SequenceSpan[], boundary: number) {
+  let low = 0;
+  let high = spans.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (spans[middle]!.end < boundary) low = middle + 1;
+    else high = middle;
+  }
+  const span = spans[low];
+  return span === undefined || boundary <= span.start;
 }
 
 function isThreadError(event: ThreadEventWithMeta["event"]): boolean {
@@ -98,10 +136,15 @@ function canReuse(
   checkpoint: Checkpoint,
   events: ThreadEventWithMeta[],
 ): boolean {
-  if (hasBackgroundState(events)) return false;
   let hasTailTurn = false;
   return events.every(({ event }) => {
     if (event.type === "turn/started") hasTailTurn = true;
+    const backgroundItemId = backgroundTaskItemId(event);
+    if (
+      backgroundItemId !== null &&
+      checkpoint.backgroundItemIds.has(backgroundItemId)
+    )
+      return false;
     const parentId = parentItemId(event);
     if (parentId !== null && checkpoint.parentItemIds.has(parentId))
       return false;
@@ -134,9 +177,8 @@ function canReuse(
 function nextCheckpoint(
   projection: ConversationOutlineProjection,
   previous: Checkpoint,
-  orderingBoundarySequence: number | null,
+  backgroundTaskSpans: readonly SequenceSpan[],
 ): Checkpoint {
-  if (hasBackgroundState(projection.events)) return previous;
   const activeTurns = new Set<string>();
   const pendingRequests = new Set<string>();
   let completedBoundary = previous.sequenceStart;
@@ -159,8 +201,7 @@ function nextCheckpoint(
     if (event.type === "turn/started") {
       if (
         activeTurns.size === 0 &&
-        (orderingBoundarySequence === null ||
-          completedBoundary <= orderingBoundarySequence)
+        isOutsideSpans(backgroundTaskSpans, completedBoundary)
       )
         boundary = completedBoundary;
       activeTurns.add(event.scope.turnId);
@@ -175,9 +216,12 @@ function nextCheckpoint(
   const turnIds = new Set(previous.turnIds);
   const requestIds = new Set(previous.requestIds);
   const parentItemIds = new Set(previous.parentItemIds);
+  const backgroundItemIds = new Set(previous.backgroundItemIds);
   for (const { event, meta } of projection.events) {
     if (meta.seq >= boundary) continue;
     if (event.scope.kind === "turn") turnIds.add(event.scope.turnId);
+    const backgroundItemId = backgroundTaskItemId(event);
+    if (backgroundItemId !== null) backgroundItemIds.add(backgroundItemId);
     const parentId = parentItemId(event);
     if (parentId !== null) parentItemIds.add(parentId);
     if ("item" in event && event.item.type === "toolCall")
@@ -197,6 +241,7 @@ function nextCheckpoint(
     turnIds,
     requestIds,
     parentItemIds,
+    backgroundItemIds,
   };
   const tailEvents = projection.events.filter(
     ({ meta }) => meta.seq >= boundary,
@@ -228,7 +273,6 @@ export function projectConversationOutlineIncrementally(args: {
   key: string;
   maxSeq: number;
   contextBoundarySeq: number;
-  orderingBoundarySequence: number | null;
   resolveProjectionState: (
     sequenceStart: number,
     previous: ConversationOutlineProjectionState | null,
@@ -245,7 +289,9 @@ export function projectConversationOutlineIncrementally(args: {
     caches.set(args.db, cache);
   }
   const dataVersion = getDatabaseDataVersion(args.db);
-  const generation = getThreadEventRewriteGeneration(args.threadId);
+  const generation = getThreadConversationOutlineRewriteGeneration(
+    args.threadId,
+  );
   const entry = cache.entries.get(args.threadId);
   if (entry !== undefined) {
     cache.entries.delete(args.threadId);
@@ -258,6 +304,7 @@ export function projectConversationOutlineIncrementally(args: {
     turnIds: new Set(),
     requestIds: new Set(),
     parentItemIds: new Set(),
+    backgroundItemIds: new Set(),
   };
   const canReuseEntry =
     entry !== undefined &&
@@ -265,8 +312,6 @@ export function projectConversationOutlineIncrementally(args: {
     entry.dataVersion === dataVersion &&
     entry.generation === generation &&
     entry.contextBoundarySeq === args.contextBoundarySeq &&
-    (args.orderingBoundarySequence === null ||
-      entry.checkpoint.sequenceStart <= args.orderingBoundarySequence) &&
     entry.maxSeq <= args.maxSeq;
   const previousState = canReuseEntry ? entry.projectionState : null;
   const projectionState = args.resolveProjectionState(
@@ -314,17 +359,26 @@ export function projectConversationOutlineIncrementally(args: {
   const next = nextCheckpoint(
     projection,
     checkpoint,
-    args.orderingBoundarySequence,
+    projection.events.some(({ event }) => backgroundTaskItemId(event) !== null)
+      ? mergeBackgroundTaskSpans(
+          listConversationOutlineBackgroundTaskSpans(args.db, {
+            threadId: args.threadId,
+            sequenceStart: checkpoint.sequenceStart,
+          }),
+        )
+      : [],
   );
   if (next.sequenceStart > args.contextBoundarySeq) {
     const chars =
       next === entry?.checkpoint
         ? entry.chars
         : JSON.stringify(next.items).length +
-          [...next.turnIds, ...next.requestIds, ...next.parentItemIds].reduce(
-            (sum, id) => sum + id.length,
-            0,
-          );
+          [
+            ...next.turnIds,
+            ...next.requestIds,
+            ...next.parentItemIds,
+            ...next.backgroundItemIds,
+          ].reduce((sum, id) => sum + id.length, 0);
     if (chars <= MAX_CHARS) {
       cache.entries.set(args.threadId, {
         agentMessageDeltaCount,

@@ -5,6 +5,7 @@ import type {
   SlowDbQueryLogger,
 } from "@bb/db";
 import type { Logger } from "@bb/logger";
+import { getCurrentEventLoopWorkLabel } from "./services/system/event-loop-work.js";
 import {
   exportLegacyAutomationsForPluginImport,
   hasLegacyAutomationsToExport,
@@ -28,6 +29,7 @@ export function initDb(
     databaseWriteBytesLogger: options.logger,
     slowQueryLogger: options.logger,
     slowQueryThresholdMs: options.slowQueryThresholdMs,
+    slowQueryWorkLabel: getCurrentEventLoopWorkLabel,
   });
   try {
     if (options.dataDir !== undefined && options.logger !== undefined) {

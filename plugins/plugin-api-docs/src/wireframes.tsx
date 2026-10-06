@@ -628,9 +628,6 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
 const MESSAGE_ACTION_RENDERERS: Record<string, () => ReactNode> = {
   copy: () => <MiniIcon icon="Copy" className="size-3.5" />,
   edit: () => <MiniIcon icon="Edit" className="size-3.5" />,
-  "send-to-main-thread": () => (
-    <MiniIcon icon="ArrowTurnBackward" className="size-3.5" />
-  ),
   "plugin-actions": () => <PluginGlyph className="size-3.5" />,
   "message-menu": () => <MiniIcon icon="MoreHorizontal" className="size-3.5" />,
 };
@@ -1045,7 +1042,7 @@ function AppShellWireframeBody({
   if (scene === "navigation") {
     return (
       <WindowFrame className={cn("flex bg-background", MOBILE_SCREEN_CLASS)}>
-        <div className="flex w-[76%] flex-col border-r border-border-seam bg-sidebar text-sidebar-foreground">
+        <div className="flex w-[86%] flex-col border-r border-border-seam bg-sidebar text-sidebar-foreground">
           <div className="flex h-12 items-center gap-3 px-3 text-sm">
             <MiniIcon icon="PanelLeft" />
             Navigation

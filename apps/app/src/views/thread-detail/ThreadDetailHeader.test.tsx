@@ -107,6 +107,7 @@ beforeEach(() => {
   });
   vi.spyOn(sdk.threads, "spendSummary").mockResolvedValue({
     historyComplete: false,
+    providerId: "codex",
     total: {
       inputTokens: null,
       cachedInputTokens: null,

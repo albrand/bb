@@ -7,8 +7,10 @@ import * as schema from "./schema.js";
 
 export interface SlowDbQueryLogFields {
   bindingArgumentCount: number;
+  callers?: string[];
   durationMs: number;
   cpuDurationMs: number;
+  eventLoopWork: string | null;
   operation: SlowDbQueryOperation;
   sql: string;
   thresholdMs: number;
@@ -36,6 +38,7 @@ export interface CreateConnectionOptions {
   databaseWriteBytesLogger?: DatabaseWriteBytesLogger;
   slowQueryLogger?: SlowDbQueryLogger;
   slowQueryThresholdMs?: number | (() => number);
+  slowQueryWorkLabel?: () => string | null;
 }
 
 export type DbConnection = ReturnType<typeof createConnection>;
@@ -58,10 +61,14 @@ const databaseWriteBytesLoggers = new WeakMap<
 interface SlowDbQueryConfig {
   logger: SlowDbQueryLogger;
   thresholdMs: number | (() => number);
+  workLabel: () => string | null;
 }
+
+type StackBoundary = (...args: never[]) => unknown;
 
 interface TimedStatementOperationArgs<TValue> {
   bindingArgumentCount: number;
+  callerStackBoundary: StackBoundary | null;
   config: SlowDbQueryConfig;
   operation: SlowDbQueryOperation;
   source: string;
@@ -73,6 +80,7 @@ export const SQLITE_CACHE_SIZE_KIB = 262_144;
 export const SQLITE_MMAP_SIZE_BYTES = 1_073_741_824;
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const MAX_LOGGED_SQL_LENGTH = 1_000;
+const MAX_LOGGED_CALLER_FRAMES = 8;
 const SQL_TRUNCATION_SUFFIX = "...";
 const SQL_STRING_LITERAL_PATTERN = /'(?:''|[^'])*'/gu;
 const SQL_WHITESPACE_PATTERN = /\s+/gu;
@@ -91,6 +99,15 @@ function formatSqlForLog(source: string): string {
     0,
     MAX_LOGGED_SQL_LENGTH - SQL_TRUNCATION_SUFFIX.length,
   )}${SQL_TRUNCATION_SUFFIX}`;
+}
+
+function captureCallers(boundary: StackBoundary): string[] {
+  const trace: { stack?: string } = {};
+  Error.captureStackTrace(trace, boundary);
+  return (trace.stack ?? "")
+    .split("\n")
+    .slice(1, MAX_LOGGED_CALLER_FRAMES + 1)
+    .map((frame) => frame.trim().replace(/^at /u, ""));
 }
 
 function runTimedStatementOperation<TValue>(
@@ -113,9 +130,13 @@ function runTimedStatementOperation<TValue>(
           bindingArgumentCount: args.bindingArgumentCount,
           durationMs: roundDurationMs(durationMs),
           cpuDurationMs: roundDurationMs((cpu.user + cpu.system) / 1_000),
+          eventLoopWork: args.config.workLabel(),
           operation: args.operation,
           sql: formatSqlForLog(args.source),
           thresholdMs,
+          ...(args.callerStackBoundary === null
+            ? {}
+            : { callers: captureCallers(args.callerStackBoundary) }),
         },
         "Slow DB query",
       );
@@ -135,6 +156,7 @@ function instrumentStatement(
   statement.all = (...params) =>
     runTimedStatementOperation({
       bindingArgumentCount: params.length,
+      callerStackBoundary: null,
       config,
       operation: "all",
       source,
@@ -143,6 +165,7 @@ function instrumentStatement(
   statement.get = (...params) =>
     runTimedStatementOperation({
       bindingArgumentCount: params.length,
+      callerStackBoundary: null,
       config,
       operation: "get",
       source,
@@ -151,6 +174,7 @@ function instrumentStatement(
   statement.run = (...params) =>
     runTimedStatementOperation({
       bindingArgumentCount: params.length,
+      callerStackBoundary: null,
       config,
       operation: "run",
       source,
@@ -172,11 +196,13 @@ function instrumentSqliteClient(
     logger: options.slowQueryLogger,
     thresholdMs:
       options.slowQueryThresholdMs ?? DEFAULT_SLOW_DB_QUERY_LOG_THRESHOLD_MS,
+    workLabel: options.slowQueryWorkLabel ?? (() => null),
   };
   const originalExec = sqlite.exec.bind(sqlite);
   sqlite.exec = (source) =>
     runTimedStatementOperation({
       bindingArgumentCount: 0,
+      callerStackBoundary: null,
       config,
       operation: "exec",
       source,
@@ -186,9 +212,13 @@ function instrumentSqliteClient(
   sqlite.transaction = (fn) => {
     const original = originalTransaction(fn);
     function wrap(mode: "default" | "deferred" | "immediate" | "exclusive") {
-      return function (this: unknown, ...params: Parameters<typeof original>) {
+      return function timedTransaction(
+        this: unknown,
+        ...params: Parameters<typeof original>
+      ) {
         return runTimedStatementOperation({
           bindingArgumentCount: params.length,
+          callerStackBoundary: timedTransaction,
           config,
           operation: "transaction",
           source: `TRANSACTION ${mode.toUpperCase()}`,

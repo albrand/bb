@@ -5,6 +5,19 @@
   white-space: normal;
 }
 
+@media (max-height: 500px) {
+  .thread-turn-token-analysis-trigger {
+    position: relative;
+    z-index: 21;
+  }
+}
+
+@media (pointer: coarse) {
+  .thread-turn-token-analysis-trigger {
+    min-height: 2.75rem;
+  }
+}
+
 .thread-turn-token-breakdown > [data-token-part] {
   flex: 0 0 auto;
   white-space: nowrap;

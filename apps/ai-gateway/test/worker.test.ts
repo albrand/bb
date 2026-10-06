@@ -20,6 +20,7 @@ async function bundleWorker(): Promise<string> {
     format: "esm",
     target: "esnext",
     conditions: ["workerd", "worker", "browser"],
+    banner: { js: `Date.now = () => ${NOW};` },
     write: false,
   });
   return result.outputFiles[0].text;
@@ -119,7 +120,7 @@ function complete(instance: Miniflare, prompt = "title please") {
   });
 }
 
-describe("bb-ai-gateway worker on D1", () => {
+describe("bb-ai-gateway worker on D1", { timeout: 30_000 }, () => {
   it("completes, meters in D1, and reports usage", async () => {
     const mf = await seededGateway();
     const response = await complete(mf);
@@ -131,9 +132,9 @@ describe("bb-ai-gateway worker on D1", () => {
     });
     expect(upstreamBodies.at(-1)).toMatchObject({
       model: "nvidia/nemotron-3.5-lightning",
-      models: ["inception/mercury-2.5"],
       max_tokens: 128,
     });
+    expect(upstreamBodies.at(-1)).not.toHaveProperty("models");
 
     const db = (await mf.getD1Database("DB")) as unknown as D1Database;
     const row = await db
@@ -190,9 +191,7 @@ describe("bb-ai-gateway worker on D1", () => {
     for (let index = 0; index < 61; index += 1) {
       statuses.push((await complete(mf)).status);
     }
-    expect(statuses.filter((status) => status === 429).length).toBeGreaterThan(
-      0,
-    );
+    expect(statuses).toEqual([...Array<number>(60).fill(200), 429]);
     const limited = await complete(mf);
     expect(limited.status).toBe(429);
     expect(await limited.json()).toMatchObject({
@@ -207,7 +206,7 @@ describe("bb-ai-gateway worker on D1", () => {
     expect(logged?.refused).toBe(
       statuses.filter((status) => status === 429).length + 1,
     );
-  }, 30_000);
+  });
 
   it("holds concurrent D1 reservations to the daily limit", async () => {
     const tight = await seededGateway({

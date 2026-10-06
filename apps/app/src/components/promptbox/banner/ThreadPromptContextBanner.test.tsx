@@ -328,7 +328,7 @@ describe("ThreadPromptContextBanner", () => {
 
     expect(markup).toContain("PR #128");
     expect(markup).not.toContain("PR #128 · Open");
-    expect(markup).not.toContain("· Ready to merge");
+    expect(markup).not.toContain(">Ready to merge</span>");
     expect(markup).not.toContain('alt="Checks success"');
   });
 
@@ -360,11 +360,11 @@ describe("ThreadPromptContextBanner", () => {
     ["checks_pending", false, null],
     ["checks_failed", false, null],
     ["checks_failed", true, null],
-    ["checks_pending", true, "Auto-merge on"],
-    ["ready_to_merge", true, "Auto-merge on"],
+    ["checks_pending", true, null],
+    ["ready_to_merge", true, null],
     ["queued", true, "Queued to merge"],
   ] as const)(
-    "shows only automation labels for %s with auto-merge %s",
+    "shows the next step and an auto-merge icon for %s with auto-merge %s",
     (attention, autoMerge, label) => {
       const markup = renderToStaticMarkup(
         <ThreadPromptContextBanner
@@ -398,11 +398,11 @@ describe("ThreadPromptContextBanner", () => {
       expect(markup).toContain("PR #128");
       expect(markup).not.toContain("PR #128 · Open");
       if (label) {
-        expect(markup).toContain(`text-attention">· ${label}</span>`);
+        expect(markup).toContain(`>${label}</span>`);
       } else {
-        expect(markup).not.toContain('text-attention">·');
-        expect(markup).not.toContain("· Checks failing</span>");
+        expect(markup).not.toContain('aria-hidden="true">·</span>');
       }
+      expect(markup.includes('aria-label="Auto-merge on"')).toBe(autoMerge);
       expect(markup).toContain('class="size-4 shrink-0 text-success"');
       expect(markup).toContain('data-icon="GitPullRequestArrow"');
       expect(markup).not.toContain('data-icon="GitMerge"');
@@ -656,8 +656,8 @@ describe("ThreadPromptContextBanner", () => {
     );
 
     expect(markup).toContain("PR #128");
-    expect(markup).not.toContain("· Checks failing");
-    expect(markup).toContain('title="Checks failing"');
+    expect(markup).not.toContain(">Checks failing</span>");
+    expect(markup).toContain('title="Open, Checks failing"');
     expect(markup).not.toContain("Checks failure");
   });
 
@@ -678,7 +678,7 @@ describe("ThreadPromptContextBanner", () => {
 
     expect(markup).toContain("PR #128");
     expect(markup).not.toContain("Open PR #128");
-    expect(markup).not.toContain("· Ready to merge");
+    expect(markup).not.toContain(">Ready to merge</span>");
     expect(markup).toContain("Uncommitted");
     expect(markup).toContain("1 file");
   });
