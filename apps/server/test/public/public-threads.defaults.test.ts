@@ -339,6 +339,81 @@ describe("public thread default routes", () => {
     });
   });
 
+  it.each([
+    {
+      name: "child without a model",
+      parent: true,
+      model: undefined,
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      name: "child naming Opus",
+      parent: true,
+      model: "claude-opus-5-5",
+      expected: "claude-opus-5-5",
+    },
+    {
+      name: "top-level thread without a model",
+      parent: false,
+      model: undefined,
+      expected: "claude-opus-5-5",
+    },
+  ])(
+    "starts a Claude $name on $expected",
+    async ({ parent, model, expected }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/thread-defaults-claude-child",
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/thread-defaults-claude-child",
+        });
+        upsertProjectExecutionDefaults(harness.db, {
+          projectId: project.id,
+          providerId: "claude-code",
+          model: "claude-opus-5-5",
+          serviceTier: "default",
+          reasoningLevel: "high",
+          permissionMode: "accept-edits",
+        });
+        const parentThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+        });
+
+        const response = await harness.app.request("/api/v1/threads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            origin: "cli",
+            projectId: project.id,
+            providerId: "claude-code",
+            ...(model !== undefined ? { model } : {}),
+            input: [{ type: "text", text: "Review the change" }],
+            environment: { type: "reuse", environmentId: environment.id },
+            ...(parent ? { parentThreadId: parentThread.id } : {}),
+          }),
+        });
+
+        expect(response.status).toBe(201);
+        const createdThread = threadSchema.parse(await readJson(response));
+        const queuedStart = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "thread.start" &&
+            command.threadId === createdThread.id,
+        );
+        expect(queuedStart.command).toMatchObject({
+          options: { model: expected, reasoningLevel: "high" },
+        });
+      });
+    },
+  );
+
   it("uses the requested provider's remembered defaults after another provider was used", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
@@ -436,7 +511,10 @@ describe("public thread default routes", () => {
         model: "claude-remembered",
         reasoningLevel: "low",
       });
-      expect(await read("")).toMatchObject({ providerId: "codex", model: "gpt-5" });
+      expect(await read("")).toMatchObject({
+        providerId: "codex",
+        model: "gpt-5",
+      });
       expect(await read("?providerId=never-used")).toBeNull();
     });
   });

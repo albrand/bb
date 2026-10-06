@@ -59,6 +59,7 @@ import {
   resolveCreateThreadEnvironment,
 } from "./thread-default-policy.js";
 import { assertValidParentThread } from "./thread-parent.js";
+import { childThreadDefaultModel } from "./child-thread-model.js";
 import {
   type ThreadCreateServiceRequestInput,
   type ThreadCreateServiceRequest,
@@ -746,6 +747,20 @@ export async function createThreadFromRequest(
     resolvedExecutionDefaults.providerId !== request.providerId
   ) {
     request.providerId = resolvedExecutionDefaults.providerId;
+  }
+  const childModel = childThreadDefaultModel({
+    parentThreadId: request.parentThreadId,
+    providerId: request.providerId,
+    requestedModel,
+  });
+  if (childModel !== null) {
+    request.model = childModel;
+    if (request.executionInputSources !== undefined) {
+      request.executionInputSources = {
+        ...request.executionInputSources,
+        model: "explicit",
+      };
+    }
   }
 
   const { environmentId, environmentIntent } =
