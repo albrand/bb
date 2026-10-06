@@ -44,7 +44,7 @@ function checkbox(name: string): HTMLInputElement {
 }
 
 describe("InstallCliSkillsDialog", () => {
-  it("gives dialog actions 44px targets on compact coarse-pointer layouts only", () => {
+  it("gives dialog actions 44px targets on coarse-pointer layouts below desktop widths", () => {
     render(
       <InstallCliSkillsDialog
         open={true}
@@ -60,7 +60,7 @@ describe("InstallCliSkillsDialog", () => {
 
     for (const name of ["Cancel", "Reinstall"]) {
       const button = screen.getByRole("button", { name });
-      expect(button.classList.contains("pointer-coarse:min-h-11")).toBe(true);
+      expect(button.classList.contains("max-xl:pointer-coarse:min-h-11")).toBe(true);
       expect(button.classList.contains("min-h-11")).toBe(false);
       expect(button.classList.contains("h-11")).toBe(false);
     }
