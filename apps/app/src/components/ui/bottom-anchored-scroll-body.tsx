@@ -27,9 +27,6 @@ export interface BottomAnchorContextValue {
   isAtBottom: boolean;
   scrollToBottom: () => void;
   scrollElementIntoView: (args: ScrollElementIntoViewArgs) => void;
-  scrollElementIntoViewClampedToMaxScroll: (
-    args: ScrollElementIntoViewClampedToMaxScrollArgs,
-  ) => void;
   captureScrollAnchor: () => (restore: boolean) => void;
   holdContentPosition: (args: HoldContentPositionArgs) => void;
 }
@@ -42,15 +39,12 @@ interface BottomAnchoredScrollBodyProps {
   contentClassName?: string;
   maxWidthClassName: string;
   scrollAnchorThreadId?: string;
+  scrollAnchorMode?: "restore" | "latest";
 }
 
 interface ScrollElementIntoViewArgs {
   element: HTMLElement;
   options?: ScrollIntoViewOptions;
-}
-
-interface ScrollElementIntoViewClampedToMaxScrollArgs {
-  element: HTMLElement;
 }
 
 interface HoldContentPositionArgs {
@@ -229,6 +223,7 @@ export function BottomAnchoredScrollBody({
   scrollOverlay,
   children,
   scrollAnchorThreadId,
+  scrollAnchorMode = "restore",
 }: BottomAnchoredScrollBodyProps) {
   const store = useStore();
   const isPointerCoarse = usePointerCoarse();
@@ -252,6 +247,10 @@ export function BottomAnchoredScrollBody({
     attemptsRemaining: number;
     lastAppliedScrollTop: number | null;
   } | null>(null);
+  const restoredAnchorRef = useRef<{
+    threadId: string;
+    mode: "restore" | "latest";
+  } | null>(null);
   const contentPositionHoldUntilRef = useRef(0);
   const activeContentPositionHoldsRef = useRef(0);
   const scrollAnchorCaptureThrottleRef = useRef<{
@@ -259,6 +258,7 @@ export function BottomAnchoredScrollBody({
     trailingTimeout: number | null;
   }>({ lastWriteAt: 0, trailingTimeout: null });
   const userDetachedFromBottomRef = useRef(false);
+  const userScrollIntentObservedRef = useRef(false);
   const maxScrollOffsetRef = useRef(0);
   const resizeObserverHasDeliveredRef = useRef(false);
   const observedScrollGeometryRef = useRef<{
@@ -275,14 +275,15 @@ export function BottomAnchoredScrollBody({
   );
   const prependPositionHoldTimerRef = useRef<number | null>(null);
   const initialScrollRestoreRowId = useMemo(() => {
-    if (scrollAnchorThreadId === undefined) return null;
+    if (scrollAnchorThreadId === undefined || scrollAnchorMode === "latest")
+      return null;
     const anchor = store.get(
       threadTimelineScrollAnchorAtomFamily(scrollAnchorThreadId),
     );
     return anchor !== null && anchor !== undefined && !anchor.atBottom
       ? anchor.rowId
       : null;
-  }, [scrollAnchorThreadId, store]);
+  }, [scrollAnchorThreadId, scrollAnchorMode, store]);
 
   const getScrollElement = useCallback(() => scrollAreaRef.current, []);
 
@@ -426,43 +427,6 @@ export function BottomAnchoredScrollBody({
     ],
   );
 
-  const scrollElementIntoViewClampedToMaxScroll = useCallback(
-    ({ element }: ScrollElementIntoViewClampedToMaxScrollArgs) => {
-      cancelPrependPositionHold();
-      const scrollArea = scrollAreaRef.current;
-      if (!scrollArea) {
-        element.scrollIntoView({ block: "start", inline: "nearest" });
-        return;
-      }
-
-      const maxScrollOffset = refreshMaxScrollOffset(scrollArea);
-      scrollArea.scrollTop = Math.min(
-        maxScrollOffset,
-        getScrollOffsetToRevealElement({ element, scrollArea }),
-      );
-
-      const targetIsAtBottom = isScrolledNearBottom(
-        maxScrollOffset,
-        scrollArea.scrollTop,
-      );
-      shouldStickToBottomRef.current = targetIsAtBottom;
-      setIsAtBottom(targetIsAtBottom);
-
-      if (targetIsAtBottom) {
-        queueBottomRestore();
-        return;
-      }
-
-      cancelQueuedRestore();
-    },
-    [
-      cancelPrependPositionHold,
-      cancelQueuedRestore,
-      queueBottomRestore,
-      refreshMaxScrollOffset,
-    ],
-  );
-
   const captureScrollAnchor = useCallback(() => {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return () => {};
@@ -562,7 +526,8 @@ export function BottomAnchoredScrollBody({
   const hasRecentUserScrollIntent = useCallback(() => {
     return (
       pointerScrollIntentRef.current ||
-      window.performance.now() <= userScrollIntentUntilRef.current
+      (userScrollIntentUntilRef.current > 0 &&
+        window.performance.now() <= userScrollIntentUntilRef.current)
     );
   }, []);
 
@@ -689,6 +654,7 @@ export function BottomAnchoredScrollBody({
   );
 
   const markUserScrollIntent = useCallback(() => {
+    userScrollIntentObservedRef.current = true;
     cancelPrependPositionHold();
     scrollToTopInProgressRef.current = false;
     contentPositionHoldUntilRef.current = 0;
@@ -758,6 +724,7 @@ export function BottomAnchoredScrollBody({
   }, [markUserScrollIntent]);
 
   const startPointerScrollIntent = useCallback(() => {
+    userScrollIntentObservedRef.current = true;
     cancelPrependPositionHold();
     scrollToTopInProgressRef.current = false;
     pointerScrollIntentRef.current = true;
@@ -964,6 +931,27 @@ export function BottomAnchoredScrollBody({
 
   useLayoutEffect(() => {
     if (scrollAnchorThreadId === undefined) return;
+    const previous = restoredAnchorRef.current;
+    if (
+      previous?.threadId === scrollAnchorThreadId &&
+      (previous.mode === "latest" || scrollAnchorMode === "restore")
+    )
+      return;
+    restoredAnchorRef.current = {
+      threadId: scrollAnchorThreadId,
+      mode: scrollAnchorMode,
+    };
+    if (scrollAnchorMode === "latest") {
+      if (
+        userScrollIntentObservedRef.current &&
+        (userDetachedFromBottomRef.current || hasRecentUserScrollIntent())
+      )
+        return;
+      cancelPendingScrollRestore();
+      attachToBottom();
+      queueBottomRestore();
+      return;
+    }
     const anchor = store.get(
       threadTimelineScrollAnchorAtomFamily(scrollAnchorThreadId),
     );
@@ -976,7 +964,16 @@ export function BottomAnchoredScrollBody({
       lastAppliedScrollTop: null,
     };
     advancePendingScrollRestore();
-  }, [scrollAnchorThreadId, store, advancePendingScrollRestore]);
+  }, [
+    scrollAnchorThreadId,
+    scrollAnchorMode,
+    store,
+    advancePendingScrollRestore,
+    attachToBottom,
+    cancelPendingScrollRestore,
+    hasRecentUserScrollIntent,
+    queueBottomRestore,
+  ]);
 
   const bottomAnchorContextValue = useMemo<BottomAnchorContextValue>(
     () => ({
@@ -984,7 +981,6 @@ export function BottomAnchoredScrollBody({
       isAtBottom,
       scrollToBottom,
       scrollElementIntoView,
-      scrollElementIntoViewClampedToMaxScroll,
       captureScrollAnchor,
       holdContentPosition,
     }),
@@ -993,7 +989,6 @@ export function BottomAnchoredScrollBody({
       isAtBottom,
       scrollToBottom,
       scrollElementIntoView,
-      scrollElementIntoViewClampedToMaxScroll,
       captureScrollAnchor,
       holdContentPosition,
     ],

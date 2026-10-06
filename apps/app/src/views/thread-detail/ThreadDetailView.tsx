@@ -892,6 +892,7 @@ function ThreadDetailViewInternal(
     contextWindowUsage,
     goal,
     hasOlderTimelineRows,
+    hasUnseenTimelineEvents,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,
@@ -1230,7 +1231,9 @@ function ThreadDetailViewInternal(
     },
     [composerActions, dismissCompactKeyboard],
   );
-  const sideChatConsumerMessageActions = useMemo<ThreadTimelineConsumerMessageAction[]>(
+  const sideChatConsumerMessageActions = useMemo<
+    ThreadTimelineConsumerMessageAction[]
+  >(
     () =>
       isSideChatThread && thread !== undefined && threadSourceThreadId !== null
         ? [
@@ -3069,6 +3072,9 @@ function ThreadDetailViewInternal(
               canSpawnChild: thread.canSpawnChild,
               contextBoundarySeq,
               hasOlderTimelineRows,
+              hasUnseenTimelineEvents:
+                hasUnseenTimelineEvents ||
+                unreadDividerState.hasUnseenUpdatesOnOpen,
               hostConnectionNotice,
               isCatchingUpTimeline,
               isLoadingOlderTimelineRows,
@@ -3102,7 +3108,6 @@ function ThreadDetailViewInternal(
               threadId: thread.id,
               threadIsActive: thread.status === "active",
               threadRuntimeDisplayStatus: thread.runtime.displayStatus,
-              unreadDividerAutoScroll: unreadDividerState.autoScroll,
               unreadDividerPlacement: unreadDividerState.placement,
               workspaceRootPath: environment?.path ?? undefined,
             }}

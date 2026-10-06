@@ -21,6 +21,7 @@ interface PageShellBaseProps {
 interface PageShellProps extends PageShellBaseProps {
   scrollBehavior?: PageShellScrollBehavior;
   scrollAnchorThreadId?: string;
+  scrollAnchorMode?: "restore" | "latest";
 }
 
 interface FooterRenderOptions {
@@ -64,6 +65,7 @@ export function PageShell({
   maxWidthClassName = DEFAULT_MAX_WIDTH_CLASS,
   scrollBehavior = "static",
   scrollAnchorThreadId,
+  scrollAnchorMode,
 }: PageShellProps) {
   const staticFooter = renderStaticFooter(footer, {
     maxWidthClassName,
@@ -80,6 +82,7 @@ export function PageShell({
           footer={staticFooter}
           scrollOverlay={scrollOverlay}
           scrollAnchorThreadId={scrollAnchorThreadId}
+          scrollAnchorMode={scrollAnchorMode}
         >
           {children}
         </BottomAnchoredScrollBody>

@@ -137,7 +137,6 @@ describe("ThreadTimelineSurface load-older control", () => {
       getScrollElement: () => scrollElement,
       isAtBottom: false,
       scrollElementIntoView: vi.fn(),
-      scrollElementIntoViewClampedToMaxScroll: vi.fn(),
       scrollToBottom: vi.fn(),
     };
     const onLoadOlderRows = vi
