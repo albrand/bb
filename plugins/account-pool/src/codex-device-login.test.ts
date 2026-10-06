@@ -57,6 +57,10 @@ function jwt(payload: object): string {
   ].join(".");
 }
 
+async function unexpectedReauthorization(): Promise<AccountSummary> {
+  throw new Error("This login was not started for an existing account.");
+}
+
 function summary(account: CodexDeviceAccount): AccountSummary {
   return {
     id: "11111111-1111-4111-8111-111111111111",
@@ -104,6 +108,7 @@ function summary(account: CodexDeviceAccount): AccountSummary {
     error: null,
     inFlight: 0,
     status: "ready",
+    signInExpired: false,
   };
 }
 
@@ -133,6 +138,7 @@ function createPollingHarness(args?: {
       }
       throw new Error(`Unexpected request to ${url}`);
     },
+    reauthorizeAccount: unexpectedReauthorization,
     addAccount: async (account) => summary(account),
   });
   return { clock, login, tokenPolls: () => tokenPolls };
@@ -202,6 +208,7 @@ describe("Codex device login", () => {
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (account) => {
         added.push(account);
         return summary(account);
@@ -383,6 +390,7 @@ describe("Codex device login", () => {
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (account) => summary(account),
     });
     const started = await login.start();
@@ -432,6 +440,7 @@ describe("Codex device login", () => {
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (account) => summary(account),
     });
     const started = await login.start();

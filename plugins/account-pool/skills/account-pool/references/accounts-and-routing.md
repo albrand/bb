@@ -28,6 +28,8 @@ bb pool account add --provider claude --import
 bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account list [--json]
+bb pool account local [--json]
+bb pool account sign-in-again <id> [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
@@ -88,7 +90,21 @@ For an OAuth account in error, `refresh` also forces a new token with the stored
 refresh token and clears the error when that succeeds, so a spurious error does
 not require logging in again.
 An account enters error only when its OAuth refresh token is rejected (HTTP 400
-or 401 from the token endpoint) or an API key is rejected. A 401 or 403 on a
+or 401 from the token endpoint) or an API key is rejected. A rejected refresh
+token sets `signInExpired` in account JSON and `expired` in the `account list`
+Sign-in column, even while the account is disabled. Repair it with
+`bb pool account sign-in-again <id>` (aliases `reauth`, `reauthorize`): it starts
+the same Claude or Codex login as `add --login`, and the matching
+`login-complete` or `login-poll` replaces that account's credential in place,
+keeping its ID, label, priority, enabled state, and conversation choices. bb
+refuses the sign-in, and leaves the account unchanged, when it belongs to a
+different Claude account (account UUID, else email) or ChatGPT account. It does
+not compare Claude organizations, which the pool does not store. API key
+accounts cannot sign in again. The RPCs are `login.start` and
+`codexLogin.start` with `{accountId}` instead of `null`.
+`bb pool account local` (RPC `local.logins`) lists the bb server host's own
+provider logins that are not in the pool, and which ones `add --import` can
+pool. A 401 or 403 on a
 freshly refreshed OAuth token is treated as an upstream failure instead: the
 request gets HTTP 503, and that token is held out of routing for one minute.
 Account tables add columns for observed model-family buckets; JSON status
@@ -145,6 +161,20 @@ Space, arrow keys, and Space again), or
 one provider. Include disabled accounts too. For Claude, priority breaks ties
 after headroom and reset recovery; for Codex, the order controls sequential
 failover. Reordering does not move an existing conversation.
+
+Account Pooler settings show one Subscriptions card. Each row has an on/off
+switch (`enable`/`disable`), a name you rename in place (Enter saves, Escape
+cancels), a plan badge from the stored tier, and a state word. A row whose
+sign-in expired shows Sign in again instead of the switch. Its menu holds Usage
+details, Refresh usage, Set priority, Sign in again, and Remove, which asks for
+confirmation first. Below the pool, On this Mac lists `account local`.
+Records that share a login fold into one subscription: Claude records with the
+same email and plan, and Codex records with the same email and ChatGPT
+account. The healthiest record represents the subscription in settings, in
+the provider usage sources, and in the Subscription selector. The selector
+still shows a folded record while a conversation is set to it. The other records
+stay in the pool unchanged and still appear in `account list`, `status`, and
+`account reorder`. Dragging a row keeps folded records in their places.
 `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.

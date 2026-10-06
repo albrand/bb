@@ -29,6 +29,7 @@ interface LoginSession {
   codeVerifier: string;
   state: string;
   createdAt: number;
+  accountId: string | null;
 }
 
 export interface ClaudeOAuthAccount {
@@ -49,6 +50,11 @@ export interface ClaudeOAuthLoginOptions {
   tokenUrl?: string;
   profileUrl?: string;
   addAccount: (authenticated: ClaudeOAuthAccount) => Promise<Account>;
+  reauthorizeAccount: (
+    accountId: string,
+    authenticated: ClaudeOAuthAccount,
+    label: string | undefined,
+  ) => Promise<Account>;
 }
 
 export interface OAuthLoginStart {
@@ -115,7 +121,7 @@ export class ClaudeOAuthLogin {
     this.profileUrl = options.profileUrl ?? OAUTH_PROFILE_URL;
   }
 
-  start(): OAuthLoginStart {
+  start(target: { accountId: string } | null = null): OAuthLoginStart {
     const codeVerifier = randomBytes(32).toString("base64url");
     const codeChallenge = createHash("sha256")
       .update(codeVerifier)
@@ -127,6 +133,7 @@ export class ClaudeOAuthLogin {
       codeVerifier,
       state,
       createdAt: this.now(),
+      accountId: target?.accountId ?? null,
     };
     const authorizeUrl = new URL(this.authorizeUrl);
     authorizeUrl.searchParams.set("code", "true");
@@ -138,6 +145,12 @@ export class ClaudeOAuthLogin {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
     authorizeUrl.searchParams.set("state", state);
     return { sessionId, authorizeUrl: authorizeUrl.toString() };
+  }
+
+  targetOf(sessionId: string): string | null {
+    return this.session?.sessionId === sessionId
+      ? this.session.accountId
+      : null;
   }
 
   async complete(input: OAuthLoginComplete): Promise<Account> {
@@ -198,7 +211,7 @@ export class ClaudeOAuthLogin {
     const profile = parsedProfile.data;
     const email = profile.account.email ?? null;
     const plan = claudePlanFromProfile(profile);
-    return this.options.addAccount({
+    const authenticated: ClaudeOAuthAccount = {
       label:
         input.label ??
         profile.account.display_name ??
@@ -212,6 +225,13 @@ export class ClaudeOAuthLogin {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: this.now() + tokens.expires_in * 1_000,
-    });
+    };
+    return session.accountId === null
+      ? this.options.addAccount(authenticated)
+      : this.options.reauthorizeAccount(
+          session.accountId,
+          authenticated,
+          input.label,
+        );
   }
 }

@@ -14,6 +14,7 @@ import {
   ACCOUNT_POOL_ACCOUNTS_CHANGED,
   ACCOUNT_POOL_CONFIG_CHANGED,
 } from "./src/realtime.js";
+import { foldSubscriptions } from "./src/subscriptions.js";
 
 function percentage(value: number | null): string {
   return value === null ? "unknown" : `${Math.round(value * 100)}%`;
@@ -127,8 +128,14 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
   }, [composer, lookupKey, provider, refresh, rpc, threadId]);
 
   if (provider === null) return null;
-  const accounts =
+  const records =
     status?.accounts.filter((account) => account.provider === provider) ?? [];
+  const shown = new Set(
+    foldSubscriptions(records).map((account) => account.id),
+  );
+  const accounts = records.filter(
+    (account) => shown.has(account.id) || account.id === selected,
+  );
   if (status !== null && accounts.length === 0 && selected === null)
     return null;
   const choose = async (value: string) => {

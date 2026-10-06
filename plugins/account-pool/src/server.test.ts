@@ -22,6 +22,8 @@ import {
   accountPoolConfigSetInputSchema,
   codexLoginPollSchema,
   codexLoginStartSchema,
+  localLoginSchema,
+  loginStartSchema,
   routedThreadStatusListSchema,
   statusReportSchema,
   statusSchema,
@@ -4174,13 +4176,7 @@ describe("Account Pool plugin", () => {
                 "sk-first",
                 "sk-second",
               ]
-            : [
-                "sk-first",
-                "sk-first",
-                "sk-second",
-                "sk-first",
-                "sk-second",
-              ],
+            : ["sk-first", "sk-first", "sk-second", "sk-first", "sk-second"],
         );
       },
     );
@@ -6879,11 +6875,14 @@ describe("Account Pool plugin", () => {
         "threads.queuedMessages.list",
         async () => [],
       );
-      await pool.fixture.host.harness.behavior.callRpc("routing.selection.set", {
-        threadId: "thr_longholdpin",
-        provider: "claude",
-        accountId: pool.fixture.account.id,
-      });
+      await pool.fixture.host.harness.behavior.callRpc(
+        "routing.selection.set",
+        {
+          threadId: "thr_longholdpin",
+          provider: "claude",
+          accountId: pool.fixture.account.id,
+        },
+      );
       setQuota(pool.fixture, pool.fixture.account.id, {
         sevenDayUtilization: 0.2,
         sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
@@ -8583,5 +8582,463 @@ describe("Account Pool nested proxy", () => {
     );
     expect(allowed.status).toBe(200);
     expect(await allowed.json()).toEqual({ claude: true, codex: false });
+  });
+});
+
+describe("Account Pool subscription sign-in repair", () => {
+  const SHARED_LOGIN = {
+    account: {
+      uuid: "33333333-3333-4333-8333-333333333333",
+      email: "shared@example.com",
+      display_name: "Shared login",
+      has_claude_max: true,
+      rate_limit_tier: "default_claude_max_20x",
+    },
+  };
+  const OTHER_LOGIN = {
+    account: {
+      uuid: "44444444-4444-4444-8444-444444444444",
+      email: "other@example.com",
+      display_name: "Other login",
+      has_claude_max: true,
+      rate_limit_tier: "default_claude_max_20x",
+    },
+  };
+
+  async function claudeLoginHost(profile: { current: object }) {
+    let issued = 0;
+    const oauth = await startUpstream(async (request, response) => {
+      await readRequestBody(request);
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/token") {
+        issued += 1;
+        response.end(
+          JSON.stringify({
+            access_token: `access-${issued}`,
+            refresh_token: `refresh-${issued}`,
+            expires_in: 3600,
+          }),
+        );
+        return;
+      }
+      if (request.url === "/profile") {
+        response.end(JSON.stringify(profile.current));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("{}");
+    });
+    cleanups.push(oauth.close);
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-reauth-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      oauthAuthorizeUrl: `${oauth.url}/authorize`,
+      oauthTokenUrl: `${oauth.url}/token`,
+      oauthProfileUrl: `${oauth.url}/profile`,
+      usageUrl: "data:application/json,{}",
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const signIn = async (
+      target: { accountId: string } | null,
+      label?: string,
+    ) => {
+      const started = loginStartSchema.parse(
+        await host.harness.behavior.callRpc("login.start", target),
+      );
+      const state = new URL(started.authorizeUrl).searchParams.get("state");
+      return accountSchema.parse(
+        await host.harness.behavior.callRpc("login.complete", {
+          sessionId: started.sessionId,
+          pasted: `code#${state}`,
+          ...(label === undefined ? {} : { label }),
+        }),
+      );
+    };
+    const secretOf = async (id: string) =>
+      accountSecretSchema.parse(
+        JSON.parse(
+          await fs.readFile(
+            path.join(
+              dataDir,
+              "plugins",
+              "account-pool",
+              "secrets",
+              "accounts",
+              `account-${id}.json`,
+            ),
+            "utf8",
+          ),
+        ),
+      );
+    const list = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null));
+    const expire = (
+      id: string,
+      error = "OAuth refresh failed with HTTP 400.",
+    ) => {
+      const quotas = new QuotaStore(host.bb.storage.database());
+      quotas.put({ ...quotas.get(id), error });
+    };
+    return { host, signIn, secretOf, list, expire };
+  }
+
+  async function parallelSubscriptions(profile: { current: object }) {
+    const pool = await claudeLoginHost(profile);
+    const principal = await pool.signIn(null, "Claude Max 20x (principal)");
+    const previous = await pool.signIn(
+      null,
+      "Claude Max 20x (previous token, disabled)",
+    );
+    await pool.host.harness.behavior.callRpc("account.disable", {
+      id: previous.id,
+    });
+    pool.expire(previous.id);
+    return { ...pool, principal, previous };
+  }
+
+  it("lists both records of one login in account list and flags only the rejected one", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    pool.expire(
+      pool.principal.id,
+      "OAuth refresh failed due to a network error or timeout.",
+    );
+    expect(
+      (await pool.list()).map((account) => ({
+        id: account.id,
+        email: account.email,
+        enabled: account.enabled,
+        signInExpired: account.signInExpired,
+      })),
+    ).toEqual([
+      {
+        id: pool.principal.id,
+        email: "shared@example.com",
+        enabled: true,
+        signInExpired: false,
+      },
+      {
+        id: pool.previous.id,
+        email: "shared@example.com",
+        enabled: false,
+        signInExpired: true,
+      },
+    ]);
+    const listed = await pool.host.harness.behavior.runCli(["account", "list"]);
+    const header = listed.stdout.split("\n")[0]?.split("\t") ?? [];
+    const signInColumn = header.indexOf("Sign-in");
+    expect(signInColumn).toBeGreaterThan(0);
+    expect(
+      listed.stdout
+        .split("\n")
+        .slice(1)
+        .filter((row) => row.length > 0)
+        .map((row) => row.split("\t")[signInColumn]),
+    ).toEqual(["ok", "expired"]);
+  });
+
+  it("reports one usage subscription per login, represented by its healthy record", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    profile.current = OTHER_LOGIN;
+    const other = await pool.signIn(null, "Claude Max 20x (other login)");
+    await pool.host.harness.behavior.callRpc("account.reorder", {
+      provider: "claude",
+      accountIds: [pool.previous.id, pool.principal.id, other.id],
+    });
+    expect(
+      usageResourceListSchema
+        .parse(await pool.host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual([pool.principal.id, other.id]);
+    expect((await pool.list()).map((account) => account.id)).toEqual([
+      pool.previous.id,
+      pool.principal.id,
+      other.id,
+    ]);
+  });
+
+  it("signs in again to an expired Claude subscription in place", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const before = await pool.secretOf(pool.previous.id);
+    const repaired = await pool.signIn({ accountId: pool.previous.id });
+    expect(repaired).toMatchObject({
+      id: pool.previous.id,
+      label: "Claude Max 20x (previous token, disabled)",
+      priority: pool.previous.priority,
+      enabled: false,
+      rateLimitTier: "default_claude_max_20x",
+    });
+    const after = await pool.secretOf(pool.previous.id);
+    expect(after.kind === "oauth" && after.refreshToken).not.toBe(
+      before.kind === "oauth" && before.refreshToken,
+    );
+    const listed = await pool.list();
+    expect(listed.map((account) => account.id)).toEqual([
+      pool.principal.id,
+      pool.previous.id,
+    ]);
+    expect(listed[1]).toMatchObject({ signInExpired: false, error: null });
+    expect(pool.host.harness.inspection.realtimeSignals).toContainEqual({
+      channel: "accounts-changed",
+      payload: {},
+    });
+  });
+
+  it("refuses a sign-in again from a different Claude account and leaves the subscription unchanged", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const before = await pool.secretOf(pool.previous.id);
+    profile.current = OTHER_LOGIN;
+    await expect(pool.signIn({ accountId: pool.previous.id })).rejects.toThrow(
+      "That code belongs to a different Claude account. Sign in as the account behind Claude Max 20x (previous token, disabled); it was not changed.",
+    );
+    expect(await pool.secretOf(pool.previous.id)).toEqual(before);
+    const listed = await pool.list();
+    expect(listed).toHaveLength(2);
+    expect(listed[1]).toMatchObject({
+      id: pool.previous.id,
+      email: "shared@example.com",
+      signInExpired: true,
+    });
+  });
+
+  it("refuses to start a sign-in again for a missing, API key, or other-provider subscription", async () => {
+    const pool = await claudeLoginHost({ current: SHARED_LOGIN });
+    const key = accountSchema.parse(
+      await pool.host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-test" },
+        label: "Metered",
+      }),
+    );
+    const subscription = await pool.signIn(null);
+    await expect(
+      pool.host.harness.behavior.callRpc("login.start", {
+        accountId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(/no longer exists/u);
+    await expect(
+      pool.host.harness.behavior.callRpc("login.start", { accountId: key.id }),
+    ).rejects.toThrow(/API key/u);
+    await expect(
+      pool.host.harness.behavior.callRpc("codexLogin.start", {
+        accountId: subscription.id,
+      }),
+    ).rejects.toThrow(/belongs to Claude/u);
+  });
+
+  it("signs in again from the CLI and says so", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const started = await pool.host.harness.behavior.runCli([
+      "account",
+      "sign-in-again",
+      pool.previous.id,
+    ]);
+    expect(started.exitCode).toBe(0);
+    expect(started.stdout).toContain(
+      "Open this URL to sign in to Claude as the account behind Claude Max 20x (previous token, disabled):",
+    );
+    const sessionId = started.stdout.match(/Session ID: ([0-9a-f-]+)/u)?.[1];
+    const authorizeUrl = started.stdout.match(/\n(http[^\n]+)\n/u)?.[1];
+    if (sessionId === undefined || authorizeUrl === undefined)
+      throw new Error("Sign in again did not print its session and URL.");
+    const state = new URL(authorizeUrl).searchParams.get("state");
+    const completed = await pool.host.harness.behavior.runCli(
+      ["account", "login-complete", "--session", sessionId, "--code-stdin"],
+      { experimental_stdinInputs: { code: `code#${state}` } },
+    );
+    expect(completed).toMatchObject({
+      exitCode: 0,
+      stdout: `Signed in again to Claude Max 20x (previous token, disabled) (${pool.previous.id}).\n`,
+    });
+    expect((await pool.list()).map((account) => account.signInExpired)).toEqual(
+      [false, false],
+    );
+  });
+
+  it("signs in again to an expired Codex subscription only as the same ChatGPT account", async () => {
+    const identity = { accountId: "chatgpt-account-1" };
+    const auth = await startUpstream(async (request, response) => {
+      await readRequestBody(request);
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/api/accounts/deviceauth/usercode") {
+        response.end(
+          JSON.stringify({
+            device_auth_id: "device",
+            user_code: "ABCD-1234",
+            interval: "1",
+            expires_in: 600,
+          }),
+        );
+        return;
+      }
+      if (request.url === "/api/accounts/deviceauth/token") {
+        response.end(
+          JSON.stringify({
+            authorization_code: "authorization",
+            code_challenge: "challenge",
+            code_verifier: "verifier",
+          }),
+        );
+        return;
+      }
+      if (request.url === "/oauth/token") {
+        response.end(
+          JSON.stringify({
+            access_token: testJwt({ exp: 2_000_000_000 }),
+            refresh_token: `refresh-${identity.accountId}`,
+            id_token: testJwt({
+              email: "codex@example.com",
+              "https://api.openai.com/auth": {
+                chatgpt_account_id: identity.accountId,
+              },
+            }),
+          }),
+        );
+        return;
+      }
+      response.statusCode = 404;
+      response.end("{}");
+    });
+    cleanups.push(auth.close);
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-codex-reauth-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      codexAuthBaseUrl: auth.url,
+      codexUsageUrl: EMPTY_USAGE_URL,
+      usageUrl: "data:application/json,{}",
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const signIn = async (target: { accountId: string } | null) => {
+      const started = codexLoginStartSchema.parse(
+        await host.harness.behavior.callRpc("codexLogin.start", target),
+      );
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, started.intervalMs));
+        const polled = codexLoginPollSchema.parse(
+          await host.harness.behavior.callRpc("codexLogin.poll", {
+            sessionId: started.sessionId,
+          }),
+        );
+        if (polled.status !== "pending") return polled;
+      }
+      throw new Error("Codex sign-in stayed pending.");
+    };
+    const added = await signIn(null);
+    if (added.status !== "complete") throw new Error("Codex login failed.");
+    const quotas = new QuotaStore(host.bb.storage.database());
+    quotas.put({
+      ...quotas.get(added.account.id),
+      error: "OAuth refresh failed with HTTP 401.",
+    });
+    identity.accountId = "chatgpt-account-2";
+    expect(await signIn({ accountId: added.account.id })).toEqual({
+      status: "error",
+      message: `Codex sign-in belongs to a different ChatGPT account. Sign in as the account behind ${added.account.label}; it was not changed. Start again.`,
+    });
+    identity.accountId = "chatgpt-account-1";
+    expect(await signIn({ accountId: added.account.id })).toMatchObject({
+      status: "complete",
+      account: {
+        id: added.account.id,
+        codexAccountId: "chatgpt-account-1",
+        signInExpired: false,
+        error: null,
+      },
+    });
+    const listed = z
+      .array(accountSummarySchema)
+      .parse(await host.harness.behavior.callRpc("account.list", null));
+    expect(listed.map((account) => account.id)).toEqual([added.account.id]);
+  });
+
+  it("lists this Mac's own logins that are not in the pool", async () => {
+    const pool = await claudeLoginHost({ current: SHARED_LOGIN });
+    await pool.signIn(null);
+    pool.host.harness.sdk.stub("system.providerStates", async (input) => {
+      expect(input).toEqual({});
+      return {
+        providers: [
+          {
+            providerId: "claude-code",
+            displayName: "Claude Code",
+            status: "ready",
+            accountEmail: "Shared@Example.com",
+            planLabel: "Max (20x)",
+          },
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            status: "ready",
+            accountEmail: "codex@example.com",
+            planLabel: null,
+          },
+          {
+            providerId: "acp-cursor",
+            displayName: "Cursor",
+            status: "expired",
+            accountEmail: "cursor@example.com",
+            planLabel: "Pro",
+          },
+          {
+            providerId: "pi",
+            displayName: "Pi",
+            status: "ready",
+            accountEmail: null,
+            planLabel: null,
+          },
+          {
+            providerId: "acp-gemini",
+            displayName: "Gemini",
+            status: "unauthenticated",
+            accountEmail: "gemini@example.com",
+            planLabel: null,
+          },
+        ],
+      };
+    });
+    const logins = z
+      .array(localLoginSchema)
+      .parse(await pool.host.harness.behavior.callRpc("local.logins", null));
+    expect(logins).toEqual([
+      {
+        providerId: "codex",
+        displayName: "Codex",
+        email: "codex@example.com",
+        planLabel: null,
+        status: "ready",
+        poolProvider: "codex",
+      },
+      {
+        providerId: "acp-cursor",
+        displayName: "Cursor",
+        email: "cursor@example.com",
+        planLabel: "Pro",
+        status: "expired",
+        poolProvider: null,
+      },
+    ]);
+    const cli = await pool.host.harness.behavior.runCli(["account", "local"]);
+    expect(cli.exitCode).toBe(0);
+    expect(cli.stdout).toContain("pool account add --provider codex --import");
+    expect(cli.stdout).toContain(
+      "Cursor\tPro\texpired\tcursor@example.com\tcan't be pooled",
+    );
   });
 });

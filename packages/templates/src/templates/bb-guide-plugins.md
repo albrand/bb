@@ -35,6 +35,8 @@ bb pool account add --provider claude --import
 bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account list [--json]
+bb pool account local [--json]
+bb pool account sign-in-again <id> [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
@@ -61,8 +63,14 @@ default, and `bb pool account rename <id> <label>` updates their label. Codex
 `--login` prints a device verification URL, one-time
 code, session ID, and an `account login-poll` command that waits for
 authorization. Both flows are available in the plugin settings page through
-the **Sign in to Claude** and **Sign in to Codex** buttons. The CLI Codex import
+**Add subscription**. The CLI Codex import
 path continues to read the bb server host's `~/.codex/auth.json`.
+`bb pool account sign-in-again <id>` starts the same login for an account whose
+sign-in expired (the `account list` Sign-in column shows `expired`), and the
+matching `login-complete` or `login-poll` replaces its credential in place,
+keeping its ID, label, and priority. A sign-in that belongs to a different
+account is refused and changes nothing. `bb pool account local` lists the bb
+server host's provider logins that are not in the pool.
 
 The hub starts immediately, even before an account is configured, so newly
 added or enabled accounts are available without a plugin reload. With an

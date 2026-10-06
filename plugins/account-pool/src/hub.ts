@@ -19,6 +19,7 @@ import {
 import type { ProviderAdapter } from "./provider-adapter.js";
 import type { ImportedProviderAccount } from "./provider-adapter.js";
 import {
+  isSignInRejection,
   OAuthRefreshError,
   TransientOAuthRefreshError,
 } from "./provider-adapter.js";
@@ -414,7 +415,10 @@ export class AccountPoolHub {
         fetch: this.options.fetch,
         now: this.options.now,
       })
-      .then(() => true, () => false)
+      .then(
+        () => true,
+        () => false,
+      )
       .finally(() => this.usageRefreshes.delete(account.id));
     this.usageRefreshes.set(account.id, refresh);
     return refresh;
@@ -469,6 +473,7 @@ export class AccountPoolHub {
           ...quotaFields,
           inFlight: this.inFlightByAccount.get(account.id) ?? 0,
           status: accountStatus(account, quota, settings.switchThreshold, now),
+          signInExpired: isSignInRejection(quota.error),
         };
       }),
     };

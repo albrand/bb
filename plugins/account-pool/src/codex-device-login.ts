@@ -79,6 +79,7 @@ interface DeviceLoginSession {
   expiresAt: number;
   nextPollAt: number;
   polling: boolean;
+  accountId: string | null;
 }
 
 export interface CodexDeviceAccount {
@@ -96,6 +97,10 @@ export interface CodexDeviceLoginOptions {
   now?: () => number;
   authBaseUrl?: string;
   addAccount: (authenticated: CodexDeviceAccount) => Promise<AccountSummary>;
+  reauthorizeAccount: (
+    accountId: string,
+    authenticated: CodexDeviceAccount,
+  ) => Promise<AccountSummary>;
 }
 
 export interface CodexDeviceLoginStart {
@@ -174,7 +179,9 @@ export class CodexDeviceLogin {
     );
   }
 
-  async start(): Promise<CodexDeviceLoginStart> {
+  async start(
+    target: { accountId: string } | null = null,
+  ): Promise<CodexDeviceLoginStart> {
     const pruneBefore = this.now();
     for (const [sessionId, session] of this.sessions) {
       if (pruneBefore >= session.expiresAt) this.deleteSession(sessionId);
@@ -211,6 +218,7 @@ export class CodexDeviceLogin {
       expiresAt: expiresAt(parsed.data, now),
       nextPollAt: now + intervalMs,
       polling: false,
+      accountId: target?.accountId ?? null,
     };
     this.sessions.set(session.sessionId, session);
     this.scheduleExpiry(session);
@@ -313,7 +321,7 @@ export class CodexDeviceLogin {
         };
       }
       this.deleteSession(session.sessionId);
-      return await this.exchange(parsed.data);
+      return await this.exchange(parsed.data, session.accountId);
     } catch {
       if (this.now() < session.expiresAt) return { status: "pending" };
       this.deleteSession(session.sessionId);
@@ -321,6 +329,10 @@ export class CodexDeviceLogin {
     } finally {
       session.polling = false;
     }
+  }
+
+  targetOf(sessionId: string): string | null {
+    return this.sessions.get(sessionId)?.accountId ?? null;
   }
 
   nextPollDelayMs(sessionId: string): number {
@@ -357,6 +369,7 @@ export class CodexDeviceLogin {
 
   private async exchange(
     authorized: z.infer<typeof deviceTokenResponseSchema>,
+    accountId: string | null,
   ): Promise<CodexDeviceLoginPoll> {
     const response = await this.fetch(`${this.authBaseUrl}/oauth/token`, {
       method: "POST",
@@ -390,7 +403,7 @@ export class CodexDeviceLogin {
     }
     try {
       const claims = idTokenClaims(parsed.data.id_token);
-      const account = await this.options.addAccount({
+      const authenticated: CodexDeviceAccount = {
         label: claims.email ?? "Codex account",
         email: claims.email,
         accountId: claims.accountId,
@@ -398,7 +411,11 @@ export class CodexDeviceLogin {
         refreshToken: parsed.data.refresh_token,
         idToken: parsed.data.id_token,
         expiresAt: codexAccessTokenExpiresAt(parsed.data.access_token),
-      });
+      };
+      const account =
+        accountId === null
+          ? await this.options.addAccount(authenticated)
+          : await this.options.reauthorizeAccount(accountId, authenticated);
       return { status: "complete", account };
     } catch (error) {
       return {

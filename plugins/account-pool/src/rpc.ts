@@ -17,7 +17,9 @@ import {
   codexLoginPollSchema,
   codexLoginStartSchema,
   hubTokenSummarySchema,
+  localLoginSchema,
   loginCompleteInputSchema,
+  loginStartInputSchema,
   loginStartSchema,
   routedThreadStatusListSchema,
   statusSchema,
@@ -96,7 +98,7 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountPoolConfigSchema,
   },
   "login.start": {
-    input: z.null(),
+    input: loginStartInputSchema,
     output: loginStartSchema,
   },
   "login.complete": {
@@ -104,8 +106,12 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountSchema,
   },
   "codexLogin.start": {
-    input: z.null(),
+    input: loginStartInputSchema,
     output: codexLoginStartSchema,
+  },
+  "local.logins": {
+    input: z.null(),
+    output: z.array(localLoginSchema),
   },
   "codexLogin.poll": {
     input: codexLoginPollInputSchema,
@@ -209,9 +215,18 @@ export function createRpcHandlers(
     },
     "config.get": () => config.get(),
     "config.set": (input) => config.set(input),
-    "login.start": () => login.start(),
+    "login.start": async (input) => {
+      if (input !== null)
+        await operations.requireReauthorizable(input.accountId, "claude");
+      return login.start(input);
+    },
     "login.complete": (input) => login.complete(input),
-    "codexLogin.start": () => codexLogin.start(),
+    "codexLogin.start": async (input) => {
+      if (input !== null)
+        await operations.requireReauthorizable(input.accountId, "codex");
+      return codexLogin.start(input);
+    },
+    "local.logins": () => operations.localLogins(),
     "codexLogin.poll": async ({ sessionId, label }) => {
       const result = await codexLogin.poll({ sessionId });
       if (result.status !== "complete" || label === undefined) return result;

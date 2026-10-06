@@ -47,13 +47,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ResourceRowDetailChevron } from "@/components/ui/resource-list";
 import { Switch } from "@/components/ui/switch";
 import type {
   AccountSummary,
@@ -61,12 +61,16 @@ import type {
   AccountPoolConfigSetInput,
   FamilyQuota,
   LimitWindow,
+  LocalLogin,
   ModelFamily,
   PoolAvailability,
   PoolProvider,
   PoolStatus,
 } from "./src/contracts.js";
-import type { accountPoolRpcContract } from "./src/rpc.js";
+import type {
+  accountPoolBindingReadRpcContract,
+  accountPoolRpcContract,
+} from "./src/rpc.js";
 import type { OAuthLoginStart } from "./src/oauth-login.js";
 import type { CodexDeviceLoginStart } from "./src/codex-device-login.js";
 import {
@@ -75,6 +79,11 @@ import {
   statusSchema,
 } from "./src/contracts.js";
 import { blockingResetAt } from "./src/quota.js";
+import {
+  foldSubscriptions,
+  subscriptionKey,
+  subscriptionRepresentatives,
+} from "./src/subscriptions.js";
 import { SubscriptionPicker } from "./subscription-picker.js";
 import {
   ACCOUNT_POOL_ACCOUNTS_CHANGED,
@@ -82,28 +91,16 @@ import {
 } from "./src/realtime.js";
 
 type DialogState =
-  | { kind: "account" | "priority" | "remove" | "rename"; accountId: string }
-  | { kind: "claude-login" | "codex-login" | "api-key" }
+  | { kind: "account" | "priority" | "remove"; accountId: string }
+  | { kind: "claude-login" | "codex-login"; accountId: string | null }
+  | { kind: "api-key" }
   | null;
 
 type ConfigField = Exclude<keyof AccountPoolConfig, "parentMode">;
 
-const PROVIDERS: Array<{
-  id: PoolProvider;
-  title: string;
-  description: string;
-}> = [
-  {
-    id: "claude",
-    title: "Claude",
-    description:
-      "Claude Code threads on every machine route through these accounts.",
-  },
-  {
-    id: "codex",
-    title: "Codex",
-    description: "Codex threads route through these ChatGPT accounts.",
-  },
+const PROVIDERS: Array<{ id: PoolProvider; title: string }> = [
+  { id: "claude", title: "Claude" },
+  { id: "codex", title: "Codex" },
 ];
 const FAMILY_LABELS: Record<ModelFamily, string> = {
   fable: "Fable 7 day",
@@ -172,14 +169,6 @@ function relative(timestamp: number, now = Date.now()): string {
   const hours = Math.round(minutes / 60);
   return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
-function windowShortLabel(window: LimitWindow): string {
-  if (window.windowMinutes === null)
-    return window.slot === "primary" ? "LIMIT" : "LIMIT 2";
-  if (window.windowMinutes % 1_440 === 0)
-    return `${window.windowMinutes / 1_440}D`;
-  if (window.windowMinutes % 60 === 0) return `${window.windowMinutes / 60}H`;
-  return `${window.windowMinutes}M`;
-}
 function windowLongLabel(window: LimitWindow): string {
   if (window.windowMinutes === null)
     return window.slot === "primary" ? "Usage limit" : "Secondary limit";
@@ -218,42 +207,118 @@ function writeCachedStatus(status: PoolStatus): void {
   }
 }
 
-function statusPresentation(
+type SubscriptionState = {
+  label: string;
+  detail: string | null;
+  icon: string | null;
+  tone: string;
+};
+
+function untilLabel(timestamp: number): string {
+  const minutes = Math.max(1, Math.round((timestamp - Date.now()) / 60_000));
+  if (minutes < 60) return `in ${minutes}m`;
+  if (minutes < 1_440)
+    return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `in ${Math.floor(minutes / 1_440)}d ${Math.floor((minutes % 1_440) / 60)}h`;
+}
+
+function subscriptionState(
   account: AccountSummary,
   threshold: number,
-): {
-  label: string;
-  dot: string;
-} {
+  nextAccountId: string | null,
+): SubscriptionState {
+  if (account.signInExpired)
+    return {
+      label: "Sign-in expired",
+      detail: null,
+      icon: "AlertCircle",
+      tone: "text-warning-text",
+    };
+  if (!account.enabled)
+    return {
+      label: "Off",
+      detail: null,
+      icon: null,
+      tone: "text-subtle-foreground",
+    };
+  if (account.status === "error")
+    return {
+      label: "Can't read usage",
+      detail: null,
+      icon: "AlertTriangle",
+      tone: "text-warning-text",
+    };
   if (account.status === "held")
     return {
-      label: `Held${account.heldUntil === null ? "" : ` · retry at ${new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(account.heldUntil)}`}`,
-      dot: "bg-warning",
+      label: "Held",
+      detail:
+        account.heldUntil === null
+          ? null
+          : `retry at ${new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(account.heldUntil)}`,
+      icon: "Clock",
+      tone: "text-warning-text",
     };
   if (account.status === "exhausted") {
     const resetAt = blockingResetAt(account, null, threshold, Date.now());
     return {
-      label: `Exhausted${resetAt === null ? "" : ` · ${resetLabel(resetAt)}`}`,
-      dot: "bg-destructive",
+      label: "Used up",
+      detail: resetAt === null ? null : `back ${untilLabel(resetAt)}`,
+      icon: "Circle",
+      tone: "text-subtle-foreground",
     };
   }
-  if (account.status === "error")
-    return { label: "Error", dot: "bg-destructive" };
-  if (account.status === "disabled")
-    return { label: "Disabled", dot: "bg-muted-foreground" };
-  return { label: "Ready", dot: "bg-success" };
+  if (account.id === nextAccountId)
+    return {
+      label: "Next",
+      detail: "most headroom",
+      icon: "ArrowRight",
+      tone: "text-foreground",
+    };
+  return {
+    label: "Ready",
+    detail: null,
+    icon: null,
+    tone: "text-subtle-foreground",
+  };
 }
-function tier(account: AccountSummary): string {
+
+function StateWord({ state }: { state: SubscriptionState }) {
   return (
-    account.subscriptionType ??
-    (account.kind === "api-key" ? "API key" : "OAuth")
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 text-xs",
+        state.tone,
+      )}
+    >
+      {state.icon === null ? null : (
+        <Icon name={state.icon} className="size-3.5 shrink-0" aria-hidden />
+      )}
+      <span className="shrink-0">{state.label}</span>
+      {state.detail === null ? null : (
+        <span className="truncate text-subtle-foreground">
+          · {state.detail}
+        </span>
+      )}
+    </span>
   );
 }
+
+function planBadge(
+  account: Pick<AccountSummary, "kind" | "subscriptionType" | "rateLimitTier">,
+): string | null {
+  if (account.kind === "api-key") return "API key";
+  const max = account.rateLimitTier?.match(/max_(\d+)x/u);
+  if (max) return `Max ${max[1]}x`;
+  const plan = account.subscriptionType;
+  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null;
+}
+
 function secondaryEmail(account: AccountSummary): string | null {
   return account.email === null || account.email === account.label
     ? null
     : account.email;
 }
+
 function SettingsBadge({ children }: { children: ReactNode }) {
   return (
     <span className="shrink-0 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground">
@@ -262,114 +327,13 @@ function SettingsBadge({ children }: { children: ReactNode }) {
   );
 }
 
-function SettingsSection({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description: string;
-  action: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
-            {description}
-          </p>
-        </div>
-        <div className="shrink-0 self-start">{action}</div>
-      </div>
-      <div className="border-t border-border">{children}</div>
-    </section>
-  );
+function providerTitle(provider: PoolProvider): string {
+  return provider === "claude" ? "Claude" : "Codex";
 }
 
-type QuotaSlot = {
-  key: string;
-  label: string;
-  utilization: number | null;
-  status: string | null;
-};
-
-function quotaSlots(account: AccountSummary): QuotaSlot[] {
-  if (account.provider === "codex") {
-    if (account.limitWindows.length === 0)
-      return [
-        { key: "primary", label: "LIMIT", utilization: null, status: null },
-      ];
-    return account.limitWindows.map((window) => ({
-      key: window.slot,
-      label: windowShortLabel(window),
-      utilization: window.utilization,
-      status: window.status,
-    }));
-  }
-  return [
-    {
-      key: "five-hour",
-      label: "5H",
-      utilization: account.fiveHourUtilization,
-      status: account.fiveHourStatus,
-    },
-    {
-      key: "seven-day",
-      label: "7D",
-      utilization: account.sevenDayUtilization,
-      status: account.sevenDayStatus,
-    },
-    {
-      key: "fable",
-      label: "FABLE",
-      utilization: account.familyWeekly.fable?.utilization ?? null,
-      status: account.familyWeekly.fable?.status ?? null,
-    },
-  ];
-}
-
-function quotaToneClass(slot: QuotaSlot, threshold: number): string {
-  if (
-    slot.status?.toLowerCase() === "rejected" ||
-    (slot.utilization !== null && slot.utilization >= 1)
-  )
-    return "text-destructive-text";
-  if (slot.utilization !== null && slot.utilization >= threshold - 0.1)
-    return "text-warning-text";
-  return slot.utilization === null
-    ? "text-subtle-foreground/75"
-    : "text-foreground";
-}
-
-function QuotaValue({
-  slot,
-  threshold,
-  refreshing,
-}: {
-  slot: QuotaSlot;
-  threshold: number;
-  refreshing: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "w-16 text-left tabular-nums transition-opacity sm:text-right",
-        refreshing && "opacity-50",
-      )}
-    >
-      <div className="text-2xs uppercase tracking-wide text-subtle-foreground/75">
-        {slot.label}
-      </div>
-      <div
-        className={cn("text-xs font-semibold", quotaToneClass(slot, threshold))}
-      >
-        {percent(slot.utilization)}
-      </div>
-    </div>
-  );
+function removeCopy(account: AccountSummary): string {
+  const name = providerTitle(account.provider);
+  return `bb deletes its saved ${account.kind === "api-key" ? "key" : "sign-in"}. Conversations on Automatic move to your other ${name} subscriptions; conversations set to this one stop until you choose another. ${account.kind === "api-key" ? "To use it again, add the key again." : "To use it again, sign in again."}`;
 }
 
 const restrictAccountDragToVerticalAxis: Modifier = ({ transform }) => ({
@@ -378,28 +342,39 @@ const restrictAccountDragToVerticalAxis: Modifier = ({ transform }) => ({
 });
 const accountDragModifiers: Modifier[] = [restrictAccountDragToVerticalAxis];
 
-function AccountRow({
+const LEDGER_ROW_CLASS =
+  "grid grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto_auto] items-center gap-x-2 border-t border-border py-2 pl-1 pr-1 text-sm @[40rem]:grid-cols-[auto_minmax(0,1fr)_14rem_7rem_auto] @[40rem]:grid-rows-[auto_auto] @[40rem]:gap-x-3 @[40rem]:pr-2";
+
+type SubscriptionAction =
+  | "toggle"
+  | "priority"
+  | "refresh"
+  | "remove"
+  | "details"
+  | "sign-in";
+
+function SubscriptionRow({
   account,
-  threshold,
+  state,
   pending,
   refreshing,
-  onAction,
-  onOpen,
   reorderDisabled,
+  onAction,
+  onRename,
 }: {
   account: AccountSummary;
-  threshold: number;
+  state: SubscriptionState;
   pending: boolean;
   refreshing: boolean;
-  onAction: (
-    action: "toggle" | "priority" | "refresh" | "remove" | "rename",
-  ) => void;
-  onOpen: () => void;
   reorderDisabled: boolean;
+  onAction: (action: SubscriptionAction) => void;
+  onRename: (label: string) => void;
 }) {
-  const status = statusPresentation(account, threshold);
-  const slots = quotaSlots(account);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(account.label);
+  const plan = planBadge(account);
   const email = secondaryEmail(account);
+  const signInAgain = account.signInExpired && account.kind === "oauth";
   const {
     attributes,
     isDragging,
@@ -409,12 +384,21 @@ function AccountRow({
     transform,
     transition,
   } = useSortable({ id: account.id, disabled: pending || reorderDisabled });
+  function commit(): void {
+    const label = draft.trim();
+    setRenaming(false);
+    if (label.length > 0 && label !== account.label) onRename(label);
+  }
+  function cancel(): void {
+    setDraft(account.label);
+    setRenaming(false);
+  }
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "flex items-center gap-3 text-sm",
+        LEDGER_ROW_CLASS,
         isDragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
       )}
     >
@@ -423,7 +407,7 @@ function AccountRow({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing"
+        className="col-start-1 row-span-full row-start-1 size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing pointer-coarse:size-11"
         disabled={pending || reorderDisabled}
         aria-label={`Reorder ${account.label}`}
         {...attributes}
@@ -431,184 +415,334 @@ function AccountRow({
       >
         <Icon name="DragDropVertical" aria-hidden="true" />
       </Button>
-      <div
-        className={cn(
-          "group -mx-2 flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2.5 transition-colors hover:bg-state-hover focus-within:bg-state-hover",
-          !account.enabled && "opacity-55",
-        )}
-      >
-        <button
-          type="button"
-          className="grid min-w-0 flex-1 grid-cols-1 items-center gap-y-1.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-y-0"
-          aria-label={`Open ${account.label}`}
-          onClick={onOpen}
-        >
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-foreground">
+      <div className="col-start-2 row-start-1 flex min-w-0 items-start gap-2">
+        {renaming ? (
+          <div
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+            onBlur={(event) => {
+              if (
+                !(event.relatedTarget instanceof Node) ||
+                !event.currentTarget.contains(event.relatedTarget)
+              )
+                commit();
+            }}
+          >
+            <Input
+              autoFocus
+              aria-label="Subscription name"
+              className="h-7 min-w-0 flex-1 basis-48 @[40rem]:max-w-80 pointer-coarse:h-10"
+              value={draft}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commit();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  cancel();
+                }
+              }}
+            />
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 pointer-coarse:h-10"
+              onClick={commit}
+            >
+              Save
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 pointer-coarse:h-10"
+              onClick={cancel}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-label={`Rename ${account.label}`}
+              disabled={pending}
+              className={cn(
+                "inline-flex min-h-6 min-w-0 items-start gap-1.5 rounded-sm text-left font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-7",
+                !account.enabled && "text-foreground/75",
+              )}
+              onClick={() => {
+                setDraft(account.label);
+                setRenaming(true);
+              }}
+            >
+              <span className="line-clamp-2 min-w-0 break-words @[40rem]:line-clamp-1">
                 {account.label}
               </span>
-              {email === null ? null : (
-                <span className="min-w-0 truncate text-xs text-subtle-foreground/75">
-                  {email}
-                </span>
-              )}
-              <SettingsBadge>{tier(account)}</SettingsBadge>
-              {account.extraUsage?.status === "allowed" ? (
-                <SettingsBadge>Extra usage available</SettingsBadge>
-              ) : null}
-              {account.active ? <SettingsBadge>Active</SettingsBadge> : null}
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground/75">
-              <span className="inline-flex shrink-0 items-center gap-1.5">
-                <span className={cn("size-1.5 rounded-full", status.dot)} />
-                {status.label}
-              </span>
-              {account.lastUsedAt === null ? null : (
-                <span>used {relative(account.lastUsedAt)}</span>
-              )}
-              {refreshing ? <span>refreshing usage…</span> : null}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:flex-nowrap sm:gap-1">
-            {slots.map((slot) => (
-              <QuotaValue
-                key={slot.key}
-                slot={slot}
-                threshold={threshold}
-                refreshing={refreshing}
+              <Icon
+                name="Pencil"
+                aria-hidden="true"
+                className="mt-1 size-3 shrink-0 text-muted-foreground opacity-70"
               />
-            ))}
+            </button>
+            {plan === null ? null : (
+              <span className="mt-0.5">
+                <SettingsBadge>{plan}</SettingsBadge>
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {renaming ? (
+        <p className="col-start-2 row-start-2 text-xs text-subtle-foreground">
+          Enter to save · Esc to cancel
+        </p>
+      ) : (
+        <>
+          <div className="col-start-2 row-start-2 hidden min-w-0 items-center gap-x-1 truncate text-xs text-subtle-foreground @[40rem]:flex">
+            {email === null ? null : <span className="truncate">{email}</span>}
+            {account.lastUsedAt === null ? null : (
+              <span className="shrink-0">
+                {email === null ? "" : "· "}used {relative(account.lastUsedAt)}
+              </span>
+            )}
+            {refreshing ? (
+              <span className="shrink-0">refreshing usage…</span>
+            ) : null}
           </div>
-        </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 data-[state=open]:bg-state-active"
-              aria-label={`${account.label} actions`}
+          <div className="col-start-2 row-start-2 min-w-0 @[40rem]:col-start-3 @[40rem]:row-span-full @[40rem]:row-start-1">
+            <StateWord state={state} />
+          </div>
+        </>
+      )}
+      {signInAgain ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          className="col-start-2 row-start-3 mt-1.5 justify-self-start pointer-coarse:h-9 @[40rem]:col-start-4 @[40rem]:row-span-full @[40rem]:row-start-1 @[40rem]:mt-0 @[40rem]:justify-self-end"
+          onClick={() => onAction("sign-in")}
+        >
+          <Icon name="UserRound" className="size-3.5" />
+          Sign in again
+        </Button>
+      ) : (
+        <Switch
+          checked={account.enabled}
+          disabled={pending}
+          aria-label={`Use ${account.label}`}
+          className="col-start-3 row-span-full row-start-1 justify-self-end @[40rem]:col-start-4"
+          onCheckedChange={() => onAction("toggle")}
+        />
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="col-start-4 row-span-full row-start-1 size-8 shrink-0 data-[state=open]:bg-state-active pointer-coarse:size-11 @[40rem]:col-start-5"
+            aria-label={`${account.label} actions`}
+          >
+            <Icon name="MoreHorizontal" className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onSelect={() => onAction("details")}>
+            <Icon name="ChartColumn" />
+            Usage details
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() => onAction("refresh")}
+          >
+            <Icon name="RotateCcw" />
+            Refresh usage
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() => onAction("priority")}
+          >
+            <Icon name="ListView" />
+            Set priority…
+          </DropdownMenuItem>
+          {account.kind === "oauth" ? (
+            <DropdownMenuItem
+              disabled={pending}
+              onSelect={() => onAction("sign-in")}
             >
-              <Icon name="MoreHorizontal" className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
+              <Icon name="UserRound" />
+              Sign in again…
+            </DropdownMenuItem>
+          ) : null}
+          {signInAgain ? (
             <DropdownMenuItem
               disabled={pending}
               onSelect={() => onAction("toggle")}
             >
               <Icon name={account.enabled ? "Circle" : "CircleCheck"} />
-              {account.enabled ? "Disable" : "Enable"}
+              {account.enabled ? "Turn off" : "Turn on"}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={pending}
-              onSelect={() => onAction("priority")}
-            >
-              <Icon name="ListView" />
-              Set priority…
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={pending}
-              onSelect={() => onAction("refresh")}
-            >
-              <Icon name="RotateCcw" />
-              Refresh usage
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={pending}
-              onSelect={() => onAction("rename")}
-            >
-              <Icon name="Pencil" />
-              Rename…
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={pending}
-              onSelect={() => onAction("remove")}
-            >
-              <Icon name="Trash2" />
-              Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <button
-          type="button"
-          aria-label={`Open ${account.label} details`}
-          onClick={onOpen}
-        >
-          <ResourceRowDetailChevron />
-        </button>
-      </div>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={pending}
+            onSelect={() => onAction("remove")}
+          >
+            <Icon name="Trash2" />
+            Remove…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
 
-function AddAccountMenu({
-  provider,
-  hasAccounts,
+function LocalLoginRow({
+  login,
+  pending,
+  onAdd,
+}: {
+  login: LocalLogin;
+  pending: boolean;
+  onAdd: (provider: PoolProvider) => void;
+}) {
+  const note = [
+    login.email ?? `This Mac's ${login.displayName} login`,
+    login.poolProvider === null ? "can't be pooled" : null,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
+  const state: SubscriptionState =
+    login.status === "expired"
+      ? {
+          label: "Sign-in expired",
+          detail: null,
+          icon: "AlertCircle",
+          tone: "text-warning-text",
+        }
+      : {
+          label: "Ready",
+          detail: null,
+          icon: null,
+          tone: "text-subtle-foreground",
+        };
+  const poolProvider = login.poolProvider;
+  return (
+    <div className={LEDGER_ROW_CLASS}>
+      <span
+        aria-hidden="true"
+        className="col-start-1 row-span-full row-start-1 size-8 pointer-coarse:size-11"
+      />
+      <div className="col-start-2 row-start-1 flex min-w-0 items-start gap-2">
+        <span className="line-clamp-2 min-w-0 break-words font-medium text-foreground @[40rem]:line-clamp-1">
+          {login.displayName}
+        </span>
+        {login.planLabel === null ? null : (
+          <span className="mt-0.5">
+            <SettingsBadge>{login.planLabel}</SettingsBadge>
+          </span>
+        )}
+      </div>
+      <p className="col-start-2 row-start-2 min-w-0 truncate text-xs text-subtle-foreground">
+        {note}
+      </p>
+      <div className="col-start-2 row-start-3 min-w-0 @[40rem]:col-start-3 @[40rem]:row-span-full @[40rem]:row-start-1">
+        <StateWord state={state} />
+      </div>
+      {poolProvider === null ? null : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          aria-label={`Add this Mac's ${login.displayName} login to the pool`}
+          className="col-start-3 row-span-full row-start-1 justify-self-end pointer-coarse:h-9 @[40rem]:col-start-4"
+          onClick={() => onAdd(poolProvider)}
+        >
+          <Icon name="Plus" className="size-3.5" />
+          Add to pool
+        </Button>
+      )}
+    </div>
+  );
+}
+
+type AddChoice = "login" | "import" | "api-key";
+
+function AddSubscriptionMenu({
   onChoose,
 }: {
-  provider: PoolProvider;
-  hasAccounts: boolean;
-  onChoose: (choice: "login" | "import" | "api-key") => void;
+  onChoose: (provider: PoolProvider, choice: AddChoice) => void;
 }) {
+  const item = (
+    provider: PoolProvider,
+    choice: AddChoice,
+    icon: string,
+    title: string,
+    detail: string,
+  ) => (
+    <DropdownMenuItem
+      className="items-start py-2"
+      onSelect={() => onChoose(provider, choice)}
+    >
+      <Icon name={icon} className="mt-0.5" />
+      <span>
+        <span className="block">{title}</span>
+        <span className="block text-xs text-muted-foreground">{detail}</span>
+      </span>
+    </DropdownMenuItem>
+  );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline">
           <Icon name="Plus" className="size-3.5" />
-          {hasAccounts ? "Add another account" : "Add account"}
+          Add subscription
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuItem
-          className="items-start py-2"
-          onSelect={() => onChoose("login")}
-        >
-          <Icon name="UserRound" className="mt-0.5" />
-          <span>
-            <span className="block">
-              Sign in to {provider === "claude" ? "Claude" : "Codex"}
-            </span>
-            <span className="block text-xs text-muted-foreground">
-              {provider === "claude"
-                ? "Opens claude.ai, paste the code back"
-                : "Opens ChatGPT with a device code"}
-            </span>
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="items-start py-2"
-          onSelect={() => onChoose("import")}
-        >
-          <Icon name="Download" className="mt-0.5" />
-          <span>
-            <span className="block">Import from this machine</span>
-            <span className="block text-xs text-muted-foreground">
-              Import the server host&apos;s current{" "}
-              {provider === "claude" ? "~/.claude" : "~/.codex"} login if it is
-              not already pooled
-            </span>
-          </span>
-        </DropdownMenuItem>
-        {provider === "claude" ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="items-start py-2"
-              onSelect={() => onChoose("api-key")}
-            >
-              <Icon name="Lock" className="mt-0.5" />
-              <span>
-                <span className="block">Add API key…</span>
-                <span className="block text-xs text-muted-foreground">
-                  Metered fallback, never routes first
-                </span>
-              </span>
-            </DropdownMenuItem>
-          </>
-        ) : null}
+      <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuLabel>Claude</DropdownMenuLabel>
+        {item(
+          "claude",
+          "login",
+          "UserRound",
+          "Sign in to Claude",
+          "Opens claude.ai, paste the code back",
+        )}
+        {item(
+          "claude",
+          "import",
+          "Download",
+          "Import this Mac's Claude login",
+          "The ~/.claude login, if it isn't pooled yet",
+        )}
+        {item(
+          "claude",
+          "api-key",
+          "Lock",
+          "Add Anthropic API key…",
+          "Metered fallback, never routes first",
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Codex</DropdownMenuLabel>
+        {item(
+          "codex",
+          "login",
+          "UserRound",
+          "Sign in to Codex",
+          "Opens ChatGPT with a device code",
+        )}
+        {item(
+          "codex",
+          "import",
+          "Download",
+          "Import this Mac's Codex login",
+          "The ~/.codex login, if it isn't pooled yet",
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -863,7 +997,9 @@ function ConfigFieldRow({
 }
 
 function AccountPoolSettings() {
-  const rpc = useRpc<typeof accountPoolRpcContract>();
+  const rpc = useRpc<
+    typeof accountPoolRpcContract & typeof accountPoolBindingReadRpcContract
+  >();
   const navigate = useBbNavigate();
   const [status, setStatus] = useState<PoolStatus | null>(readCachedStatus);
   const [statusIsCached, setStatusIsCached] = useState(status !== null);
@@ -900,7 +1036,8 @@ function AccountPoolSettings() {
   const [loginDone, setLoginDone] = useState<string | null>(null);
   const [pastedCode, setPastedCode] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
-  const [renameLabel, setRenameLabel] = useState("");
+  const [nextAccountId, setNextAccountId] = useState<string | null>(null);
+  const [localLogins, setLocalLogins] = useState<LocalLogin[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [priority, setPriority] = useState("100");
   const [countdown, setCountdown] = useState(0);
@@ -918,9 +1055,26 @@ function AccountPoolSettings() {
       if (!mounted.current) return;
       setStatus(next);
       setStatusIsCached(false);
+      const pick =
+        next.routing.claude &&
+        next.accounts.some(
+          (account) => account.provider === "claude" && account.enabled,
+        )
+          ? await rpc.call("routing.binding.next", { provider: "claude" }).then(
+              (result) => result.nextAccountId,
+              () => null,
+            )
+          : null;
+      if (mounted.current) setNextAccountId(pick);
     } catch (loadError) {
       if (mounted.current) setError(errorText(loadError));
     }
+  }, [rpc]);
+  const refreshLocalLogins = useCallback(async () => {
+    const logins = await rpc
+      .call("local.logins", null)
+      .catch((): LocalLogin[] => []);
+    if (mounted.current) setLocalLogins(logins);
   }, [rpc]);
   const refreshConfig = useCallback(async () => {
     try {
@@ -934,12 +1088,14 @@ function AccountPoolSettings() {
     mounted.current = true;
     void refresh();
     void refreshConfig();
+    void refreshLocalLogins();
     return () => {
       mounted.current = false;
     };
-  }, [refresh, refreshConfig]);
+  }, [refresh, refreshConfig, refreshLocalLogins]);
   useRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, () => {
     void refresh();
+    void refreshLocalLogins();
   });
   useRealtime(ACCOUNT_POOL_CONFIG_CHANGED, () => {
     void refreshConfig();
@@ -984,13 +1140,16 @@ function AccountPoolSettings() {
     };
   }, [accountLabel, codexStep, loginDone, refresh, rpc]);
   const accounts = status?.accounts ?? [];
+  const nextRecord = accounts.find((account) => account.id === nextAccountId);
+  const nextSubscriptionId =
+    nextRecord === undefined
+      ? null
+      : (subscriptionRepresentatives(accounts).get(subscriptionKey(nextRecord))
+          ?.id ?? null);
   const selectedAccount =
-    dialog?.kind === "account" ||
-    dialog?.kind === "priority" ||
-    dialog?.kind === "remove" ||
-    dialog?.kind === "rename"
-      ? (accounts.find((account) => account.id === dialog.accountId) ?? null)
-      : null;
+    dialog === null || dialog.kind === "api-key" || dialog.accountId === null
+      ? null
+      : (accounts.find((account) => account.id === dialog.accountId) ?? null);
   async function run(key: string, action: () => Promise<void>): Promise<void> {
     if (pending !== null) return;
     setPending(key);
@@ -1057,27 +1216,41 @@ function AccountPoolSettings() {
       setPending(null);
     }
   }
-  async function startClaude(): Promise<void> {
-    setDialog({ kind: "claude-login" });
+  async function startClaude(
+    target: AccountSummary | null = null,
+  ): Promise<void> {
+    setDialog({ kind: "claude-login", accountId: target?.id ?? null });
     setLoginDone(null);
+    setLoginStep(null);
     await run("claude-login", async () => {
-      const started = await rpc.call("login.start", null);
+      const started = await rpc.call(
+        "login.start",
+        target === null ? null : { accountId: target.id },
+      );
       setLoginStep(started);
       setPastedCode("");
       setAccountLabel("");
     });
   }
-  async function startCodex(): Promise<void> {
-    setDialog({ kind: "codex-login" });
+  async function startCodex(
+    target: AccountSummary | null = null,
+  ): Promise<void> {
+    setDialog({ kind: "codex-login", accountId: target?.id ?? null });
     setLoginDone(null);
+    setCodexStep(null);
     await run("codex-login", async () => {
       setAccountLabel("");
-      setCodexStep(await rpc.call("codexLogin.start", null));
+      setCodexStep(
+        await rpc.call(
+          "codexLogin.start",
+          target === null ? null : { accountId: target.id },
+        ),
+      );
     });
   }
   async function chooseAdd(
     provider: PoolProvider,
-    choice: "login" | "import" | "api-key",
+    choice: AddChoice,
   ): Promise<void> {
     if (choice === "login") {
       if (provider === "claude") await startClaude();
@@ -1096,10 +1269,22 @@ function AccountPoolSettings() {
       });
     });
   }
+  async function renameAccount(
+    account: AccountSummary,
+    label: string,
+  ): Promise<void> {
+    await run(`rename-${account.id}`, async () => {
+      await rpc.call("account.rename", { id: account.id, label });
+    });
+  }
   async function accountAction(
     account: AccountSummary,
-    action: "toggle" | "priority" | "refresh" | "remove" | "rename",
+    action: SubscriptionAction,
   ): Promise<void> {
+    if (action === "details") {
+      setDialog({ kind: "account", accountId: account.id });
+      return;
+    }
     if (action === "priority") {
       setPriority(String(account.priority));
       setDialog({ kind: "priority", accountId: account.id });
@@ -1109,9 +1294,9 @@ function AccountPoolSettings() {
       setDialog({ kind: "remove", accountId: account.id });
       return;
     }
-    if (action === "rename") {
-      setRenameLabel(account.label);
-      setDialog({ kind: "rename", accountId: account.id });
+    if (action === "sign-in") {
+      if (account.provider === "claude") await startClaude(account);
+      else await startCodex(account);
       return;
     }
     await run(`${action}-${account.id}`, async () => {
@@ -1128,14 +1313,20 @@ function AccountPoolSettings() {
     event: DragEndEvent,
   ): Promise<void> {
     if (pending !== null || event.over === null) return;
-    const ids = accounts
-      .filter((account) => account.provider === provider)
-      .map((account) => account.id);
+    const records = accounts.filter((account) => account.provider === provider);
+    const ids = foldSubscriptions(records).map((account) => account.id);
     const from = ids.findIndex((id) => id === event.active.id);
     const to = ids.findIndex((id) => id === event.over?.id);
     if (from < 0 || to < 0 || from === to) return;
-    const accountIds = arrayMove(ids, from, to);
-    setOptimisticOrder({ provider, ids: accountIds });
+    const reordered = arrayMove(ids, from, to);
+    const shown = new Set(ids);
+    let slot = 0;
+    const accountIds = records.map((account) => {
+      if (!shown.has(account.id)) return account.id;
+      slot += 1;
+      return reordered[slot - 1] ?? account.id;
+    });
+    setOptimisticOrder({ provider, ids: reordered });
     try {
       await run(`order-${provider}`, async () => {
         await rpc.call("account.reorder", { provider, accountIds });
@@ -1194,11 +1385,6 @@ function AccountPoolSettings() {
         className={proxying ? "space-y-6 opacity-50" : "space-y-6"}
         inert={proxying ? true : undefined}
       >
-        <p className="text-xs text-subtle-foreground/75">
-          Hub {status?.accepting ? "accepting" : "not accepting"} ·{" "}
-          {status?.inFlight ?? 0} in flight · used by {hubHosts}
-          {statusIsCached ? " · refreshing…" : null}
-        </p>
         {error === null ? null : (
           <div
             role="alert"
@@ -1207,123 +1393,177 @@ function AccountPoolSettings() {
             {error}
           </div>
         )}
-        {status !== null && !statusIsCached && accounts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-5 py-6 text-center">
-            <h2 className="text-sm font-semibold text-foreground">
-              No accounts in the pool
-            </h2>
-            <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
-              Add a Claude or Codex account and threads on every machine will
-              route through it. Your machine&apos;s own login keeps working
-              until then.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Button size="sm" onClick={() => void startClaude()}>
-                Sign in to Claude
-              </Button>
-              <Button size="sm" onClick={() => void startCodex()}>
-                Sign in to Codex
-              </Button>
+        <section className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                Subscriptions
+              </h2>
+              <p className="mt-0.5 max-w-xl text-xs leading-snug text-subtle-foreground/75">
+                Plans bb can send with. New conversations go to the subscription
+                with the most headroom, and each conversation stays on its
+                subscription.
+              </p>
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              or use either provider&apos;s Add account menu to import this
-              machine&apos;s login
-            </p>
+            <div className="shrink-0 self-start">
+              <AddSubscriptionMenu
+                onChoose={(provider, choice) =>
+                  void chooseAdd(provider, choice)
+                }
+              />
+            </div>
           </div>
-        ) : null}
-        {PROVIDERS.map((provider) => {
-          const serverAccounts = accounts.filter(
-            (account) => account.provider === provider.id,
-          );
-          const order =
-            optimisticOrder?.provider === provider.id
-              ? optimisticOrder.ids
-              : null;
-          const providerAccounts =
-            order !== null &&
-            order.length === serverAccounts.length &&
-            serverAccounts.every((account) => order.includes(account.id))
-              ? order.flatMap((id) =>
-                  serverAccounts.filter((account) => account.id === id),
-                )
-              : serverAccounts;
-          return (
-            <SettingsSection
-              key={provider.id}
-              title={provider.title}
-              description={provider.description}
-              action={
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={status?.routing[provider.id] ?? true}
-                    disabled={pending !== null}
-                    aria-label={`Route ${provider.title} threads`}
-                    onCheckedChange={(enabled) =>
-                      void run(`routing-${provider.id}`, async () => {
-                        await rpc.call("routing.set", {
-                          provider: provider.id,
-                          enabled,
-                        });
-                      })
-                    }
-                  />
-                  <AddAccountMenu
-                    provider={provider.id}
-                    hasAccounts={providerAccounts.length > 0}
-                    onChoose={(choice) => void chooseAdd(provider.id, choice)}
-                  />
-                </div>
-              }
-            >
-              {status === null ? (
-                <p className="py-2.5 text-sm text-muted-foreground">Loading…</p>
-              ) : providerAccounts.length === 0 ? (
-                <p className="py-2.5 text-sm text-subtle-foreground">
-                  No accounts yet.
+          <div className="@container divide-y divide-border overflow-hidden rounded-lg border border-border">
+            {status === null ? (
+              <p className="px-4 py-3 text-sm text-muted-foreground">
+                Loading…
+              </p>
+            ) : !statusIsCached && accounts.length === 0 ? (
+              <div className="px-5 py-6 text-center">
+                <h3 className="text-sm font-semibold text-foreground">
+                  No subscriptions in the pool
+                </h3>
+                <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
+                  Add a Claude or Codex subscription and threads on every
+                  machine will route through it. Your machine&apos;s own login
+                  keeps working until then.
                 </p>
-              ) : (
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  modifiers={accountDragModifiers}
-                  onDragEnd={(event) =>
-                    void reorderAccounts(provider.id, event)
-                  }
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button size="sm" onClick={() => void startClaude()}>
+                    Sign in to Claude
+                  </Button>
+                  <Button size="sm" onClick={() => void startCodex()}>
+                    Sign in to Codex
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {PROVIDERS.map((provider) => {
+              const serverAccounts = foldSubscriptions(
+                accounts.filter((account) => account.provider === provider.id),
+              );
+              if (serverAccounts.length === 0) return null;
+              const order =
+                optimisticOrder?.provider === provider.id
+                  ? optimisticOrder.ids
+                  : null;
+              const providerAccounts =
+                order !== null &&
+                order.length === serverAccounts.length &&
+                serverAccounts.every((account) => order.includes(account.id))
+                  ? order.flatMap((id) =>
+                      serverAccounts.filter((account) => account.id === id),
+                    )
+                  : serverAccounts;
+              const on = providerAccounts.filter(
+                (account) => account.enabled,
+              ).length;
+              const needs = providerAccounts.filter(
+                (account) => account.signInExpired,
+              ).length;
+              const groupSummary = `${providerAccounts.length} subscription${providerAccounts.length === 1 ? "" : "s"} · ${on} on${needs === 0 ? "" : ` · ${needs} need${needs === 1 ? "s" : ""} sign-in`}`;
+              return (
+                <div
+                  key={provider.id}
+                  role="group"
+                  aria-label={`${provider.title} subscriptions`}
                 >
-                  <SortableContext
-                    items={providerAccounts.map((account) => account.id)}
-                    strategy={verticalListSortingStrategy}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 pb-2 pt-2.5 @[40rem]:px-4">
+                    <h3 className="text-sm font-medium text-foreground">
+                      {provider.title}
+                    </h3>
+                    <span className="order-3 basis-full text-xs text-subtle-foreground @[40rem]:order-none @[40rem]:basis-auto">
+                      {groupSummary}
+                    </span>
+                    <span className="flex-1" />
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-subtle-foreground">
+                      Route {provider.title} threads
+                      <Switch
+                        checked={status?.routing[provider.id] ?? true}
+                        disabled={pending !== null}
+                        aria-label={`Route ${provider.title} threads`}
+                        onCheckedChange={(enabled) =>
+                          void run(`routing-${provider.id}`, async () => {
+                            await rpc.call("routing.set", {
+                              provider: provider.id,
+                              enabled,
+                            });
+                          })
+                        }
+                      />
+                    </span>
+                  </div>
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    modifiers={accountDragModifiers}
+                    onDragEnd={(event) =>
+                      void reorderAccounts(provider.id, event)
+                    }
                   >
-                    <div className="divide-y divide-border">
-                      {providerAccounts.map((account) => (
-                        <AccountRow
-                          key={account.id}
-                          account={account}
-                          threshold={threshold}
-                          pending={pending !== null}
-                          refreshing={
-                            statusIsCached ||
-                            pending === `refresh-${account.id}`
-                          }
-                          reorderDisabled={providerAccounts.length < 2}
-                          onAction={(action) =>
-                            void accountAction(account, action)
-                          }
-                          onOpen={() =>
-                            setDialog({
-                              kind: "account",
-                              accountId: account.id,
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              )}
-            </SettingsSection>
-          );
-        })}
+                    <SortableContext
+                      items={providerAccounts.map((account) => account.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div>
+                        {providerAccounts.map((account) => (
+                          <SubscriptionRow
+                            key={account.id}
+                            account={account}
+                            state={subscriptionState(
+                              account,
+                              threshold,
+                              status?.routing.claude === false
+                                ? null
+                                : nextSubscriptionId,
+                            )}
+                            pending={pending !== null}
+                            refreshing={
+                              statusIsCached ||
+                              pending === `refresh-${account.id}`
+                            }
+                            reorderDisabled={providerAccounts.length < 2}
+                            onAction={(action) =>
+                              void accountAction(account, action)
+                            }
+                            onRename={(label) =>
+                              void renameAccount(account, label)
+                            }
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                </div>
+              );
+            })}
+            {localLogins.length === 0 ? null : (
+              <div role="group" aria-label="On this Mac">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 pb-2 pt-2.5 @[40rem]:px-4">
+                  <h3 className="text-sm font-medium text-foreground">
+                    On this Mac
+                  </h3>
+                  <span className="text-xs text-subtle-foreground">
+                    Signed in directly, not in the pool
+                  </span>
+                </div>
+                {localLogins.map((login) => (
+                  <LocalLoginRow
+                    key={`${login.providerId}:${login.email ?? ""}`}
+                    login={login}
+                    pending={pending !== null}
+                    onAdd={(provider) => void chooseAdd(provider, "import")}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+        <p className="text-xs text-subtle-foreground/75">
+          Hub {status?.accepting ? "accepting" : "not accepting"} ·{" "}
+          {status?.inFlight ?? 0} in flight · used by {hubHosts}
+          {statusIsCached ? " · refreshing…" : null}
+        </p>
         <Collapsible className="rounded-lg border border-border px-4">
           <CollapsibleTrigger className="flex w-full items-center gap-2 py-2.5 text-sm font-medium text-foreground">
             <Icon
@@ -1496,39 +1736,6 @@ function AccountPoolSettings() {
             />
           </DialogFrame>
         ) : null}
-        {dialog?.kind === "rename" && selectedAccount !== null ? (
-          <DialogFrame
-            title={`Rename ${selectedAccount.label}`}
-            footer={
-              <>
-                <span className="flex-1" />
-                <Button variant="outline" onClick={closeDialog}>
-                  Cancel
-                </Button>
-                <Button
-                  disabled={renameLabel.trim().length === 0 || pending !== null}
-                  onClick={() =>
-                    void run(`rename-${selectedAccount.id}`, async () => {
-                      await rpc.call("account.rename", {
-                        id: selectedAccount.id,
-                        label: renameLabel.trim(),
-                      });
-                      setDialog(null);
-                    })
-                  }
-                >
-                  Save
-                </Button>
-              </>
-            }
-          >
-            <Input
-              aria-label="Account label"
-              value={renameLabel}
-              onChange={(event) => setRenameLabel(event.target.value)}
-            />
-          </DialogFrame>
-        ) : null}
         {dialog?.kind === "api-key" ? (
           <DialogFrame
             title="Add an Anthropic API key"
@@ -1598,14 +1805,14 @@ function AccountPoolSettings() {
             }
           >
             <p className="text-sm text-muted-foreground">
-              This deletes the account&apos;s secret file. Threads fall back to
-              their machine login when no other pooled account is available.
+              {removeCopy(selectedAccount)}
             </p>
           </DialogFrame>
         ) : null}
         {dialog?.kind === "claude-login" ? (
           <LoginDialog
             provider="claude"
+            target={selectedAccount}
             loginStep={loginStep}
             codexStep={null}
             loginDone={loginDone}
@@ -1621,24 +1828,30 @@ function AccountPoolSettings() {
             complete={() =>
               void run("complete-claude", async () => {
                 if (loginStep === null) return;
-                const added = await rpc.call("login.complete", {
-                  sessionId: loginStep.sessionId,
-                  pasted: pastedCode,
-                  ...(accountLabel.trim() === ""
-                    ? {}
-                    : { label: accountLabel.trim() }),
-                });
+                const added = await rpc
+                  .call("login.complete", {
+                    sessionId: loginStep.sessionId,
+                    pasted: pastedCode,
+                    ...(selectedAccount !== null || accountLabel.trim() === ""
+                      ? {}
+                      : { label: accountLabel.trim() }),
+                  })
+                  .catch((completeError: unknown) => {
+                    setLoginStep(null);
+                    throw completeError;
+                  });
                 setPastedCode("");
                 setLoginDone(added.label);
                 setLoginStep(null);
               })
             }
-            restart={() => void startClaude()}
+            restart={() => void startClaude(selectedAccount)}
           />
         ) : null}
         {dialog?.kind === "codex-login" ? (
           <LoginDialog
             provider="codex"
+            target={selectedAccount}
             loginStep={null}
             codexStep={codexStep}
             loginDone={loginDone}
@@ -1652,7 +1865,7 @@ function AccountPoolSettings() {
             accountLabel={accountLabel}
             setAccountLabel={setAccountLabel}
             complete={() => {}}
-            restart={() => void startCodex()}
+            restart={() => void startCodex(selectedAccount)}
           />
         ) : null}
       </Dialog>
@@ -1684,6 +1897,7 @@ function AccountDialog({
     account.provider === "claude"
       ? account.accountUuid
       : account.codexAccountId;
+  const plan = planBadge(account);
   return (
     <DialogFrame
       title={account.label}
@@ -1709,10 +1923,8 @@ function AccountDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <SettingsBadge>{tier(account)}</SettingsBadge>
-        <SettingsBadge>
-          {statusPresentation(account, threshold).label}
-        </SettingsBadge>
+        {plan === null ? null : <SettingsBadge>{plan}</SettingsBadge>}
+        <StateWord state={subscriptionState(account, threshold, null)} />
       </div>
       <div className="space-y-4">
         {account.provider === "codex" ? (
@@ -1790,6 +2002,16 @@ function AccountDialog({
         <dd>
           {account.observedAt === null ? "Never" : relative(account.observedAt)}
         </dd>
+        {account.extraUsage === null ? null : (
+          <>
+            <dt className="text-muted-foreground">Extra usage</dt>
+            <dd>
+              {account.extraUsage.status === "allowed"
+                ? "Available"
+                : "Not available"}
+            </dd>
+          </>
+        )}
         {providerId === null || providerId === undefined ? null : (
           <>
             <dt className="text-muted-foreground">Account id</dt>
@@ -1803,6 +2025,7 @@ function AccountDialog({
 
 function LoginDialog({
   provider,
+  target,
   loginStep,
   codexStep,
   loginDone,
@@ -1819,6 +2042,7 @@ function LoginDialog({
   restart,
 }: {
   provider: PoolProvider;
+  target: AccountSummary | null;
   loginStep: OAuthLoginStart | null;
   codexStep: CodexDeviceLoginStart | null;
   loginDone: string | null;
@@ -1835,21 +2059,24 @@ function LoginDialog({
   restart: () => void;
 }) {
   const name = provider === "claude" ? "Claude" : "Codex";
+  const service = provider === "claude" ? "Claude" : "ChatGPT";
   const url =
     provider === "claude"
       ? loginStep?.authorizeUrl
       : codexStep?.verificationUri;
   return (
     <DialogFrame
-      title={`Sign in to ${name}`}
+      title={target === null ? `Sign in to ${name}` : "Sign in again"}
       className="sm:max-w-xl"
       footer={
         loginDone !== null ? (
           <>
             <span className="flex-1" />
-            <Button variant="outline" onClick={restart}>
-              Add another
-            </Button>
+            {target === null ? (
+              <Button variant="outline" onClick={restart}>
+                Add another
+              </Button>
+            ) : null}
             <Button onClick={close}>Done</Button>
           </>
         ) : provider === "claude" ? (
@@ -1870,16 +2097,25 @@ function LoginDialog({
       <StepIndicator step={loginDone === null ? 2 : 3} />
       {loginDone !== null ? (
         <div>
-          <h3 className="text-base font-semibold">Connected {loginDone}</h3>
+          <h3 className="text-base font-semibold">
+            {target === null
+              ? `Connected ${loginDone}`
+              : `Signed in again to ${loginDone}`}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {name} threads on every machine now route through this account.
-            Usage refreshes in the background.
+            {target === null
+              ? `${name} threads on every machine now route through this account. Usage refreshes in the background.`
+              : target.enabled
+                ? `${name} threads can use it again. Usage refreshes in the background.`
+                : "It stays off until you turn it on."}
           </p>
         </div>
       ) : url === undefined ? (
-        provider === "codex" && error !== null ? (
+        error !== null ? (
           <div className="space-y-3">
-            <p className="text-sm text-destructive-text">{error}</p>
+            <p role="alert" className="text-sm text-destructive-text">
+              {error}
+            </p>
             <Button variant="outline" onClick={restart}>
               Try again
             </Button>
@@ -1889,6 +2125,14 @@ function LoginDialog({
         )
       ) : (
         <>
+          {target === null ? null : (
+            <p className="text-sm text-foreground">
+              Sign in to {service} as the account behind{" "}
+              <span className="font-semibold">{target.label}</span>. bb keeps
+              its name{provider === "claude" ? ", plan" : ""} and place in the
+              list.
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             {provider === "claude"
               ? "Sign in at claude.ai, then paste the code from the final page."
@@ -1898,15 +2142,25 @@ function LoginDialog({
             <UserCodeBlock userCode={codexStep.userCode} />
           )}
           <AuthorizationUrlRow name={name} url={url} openUrl={openUrl} />
-          <Input
-            aria-label="Account label"
-            placeholder={`Optional ${name} account label`}
-            value={accountLabel}
-            onChange={(event) => setAccountLabel(event.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">
-            Use a private window or sign in to the account you want to add.
-          </p>
+          {target === null ? (
+            <>
+              <Input
+                aria-label="Account label"
+                placeholder={`Optional ${name} account label`}
+                value={accountLabel}
+                onChange={(event) => setAccountLabel(event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Use a private window or sign in to the account you want to add.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              If {provider === "claude" ? "the code belongs" : "you sign in"} to
+              a different {service} account, bb stops and keeps this
+              subscription as it is.
+            </p>
+          )}
           {provider === "claude" ? (
             <Input
               type="password"

@@ -207,6 +207,34 @@ export class AccountStore {
     return this.update(id, (account) => ({ ...account, accountUuid }));
   }
 
+  async replaceCredentials(
+    id: string,
+    identity: Partial<
+      Pick<
+        Account,
+        | "label"
+        | "email"
+        | "accountUuid"
+        | "codexAccountId"
+        | "subscriptionType"
+        | "rateLimitTier"
+      >
+    >,
+    secret: AccountSecret,
+  ): Promise<Account | null> {
+    return this.serialized(async () => {
+      const accounts = await this.list();
+      const index = accounts.findIndex((account) => account.id === id);
+      const current = accounts[index];
+      if (index < 0 || current === undefined) return null;
+      const updated = accountSchema.parse({ ...current, ...identity });
+      await this.writeSecret(id, secret);
+      accounts[index] = updated;
+      await this.kv.set(ACCOUNTS_KEY, accounts);
+      return updated;
+    });
+  }
+
   private async update(
     id: string,
     change: (account: Account) => Account,

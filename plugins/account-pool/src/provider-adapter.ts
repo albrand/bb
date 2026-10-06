@@ -42,6 +42,12 @@ const oauthErrorSchema = z.object({
 
 export class OAuthRefreshError extends Error {}
 
+const SIGN_IN_REJECTION = /^OAuth refresh failed with HTTP 40[01]\./u;
+
+export function isSignInRejection(error: string | null): boolean {
+  return error !== null && SIGN_IN_REJECTION.test(error);
+}
+
 export class TransientOAuthRefreshError extends OAuthRefreshError {
   constructor(
     message: string,
