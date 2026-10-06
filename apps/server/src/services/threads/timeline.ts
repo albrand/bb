@@ -1695,7 +1695,7 @@ interface LoadThreadConversationOutlineOptions extends BuildThreadConversationOu
 }
 
 const CONVERSATION_OUTLINE_PREVIEW_MAX_LENGTH = 200;
-const CONVERSATION_OUTLINE_PROJECTION_VERSION = 3;
+const CONVERSATION_OUTLINE_PROJECTION_VERSION = 4;
 const conversationOutlineItemsSchema =
   threadConversationOutlineItemSchema.array();
 

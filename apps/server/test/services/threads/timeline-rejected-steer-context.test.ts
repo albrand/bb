@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { THREAD_CONTEXT_CLEAR_OPERATION } from "@bb/domain";
-import { getLatestThreadSequence } from "@bb/db";
-import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
+import {
+  getLatestStoredConversationOutlineSequence,
+  getLatestThreadSequence,
+  upsertThreadConversationOutlineRecord,
+} from "@bb/db";
+import {
+  buildThreadConversationOutline,
+  buildThreadConversationOutlineProjectionKey,
+  buildThreadTimelineWithProfile,
+  loadThreadConversationOutline,
+} from "../../../src/services/threads/timeline.js";
 import {
   appendRows,
   withTestThread,
@@ -101,6 +110,18 @@ function steer(result: ReturnType<typeof load>) {
   );
 }
 
+function outlineOptions(testThread: TestThread) {
+  return {
+    completedTurnDisplay: "collapse" as const,
+    maxSeq: getLatestThreadSequence(testThread.db, {
+      threadId: testThread.thread.id,
+    }),
+    outlineSequence: getLatestStoredConversationOutlineSequence(testThread.db, {
+      threadId: testThread.thread.id,
+    }),
+  };
+}
+
 describe("rejected steer turn context", () => {
   it.each(["agent", "system", "user"] as const)(
     "keeps a rejected %s steer visible without replacing a historical summary",
@@ -135,6 +156,11 @@ describe("rejected steer turn context", () => {
           ).flat(),
         ]);
         const requested = request();
+        loadThreadConversationOutline(
+          testThread.db,
+          testThread.thread,
+          outlineOptions(testThread),
+        );
         const [liveStart, ...liveRest] = turn("live");
         appendRows(testThread, [
           liveStart,
@@ -150,6 +176,49 @@ describe("rejected steer turn context", () => {
           turnRequest: { status: "rejected" },
         });
         expect(latest.response.rows).toContainEqual(fullSteer);
+        const lastHistoricalAnswer = full.response.rows.findIndex(
+          (row) =>
+            row.kind === "conversation" && row.text === "Answer later-99",
+        );
+        expect(full.response.rows.indexOf(fullSteer!)).toBeGreaterThan(
+          lastHistoricalAnswer,
+        );
+        const outline = buildThreadConversationOutline(
+          testThread.db,
+          testThread.thread,
+          outlineOptions(testThread),
+        );
+        const options = outlineOptions(testThread);
+        const rejectedItem = outline.items.find(
+          (item) => item.id === fullSteer?.id,
+        );
+        if (rejectedItem === undefined)
+          throw new Error("Rejected outline item missing");
+        const staleItems = outline.items.filter(
+          (item) => item.id !== rejectedItem.id,
+        );
+        staleItems.splice(2, 0, rejectedItem);
+        upsertThreadConversationOutlineRecord(testThread.db, {
+          threadId: testThread.thread.id,
+          projectionKey: buildThreadConversationOutlineProjectionKey(
+            testThread.thread,
+            options.outlineSequence,
+            options,
+          ).replace(/^\[\d+,/, "[3,"),
+          itemsJson: JSON.stringify(staleItems),
+        });
+        expect(
+          loadThreadConversationOutline(
+            testThread.db,
+            testThread.thread,
+            options,
+          ),
+        ).toEqual(outline);
+        expect(
+          outline.items.findIndex((item) => item.id === fullSteer?.id),
+        ).toBeGreaterThan(
+          outline.items.findIndex((item) => item.preview === "Answer later-99"),
+        );
         const historicalSummary = full.response.rows.find(
           (row) => row.kind === "turn" && row.turnId === targetTurnId,
         );

@@ -1053,8 +1053,9 @@ function isRootOwnedHumanSteerRow(row: TimelineRow): boolean {
   );
 }
 
-function collectExternalUserBoundarySeqs(
+function collectTimelineOrderingBoundarySeqs(
   projection: EventProjection,
+  rows: readonly TimelineRow[],
 ): number[] {
   const boundarySeqs = new Set<number>();
   for (const entry of projection.entries) {
@@ -1063,6 +1064,17 @@ function collectExternalUserBoundarySeqs(
     }
     for (const seq of entry.turn.externalUserBoundarySeqs ?? []) {
       boundarySeqs.add(seq);
+    }
+  }
+  for (const row of rows) {
+    if (
+      row.kind === "conversation" &&
+      row.role === "user" &&
+      row.turnId !== null &&
+      row.turnRequest?.kind === "steer" &&
+      row.turnRequest.status === "rejected"
+    ) {
+      boundarySeqs.add(row.sourceSeqStart);
     }
   }
   return [...boundarySeqs].sort((left, right) => left - right);
@@ -1081,7 +1093,7 @@ function compareTimelineRowsBySource(
   return 0;
 }
 
-function orderRowsAfterExternalUserBoundary(
+function orderRowsAfterBoundary(
   rows: TimelineRow[],
   boundarySeqs: readonly number[],
 ): TimelineRow[] {
@@ -1139,9 +1151,9 @@ function buildTimelineRows(
     appendRows(rows, materializeTimelinePlan(item, options));
   }
 
-  return orderRowsAfterExternalUserBoundary(
+  return orderRowsAfterBoundary(
     rows,
-    collectExternalUserBoundarySeqs(projection),
+    collectTimelineOrderingBoundarySeqs(projection, rows),
   );
 }
 
