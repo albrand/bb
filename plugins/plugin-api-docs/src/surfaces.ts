@@ -571,11 +571,12 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         id: "composer-actions",
         title: "Inline actions",
         summary:
-          "Add a button inside the prompt box, beside voice and send. With this, a plugin can:",
+          "Add an inline action button beside the voice and send controls in the prompt box. With this, a plugin can:",
         bullets: [
-          "Rewrite the draft, for example to rephrase it or insert a template",
-          "Open a popup anchored to the prompt box",
-          "Run from a keyboard shortcut people can rebind",
+          "Read or rewrite drafts, insert text or mentions, and read or change picker values",
+          "Lock or tint the draft, or add model-menu controls such as a subscription selector",
+          "Show up to three inline actions; overflow the rest, and open responsive popups or commands",
+          "Attach plugin data to a new-thread draft before its first message",
         ],
         apiSymbols: [
           "PluginComposerApi",
@@ -583,6 +584,10 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ComposerInsertPart",
           "ComposerInsertOptions",
           "ComposerCustomization.experimental_popups",
+          "ComposerCustomization.experimental_modelPicker",
+          "PluginComposerApi.experimental_createData",
+          "PluginComposerApi.experimental_setCreateData",
+          "PluginHookSignatures.experimental_thread.configure",
           "ExperimentalComposerPopupRegistration",
           "PluginComposerApi.experimental_openPopup",
           "PluginComposerApi.experimental_closePopup",

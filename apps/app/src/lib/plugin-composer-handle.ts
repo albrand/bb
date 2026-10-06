@@ -30,6 +30,10 @@ import type { PluginComposerHost } from "@/components/plugin/plugin-composer-hos
 import { serializedTextForPromptMentionResource } from "@/components/promptbox/mentions/prompt-mention-clipboard";
 import { subscribeComposerSubmitted } from "./composer-submissions";
 import {
+  getComposerCreateData,
+  setComposerCreateData,
+} from "./composer-create-data";
+import {
   getComposerEditorBridge,
   subscribeComposerEditorBridge,
 } from "./composer-editor-registry";
@@ -211,6 +215,14 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
       getComposerEditorBridge(key)?.closePopup(pluginId) ?? false,
     getAttachmentCount: () => source.getCurrent().attachments.length,
     getSelection: () => source.getSelection?.() ?? null,
+    getCreateData: (pluginId) => {
+      const data = getComposerCreateData(key);
+      return data !== undefined && Object.hasOwn(data, pluginId)
+        ? (data[pluginId] ?? null)
+        : null;
+    },
+    setCreateData: (pluginId, data) =>
+      setComposerCreateData(key, pluginId, data),
     addQuote: (text) => {
       const current = source.getCurrent();
       const next = appendQuoteAndAttachmentsToDraft(current, text, []);

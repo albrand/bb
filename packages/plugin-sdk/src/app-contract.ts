@@ -2399,6 +2399,8 @@ export interface ComposerCustomization {
   plusMenu?: readonly ComposerPlusMenuItem[];
   /** Host-rendered rows in the menu next to the composer's send button. */
   sendMenu?: readonly ComposerSendMenuItem[];
+  /** Content beside model options, bound to this composer and the provider currently displayed by the menu. */
+  experimental_modelPicker?: ComponentType<{ providerId: string }>;
   richText?: ComposerRichTextSpec;
   /** Host-managed popups sharing the mention menu's above/below placement, with a responsive drawer on compact screens. Open by popup id, unique within this plugin. */
   experimental_popups?: readonly ExperimentalComposerPopupRegistration[];
@@ -2780,6 +2782,10 @@ export interface PluginComposerApi {
    * handling and restore the draft, exactly as an interactive failure does.
    */
   submit(options: ComposerSubmitOptions): Promise<void>;
+  /** This plugin's creation data for this new-thread draft, or null. It survives menu unmounts and failed sends. */
+  readonly experimental_createData: JsonValue | null;
+  /** Set this plugin's creation data for ordinary and programmatic new-thread sends. Null clears it; existing-thread composers reject this operation. */
+  experimental_setCreateData(data: JsonValue | null): void;
   /**
    * Set this composer's pickers as if each value had been picked by hand.
    *
@@ -3102,6 +3108,8 @@ export interface ExperimentalPermissionModePickerProps {
  * composer props.
  */
 export interface NewThreadRequest {
+  /** Plugin-owned creation configuration; forward unchanged to `threads.spawn`. Each value is delivered only to that plugin before message admission. */
+  experimental_pluginCreateData?: Record<string, JsonValue>;
   /**
    * The selected project id. Choosing "Don't work in a project" submits BB's
    * personal-project id (not `null`) together with a `personal` workspace

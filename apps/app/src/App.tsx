@@ -2,7 +2,6 @@ import { LazyThreadDetailView } from "./views/thread-detail/LazyThreadDetailView
 import { LazyRootComposeView } from "./views/LazyRootComposeView";
 import { useRouteState } from "./hooks/useRouteState";
 import { lazy, Suspense, useEffect } from "react";
-import { parseMessageLink } from "@bb/client-core";
 import {
   matchPath,
   Navigate,
@@ -234,13 +233,41 @@ function hashTargetId(hash: string): string | null {
   }
 }
 
+function isMessageLinkLocation(location: {
+  pathname: string;
+  hash: string;
+}): boolean {
+  const encodedThreadId = /^\/(?:projects\/[^/]+\/)?threads\/([^/]+)\/?$/.exec(
+    location.pathname,
+  )?.[1];
+  const seq = new URLSearchParams(location.hash.slice(1)).get("msg");
+  if (
+    encodedThreadId === undefined ||
+    seq === null ||
+    !/^(0|[1-9]\d*)$/.test(seq)
+  ) {
+    return false;
+  }
+  try {
+    decodeURIComponent(encodedThreadId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const HASH_NAVIGATION_WAIT_MS = 2_000;
 
 export function HashNavigationScroll() {
   const location = useLocation();
 
   useEffect(() => {
-    if (parseMessageLink(`${location.pathname}${location.hash}`) !== null) {
+    if (
+      isMessageLinkLocation({
+        pathname: location.pathname,
+        hash: location.hash,
+      })
+    ) {
       return;
     }
     const targetId = hashTargetId(location.hash);

@@ -490,12 +490,13 @@ export function createCodexAdapter(options: {
       });
       if (!response.ok) {
         await response.body?.cancel();
-        return;
+        throw new Error("Usage refresh failed.");
       }
       const parsed = usageResponseSchema.safeParse(
         await response.json().catch(() => null),
       );
-      if (!parsed.success) return;
+      if (!parsed.success)
+        throw new Error("Usage refresh returned unreadable data.");
       if (parsed.data.plan_type != null) {
         await context.accounts.setSubscriptionType(
           context.account.id,
@@ -508,7 +509,9 @@ export function createCodexAdapter(options: {
         context.quotas.get(context.account.id),
         context.now(),
       );
-      if (quota !== null) context.quotas.put(quota);
+      if (quota === null)
+        throw new Error("Usage refresh returned unreadable data.");
+      context.quotas.put(quota);
     },
     errorResponse(status, message, headers) {
       return Response.json(

@@ -130,6 +130,30 @@ export const limitWindowSchema = z
 
 export type LimitWindow = z.infer<typeof limitWindowSchema>;
 
+export const threadSelectionInputSchema = z
+  .object({
+    threadId: z.string().regex(/^thr_[A-Za-z0-9]+$/u),
+    provider: providerSchema,
+  })
+  .strict();
+
+export const threadSelectionSchema = z
+  .object({
+    accountId: z.string().uuid().nullable(),
+  })
+  .strict();
+
+export const threadSelectionSetSchema = threadSelectionInputSchema.extend(
+  threadSelectionSchema.shape,
+);
+
+export const draftSelectionSchema = z
+  .object({
+    provider: providerSchema,
+    accountId: z.string().uuid(),
+  })
+  .strict();
+
 export const accountSchema = z
   .object({
     id: z.string().uuid(),
@@ -364,4 +388,8 @@ export const tokenRotateInputSchema = z
 
 export const bypassInputSchema = z
   .object({ threadId: z.string().min(1), bypassed: z.boolean() })
+  .strict();
+
+export const bypassGetInputSchema = z
+  .object({ threadId: z.string().min(1) })
   .strict();

@@ -49,6 +49,13 @@ export class PoolOperations {
     private readonly parentStatus: () => Promise<
       PoolStatus["parent"]
     > = async () => null,
+    private readonly threadState: (threadId: string) => Promise<{
+      providerId: string;
+      status: string;
+      queued: boolean;
+    }> = async () => {
+      throw new Error("Thread routing state is unavailable.");
+    },
   ) {}
 
   async add(input: AccountAddInput): Promise<Account> {
@@ -218,8 +225,12 @@ export class PoolOperations {
 
   async refreshUsage(id: string): Promise<AccountSummary | null> {
     if ((await this.accounts.get(id)) === null) return null;
-    await this.hub.refreshUsage(id, true);
-    this.onAccountsChanged();
+    try {
+      if (!(await this.hub.refreshUsage(id, true)))
+        throw new Error("Could not refresh account usage. Try again.");
+    } finally {
+      this.onAccountsChanged();
+    }
     return (
       (await this.status()).accounts.find((account) => account.id === id) ??
       null
@@ -233,6 +244,79 @@ export class PoolOperations {
 
   isRoutingEnabled(provider: PoolProvider): Promise<boolean> {
     return this.routing.isProviderEnabled(provider);
+  }
+
+  async selectedAccount(
+    threadId: string,
+    provider: PoolProvider,
+  ): Promise<{ accountId: string | null }> {
+    return {
+      accountId: await this.routing.selectedAccount(threadId, provider),
+    };
+  }
+
+  async selectAccount(
+    threadId: string,
+    provider: PoolProvider,
+    accountId: string | null,
+  ): Promise<{ accountId: string | null }> {
+    const current = await this.routing.selectedAccount(threadId, provider);
+    const thread = await this.threadState(threadId);
+    if (
+      thread.providerId !== (provider === "claude" ? "claude-code" : "codex")
+    ) {
+      throw new Error("This subscription belongs to a different provider.");
+    }
+    if (current === accountId) return { accountId };
+    if (
+      (thread.status !== "idle" && thread.status !== "error") ||
+      thread.queued
+    ) {
+      throw new Error(
+        "Wait for this conversation and its queued messages to finish before changing subscriptions.",
+      );
+    }
+    await this.validateSelection(threadId, provider, accountId);
+    await this.routing.selectAccount(threadId, provider, accountId);
+    this.onAccountsChanged();
+    return { accountId };
+  }
+
+  async initializeSelection(
+    threadId: string,
+    provider: PoolProvider,
+    accountId: string,
+  ): Promise<void> {
+    await this.validateSelection(threadId, provider, accountId);
+    await this.routing.selectAccount(threadId, provider, accountId);
+  }
+
+  private async validateSelection(
+    threadId: string,
+    provider: PoolProvider,
+    accountId: string | null,
+  ): Promise<void> {
+    if (accountId === null) return;
+    if (
+      (await this.routing.isBypassed(threadId)) ||
+      !(await this.isRoutingEnabled(provider))
+    ) {
+      throw new Error("Enable pooled routing before selecting a subscription.");
+    }
+    if ((await this.parentStatus())?.mode === "proxy") {
+      throw new Error("Choose Automatic while using a parent pool.");
+    }
+    const account = await this.accounts.get(accountId);
+    if (account === null || account.provider !== provider || !account.enabled) {
+      throw new Error(
+        "The selected subscription is missing, disabled, or belongs to another provider.",
+      );
+    }
+    if (this.quotas.get(accountId).error !== null) {
+      throw new Error(
+        "Repair the selected subscription's login before using it.",
+      );
+    }
   }
 
   private async nextPriority(provider: PoolProvider): Promise<number> {
@@ -295,6 +379,13 @@ export class PoolOperations {
   }> {
     await this.routing.setBypassed(threadId, bypassed);
     return { threadId, bypassed };
+  }
+
+  async getBypass(threadId: string): Promise<{
+    threadId: string;
+    bypassed: boolean;
+  }> {
+    return { threadId, bypassed: await this.routing.isBypassed(threadId) };
   }
 
   async hasUsableEnabledAccount(provider: PoolProvider): Promise<boolean> {

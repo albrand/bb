@@ -359,6 +359,7 @@ describe("runPeriodicSweeps", () => {
       });
       let attempts = 0;
       installHooks({
+        "experimental_thread.configure": [],
         "message.dispatch": [
           {
             pluginId: "slow-idle-recovery",
@@ -627,11 +628,7 @@ describe("runPeriodicSweeps", () => {
             .from(events)
             .where(eq(events.threadId, thread.id))
             .all(),
-        ).toEqual([
-          { sequence: 1 },
-          { sequence: 2 },
-          { sequence: 3 },
-        ]);
+        ).toEqual([{ sequence: 1 }, { sequence: 2 }, { sequence: 3 }]);
       } finally {
         clock.mockRestore();
       }

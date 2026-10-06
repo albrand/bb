@@ -15,11 +15,14 @@ import {
   type PoolProvider,
   type PoolStatus,
 } from "./contracts.js";
+import { draftSelectionSchema } from "./contracts.js";
+import { ThreadTokenStore } from "./thread-tokens.js";
 import {
   AVAILABILITY_PATH,
   PARENT_TOKEN_ENV,
   PARENT_URL_ENV,
   ParentAvailability,
+  isParentPoolSelf,
   readParentPool,
   type ParentPool,
 } from "./parent-pool.js";
@@ -29,7 +32,11 @@ import type {
 } from "./credentials.js";
 import { createHub } from "./hub.js";
 import { PoolOperations } from "./operations.js";
-import { accountPoolRpcContract, createRpcHandlers } from "./rpc.js";
+import {
+  accountPoolBypassReadRpcContract,
+  accountPoolRpcContract,
+  createRpcHandlers,
+} from "./rpc.js";
 import { ClaudeOAuthLogin } from "./oauth-login.js";
 import { CodexDeviceLogin } from "./codex-device-login.js";
 import {
@@ -127,12 +134,21 @@ export function createAccountPoolPlugin(
     await hubTokens.initialize();
     const enrolledHosts = await bb.sdk.hosts.list();
     await hubTokens.prune(enrolledHosts.map((host) => host.id));
+    const threadTokens = new ThreadTokenStore(secretDir, hubTokens);
+    await threadTokens.initialize(enrolledHosts.map((host) => host.id));
     const routing = new RoutingStore(bb.storage.kv, now);
-    const parentPool = readParentPool(options.env ?? process.env);
+    const env = options.env ?? process.env;
+    const configuredParentPool = readParentPool(env);
+    const hasConfiguredParentPool = configuredParentPool !== null;
+    const parentPool = (): ParentPool | null => {
+      if (configuredParentPool === null) return null;
+      const ownHubUrl = `${bb.server.loopbackBaseUrl.replace(/\/+$/u, "")}${HUB_BASE_PATH}`;
+      return isParentPoolSelf(configuredParentPool, ownHubUrl)
+        ? null
+        : configuredParentPool;
+    };
     const proxyingParent = (): ParentPool | null =>
-      parentPool !== null && currentSettings.parentMode === "proxy"
-        ? parentPool
-        : null;
+      currentSettings.parentMode === "proxy" ? parentPool() : null;
     const db = bb.storage.database();
     bb.storage.migrate(db, QUOTA_MIGRATIONS);
     const quotas = new QuotaStore(db);
@@ -144,6 +160,8 @@ export function createAccountPoolPlugin(
       quotas,
       affinity: new PoolAffinityStore(db),
       hubTokens,
+      threadTokens,
+      routing,
       getSettings: () => currentSettings,
       fetch: upstreamFetch,
       now,
@@ -176,10 +194,10 @@ export function createAccountPoolPlugin(
       });
     }
     const availability =
-      parentPool === null
+      configuredParentPool === null
         ? null
         : new ParentAvailability({
-            parent: parentPool,
+            parent: configuredParentPool,
             fetch: upstreamFetch ?? fetch,
             now,
             ...(options.availabilityTtlMs === undefined
@@ -190,14 +208,16 @@ export function createAccountPoolPlugin(
                 `Account Pooler could not read parent availability: ${error instanceof Error ? error.message : String(error)}.`,
               ),
           });
-    const parentStatus = async (): Promise<PoolStatus["parent"]> =>
-      parentPool === null || availability === null
+    const parentStatus = async (): Promise<PoolStatus["parent"]> => {
+      const parent = parentPool();
+      return parent === null || availability === null
         ? null
         : {
-            baseUrl: parentPool.baseUrl,
+            baseUrl: parent.baseUrl,
             mode: currentSettings.parentMode,
             availability: await availability.get(),
           };
+    };
     const operations = new PoolOperations(
       accounts,
       quotas,
@@ -209,9 +229,48 @@ export function createAccountPoolPlugin(
         (await bb.sdk.system.providerStates({ hostId })).providers,
       now,
       () => bb.realtime.publish(ACCOUNT_POOL_ACCOUNTS_CHANGED, {}),
-      (accountId) => hub.refreshUsage(accountId, true),
+      async (accountId) => {
+        await hub.refreshUsage(accountId, true);
+      },
       parentStatus,
+      async (threadId) => {
+        const [thread, queue] = await Promise.all([
+          bb.sdk.threads.get({ threadId }),
+          bb.sdk.threads.queuedMessages.list({ threadId }),
+        ]);
+        return {
+          providerId: thread.providerId,
+          status: thread.status,
+          queued: queue.length > 0,
+        };
+      },
     );
+    bb.experimental_hooks.on(
+      "experimental_thread.configure",
+      async ({ thread, data }) => {
+        const selection = draftSelectionSchema.parse(data);
+        if (
+          thread.providerId !==
+          (selection.provider === "claude" ? "claude-code" : "codex")
+        ) {
+          throw new Error(
+            "The selected subscription belongs to another provider.",
+          );
+        }
+        await operations.initializeSelection(
+          thread.id,
+          selection.provider,
+          selection.accountId,
+        );
+        return null;
+      },
+    );
+    bb.events.on("thread.deleted", async ({ thread }) => {
+      await Promise.all([
+        threadTokens.removeThread(thread.id),
+        routing.removeThread(thread.id),
+      ]);
+    });
     const login = new ClaudeOAuthLogin({
       fetch: upstreamFetch,
       now,
@@ -237,6 +296,11 @@ export function createAccountPoolPlugin(
     bb.rpc.register(
       accountPoolRpcContract,
       createRpcHandlers(operations, login, codexLogin, config),
+    );
+    bb.rpc.register(
+      accountPoolBypassReadRpcContract,
+      { "bypass.get": ({ threadId }) => operations.getBypass(threadId) },
+      { experimental_discoverable: true },
     );
     registerPoolCli(bb, operations, login, codexLogin, config);
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
@@ -269,14 +333,33 @@ export function createAccountPoolPlugin(
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
         const bypassed = await routing.isBypassed(context.threadId);
-        if (!bypassed && (await canServe(provider))) {
-          const token = await hubTokens.forHost(context.hostId);
+        const selectedAccountId = await routing.selectedAccount(
+          context.threadId,
+          provider,
+        );
+        const accountId = proxyingParent() === null ? selectedAccountId : null;
+        const canRoute =
+          !bypassed &&
+          (accountId === null
+            ? await canServe(provider)
+            : await operations.isRoutingEnabled(provider));
+        if (canRoute) {
+          const parentToken = await hubTokens.forHost(context.hostId);
+          const token = await threadTokens.forThread(
+            {
+              threadId: context.threadId,
+              hostId: context.hostId,
+              provider,
+              accountId,
+            },
+            parentToken,
+          );
           if (provider === "claude") {
             await routing.recordRouted(context.threadId, context.hostId);
           }
-          return [...serving(token), ...markerEntries(token)];
+          return [...serving(token), ...markerEntries(parentToken)];
         }
-        return parentPool === null ? [] : neutralized(provider);
+        return hasConfiguredParentPool ? neutralized(provider) : [];
       };
     const proxiedHealth = async (provider: PoolProvider) =>
       (await canServe(provider))

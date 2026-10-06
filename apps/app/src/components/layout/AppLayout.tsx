@@ -1,5 +1,13 @@
 import { type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import { atom, useAtom, useAtomValue, useStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
@@ -54,7 +62,6 @@ import {
   COMPACT_SHELF_HIDDEN_FIXED_CHROME_CLASS,
   usePanelShelfState,
 } from "@/components/ui/secondary-panel-shelf-visibility";
-import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import { ProjectActionsMenu } from "@/components/project/ProjectActionsMenu";
 import { ProjectActionsProvider } from "@/components/project/ProjectActionsProvider";
 import {
@@ -119,6 +126,12 @@ import { useAppSettingsRouteMemory } from "@/hooks/useAppSettingsRouteMemory";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
 import { BackToAppCommandHandler } from "./BackToAppCommandHandler";
 import { HistoryCommandHandlers } from "./HistoryCommandHandlers";
+
+const ProjectPathDialog = lazy(() =>
+  import("@/components/dialogs/ProjectPathDialog").then((module) => ({
+    default: module.ProjectPathDialog,
+  })),
+);
 
 const SIDEBAR_WIDTH_KEY = "bb.sidebar.width";
 const SIDEBAR_OPEN_KEY = "bb.sidebar.open";
@@ -837,16 +850,22 @@ export function AppLayout({ children }: AppLayoutProps) {
                 projectId={projectId ?? null}
               />
               <NotificationCenter />
-              <ProjectPathDialog
-                target={quickCreateProject.projectPathDialog.target}
-                pending={quickCreateProject.isCreating}
-                platform={quickCreateProject.platform}
-                hostId={quickCreateProject.hostId}
-                hostName={quickCreateProject.hostName}
-                hosts={quickCreateProject.hosts}
-                onOpenChange={quickCreateProject.projectPathDialog.onOpenChange}
-                onSubmit={quickCreateProject.submitProjectPath}
-              />
+              {quickCreateProject.projectPathDialog.target === null ? null : (
+                <Suspense fallback={null}>
+                  <ProjectPathDialog
+                    target={quickCreateProject.projectPathDialog.target}
+                    pending={quickCreateProject.isCreating}
+                    platform={quickCreateProject.platform}
+                    hostId={quickCreateProject.hostId}
+                    hostName={quickCreateProject.hostName}
+                    hosts={quickCreateProject.hosts}
+                    onOpenChange={
+                      quickCreateProject.projectPathDialog.onOpenChange
+                    }
+                    onSubmit={quickCreateProject.submitProjectPath}
+                  />
+                </Suspense>
+              )}
             </ThreadActionsProvider>
           </AppThreadSectionMoveProvider>
         </ThreadTitleMentionResourcesProvider>

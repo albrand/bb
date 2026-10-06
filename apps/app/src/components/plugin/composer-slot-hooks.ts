@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import type { PluginComposerScope } from "@get-bb/plugin-sdk";
 import {
   resolveComposerActions,
+  resolveComposerModelPickers,
   resolveComposerPopups,
   resolveComposerBanners,
   resolveComposerDraftObservers,
@@ -59,6 +60,14 @@ const emptyComposerEditor = () => ({ effects: [], observers: [] });
 
 export function useResolvedComposerActions(scopeKind: ComposerScopeKind) {
   return useResolvedComposerSlot(scopeKind, resolveComposerActions, emptyList);
+}
+
+export function useResolvedComposerModelPickers(scopeKind: ComposerScopeKind) {
+  return useResolvedComposerSlot(
+    scopeKind,
+    resolveComposerModelPickers,
+    emptyList,
+  );
 }
 
 export function useResolvedComposerBanners(scopeKind: ComposerScopeKind) {

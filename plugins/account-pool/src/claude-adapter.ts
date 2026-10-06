@@ -142,20 +142,22 @@ export function createClaudeAdapter(options: {
         },
         signal: AbortSignal.timeout(USAGE_REQUEST_TIMEOUT_MS),
       });
-      if (response.ok) {
-        const payload = await response.json().catch(() => null);
-        if (typeof payload === "object" && payload !== null) {
-          const quota = quotaFromUsage(
-            context.account.id,
-            payload,
-            context.quotas.get(context.account.id),
-            context.now(),
-          );
-          if (quota !== null) context.quotas.put(quota);
-        }
-      } else {
+      if (!response.ok) {
         await response.body?.cancel();
+        throw new Error("Usage refresh failed.");
       }
+      const payload: unknown = await response.json().catch(() => null);
+      if (typeof payload !== "object" || payload === null)
+        throw new Error("Usage refresh returned unreadable data.");
+      const quota = quotaFromUsage(
+        context.account.id,
+        payload,
+        context.quotas.get(context.account.id),
+        context.now(),
+      );
+      if (quota === null)
+        throw new Error("Usage refresh returned unreadable data.");
+      context.quotas.put(quota);
       if (context.account.accountUuid !== null) return;
       const profile = await context.fetch(options.profileUrl, {
         headers: {

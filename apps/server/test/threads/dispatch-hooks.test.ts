@@ -58,7 +58,7 @@ type HookRegistry = {
 };
 
 function emptyRegistry(): HookRegistry {
-  return { "message.dispatch": [] };
+  return { "experimental_thread.configure": [], "message.dispatch": [] };
 }
 
 function installHooks(
@@ -191,10 +191,169 @@ async function expectApiError(run: () => Promise<unknown>): Promise<ApiError> {
 }
 
 describe("message.dispatch hook context", () => {
+  it("configures only each plugin's own creation data before Fleet admission", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, project } = seedDispatchFixture(harness, "host-configure");
+      let selected: string | null = null;
+      const seen: unknown[] = [];
+      installHooks({
+        "experimental_thread.configure": [
+          {
+            pluginId: "unrelated",
+            handler: () => {
+              throw new Error(
+                "Unrelated plugin must not receive creation data",
+              );
+            },
+          },
+          {
+            pluginId: "account-pool",
+            handler: ({ thread, data }) => {
+              expect(thread.providerId).toBe("codex");
+              seen.push(data);
+              selected = "selected-subscription";
+              return null;
+            },
+          },
+        ],
+        "message.dispatch": [
+          {
+            pluginId: "fleet",
+            handler: () => {
+              expect(selected).toBe("selected-subscription");
+              return {
+                action: "wait",
+                reason: "Selected subscription has reached its limit",
+              };
+            },
+          },
+        ],
+      });
+      const data = { accountId: "configuration-marker-only" };
+      const thread = await createThreadFromRequest(harness.deps, {
+        environment: {
+          type: "host",
+          hostId: host.id,
+          workspace: { type: "unmanaged", path: WORKSPACE_PATH },
+        },
+        input: textInput("ordinary send"),
+        origin: "app",
+        projectId: project.id,
+        providerId: "codex",
+        startedOnBehalfOf: null,
+        experimental_pluginCreateData: { "account-pool": data },
+      });
+      expect(seen).toEqual([data]);
+      expect(onlyQueuedRow(harness, thread.id).waitingOn).toMatchObject({
+        kind: "plugin",
+        pluginId: "fleet",
+      });
+      expect(
+        JSON.stringify(listEvents(harness.db, { threadId: thread.id })),
+      ).not.toContain("configuration-marker-only");
+      expect(turnRequests(harness, thread.id)).toEqual([]);
+    });
+  });
+
+  it("rejects unavailable creation handlers before attempting any turn", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, project } = seedDispatchFixture(
+        harness,
+        "host-unavailable-configuration",
+      );
+      let admitted = false;
+      installHooks({
+        "experimental_thread.configure": [],
+        "message.dispatch": [
+          {
+            pluginId: "fleet",
+            handler: () => {
+              admitted = true;
+              return { action: "proceed" };
+            },
+          },
+        ],
+      });
+      await expect(
+        createThreadFromRequest(harness.deps, {
+          environment: {
+            type: "host",
+            hostId: host.id,
+            workspace: { type: "unmanaged", path: WORKSPACE_PATH },
+          },
+          input: textInput("ordinary send"),
+          origin: "app",
+          projectId: project.id,
+          providerId: "codex",
+          startedOnBehalfOf: null,
+          experimental_pluginCreateData: {
+            "disabled-plugin": { accountId: "unavailable" },
+          },
+        }),
+      ).rejects.toThrow("cannot configure this conversation");
+      expect(admitted).toBe(false);
+      expect(listRunningThreads(harness.db)).toEqual([]);
+    });
+  });
+
+  it("fails creation when configuration fails without admitting a message", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, project } = seedDispatchFixture(
+        harness,
+        "host-configuration-error",
+      );
+      let admitted = false;
+      installHooks({
+        "experimental_thread.configure": [
+          {
+            pluginId: "account-pool",
+            handler: () => {
+              throw new Error("Selected subscription is disabled");
+            },
+          },
+        ],
+        "message.dispatch": [
+          {
+            pluginId: "fleet",
+            handler: () => {
+              admitted = true;
+              return { action: "proceed" };
+            },
+          },
+        ],
+      });
+      const error = await expectApiError(() =>
+        createThreadFromRequest(harness.deps, {
+          environment: {
+            type: "host",
+            hostId: host.id,
+            workspace: { type: "unmanaged", path: WORKSPACE_PATH },
+          },
+          input: textInput("ordinary send"),
+          origin: "app",
+          projectId: project.id,
+          providerId: "codex",
+          startedOnBehalfOf: null,
+          experimental_pluginCreateData: {
+            "account-pool": { accountId: "disabled" },
+          },
+        }),
+      );
+      expect(error.status).toBe(400);
+      expect(error.body).toMatchObject({
+        code: "thread_configuration_rejected",
+        message:
+          'The "account-pool" plugin\'s experimental_thread.configure hook rejected the thread configuration: Selected subscription is disabled',
+      });
+      expect(admitted).toBe(false);
+    });
+  });
+
   it("passes plugin submission data through a new thread's first dispatch", async () => {
     await withTestHarness(async (harness) => {
       const seen: unknown[] = [];
       installHooks({
+        "experimental_thread.configure": [],
         "message.dispatch": [
           {
             pluginId: "drafts",
@@ -235,6 +394,7 @@ describe("message.dispatch hook context", () => {
   it("applies plugin policy before a future schedule", async () => {
     await withTestHarness(async (harness) => {
       installHooks({
+        "experimental_thread.configure": [],
         "message.dispatch": [
           {
             pluginId: "drafts",
@@ -272,6 +432,7 @@ describe("message.dispatch hook context", () => {
       const { host, project } = seedDispatchFixture(harness, "host-intent");
       const seen: { environment: unknown; hostId: string | null }[] = [];
       installHooks({
+        "experimental_thread.configure": [],
         "message.dispatch": [
           {
             pluginId: "limits",
@@ -630,7 +791,10 @@ describe("dispatch hooks and the no-hook path", () => {
       ).toBeNull();
 
       await acceptThreadSendRequest(harness.deps, {
-        payload: { input: textInput("second turn after restart"), mode: "auto" },
+        payload: {
+          input: textInput("second turn after restart"),
+          mode: "auto",
+        },
         thread: second,
       });
 

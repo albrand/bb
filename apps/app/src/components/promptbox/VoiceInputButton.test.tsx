@@ -35,6 +35,7 @@ it.each(["warning", "context menu", "keyboard"])(
           : "Start voice input",
     });
     expect(container.querySelectorAll("button")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "System default" })).toBeNull();
     if (method === "warning") fireEvent.click(mic);
     if (method === "context menu") fireEvent.contextMenu(mic);
     if (method === "keyboard")
@@ -65,12 +66,10 @@ it("shows a recurring capture error after preview recovery and another recording
         .mockResolvedValue([
           { kind: "audioinput", deviceId: "mic", label: "Microphone" },
         ]),
-      getUserMedia: vi
-        .fn()
-        .mockResolvedValue({
-          getTracks: () => [{ stop }],
-          getAudioTracks: () => [{ label: "Microphone" }],
-        }),
+      getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop }],
+        getAudioTracks: () => [{ label: "Microphone" }],
+      }),
     }),
   });
   const record = vi.fn();

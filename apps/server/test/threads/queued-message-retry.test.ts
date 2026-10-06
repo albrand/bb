@@ -51,7 +51,10 @@ function installDispatchGate(decide: (attempt: number) => GateDecision): {
   attempts: () => number;
 } {
   let attempts = 0;
-  const registry: HookRegistry = { "message.dispatch": [] };
+  const registry: HookRegistry = {
+    "experimental_thread.configure": [],
+    "message.dispatch": [],
+  };
   registry["message.dispatch"].push({
     pluginId: "gate",
     handler: () => {
@@ -70,9 +73,9 @@ function installDispatchGate(decide: (attempt: number) => GateDecision): {
   return { attempts: () => attempts };
 }
 
-function throwOnAttempts(
-  shouldThrow: (attempt: number) => boolean,
-): { attempts: () => number } {
+function throwOnAttempts(shouldThrow: (attempt: number) => boolean): {
+  attempts: () => number;
+} {
   return installDispatchGate((attempt) => {
     if (shouldThrow(attempt)) throw new Error("boom");
     return { action: "proceed" };
@@ -198,7 +201,11 @@ describe("queued message dispatch retry", () => {
       const { row, thread } = seedRunnableThreadWithQueuedRow(harness);
 
       await drain(harness, thread.id);
-      for (let attempt = 2; attempt <= QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS; attempt += 1) {
+      for (
+        let attempt = 2;
+        attempt <= QUEUED_MESSAGE_DISPATCH_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
         const booked = retryOf(harness, row.id);
         expect(booked?.attempt).toBe(attempt - 1);
         await drainDueRetries(harness, booked!.nextAttemptAt);
@@ -364,7 +371,10 @@ describe("queued message dispatch retry", () => {
         sendAt: Date.now() - 1_000,
       });
       installDispatchGate(() => {
-        const claimToken = getQueuedThreadMessage(harness.db, row.id)?.claimToken;
+        const claimToken = getQueuedThreadMessage(
+          harness.db,
+          row.id,
+        )?.claimToken;
         if (claimToken) {
           releaseQueuedMessageClaim(harness.db, harness.deps.hub, {
             id: row.id,

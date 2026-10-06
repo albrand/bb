@@ -119,6 +119,15 @@ export const createThreadRequestSchema = z
     pluginSubmission: z
       .object({ pluginId: pluginIdSchema, data: jsonValueSchema })
       .optional(),
+    experimental_pluginCreateData: z
+      .record(pluginIdSchema, jsonValueSchema)
+      .refine(
+        (data) =>
+          Object.keys(data).length <= 32 &&
+          JSON.stringify(data).length <= 16_384,
+        "Plugin creation data exceeds its limit",
+      )
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.origin === "plugin" && value.originPluginId === undefined) {

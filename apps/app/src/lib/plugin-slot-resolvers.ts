@@ -98,6 +98,23 @@ export function resolveComposerActions(
   return resolved;
 }
 
+export function resolveComposerModelPickers(
+  customizations: readonly PluginComposerCustomizationSlot[],
+  scopeKind: PluginComposerScope["kind"],
+) {
+  return customizations.flatMap((customization) =>
+    composerCustomizationApplies(customization, scopeKind) &&
+    customization.experimental_modelPicker !== undefined
+      ? [
+          {
+            ...resolvedComposerContribution(customization, "model-picker"),
+            component: customization.experimental_modelPicker,
+          },
+        ]
+      : [],
+  );
+}
+
 export function resolveComposerBanners(
   customizations: readonly PluginComposerCustomizationSlot[],
   scopeKind: PluginComposerScope["kind"],

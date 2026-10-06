@@ -31,14 +31,51 @@ export interface ParentPool {
 
 export function readParentPool(
   env: NodeJS.ProcessEnv = process.env,
+  ownHubUrl?: string,
 ): ParentPool | null {
   const url = parentUrlSchema.safeParse(env[PARENT_URL_ENV]);
   const token = parentTokenSchema.safeParse(env[PARENT_TOKEN_ENV]);
   if (!url.success || !token.success) return null;
+  if (ownHubUrl !== undefined && sameHubUrl(url.data, ownHubUrl)) {
+    return null;
+  }
   return {
     baseUrl: url.data.replace(/\/+$/u, ""),
     token: token.data,
   };
+}
+
+function canonicalHubUrl(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  ) {
+    url.hostname = "localhost";
+  }
+  url.pathname = url.pathname.replace(/\/+$/u, "");
+  return `${url.origin}${url.pathname}`;
+}
+
+function sameHubUrl(parentUrl: string, ownHubUrl: string): boolean {
+  const parent = canonicalHubUrl(parentUrl);
+  const own = canonicalHubUrl(ownHubUrl);
+  return parent !== null && own !== null && parent === own;
+}
+
+export function isParentPoolSelf(
+  parent: ParentPool | null,
+  ownHubUrl: string,
+): boolean {
+  return parent !== null && sameHubUrl(parent.baseUrl, ownHubUrl);
 }
 
 export function parentRequestHeaders(inbound: Headers, token: string): Headers {

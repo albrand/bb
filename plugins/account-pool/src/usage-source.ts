@@ -88,7 +88,8 @@ export function registerUsageSource(
           )
         )
           throw new Error("Usage resource no longer exists.");
-        await hub.refreshUsage(resourceId, refresh);
+        if (!(await hub.refreshUsage(resourceId, refresh)) && refresh)
+          throw new Error("Could not refresh account usage. Try again.");
         const { accounts: allAccounts } = await hub.status();
         const accounts = allAccounts.filter(
           (account) => account.id === resourceId,

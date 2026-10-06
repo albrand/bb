@@ -43,9 +43,13 @@ type HookRegistry = {
 };
 
 function installHooks(
-  handlers: Partial<{ "message.dispatch": MessageDispatchRegistration[] }>,
+  handlers: Partial<{
+    "experimental_thread.configure": [];
+    "message.dispatch": MessageDispatchRegistration[];
+  }>,
 ): void {
   const registry: HookRegistry = {
+    "experimental_thread.configure": [],
     "message.dispatch": handlers["message.dispatch"] ?? [],
   };
   setPluginHookProvider({
@@ -652,6 +656,7 @@ describe("retrying a failed turn", () => {
     await withTestHarness(async (harness) => {
       let dispatchCalls = 0;
       installHooks({
+        "experimental_thread.configure": [],
         "message.dispatch": [
           {
             pluginId: "concurrency-limit",

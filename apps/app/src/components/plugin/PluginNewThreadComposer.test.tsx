@@ -65,6 +65,10 @@ import { getActiveThreadPanelOpener } from "./plugin-thread-panel-navigation";
 import { PluginDetailPanelContext } from "./plugin-detail-navigation";
 import { openPluginDetailsInWorkspace } from "./plugin-detail-opener";
 import { PluginNewThreadComposer } from "./PluginNewThreadComposer";
+import {
+  getComposerCreateData,
+  setComposerCreateData,
+} from "@/lib/composer-create-data";
 
 function PanedRootComposeView() {
   return (
@@ -1114,6 +1118,65 @@ describe("PluginNewThreadComposer seeding", () => {
 
     expect(submitted).toHaveLength(1);
     expect(submitted[0]).toMatchObject({ pluginSubmission });
+  });
+
+  it.each(["ordinary", "programmatic"])(
+    "forwards subscription configuration on %s sends and clears it after success",
+    async (mode) => {
+      const submitted: NewThreadRequest[] = [];
+      renderComposer(
+        STORED_REQUEST,
+        (request) => {
+          submitted.push(request);
+        },
+        `subscription-${mode}`,
+      );
+      await waitFor(() => expect(latestPromptBoxProps().disabled).toBe(false));
+      const key = latestPromptBoxProps().pluginComposerHost.textEffectKey;
+      const data = {
+        provider: "codex",
+        accountId: "11111111-1111-4111-8111-111111111111",
+      };
+      setComposerCreateData(key, "account-pool", data);
+      if (mode === "ordinary") await submit();
+      else
+        await act(async () => {
+          await latestPromptBoxProps().pluginComposerHost.submit(
+            { sendAt: Date.now() },
+            undefined,
+          );
+        });
+      await waitFor(() => expect(submitted).toHaveLength(1));
+      expect(submitted[0]).toMatchObject({
+        experimental_pluginCreateData: { "account-pool": data },
+      });
+      expect(getComposerCreateData(key)).toBeUndefined();
+    },
+  );
+
+  it("retains subscription configuration when an ordinary send fails", async () => {
+    renderComposer(
+      STORED_REQUEST,
+      () => {
+        throw new Error("Subscription unavailable");
+      },
+      "failed-subscription",
+    );
+    await waitFor(() => expect(latestPromptBoxProps().disabled).toBe(false));
+    const key = latestPromptBoxProps().pluginComposerHost.textEffectKey;
+    const data = {
+      provider: "codex",
+      accountId: "11111111-1111-4111-8111-111111111111",
+    };
+    setComposerCreateData(key, "account-pool", data);
+    await submit();
+    expect(getComposerCreateData(key)).toEqual({ "account-pool": data });
+    expect(latestPromptBoxProps().value).toBe(
+      STORED_REQUEST.input[0]?.type === "text"
+        ? STORED_REQUEST.input[0].text
+        : "",
+    );
+    setComposerCreateData(key, "account-pool", null);
   });
 
   it("does not demote a project the replayed bootstrap does not know yet", async () => {

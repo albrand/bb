@@ -13,6 +13,7 @@ import {
   accountReorderInputSchema,
   accountRenameInputSchema,
   accountPoolConfigSetInputSchema,
+  bypassGetInputSchema,
   bypassInputSchema,
   codexLoginPollInputSchema,
   loginCompleteInputSchema,
@@ -20,6 +21,8 @@ import {
   parentModeSchema,
   tokenRotateInputSchema,
   routingSetInputSchema,
+  threadSelectionInputSchema,
+  threadSelectionSetSchema,
   type AccountPoolConfig,
   type AccountPoolConfigController,
   type AccountPoolConfigSetInput,
@@ -702,6 +705,55 @@ export function registerPoolCli(
               };
             }),
         }),
+        select: cliCommand({
+          summary: "Show or select a subscription for one idle conversation",
+          positionals: [
+            {
+              name: "thread-id",
+              description: "Conversation ID",
+              required: true,
+            },
+            {
+              name: "provider",
+              description: "claude or codex",
+              required: true,
+            },
+            {
+              name: "account-id",
+              description:
+                "Account UUID or automatic; omit to show the current choice",
+            },
+          ],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const target = threadSelectionInputSchema.parse({
+                threadId: input.positionals["thread-id"],
+                provider: input.positionals.provider,
+              });
+              const requested = input.positionals["account-id"];
+              const selection =
+                requested === undefined
+                  ? await operations.selectedAccount(
+                      target.threadId,
+                      target.provider,
+                    )
+                  : await operations.selectAccount(
+                      target.threadId,
+                      target.provider,
+                      threadSelectionSetSchema.parse({
+                        ...target,
+                        accountId: requested === "automatic" ? null : requested,
+                      }).accountId,
+                    );
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ...target, ...selection })
+                  : `${target.threadId}: ${selection.accountId ?? "Automatic"}\n`,
+              };
+            }),
+        }),
         status: cliCommand({
           summary: "Show hub, machine token, routing, and account status",
           suggestFor: ["info", "hub"],
@@ -868,6 +920,30 @@ export function registerPoolCli(
                 stdout: input.options.json
                   ? json({ ok: true, token })
                   : `Rotated the Account Pooler token for ${token.hostName ?? token.hostId}.\n`,
+              };
+            }),
+        }),
+        "bypass get": cliCommand({
+          summary: "Read Account Pooler bypass status for one thread",
+          positionals: [
+            {
+              name: "thread-id",
+              description: "Thread whose routing bypass status to read",
+              required: true,
+            },
+          ],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const { threadId } = bypassGetInputSchema.parse({
+                threadId: input.positionals["thread-id"],
+              });
+              const result = await operations.getBypass(threadId);
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ok: true, ...result })
+                  : `Account Pooler bypass is ${result.bypassed ? "enabled" : "disabled"} for ${result.threadId}.\n`,
               };
             }),
         }),

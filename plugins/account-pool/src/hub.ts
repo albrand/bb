@@ -39,7 +39,9 @@ import type {
   HubTokenStore,
   PoolAffinityStore,
   QuotaStore,
+  RoutingStore,
 } from "./store.js";
+import type { ThreadTokenStore, ThreadRoute } from "./thread-tokens.js";
 import { parentRequestHeaders, type ParentPool } from "./parent-pool.js";
 
 const ROUTE = "/api/v1/plugins/account-pool/http";
@@ -75,6 +77,8 @@ interface HubOptions {
   affinity: PoolAffinityStore;
   maxAffinityBindings: number;
   hubTokens: HubTokenStore;
+  threadTokens: ThreadTokenStore | null;
+  routing: RoutingStore | null;
   getSettings: () => AccountPoolConfig;
   adapters: ReadonlyMap<PoolProvider, ProviderAdapter>;
   fetch: typeof fetch;
@@ -111,6 +115,7 @@ interface RoutingAttempt {
   binding: AccountBinding | null;
   active: ActiveAccount | null;
   pinnedAccountId: string | null;
+  selectionAccountId: string | null;
 }
 interface UpstreamResult {
   response: Response;
@@ -150,7 +155,7 @@ export class AccountPoolHub {
   private readonly pacingByAccount = new Map<string, PacingFlight>();
   private affinityBindings = new Map<string, AccountBinding>();
   private activeAccounts = new Map<PoolProvider, ActiveAccount>();
-  private readonly usageRefreshes = new Map<string, Promise<void>>();
+  private readonly usageRefreshes = new Map<string, Promise<boolean>>();
   private readonly lastUsageRefreshAt = new Map<string, number>();
   private readonly drainWaiters = new Set<() => void>();
 
@@ -176,7 +181,8 @@ export class AccountPoolHub {
     const token =
       request.headers.get("x-bb-account-pool-token") ??
       readBearer(request.headers.get("authorization"));
-    return this.options.hubTokens.authenticate(token);
+    const route = await this.options.threadTokens?.authenticate(token);
+    return route?.hostId ?? this.options.hubTokens.authenticate(token);
   }
 
   async importAccount(
@@ -191,7 +197,13 @@ export class AccountPoolHub {
     routePath: string,
   ): Promise<Response> {
     const adapter = this.adapter(provider);
-    const hostId = await this.authenticate(request);
+    const token =
+      request.headers.get("x-bb-account-pool-token") ??
+      readBearer(request.headers.get("authorization"));
+    const threadRoute =
+      (await this.options.threadTokens?.authenticate(token, provider)) ?? null;
+    const hostId =
+      threadRoute?.hostId ?? (await this.options.hubTokens.authenticate(token));
     if (hostId === null) {
       return adapter.errorResponse(401, "Invalid Account Pooler bearer token.");
     }
@@ -200,8 +212,30 @@ export class AccountPoolHub {
         503,
         "Account Pooler is not accepting requests.",
       );
+    if (
+      threadRoute !== null &&
+      threadRoute.accountId !== null &&
+      threadRoute.accountId !== undefined &&
+      this.options.routing !== null &&
+      ((await this.options.routing.isBypassed(threadRoute.threadId)) ||
+        !(await this.options.routing.isProviderEnabled(provider)))
+    ) {
+      return adapter.errorResponse(
+        409,
+        "Pooled routing is disabled for this conversation. Start a new turn to use its current routing settings.",
+      );
+    }
     const parent = this.options.getParentRoute();
     if (parent !== null) {
+      if (
+        threadRoute?.accountId !== undefined &&
+        threadRoute.accountId !== null
+      ) {
+        return adapter.errorResponse(
+          409,
+          "An explicit subscription requires a local account pool. Choose Automatic while using a parent pool.",
+        );
+      }
       return this.forwardToParent(request, adapter, routePath, parent);
     }
     return this.forward(
@@ -209,6 +243,7 @@ export class AccountPoolHub {
       new Uint8Array(await request.arrayBuffer()),
       adapter,
       hostId,
+      threadRoute,
     );
   }
 
@@ -281,14 +316,14 @@ export class AccountPoolHub {
     }
   }
 
-  async refreshUsage(accountId?: string, force = false): Promise<void> {
+  async refreshUsage(accountId?: string, force = false): Promise<boolean> {
     const accounts = (await this.options.accounts.list()).filter(
       (account) =>
         account.enabled &&
         account.kind === "oauth" &&
         (accountId === undefined || account.id === accountId),
     );
-    await Promise.all(
+    const refreshed = await Promise.all(
       accounts.map((account) =>
         this.refreshAccountUsage(
           account,
@@ -297,6 +332,7 @@ export class AccountPoolHub {
         ),
       ),
     );
+    return refreshed.every(Boolean);
   }
 
   private async refreshExhaustedUsage(
@@ -330,14 +366,14 @@ export class AccountPoolHub {
     account: Account,
     minIntervalMs: number,
     recoverError = false,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const adapter = this.adapter(account.provider);
-    if ((this.inFlightByAccount.get(account.id) ?? 0) > 0) return;
+    if ((this.inFlightByAccount.get(account.id) ?? 0) > 0) return true;
     const running = this.usageRefreshes.get(account.id);
     if (running !== undefined) return running;
     const now = this.options.now();
     const last = this.lastUsageRefreshAt.get(account.id);
-    if (last !== undefined && now - last < minIntervalMs) return;
+    if (last !== undefined && now - last < minIntervalMs) return true;
     this.lastUsageRefreshAt.set(account.id, now);
     const recover =
       recoverError && this.options.quotas.get(account.id).error !== null;
@@ -357,7 +393,7 @@ export class AccountPoolHub {
         fetch: this.options.fetch,
         now: this.options.now,
       })
-      .catch(() => undefined)
+      .then(() => true, () => false)
       .finally(() => this.usageRefreshes.delete(account.id));
     this.usageRefreshes.set(account.id, refresh);
     return refresh;
@@ -418,6 +454,7 @@ export class AccountPoolHub {
     body: Uint8Array,
     adapter: ProviderAdapter,
     hostId: string,
+    threadRoute: ThreadRoute | null = null,
   ): Promise<Response> {
     const signal = AbortSignal.any([request.signal, this.stopped.signal]);
     const attempted = new Set<string>();
@@ -426,24 +463,52 @@ export class AccountPoolHub {
       binding: null,
       active: null,
       pinnedAccountId: null,
+      selectionAccountId: threadRoute?.accountId ?? null,
     };
     let previousAccountId: string | null = null;
     let failure: FailureSummary | null = null;
     let usageRefreshed = false;
     const accounts = (await this.options.accounts.list()).filter(
-      (account) => account.provider === adapter.provider,
+      (account) =>
+        account.provider === adapter.provider &&
+        (routing.selectionAccountId === null ||
+          account.id === routing.selectionAccountId),
     );
+    if (routing.selectionAccountId !== null && accounts.length === 0) {
+      return adapter.errorResponse(
+        404,
+        "The selected subscription no longer exists. Choose another subscription or Automatic.",
+      );
+    }
     const candidateIds = new Set(accounts.map((account) => account.id));
     const parsed = adapter.parseRequest(body, request.headers);
     const family = parsed.family;
     const affinityKey =
       parsed.affinityId === null
         ? null
-        : JSON.stringify([adapter.provider, hostId, parsed.affinityId]);
+        : JSON.stringify(
+            threadRoute === null
+              ? [adapter.provider, hostId, parsed.affinityId]
+              : [
+                  adapter.provider,
+                  hostId,
+                  threadRoute.threadId,
+                  parsed.affinityId,
+                ],
+          );
     const parentAffinityKey =
       affinityKey === null || parsed.parentAffinityId === null
         ? null
-        : JSON.stringify([adapter.provider, hostId, parsed.parentAffinityId]);
+        : JSON.stringify(
+            threadRoute === null
+              ? [adapter.provider, hostId, parsed.parentAffinityId]
+              : [
+                  adapter.provider,
+                  hostId,
+                  threadRoute.threadId,
+                  parsed.parentAffinityId,
+                ],
+          );
     try {
       while (attempted.size < candidateIds.size) {
         signal.throwIfAborted();
@@ -959,7 +1024,8 @@ export class AccountPoolHub {
     }
     if (active === undefined) {
       active = { accountId: selected.account.id };
-      this.activeAccounts.set(provider, active);
+      if (routing.selectionAccountId === null)
+        this.activeAccounts.set(provider, active);
     }
     routing.binding ??= binding ?? null;
     routing.active ??= active;
@@ -977,6 +1043,7 @@ export class AccountPoolHub {
         bound.account.id === selected.account.id ||
         (binding === routing.binding && attempted.has(bound.account.id)));
     const advance =
+      routing.selectionAccountId === null &&
       !familyDetour(active.accountId) &&
       (activeAccount === undefined ||
         active.accountId === selected.account.id ||
@@ -1366,6 +1433,8 @@ export function createHub(options: {
   quotas: QuotaStore;
   affinity: PoolAffinityStore;
   hubTokens: HubTokenStore;
+  threadTokens?: ThreadTokenStore;
+  routing?: RoutingStore;
   getSettings: () => AccountPoolConfig;
   fetch?: typeof fetch;
   now?: () => number;
@@ -1408,6 +1477,8 @@ export function createHub(options: {
     affinity: options.affinity,
     maxAffinityBindings: options.maxAffinityBindings ?? MAX_AFFINITY_BINDINGS,
     hubTokens: options.hubTokens,
+    threadTokens: options.threadTokens ?? null,
+    routing: options.routing ?? null,
     getSettings: options.getSettings,
     adapters,
     fetch: options.fetch ?? fetch,

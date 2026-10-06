@@ -40,6 +40,7 @@ import {
   type PendingThreadStartContext,
 } from "./dispatch-attempt.js";
 import { emitPluginThreadDeleted } from "../plugins/plugin-thread-events.js";
+import { configureThreadPlugins } from "./dispatch-hooks.js";
 import {
   createThreadRecord,
   getThreadSafe,
@@ -405,6 +406,10 @@ async function createPendingThreadAndAttemptFirstDispatch(
   });
   let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
   try {
+    await configureThreadPlugins(
+      thread,
+      args.request.experimental_pluginCreateData,
+    );
     if (
       args.fork !== null &&
       args.fork.historyEndSequence !== null &&

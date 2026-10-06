@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { useComposer } from "@get-bb/plugin-sdk/app";
+import type { PluginComposerApi } from "@get-bb/plugin-sdk";
 import type {
   AccountPoolConfig,
   AccountSummary,
   PoolStatus,
 } from "./src/contracts.js";
+import { ACCOUNT_POOL_CONFIG_CHANGED } from "./src/realtime.js";
 
 const app = await loadPluginApp(() => import("./app"));
 afterEach(() => {
@@ -133,6 +137,342 @@ function render(
     },
   );
 }
+
+describe("Subscription picker", () => {
+  const Component = (() => {
+    const component = app.composerCustomizations[0]?.experimental_modelPicker;
+    if (component === undefined)
+      throw new Error("Subscription picker registration is missing.");
+    return component;
+  })();
+
+  const accounts = [
+    account({ label: "Max 20x", sevenDayUtilization: 0.98 }),
+    account({
+      id: "22222222-2222-4222-8222-222222222222",
+      label: "Max 5x",
+      sevenDayUtilization: 0.05,
+    }),
+    account({
+      id: "33333333-3333-4333-8333-333333333333",
+      label: "Previous login",
+      enabled: false,
+    }),
+  ];
+
+  it("shows separate account statistics even when both accounts use the same email", async () => {
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: { selection: { providerId: "claude-code" } },
+        rpc: { "status.get": () => status(accounts) },
+      },
+    );
+    expect(
+      await slot.findByRole("option", { name: /Max 20x.*weekly 98%/ }),
+    ).toBeTruthy();
+    expect(
+      slot.getByRole("option", { name: /Max 5x.*weekly 5%/ }),
+    ).toBeTruthy();
+    expect(
+      slot
+        .getByRole("option", { name: /Previous login.*Disabled/ })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      (
+        slot.getByRole("combobox", {
+          name: "Subscription",
+        }) as HTMLSelectElement
+      ).value,
+    ).toBe("automatic");
+  });
+
+  it("retains a new draft's choice after menu unmount and clears it for Automatic", async () => {
+    let composer: PluginComposerApi | undefined;
+    function Capture() {
+      const current = useComposer();
+      useEffect(() => {
+        composer = current;
+      }, [current]);
+      return <Component providerId="claude-code" />;
+    }
+    const slot = renderSlot(
+      { component: Capture },
+      {},
+      {
+        pluginId: "account-pool",
+        composer: { selection: { providerId: "claude-code" } },
+        rpc: { "status.get": () => status(accounts) },
+      },
+    );
+    const select = await slot.findByRole("combobox", { name: "Subscription" });
+    await waitFor(() => expect(select.hasAttribute("disabled")).toBe(false));
+    fireEvent.change(select, { target: { value: accounts[1]!.id } });
+    await waitFor(() =>
+      expect(composer?.experimental_createData).toEqual({
+        provider: "claude",
+        accountId: accounts[1]!.id,
+      }),
+    );
+    slot.rerender(<div />);
+    slot.rerender(<Capture />);
+    await waitFor(() =>
+      expect(
+        (
+          slot.getByRole("combobox", {
+            name: "Subscription",
+          }) as HTMLSelectElement
+        ).value,
+      ).toBe(accounts[1]!.id),
+    );
+    fireEvent.change(slot.getByRole("combobox"), {
+      target: { value: "automatic" },
+    });
+    await waitFor(() => expect(composer?.experimental_createData).toBeNull());
+  });
+
+  it.each(["routing-off", "parent-proxy"] as const)(
+    "explains that a new pinned conversation cannot be sent while %s is active",
+    async (inactiveMode) => {
+      let currentStatus = status(accounts);
+      const slot = renderSlot(
+        { component: Component },
+        { providerId: "claude-code" },
+        {
+          pluginId: "account-pool",
+          composer: {
+            scope: { kind: "new-thread", projectId: null },
+            selection: { providerId: "claude-code" },
+          },
+          rpc: { "status.get": () => currentStatus },
+        },
+      );
+      const select = await slot.findByRole("combobox", {
+        name: "Subscription",
+      });
+      await waitFor(() => expect(select.hasAttribute("disabled")).toBe(false));
+      fireEvent.change(select, { target: { value: accounts[1]!.id } });
+
+      if (inactiveMode === "routing-off") {
+        currentStatus = {
+          ...currentStatus,
+          routing: { claude: false, codex: true },
+        };
+      } else {
+        currentStatus = {
+          ...currentStatus,
+          parent: {
+            baseUrl: "https://parent.example",
+            mode: "proxy",
+            availability: { claude: true, codex: true },
+          },
+        };
+      }
+      await slot.emitRealtime(ACCOUNT_POOL_CONFIG_CHANGED, {});
+
+      const expected =
+        inactiveMode === "routing-off"
+          ? "This new conversation can't use the selected subscription while Claude routing is off. Choose Automatic or turn routing back on before sending."
+          : "This new conversation can't use the selected subscription while a parent pool is in proxy mode. Choose Automatic or switch the parent to local mode before sending.";
+      expect(await slot.findByText(expected)).toBeTruthy();
+      expect(
+        slot.queryByText(/Saved preference not in use right now/u),
+      ).toBeNull();
+      expect(
+        slot.queryByText("This conversation uses only the selected subscription."),
+      ).toBeNull();
+    },
+  );
+
+  it("selects only the owning conversation and preserves its choice when the server rejects a change", async () => {
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: {
+          scope: { kind: "thread", threadId: "thr_existing" },
+          selection: { providerId: "claude-code" },
+        },
+        rpc: {
+          "status.get": () => status(accounts),
+          "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({
+            threadId: "thr_existing",
+            bypassed: false,
+          }),
+          "routing.selection.set": () => {
+            throw new Error("Wait for queued messages to finish.");
+          },
+        },
+      },
+    );
+    const select = await slot.findByRole("combobox");
+    await waitFor(() => expect(select.hasAttribute("disabled")).toBe(false));
+    fireEvent.change(select, { target: { value: "automatic" } });
+    expect(await slot.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Wait for queued messages to finish.",
+    );
+    expect(slot.rpcCalls.at(-1)?.input).toEqual({
+      threadId: "thr_existing",
+      provider: "claude",
+      accountId: null,
+    });
+    expect((select as HTMLSelectElement).value).toBe(accounts[1]!.id);
+  });
+
+  it("shows a saved preference when parent routing or routing-off makes the pin inactive", async () => {
+    const pinnedSlot = (currentStatus: PoolStatus, bypassed = false) =>
+      renderSlot(
+        { component: Component },
+        { providerId: "claude-code" },
+        {
+          pluginId: "account-pool",
+          composer: {
+            scope: { kind: "thread", threadId: "thr_existing" },
+            selection: { providerId: "claude-code" },
+          },
+          rpc: {
+            "status.get": () => currentStatus,
+            "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+            "bypass.get": () => ({ threadId: "thr_existing", bypassed }),
+          },
+        },
+      );
+    const parentProxyStatus = {
+      ...status(accounts),
+      parent: {
+        baseUrl: "https://parent.example",
+        mode: "proxy" as const,
+        availability: { claude: true, codex: true },
+      },
+    };
+    const proxySlot = pinnedSlot(parentProxyStatus);
+    expect(
+      await proxySlot.findByText(
+        "Saved preference not in use right now. A parent pool decides which subscription to use.",
+      ),
+    ).toBeTruthy();
+    expect(
+      proxySlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+
+    const routingOffSlot = pinnedSlot({
+      ...status(accounts),
+      routing: { claude: false, codex: true },
+    });
+    expect(
+      await routingOffSlot.findByText(
+        "Saved preference not in use right now. Claude routing is off.",
+      ),
+    ).toBeTruthy();
+    expect(
+      routingOffSlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+
+    const bypassedSlot = pinnedSlot(status(accounts), true);
+    expect(
+      await bypassedSlot.findByText(
+        "Saved preference not in use right now. Pool routing is bypassed for this conversation.",
+      ),
+    ).toBeTruthy();
+    expect(
+      bypassedSlot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+    cleanup();
+  });
+
+  it("refreshes the pin explanation after a routing configuration event", async () => {
+    let currentStatus: PoolStatus = status(accounts);
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: {
+          scope: { kind: "thread", threadId: "thr_existing" },
+          selection: { providerId: "claude-code" },
+        },
+        rpc: {
+          "status.get": () => currentStatus,
+          "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({ threadId: "thr_existing", bypassed: false }),
+        },
+      },
+    );
+    expect(
+      await slot.findByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeTruthy();
+    const statusCalls = slot.rpcCalls.filter(
+      (call) => call.method === "status.get",
+    ).length;
+    currentStatus = {
+      ...currentStatus,
+      parent: {
+        baseUrl: "https://parent.example",
+        mode: "proxy",
+        availability: { claude: true, codex: true },
+      },
+    };
+    await slot.emitRealtime(ACCOUNT_POOL_CONFIG_CHANGED, {});
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "status.get").length,
+      ).toBeGreaterThan(statusCalls),
+    );
+    expect(
+      await slot.findByText(
+        "Saved preference not in use right now. A parent pool decides which subscription to use.",
+      ),
+    ).toBeTruthy();
+    expect(
+      slot.queryByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps the exclusivity message for an active local pin", async () => {
+    const slot = renderSlot(
+      { component: Component },
+      { providerId: "claude-code" },
+      {
+        pluginId: "account-pool",
+        composer: {
+          scope: { kind: "thread", threadId: "thr_existing" },
+          selection: { providerId: "claude-code" },
+        },
+        rpc: {
+          "status.get": () => status(accounts),
+          "routing.selection.get": () => ({ accountId: accounts[1]!.id }),
+          "bypass.get": () => ({ threadId: "thr_existing", bypassed: false }),
+        },
+      },
+    );
+    expect(
+      await slot.findByText(
+        "This conversation uses only the selected subscription.",
+      ),
+    ).toBeTruthy();
+    expect(
+      slot.queryByText(/Saved preference not in use right now/u),
+    ).toBeNull();
+  });
+});
 
 describe("Account Pool parent banner", () => {
   const PARENT_URL = "http://127.0.0.1:25231/api/v1/plugins/account-pool/http";

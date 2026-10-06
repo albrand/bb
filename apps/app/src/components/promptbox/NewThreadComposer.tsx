@@ -4,6 +4,10 @@ import { useInitialPromptDraft } from "./mentions/initial-prompt-draft";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
 import { Button } from "@bb/shared-ui/button";
 import {
+  getComposerCreateData,
+  clearSubmittedComposerCreateData,
+} from "@/lib/composer-create-data";
+import {
   getPluginConfigurationRoutePath,
   getSettingsRoutePath,
 } from "@/lib/route-paths";
@@ -253,6 +257,7 @@ export function resolveSubmittedExecutionSources(
 
 export interface NewThreadComposerSubmission extends NewThreadRequest {
   pluginSubmission?: CreateThreadRequest["pluginSubmission"];
+  experimental_pluginCreateData?: CreateThreadRequest["experimental_pluginCreateData"];
   sendAt?: number;
 }
 
@@ -1632,6 +1637,7 @@ export function NewThreadComposer({
         ...executionInputSources,
         ...seededExecutionInputSources,
       };
+      const creationData = getComposerCreateData(promptDraft.storageKey);
       const request: NewThreadComposerSubmission = {
         projectId,
         providerId: selectedProviderId,
@@ -1649,6 +1655,9 @@ export function NewThreadComposer({
           ? {}
           : { sendAt: submitOptions.sendAt }),
         ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
+        ...(creationData === undefined
+          ? {}
+          : { experimental_pluginCreateData: creationData }),
       };
       isSubmittingRef.current = true;
       setIsSubmitting(true);
@@ -1657,6 +1666,7 @@ export function NewThreadComposer({
         promptDraft.clearIfCurrentMatches(submittedDraft);
       try {
         await onSubmit(request);
+        clearSubmittedComposerCreateData(promptDraft.storageKey, creationData);
         clearReuseEnvironment();
       } catch (submitError) {
         if (clearedSubmittedDraft) {

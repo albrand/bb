@@ -1,5 +1,7 @@
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useMemo,
@@ -19,7 +21,6 @@ import {
   useLocalPathPicker,
   type LocalPathSubmitParams,
 } from "@/hooks/useLocalPathPicker";
-import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import {
   ProjectDeleteDialog,
   type ProjectDeleteDialogTarget,
@@ -30,6 +31,12 @@ import {
 } from "@/components/dialogs/ProjectRenameDialog";
 import { collapsedProjectIdsAtom } from "@/components/sidebar/sidebarCollapsedAtoms";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
+
+const ProjectPathDialog = lazy(() =>
+  import("@/components/dialogs/ProjectPathDialog").then((module) => ({
+    default: module.ProjectPathDialog,
+  })),
+);
 
 interface ProjectActionsContextValue {
   requestRename: (project: ProjectResponse) => void;
@@ -171,15 +178,19 @@ export function ProjectActionsProvider({
         onOpenChange={deleteDialog.onOpenChange}
         onDelete={confirmDelete}
       />
-      <ProjectPathDialog
-        target={addLocalSourcePicker.projectPathDialog.target}
-        pending={addLocalSource.isPending}
-        platform={addLocalSourcePicker.platform}
-        hostId={addLocalSourcePicker.hostId}
-        hostName={addLocalSourcePicker.hostName}
-        onOpenChange={addLocalSourcePicker.projectPathDialog.onOpenChange}
-        onSubmit={addLocalSourcePicker.submitProjectPath}
-      />
+      {addLocalSourcePicker.projectPathDialog.target === null ? null : (
+        <Suspense fallback={null}>
+          <ProjectPathDialog
+            target={addLocalSourcePicker.projectPathDialog.target}
+            pending={addLocalSource.isPending}
+            platform={addLocalSourcePicker.platform}
+            hostId={addLocalSourcePicker.hostId}
+            hostName={addLocalSourcePicker.hostName}
+            onOpenChange={addLocalSourcePicker.projectPathDialog.onOpenChange}
+            onSubmit={addLocalSourcePicker.submitProjectPath}
+          />
+        </Suspense>
+      )}
     </ProjectActionsContext.Provider>
   );
 }
