@@ -124,6 +124,74 @@ describe("InstallCliSkillsDialog", () => {
     ).toBeDefined();
   });
 
+  it("updates the default selection when partial statuses load while open", () => {
+    const { rerender } = render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={new Map()}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={new Map([
+          ["host-laptop", "installed"],
+          ["host-studio", "missing"],
+        ])}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("updates the default selection when outdated statuses load while open", () => {
+    const { rerender } = render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={new Map()}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={statuses}
+        action="update"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+  });
+
   it("updates only outdated machines and uses matching dialog copy", () => {
     render(
       <InstallCliSkillsDialog

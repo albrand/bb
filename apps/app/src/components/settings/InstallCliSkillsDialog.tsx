@@ -65,11 +65,14 @@ function InstallCliSkillsDialogContent({
     }
     return true;
   });
-  const [selectedHostIds, setSelectedHostIds] =
-    useState<readonly string[]>(targetHostIds);
+  const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<
+    readonly string[] | null
+  >(null);
   const choosable = hosts.length > 1;
   const selected = choosable
-    ? selectedHostIds.filter((hostId) => connectedHostIds.includes(hostId))
+    ? (selectedHostIdsOverride ?? targetHostIds).filter((hostId) =>
+        connectedHostIds.includes(hostId),
+      )
     : targetHostIds;
   const actionTitle =
     action === "update"
@@ -116,11 +119,12 @@ function InstallCliSkillsDialogContent({
                   checked={selected.includes(host.id)}
                   disabled={!connected || pending}
                   onCheckedChange={(checked) =>
-                    setSelectedHostIds((current) =>
-                      checked === true
-                        ? [...current, host.id]
-                        : current.filter((hostId) => hostId !== host.id),
-                    )
+                    setSelectedHostIdsOverride((current) => {
+                      const selection = current ?? targetHostIds;
+                      return checked === true
+                        ? [...selection, host.id]
+                        : selection.filter((hostId) => hostId !== host.id);
+                    })
                   }
                   aria-label={host.name}
                 />
