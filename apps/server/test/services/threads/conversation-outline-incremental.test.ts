@@ -420,6 +420,11 @@ describe("incremental conversation outlines", () => {
           expectMatchesFull(testThread, display),
         );
         expect(selected).toBeLessThan(20);
+        expect(
+          load(testThread, display)
+            .items.slice(-2)
+            .map((item) => item.preview),
+        ).toEqual(["User request", "Later answer"]);
       });
     },
   );
@@ -436,6 +441,45 @@ describe("incremental conversation outlines", () => {
         );
         expect(selected).toBeLessThan(20);
       }
+    });
+  });
+
+  it("advances beyond a historical rejected steer without losing its message", () => {
+    withTestThread((testThread) => {
+      const requestId = "creq_abcdefghij";
+      const rejectedRequest = request(requestId, "earlier");
+      appendRows(testThread, [
+        started("earlier"),
+        {
+          ...rejectedRequest,
+          data: {
+            ...rejectedRequest.data,
+            input: [{ type: "text", text: "Rejected historical steer" }],
+          },
+        },
+        {
+          type: "client/turn/rejected",
+          data: {
+            requestId,
+            reason: "host_unavailable",
+            message: "Host disconnected",
+          },
+        },
+        message("earlier", "Earlier answer"),
+        completed("earlier"),
+      ]);
+      seed(testThread, 100);
+      expectMatchesFull(testThread);
+      appendRows(testThread, [delta("live", " continued")]);
+      const selected = countSelectedEventRows(testThread, () => {
+        const outline = expectMatchesFull(testThread);
+        expect(
+          outline.items.filter(
+            (item) => item.preview === "Rejected historical steer",
+          ),
+        ).toHaveLength(1);
+      });
+      expect(selected).toBeLessThan(20);
     });
   });
 
