@@ -310,11 +310,24 @@ function printTokenWeather(
     compactionTurnIds,
     turns,
   });
+  console.log(`  History: ${summary.historyComplete ? "complete" : "partial"}`);
   console.log(
     `  Weather: ${weather.weather} · cache reuse ${weather.cacheReuseShare === null ? "unavailable" : `${Math.round(weather.cacheReuseShare * 100)}%`} · context fill ${contextFill === null ? "unavailable" : `${Math.round(contextFill * 100)}%`}`,
   );
   console.log(
     `  Fresh input median/range: ${weather.medianFreshInput?.toLocaleString("en") ?? "unavailable"} / ${weather.rangeFreshInput ? `${weather.rangeFreshInput.min.toLocaleString("en")}–${weather.rangeFreshInput.max.toLocaleString("en")}` : "unavailable"}`,
+  );
+  for (const turn of weather.turns) {
+    const change =
+      turn.freshInputChange === null
+        ? "no same-model baseline"
+        : `${turn.freshInputChange >= 0 ? "+" : ""}${Math.round(turn.freshInputChange * 100)}% vs ${turn.sameModelMedian?.toLocaleString("en") ?? "unavailable"}`;
+    console.log(
+      `  Turn ${turn.turnId}: ${turn.providerId} / ${turn.model ?? "unknown model"} · ${turn.weather} · fresh input ${compactTokenCount(turn.inputTokens)} · ${change}`,
+    );
+  }
+  console.log(
+    "  Rules: stormy at ≥85% context fill, or ≥50% fresh-input growth with <20% cache reuse; cloudy at ≥70% fill, ≥25% growth, or <35% reuse; clear at ≥35% reuse, <25% growth and <70% fill.",
   );
   if (compactions.length === 0) {
     console.log(
@@ -322,10 +335,49 @@ function printTokenWeather(
     );
   }
   for (const compaction of compactions) {
+    const paidForItself =
+      compaction.likelyPaidForItself === null
+        ? "payback unavailable"
+        : compaction.likelyPaidForItself
+          ? "likely paid for itself"
+          : "not yet paid for itself";
     console.log(
-      `  Compaction ${compaction.turnId}: estimated context ${compaction.beforeTokens.toLocaleString("en")} → ${compaction.afterTokens.toLocaleString("en")} · own cost ${compaction.compactionCostTokens.toLocaleString("en")} · later observed below trend ${compaction.observedSavingsTokens.toLocaleString("en")} · ${compaction.likelyPaidForItself ? "likely paid for itself" : "not yet paid for itself"} (estimate)`,
+      `  Compaction ${compaction.turnId}: estimated context ${compaction.beforeTokens?.toLocaleString("en") ?? "unavailable"} → ${compaction.afterTokens?.toLocaleString("en") ?? "unavailable"} · own cost ${compaction.compactionCostTokens?.toLocaleString("en") ?? "unavailable"} · later observed below trend ${compaction.observedSavingsTokens?.toLocaleString("en") ?? "unavailable"} · ${paidForItself} (estimate)`,
     );
   }
+}
+
+async function fetchThreadUsageTimeline(
+  sdk: BbSdk,
+  threadId: string,
+): Promise<ThreadTimelineResponse> {
+  const latest = await sdk.threads.timeline({ threadId });
+  const rows: ThreadTimelineResponse["rows"] = [];
+  let page = latest;
+  const seenCursors = new Set<string>();
+  while (true) {
+    rows.push(
+      ...page.rows.filter(
+        (row) =>
+          row.kind === "system" &&
+          row.systemKind === "operation" &&
+          row.operationKind === "compaction",
+      ),
+    );
+    const cursor = page.timelinePage.olderCursor;
+    if (cursor === null) break;
+    const cursorKey = `${cursor.anchorSeq}:${cursor.anchorId}`;
+    if (seenCursors.has(cursorKey)) {
+      throw new Error("Thread timeline repeated an older-page cursor");
+    }
+    seenCursors.add(cursorKey);
+    page = await sdk.threads.timeline({
+      beforeAnchorId: cursor.anchorId,
+      beforeAnchorSeq: String(cursor.anchorSeq),
+      threadId,
+    });
+  }
+  return { ...latest, rows };
 }
 
 function printChildSummary(summary: ThreadChildSummaryResult): void {
@@ -378,10 +430,10 @@ export function registerShowCommand(
           sdk.threads.childSummary({ threadId }).catch(() => null),
           sdk.threads.spendSummary({ threadId }).catch(() => null),
           opts.usage
-            ? sdk.threads
+            ? fetchThreadUsageTimeline(sdk, threadId).catch(() => null)
+            : sdk.threads
                 .timeline({ threadId, summaryOnly: "true" })
-                .catch(() => null)
-            : Promise.resolve(null),
+                .catch(() => null),
         ]);
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {

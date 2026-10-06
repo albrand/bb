@@ -72,6 +72,7 @@ const SYSTEM_PROVIDER_STATES_QUERY_KEY = "systemProviderStates";
 const HOST_PATH_EXISTENCE_QUERY_KEY = "hostPathExistence";
 const PROJECT_SKILLS_QUERY_KEY = "projectSkills";
 const THREAD_SPEND_SUMMARY_QUERY_KEY = "threadSpendSummary";
+const THREAD_COMPACTION_TURN_IDS_QUERY_KEY = "threadCompactionTurnIds";
 export const SKILL_CONTENT_QUERY_KEY = "skillContent";
 export const SKILL_FILES_QUERY_KEY = "skillFiles";
 const PLUGIN_LIST_QUERY_KEY = "plugin-list";
@@ -935,6 +936,10 @@ export function threadTimelineQueryKey(
 
 export function threadSpendSummaryQueryKey(threadId: string) {
   return [THREAD_SPEND_SUMMARY_QUERY_KEY, threadId] as const;
+}
+
+export function threadCompactionTurnIdsQueryKey(threadId: string) {
+  return [THREAD_COMPACTION_TURN_IDS_QUERY_KEY, threadId] as const;
 }
 
 export function allThreadSpendSummaryQueryKeyPrefix() {

@@ -18,10 +18,12 @@ import {
 } from "./ThreadUsageSummary";
 
 const useThreadSpendSummary = vi.hoisted(() => vi.fn());
+const useThreadTimeline = vi.hoisted(() => vi.fn());
 const childSummary = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThreadSpendSummary,
+  useThreadTimeline,
 }));
 vi.mock("@/lib/sdk", () => ({ sdk: { threads: { childSummary } } }));
 
@@ -30,7 +32,9 @@ describe("thread usage summary", () => {
 
   beforeEach(() => {
     useThreadSpendSummary.mockReset();
+    useThreadTimeline.mockReset();
     childSummary.mockReset();
+    useThreadTimeline.mockReturnValue({ data: undefined });
     useThreadSpendSummary.mockReturnValue({
       data: {
         historyComplete: false,
@@ -113,6 +117,42 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Writer · idle")).toBeTruthy();
   });
 
+  it("opens thread analysis from the per-turn tooltip without adding a header control", async () => {
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ThreadTurnTokenSummary threadId="parent" turnId="da385f7e5d-t1" />
+            <ThreadUsageAndAgents threadId="parent" />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    expect(container.querySelector("[data-token-weather-open]")).toBeNull();
+    fireEvent.pointerMove(
+      container.querySelector("[data-thread-turn-tokens]")!,
+    );
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Open thread token analysis",
+        })
+      )[0]!,
+    );
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Token weather and compaction savings",
+      }),
+    ).toBeTruthy();
+    expect(useThreadTimeline).toHaveBeenCalledWith(
+      "parent",
+      expect.objectContaining({ enabled: true }),
+    );
+  });
+
   it("shows reasoning in the footer only when a turn reports it", () => {
     useThreadSpendSummary.mockReturnValue({
       data: {
@@ -167,16 +207,17 @@ describe("thread usage summary", () => {
       ),
     ).toBeTruthy();
     expect(
-      container.querySelector('[data-agent-summary-full]')?.textContent,
+      container.querySelector("[data-agent-summary-full]")?.textContent,
     ).toContain("Ran 2 agents");
     expect(
-      container.querySelector('[data-agent-summary-count]')?.textContent,
+      container.querySelector("[data-agent-summary-count]")?.textContent,
     ).toBe("2");
     fireEvent.click(screen.getByText("View ▸"));
     expect(await screen.findByText("Scout · active")).toBeTruthy();
     expect(screen.getByText("Writer · idle")).toBeTruthy();
-    expect(screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/))
-      .toBeTruthy();
+    expect(
+      screen.getByText(/2 agents · 1 working · 0 waiting · 1 idle/),
+    ).toBeTruthy();
   });
 
   it("keeps the full desktop rollup behind the roomy header container tier", () => {
@@ -205,7 +246,9 @@ describe("thread usage summary", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "View 2 agents: 1 working" }),
     );
-    await waitFor(() => expect(screen.getByText("Agent activity")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Agent activity")).toBeTruthy(),
+    );
 
     rerender(
       <TooltipProvider>

@@ -193,6 +193,52 @@ describe("bb thread show command output", () => {
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
   });
 
+  it("loads timeline rows for the on-demand token usage analysis", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-usage-analysis",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    const latestTimeline = fixtures.makeTimelineResponse([]);
+    latestTimeline.timelinePage.olderCursor = {
+      anchorId: "older-anchor",
+      anchorSeq: 20,
+    };
+    const timelineGet = vi.fn(
+      async ({ query }: { query: Record<string, string> }) =>
+        query.beforeAnchorSeq === undefined
+          ? latestTimeline
+          : fixtures.makeTimelineResponse([]),
+    );
+    stubThreadApi({
+      "v1.threads.:id.$get": vi.fn(async () => thread),
+      "v1.threads.:id.timeline.$get": timelineGet,
+    });
+
+    await runCommand(["thread", "show", thread.id, "--usage"], register);
+
+    expect(timelineGet).toHaveBeenCalledWith({
+      param: { id: thread.id },
+      query: {},
+    });
+    expect(timelineGet).toHaveBeenCalledWith({
+      param: { id: thread.id },
+      query: {
+        beforeAnchorId: "older-anchor",
+        beforeAnchorSeq: "20",
+      },
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "  History: partial",
+    );
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
+      "  Rules: stormy at ≥85% context fill",
+    );
+  });
+
   it("bb thread show --work-status prints non-git environment message", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-show-work-status",

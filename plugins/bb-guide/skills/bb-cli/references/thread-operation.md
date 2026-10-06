@@ -125,7 +125,7 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
 - Add `--usage` to `bb thread show <thread-id>` for per-turn token weather,
   same-model input trends, context fill, and compaction savings estimates.
   Cached input combines reads and writes, and compaction payback is explicitly
-  estimated. Add `--json` to include `usageTimeline` summary rows for compaction
+  estimated. Add `--json` to include `usageTimeline` compaction rows for savings
   estimates.
 - Use `bb thread show <thread-id> --git-diff` to review file changes.
 - Use `bb thread log <thread-id>` to inspect the conversation. The default

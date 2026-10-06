@@ -30,11 +30,11 @@ export interface TokenWeatherSummary {
 }
 
 export interface CompactionEstimate {
-  afterTokens: number;
-  beforeTokens: number;
-  compactionCostTokens: number;
-  likelyPaidForItself: boolean;
-  observedSavingsTokens: number;
+  afterTokens: number | null;
+  beforeTokens: number | null;
+  compactionCostTokens: number | null;
+  likelyPaidForItself: boolean | null;
+  observedSavingsTokens: number | null;
   turnId: string;
 }
 
@@ -48,7 +48,7 @@ function median(values: number[]): number | null {
 }
 
 function sumKnown(values: Array<number | null>): number | null {
-  return values.some((value) => value === null)
+  return values.length === 0 || values.some((value) => value === null)
     ? null
     : values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
 }
@@ -187,40 +187,48 @@ export function estimateCompactionSavings(args: {
   const compactionTurnIds = new Set(args.compactionTurnIds);
   const lookaheadTurns = args.lookaheadTurns ?? 3;
   return turns.flatMap((turn, index) => {
-    if (!compactionTurnIds.has(turn.turnId) || !turn.model) return [];
+    if (!compactionTurnIds.has(turn.turnId)) return [];
     const earlier = turns
       .slice(0, index)
       .filter(
         (candidate) =>
+          turn.model !== null &&
           candidate.model === turn.model &&
           candidate.providerId === turn.providerId &&
           candidate.inputTokens !== null,
       )
       .map((candidate) => candidate.inputTokens!);
     const beforeTokens = median(earlier.slice(-3));
-    const later = turns
-      .slice(index + 1)
-      .filter(
-        (candidate) =>
-          candidate.model === turn.model &&
-          candidate.providerId === turn.providerId &&
-          candidate.inputTokens !== null,
-      )
-      .slice(0, lookaheadTurns);
-    if (beforeTokens === null || later.length === 0) return [];
-    const afterTokens = later[0]!.inputTokens!;
-    const observedSavingsTokens = later.reduce(
-      (total, candidate) =>
-        total + Math.max(0, beforeTokens - candidate.inputTokens!),
-      0,
-    );
-    if (turn.totalTokens === null) return [];
+    const later = turn.model
+      ? turns
+          .slice(index + 1)
+          .filter(
+            (candidate) =>
+              candidate.model === turn.model &&
+              candidate.providerId === turn.providerId &&
+              candidate.inputTokens !== null,
+          )
+          .slice(0, lookaheadTurns)
+      : [];
+    const afterTokens = later[0]?.inputTokens ?? null;
+    const observedSavingsTokens =
+      beforeTokens === null || later.length === 0
+        ? null
+        : later.reduce(
+            (total, candidate) =>
+              total + Math.max(0, beforeTokens - candidate.inputTokens!),
+            0,
+          );
+    const compactionCostTokens = turn.totalTokens;
     return [
       {
         afterTokens,
         beforeTokens,
-        compactionCostTokens: turn.totalTokens,
-        likelyPaidForItself: observedSavingsTokens > turn.totalTokens,
+        compactionCostTokens,
+        likelyPaidForItself:
+          observedSavingsTokens === null || compactionCostTokens === null
+            ? null
+            : observedSavingsTokens > compactionCostTokens,
         observedSavingsTokens,
         turnId: turn.turnId,
       },

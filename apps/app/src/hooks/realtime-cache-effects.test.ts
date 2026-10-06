@@ -50,6 +50,7 @@ import {
   threadTimelineQueryKeyPrefix,
   threadTimelineTurnSummaryDetailsQueryKey,
   threadSpendSummaryQueryKey,
+  threadCompactionTurnIdsQueryKey,
 } from "./queries/query-keys";
 import { pluginContributionsQueryKey } from "./queries/query-keys";
 import { systemEnvironmentProvidersQueryKey } from "./queries/environment-provider-queries";
@@ -677,7 +678,9 @@ describe("createRealtimeCacheEffects", () => {
       query: "needle",
     });
     const spendSummaryKey = threadSpendSummaryQueryKey("thr_1");
+    const compactionTurnIdsKey = threadCompactionTurnIdsQueryKey("thr_1");
     queryClient.setQueryData(spendSummaryKey, { total: {} });
+    queryClient.setQueryData(compactionTurnIdsKey, []);
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -712,6 +715,9 @@ describe("createRealtimeCacheEffects", () => {
       true,
     );
     expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
       true,
     );
 

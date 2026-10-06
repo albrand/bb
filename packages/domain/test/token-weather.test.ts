@@ -43,6 +43,19 @@ describe("token weather", () => {
     expect(result.turns[1]?.weather).toBe("unknown");
   });
 
+  it("keeps an empty thread unavailable instead of reporting zero usage", () => {
+    const result = summarizeTokenWeather({ turns: [] });
+
+    expect(result.totals).toEqual({
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    });
+    expect(result.weather).toBe("unknown");
+  });
+
   it("compares only same-provider, same-model turns and reports measured weather rules", () => {
     const result = summarizeTokenWeather({
       contextFill: 0.72,
@@ -74,6 +87,9 @@ describe("token weather", () => {
     expect(result.turns[1]?.freshInputChange).toBe(1);
     expect(result.turns[1]?.weather).toBe("stormy");
     expect(result.weather).toBe("stormy");
+    expect(result.medianFreshInput).toBe(60);
+    expect(result.rangeFreshInput).toEqual({ min: 40, max: 80 });
+    expect(result.totals.totalTokens).toBe(200);
     expect(
       tokenWeatherForMetrics({
         cacheReuseShare: 0.5,
@@ -81,6 +97,20 @@ describe("token weather", () => {
         freshInputChange: 0,
       }),
     ).toBe("clear");
+    expect(
+      tokenWeatherForMetrics({
+        cacheReuseShare: 0.5,
+        contextFill: null,
+        freshInputChange: 0.3,
+      }),
+    ).toBe("cloudy");
+    expect(
+      tokenWeatherForMetrics({
+        cacheReuseShare: null,
+        contextFill: 0.85,
+        freshInputChange: null,
+      }),
+    ).toBe("stormy");
   });
 
   it("estimates context change and payback from later same-model turns", () => {
@@ -147,6 +177,45 @@ describe("token weather", () => {
         compactionCostTokens: 250,
         likelyPaidForItself: true,
         observedSavingsTokens: 1400,
+        turnId: "compact",
+      },
+    ]);
+  });
+
+  it("keeps incomplete compaction estimates visible as unknown", () => {
+    const result = estimateCompactionSavings({
+      compactionTurnIds: ["compact"],
+      turns: [
+        {
+          cachedInputTokens: 0,
+          inputTokens: 1000,
+          model: "model-a",
+          outputTokens: 20,
+          providerId: "provider-a",
+          reasoningOutputTokens: null,
+          totalTokens: 1020,
+          turnId: "before",
+        },
+        {
+          cachedInputTokens: null,
+          inputTokens: null,
+          model: "model-a",
+          outputTokens: null,
+          providerId: "provider-a",
+          reasoningOutputTokens: null,
+          totalTokens: null,
+          turnId: "compact",
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        afterTokens: null,
+        beforeTokens: 1000,
+        compactionCostTokens: null,
+        likelyPaidForItself: null,
+        observedSavingsTokens: null,
         turnId: "compact",
       },
     ]);
