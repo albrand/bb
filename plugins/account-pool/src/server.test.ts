@@ -423,9 +423,20 @@ async function createFixture(args: {
     anthropicUpstreamBaseUrl: args.upstreamUrl,
     codexUpstreamBaseUrl: args.upstreamUrl,
   });
+  const options = args.options ?? {};
+  const upstreamFetch = options.fetch;
   const plugin = createAccountPoolPlugin({
     usageUrl: "data:application/json,{}",
-    ...args.options,
+    ...options,
+    oauthProfileUrl: options.oauthProfileUrl ?? UNUSED_PROFILE_URL,
+    ...(upstreamFetch === undefined
+      ? {}
+      : {
+          fetch: (input, init) =>
+            String(input) === UNUSED_PROFILE_URL
+              ? Promise.resolve(Response.json(null))
+              : upstreamFetch(input, init),
+        }),
   });
   args.beforePlugin?.(host);
   await plugin(host.bb);
@@ -573,6 +584,7 @@ async function movePoolToOtherAccount(
 }
 
 const EMPTY_USAGE_URL = "data:application/json,{}";
+const UNUSED_PROFILE_URL = "data:application/json,null";
 const CODEX_USAGE_STUB_URL = "https://usage.example/wham/usage";
 
 describe("Account Pool config schema", () => {
@@ -6177,6 +6189,122 @@ describe("Account Pool plugin", () => {
         error: null,
       });
       expect(quota(await accountState())).toBe(0.3);
+    },
+  );
+
+  async function claudePlanFixture(profile: Record<string, unknown>) {
+    const profileCalls: string[] = [];
+    const fixture = await createFixture({
+      upstreamUrl: "https://upstream.example",
+      source: "import",
+      options: {
+        usageUrl: "https://upstream.example/usage",
+        oauthProfileUrl: "https://upstream.example/profile",
+        importCredentials: async () =>
+          importedCredentials({
+            subscriptionType: "max",
+            rateLimitTier: "default_claude_max_5x",
+          }),
+        fetch: async (input, init) => {
+          const url = new URL(String(input));
+          if (url.pathname === "/profile") {
+            profileCalls.push(
+              new Headers(init?.headers).get("authorization") ?? "",
+            );
+            return Response.json(profile);
+          }
+          if (url.pathname === "/usage")
+            return Response.json({ seven_day: { utilization: 13 } });
+          return Response.json({ ok: true });
+        },
+      },
+    });
+    const listed = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(
+          await fixture.host.harness.behavior.callRpc("account.list", null),
+        )
+        .find((account) => account.id === fixture.account.id);
+    return { fixture, listed, profileCalls };
+  }
+
+  it("refreshes a Claude account's plan when Anthropic reports a new tier", async () => {
+    const { fixture, listed, profileCalls } = await claudePlanFixture({
+      account: {
+        uuid: "11111111-1111-4111-8111-111111111111",
+        has_claude_max: true,
+      },
+      organization: {
+        organization_type: "claude_max",
+        rate_limit_tier: "default_claude_max_20x",
+      },
+    });
+    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      accountId: fixture.account.id,
+    });
+
+    expect(await listed()).toMatchObject({
+      subscriptionType: "max",
+      rateLimitTier: "default_claude_max_20x",
+    });
+    const fetched = usageMeasurementSchema.parse(
+      await fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+        resourceId: fixture.account.id,
+        refresh: false,
+      }),
+    );
+    expect(fetched.usage).toMatchObject({ planLabel: "Max (20x)" });
+    expect(profileCalls.length).toBeGreaterThan(0);
+    expect(profileCalls.every((value) => value === "Bearer oauth-access")).toBe(
+      true,
+    );
+  });
+
+  it("checks a Claude account's plan at most once per refresh interval", async () => {
+    const { fixture, profileCalls } = await claudePlanFixture({
+      account: { uuid: "11111111-1111-4111-8111-111111111111" },
+      organization: { rate_limit_tier: "default_claude_max_20x" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: fixture.account.id,
+      });
+    }
+
+    expect(profileCalls).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "omits the tier",
+      { account: { uuid: "11111111-1111-4111-8111-111111111111" } },
+    ],
+    [
+      "describes another Claude account",
+      {
+        account: {
+          uuid: "99999999-9999-4999-8999-999999999999",
+          has_claude_max: true,
+        },
+        organization: { rate_limit_tier: "default_claude_max_20x" },
+      },
+    ],
+  ])(
+    "keeps a Claude account's stored plan when the profile %s",
+    async (_case, profile) => {
+      const { fixture, listed, profileCalls } =
+        await claudePlanFixture(profile);
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: fixture.account.id,
+      });
+
+      expect(await listed()).toMatchObject({
+        accountUuid: "11111111-1111-4111-8111-111111111111",
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_5x",
+      });
+      expect(profileCalls.length).toBeGreaterThan(0);
     },
   );
 
