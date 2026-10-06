@@ -234,6 +234,59 @@ describe("Subscription picker", () => {
     await waitFor(() => expect(composer?.experimental_createData).toBeNull());
   });
 
+  it.each(["routing-off", "parent-proxy"] as const)(
+    "explains that a new pinned conversation cannot be sent while %s is active",
+    async (inactiveMode) => {
+      let currentStatus = status(accounts);
+      const slot = renderSlot(
+        { component: Component },
+        { providerId: "claude-code" },
+        {
+          pluginId: "account-pool",
+          composer: {
+            scope: { kind: "new-thread", projectId: null },
+            selection: { providerId: "claude-code" },
+          },
+          rpc: { "status.get": () => currentStatus },
+        },
+      );
+      const select = await slot.findByRole("combobox", {
+        name: "Subscription",
+      });
+      await waitFor(() => expect(select.hasAttribute("disabled")).toBe(false));
+      fireEvent.change(select, { target: { value: accounts[1]!.id } });
+
+      if (inactiveMode === "routing-off") {
+        currentStatus = {
+          ...currentStatus,
+          routing: { claude: false, codex: true },
+        };
+      } else {
+        currentStatus = {
+          ...currentStatus,
+          parent: {
+            baseUrl: "https://parent.example",
+            mode: "proxy",
+            availability: { claude: true, codex: true },
+          },
+        };
+      }
+      await slot.emitRealtime(ACCOUNT_POOL_CONFIG_CHANGED, {});
+
+      const expected =
+        inactiveMode === "routing-off"
+          ? "This new conversation can't use the selected subscription while Claude routing is off. Choose Automatic or turn routing back on before sending."
+          : "This new conversation can't use the selected subscription while a parent pool is in proxy mode. Choose Automatic or switch the parent to local mode before sending.";
+      expect(await slot.findByText(expected)).toBeTruthy();
+      expect(
+        slot.queryByText(/Saved preference not in use right now/u),
+      ).toBeNull();
+      expect(
+        slot.queryByText("This conversation uses only the selected subscription."),
+      ).toBeNull();
+    },
+  );
+
   it("selects only the owning conversation and preserves its choice when the server rejects a change", async () => {
     const slot = renderSlot(
       { component: Component },

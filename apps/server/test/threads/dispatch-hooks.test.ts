@@ -322,7 +322,7 @@ describe("message.dispatch hook context", () => {
           },
         ],
       });
-      await expect(
+      const error = await expectApiError(() =>
         createThreadFromRequest(harness.deps, {
           environment: {
             type: "host",
@@ -338,7 +338,13 @@ describe("message.dispatch hook context", () => {
             "account-pool": { accountId: "disabled" },
           },
         }),
-      ).rejects.toThrow("Selected subscription is disabled");
+      );
+      expect(error.status).toBe(400);
+      expect(error.body).toMatchObject({
+        code: "thread_configuration_rejected",
+        message:
+          'The "account-pool" plugin\'s experimental_thread.configure hook rejected the thread configuration: Selected subscription is disabled',
+      });
       expect(admitted).toBe(false);
     });
   });

@@ -210,6 +210,30 @@ function messageDispatchHookFailure(
   );
 }
 
+function threadConfigurationRejected(
+  pluginId: string,
+  detail: string,
+): ApiError {
+  return new ApiError(
+    400,
+    "thread_configuration_rejected",
+    `The "${pluginId}" plugin's experimental_thread.configure hook rejected the thread configuration: ${detail}`,
+    { details: { pluginId } },
+  );
+}
+
+function threadConfigurationHookFailure(
+  pluginId: string,
+  detail: string,
+): ApiError {
+  return new ApiError(
+    502,
+    "thread_configuration_hook_failed",
+    `The "${pluginId}" plugin's experimental_thread.configure hook failed: ${detail}`,
+    { details: { pluginId } },
+  );
+}
+
 function dispatchRejection(pluginId: string, message: string): ApiError {
   return new ApiError(409, "dispatch_rejected", message, {
     details: { pluginId },
@@ -488,11 +512,11 @@ export async function configureThreadPlugins(
         ),
     );
     if (!invocation.ok)
-      throw messageDispatchHookFailure(hook.pluginId, invocation.error);
+      throw threadConfigurationHookFailure(hook.pluginId, invocation.error);
     if (!invocation.value.ok)
-      throw messageDispatchHookFailure(hook.pluginId, invocation.value.error);
+      throw threadConfigurationRejected(hook.pluginId, invocation.value.error);
     if (invocation.value.value !== null)
-      throw messageDispatchHookFailure(
+      throw threadConfigurationRejected(
         hook.pluginId,
         "returned an invalid configuration result",
       );

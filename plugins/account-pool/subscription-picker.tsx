@@ -178,6 +178,14 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
         : bypassed
           ? "Pool routing is bypassed for this conversation."
           : null;
+  const newThreadInactiveMessage =
+    scope.kind === "new-thread" && selected !== null && inactiveReason !== null
+      ? status?.parent?.mode === "proxy"
+        ? "This new conversation can't use the selected subscription while a parent pool is in proxy mode. Choose Automatic or switch the parent to local mode before sending."
+        : status !== null && !status.routing[provider]
+          ? `This new conversation can't use the selected subscription while ${provider === "claude" ? "Claude" : "Codex"} routing is off. Choose Automatic or turn routing back on before sending.`
+          : null
+      : null;
   const disabled =
     pending || status === null || composer.isRunning || composer.isSubmitting;
   return (
@@ -246,6 +254,10 @@ export function SubscriptionPicker({ providerId }: { providerId: string }) {
       {selectedInUse ? (
         <p className="mt-1 text-xs text-muted-foreground">
           This conversation uses only the selected subscription.
+        </p>
+      ) : newThreadInactiveMessage !== null ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {newThreadInactiveMessage}
         </p>
       ) : selected !== null && status !== null && inactiveReason !== null ? (
         <p className="mt-1 text-xs text-muted-foreground">

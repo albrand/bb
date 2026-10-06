@@ -1,5 +1,12 @@
 import { ScopedMachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "@bb/shared-ui/icon-extended";
 import {
@@ -12,7 +19,6 @@ import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { Pill } from "@bb/shared-ui/pill";
 import { ResourceOverflowMenu } from "@bb/shared-ui/resource-list";
-import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import {
   ProjectDeleteDialog,
   type ProjectDeleteDialogTarget,
@@ -73,6 +79,12 @@ const CHECKOUTS_DESCRIPTION =
 
 const DEFAULTS_DESCRIPTION =
   "What new threads in this project start with. bb remembers the last options you used here.";
+
+const ProjectPathDialog = lazy(() =>
+  import("@/components/dialogs/ProjectPathDialog").then((module) => ({
+    default: module.ProjectPathDialog,
+  })),
+);
 
 interface CheckoutRowProps {
   host: Host;
@@ -541,15 +553,19 @@ export function ProjectDetailSettingsView() {
         </SettingsSection>
       </div>
 
-      <ProjectPathDialog
-        target={localSourcePicker.projectPathDialog.target}
-        pending={localSourcePending}
-        platform={localSourcePicker.platform}
-        hostId={localSourcePicker.hostId}
-        hostName={localSourcePicker.hostName}
-        onOpenChange={localSourcePicker.projectPathDialog.onOpenChange}
-        onSubmit={localSourcePicker.submitProjectPath}
-      />
+      {localSourcePicker.projectPathDialog.target === null ? null : (
+        <Suspense fallback={null}>
+          <ProjectPathDialog
+            target={localSourcePicker.projectPathDialog.target}
+            pending={localSourcePending}
+            platform={localSourcePicker.platform}
+            hostId={localSourcePicker.hostId}
+            hostName={localSourcePicker.hostName}
+            onOpenChange={localSourcePicker.projectPathDialog.onOpenChange}
+            onSubmit={localSourcePicker.submitProjectPath}
+          />
+        </Suspense>
+      )}
 
       <ProjectMachineSetupDialog
         target={machineSetupTarget}

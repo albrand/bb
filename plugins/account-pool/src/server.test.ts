@@ -200,6 +200,32 @@ describe("Explicit subscription routing", () => {
     ).toEqual([]);
   });
 
+  it.each(["routing-off", "bypassed"] as const)(
+    "keeps an automatic turn on its route after %s changes",
+    async (change) => {
+      const { fixture, seen, request } = await twoSubscriptions();
+      const token = await resolveToken(
+        fixture.host,
+        "host-one",
+        "thread-running",
+      );
+      if (change === "routing-off") {
+        await fixture.host.harness.behavior.callRpc("routing.set", {
+          provider: "claude",
+          enabled: false,
+        });
+      } else {
+        await fixture.host.harness.behavior.callRpc("bypass.set", {
+          threadId: "thread-running",
+          bypassed: true,
+        });
+      }
+
+      expect((await request(token)).status).toBe(200);
+      expect(seen).toEqual(["sk-first"]);
+    },
+  );
+
   it.each(["disabled", "exhausted", "removed"])(
     "never switches away from a selected %s subscription",
     async (state) => {

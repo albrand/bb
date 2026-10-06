@@ -214,6 +214,8 @@ export class AccountPoolHub {
       );
     if (
       threadRoute !== null &&
+      threadRoute.accountId !== null &&
+      threadRoute.accountId !== undefined &&
       this.options.routing !== null &&
       ((await this.options.routing.isBypassed(threadRoute.threadId)) ||
         !(await this.options.routing.isProviderEnabled(provider)))

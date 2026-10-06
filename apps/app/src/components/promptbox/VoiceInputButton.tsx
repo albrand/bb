@@ -1,10 +1,22 @@
-import { useCallback, useRef, useState, type ComponentProps } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { Button } from "@bb/shared-ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
 import { Icon } from "@bb/shared-ui/icon";
 import { Popover, PopoverAnchor, PopoverContent } from "@bb/shared-ui/popover";
-import { MicrophonePreferences } from "@/components/settings/MicrophonePreferences";
+
+const MicrophonePreferences = lazy(() =>
+  import("@/components/settings/MicrophonePreferences").then((module) => ({
+    default: module.MicrophonePreferences,
+  })),
+);
 
 export function VoiceInputButton({
   warning,
@@ -109,11 +121,13 @@ export function VoiceInputButton({
               {visibleWarning}
             </p>
           ) : null}
-          <MicrophonePreferences
-            open={open}
-            activeStream={null}
-            onCaptureReady={handleCaptureReady}
-          />
+          <Suspense fallback={null}>
+            <MicrophonePreferences
+              open={open}
+              activeStream={null}
+              onCaptureReady={handleCaptureReady}
+            />
+          </Suspense>
         </div>
       </PopoverContent>
     </Popover>

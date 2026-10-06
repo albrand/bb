@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { Host } from "@bb/domain";
@@ -11,7 +11,6 @@ import {
   ResourceOverflowMenu,
   ResourceRowDetailChevron,
 } from "@bb/shared-ui/resource-list";
-import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import {
   ProjectDeleteDialog,
   type ProjectDeleteDialogTarget,
@@ -41,6 +40,12 @@ import {
 
 const PROJECTS_SECTION_DESCRIPTION =
   "Repositories bb can work in. Drag to change the order projects appear in the sidebar.";
+
+const ProjectPathDialog = lazy(() =>
+  import("@/components/dialogs/ProjectPathDialog").then((module) => ({
+    default: module.ProjectPathDialog,
+  })),
+);
 
 export function formatGitRemote(url: string): string {
   const sshMatch = /^[^@]+@([^:]+):(.+?)(?:\.git)?$/.exec(url);
@@ -328,16 +333,20 @@ export function ProjectsSettingsSection() {
         )}
       </SettingsSection>
 
-      <ProjectPathDialog
-        target={quickCreateProject.projectPathDialog.target}
-        pending={quickCreateProject.isCreating}
-        platform={quickCreateProject.platform}
-        hostId={quickCreateProject.hostId}
-        hostName={quickCreateProject.hostName}
-        hosts={quickCreateProject.hosts}
-        onOpenChange={quickCreateProject.projectPathDialog.onOpenChange}
-        onSubmit={quickCreateProject.submitProjectPath}
-      />
+      {quickCreateProject.projectPathDialog.target === null ? null : (
+        <Suspense fallback={null}>
+          <ProjectPathDialog
+            target={quickCreateProject.projectPathDialog.target}
+            pending={quickCreateProject.isCreating}
+            platform={quickCreateProject.platform}
+            hostId={quickCreateProject.hostId}
+            hostName={quickCreateProject.hostName}
+            hosts={quickCreateProject.hosts}
+            onOpenChange={quickCreateProject.projectPathDialog.onOpenChange}
+            onSubmit={quickCreateProject.submitProjectPath}
+          />
+        </Suspense>
+      )}
 
       <ProjectRenameDialog
         target={renameTarget}
