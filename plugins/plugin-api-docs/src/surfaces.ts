@@ -571,17 +571,12 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         id: "composer-actions",
         title: "Inline actions",
         summary:
-          "Adds a button to the row of controls inside the prompt box, beside the voice and send buttons. With this, a plugin can:",
+          "Add an inline action button beside the voice and send controls in the prompt box. With this, a plugin can:",
         bullets: [
-          "Read and rewrite the draft prompt, for example rephrasing it or inserting a template",
-          "Insert text and @-mentions at the cursor or at the end, optionally as their own paragraph; a mention read from the draft is recreated exactly, and the plugin's own mentions resolve fresh context when the message is sent",
-          "Lock the input while it works, and tint the whole draft while it does",
-          "Open a registered popup sharing the mention menu's above/below placement; compact interactive popups use bb's responsive drawer",
-          "Register a rebindable composer command that runs in the composer holding the caret, for example to open the popup with Ctrl+R; inside the popup, useComposer targets that composer and useComposer().experimental_closePopup() restores editor focus",
-          "Read reactive picker values from composer.selection, or set them through the same paths the pickers use and read back what the composer settled on",
-          "Add a control to the model menu, such as a subscription selector, through experimental_modelPicker",
-          "Keep plugin-owned creation data on the new-thread draft; experimental_thread.configure applies that plugin's data before the first message is admitted",
-          "Render in the same row as bb's own prompt-box buttons; bb keeps up to 3 plugins with applicable actions inline, ranked by use, and moves the rest into an overflow menu",
+          "Read or rewrite drafts, insert text or mentions, and read or change picker values",
+          "Lock or tint the draft, or add model-menu controls such as a subscription selector",
+          "Show up to three inline actions; overflow the rest, and open responsive popups or commands",
+          "Attach plugin data to a new-thread draft before its first message",
         ],
         apiSymbols: [
           "PluginComposerApi",
