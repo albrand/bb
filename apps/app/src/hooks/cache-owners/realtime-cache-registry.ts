@@ -356,7 +356,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadSearchQueriesForCompletedTurn,
       dirtyThreadTimelineQueries,
       dirtyThreadCompactionTurnIdsQueriesForCompletedTurn,
-      dirtyThreadSpendSummaryQueriesForCompletedTurn,
+      dirtyThreadSpendSummaryQueriesForUsageUpdate,
       dirtyThreadPullRequestQueryForCompletedTurn,
       dirtyThreadTurnRequestQueries,
     ],
@@ -816,15 +816,19 @@ function dirtyThreadDetailQueries({
   return getThreadDetailInvalidationQueryKeys({ threadId });
 }
 
-function dirtyThreadSpendSummaryQueriesForCompletedTurn({
+function dirtyThreadSpendSummaryQueriesForUsageUpdate({
   eventTypes,
   flushOnce,
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
   if (
     !threadId ||
-    !eventTypes?.includes("turn/completed") ||
-    !flushOnce("thread-spend-summary:turn-completed")
+    !eventTypes?.some(
+      (eventType) =>
+        eventType === "turn/completed" ||
+        eventType === "thread/tokenUsage/updated",
+    ) ||
+    !flushOnce("thread-spend-summary:usage-update")
   ) {
     return [];
   }

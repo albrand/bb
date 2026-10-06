@@ -730,6 +730,33 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
+  it("refreshes token usage when usage arrives after the turn completes", () => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const spendSummaryKey = threadSpendSummaryQueryKey("thr_1");
+    const compactionTurnIdsKey = threadCompactionTurnIdsQueryKey("thr_1");
+    queryClient.setQueryData(spendSummaryKey, { total: {} });
+    queryClient.setQueryData(compactionTurnIdsKey, []);
+
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      metadata: { eventTypes: ["thread/tokenUsage/updated"] },
+      changes: ["events-appended"],
+    });
+    vi.advanceTimersByTime(50);
+
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(compactionTurnIdsKey)?.isInvalidated).toBe(
+      false,
+    );
+
+    effects.dispose();
+  });
+
   it("refreshes an open search once per flush without aborting the request in flight, then once it settles", async () => {
     vi.useFakeTimers();
     const visibility = createFakeVisibility();
