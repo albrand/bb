@@ -1227,7 +1227,9 @@ export class AccountPoolHub {
         (provider === "claude" && automaticChoice !== null));
     return {
       ...selected,
-      keepAffinity: selected.account.id === routing.pinnedAccountId,
+      keepAffinity:
+        selected.account.id === routing.pinnedAccountId &&
+        (provider !== "claude" || routing.selectionAccountId !== null),
       automaticChoice,
       accept: () => {
         if (automaticChoice !== null) {

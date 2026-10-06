@@ -4144,20 +4144,32 @@ describe("Account Pool plugin", () => {
         };
         await send("warm");
         limited = true;
-        await send("warm", 429);
+        await send("warm", provider === "claude" ? 200 : 429);
         await send("fresh");
-        await send("warm", 429);
+        await send("warm", provider === "claude" ? 200 : 429);
         now += 60_000;
         limited = false;
         await send("warm");
         await send("fresh-after-recovery");
-        expect(attempts).toEqual([
-          "sk-first",
-          "sk-first",
-          "sk-second",
-          "sk-first",
-          "sk-second",
-        ]);
+        expect(attempts).toEqual(
+          provider === "claude"
+            ? [
+                "sk-first",
+                "sk-first",
+                "sk-second",
+                "sk-second",
+                "sk-second",
+                "sk-second",
+                "sk-second",
+              ]
+            : [
+                "sk-first",
+                "sk-first",
+                "sk-second",
+                "sk-first",
+                "sk-second",
+              ],
+        );
       },
     );
 
@@ -6670,6 +6682,96 @@ describe("Account Pool plugin", () => {
           { accountId: pool.second.id, eligible: true },
         ],
       });
+    });
+
+    it("moves an Automatic conversation to another account after a long hold", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+      const before = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_longholdrebalance", provider: "claude" },
+      );
+      expect(before).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      expect(pool.seen).toEqual(["sk-first", "sk-second"]);
+      const after = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_longholdrebalance", provider: "claude" },
+      );
+      expect(after).toMatchObject({
+        boundAccountId: pool.second.id,
+        nextAccountId: pool.second.id,
+      });
+    });
+
+    it("keeps an explicitly pinned conversation on its account during a long hold", async () => {
+      const pool = await fixtureWithAccounts();
+      pool.fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+        makeThreadResponse({
+          id: threadId,
+          providerId: "claude-code",
+          status: "idle",
+        }),
+      );
+      pool.fixture.host.harness.sdk.stub(
+        "threads.queuedMessages.list",
+        async () => [],
+      );
+      await pool.fixture.host.harness.behavior.callRpc("routing.selection.set", {
+        threadId: "thr_longholdpin",
+        provider: "claude",
+        accountId: pool.fixture.account.id,
+      });
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+
+      const token = await resolveToken(
+        pool.fixture.host,
+        "host-one",
+        "thr_longholdpin",
+      );
+      const response = await pool.fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        "/v1/messages",
+        {
+          headers: authHeaders(token),
+          body: JSON.stringify({
+            model: "claude-opus-4-1",
+            messages: [],
+            max_tokens: 1,
+          }),
+        },
+      );
+
+      expect(response.status).toBe(429);
+      await response.text();
+      expect(pool.seen).toEqual([]);
     });
 
     it("keeps an extra-usage eligible bound account in the binding preview", async () => {
