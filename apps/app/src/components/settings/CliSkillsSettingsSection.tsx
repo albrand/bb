@@ -19,24 +19,45 @@ import { useCliSkillsStatus } from "@/hooks/queries/system-queries";
 const CLI_SKILLS_SETTING_LABEL = "bb CLI skills";
 
 interface CliSkillsSettingsSectionContentProps {
+  action?: CliSkillsAction;
+  actionLabel?: string;
   hasConnectedMachine: boolean;
   onOpenPicker: () => void;
   pending: boolean;
   statusBadge: string | null;
 }
 
-function installDescription(hasConnectedMachine: boolean): string {
-  return hasConnectedMachine
-    ? "Install them into ~/.agents/skills and ~/.claude/skills so agents outside bb can use the bb CLI."
-    : "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.";
+export type CliSkillsAction = "install" | "update" | "reinstall";
+
+function installDescription(
+  hasConnectedMachine: boolean,
+  action: CliSkillsAction,
+  statusBadge: string | null,
+): string {
+  if (!hasConnectedMachine) {
+    return "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.";
+  }
+  if (action === "reinstall") {
+    return "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI.";
+  }
+  if (action === "update") {
+    return "Update the bb CLI skills in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version.";
+  }
+  return statusBadge?.startsWith("Installed on ")
+    ? "Install them into ~/.agents/skills and ~/.claude/skills on the remaining machines, so agents outside bb can use the bb CLI."
+    : "Install them into ~/.agents/skills and ~/.claude/skills so agents outside bb can use the bb CLI.";
 }
 
 export function summarizeMachineStatuses(
-  statuses: readonly CliSkillMachineStatus[],
+  statuses: readonly { name: string; status: CliSkillMachineStatus }[],
 ): string | null {
-  const known = statuses.filter((status) => status !== "unknown");
+  const known = statuses.filter(({ status }) => status !== "unknown");
   if (known.length === 0) return null;
-  const installed = known.filter((status) => status === "installed").length;
+  const outdated = known.filter(({ status }) => status === "outdated");
+  if (outdated.length > 0) {
+    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}`;
+  }
+  const installed = known.filter(({ status }) => status === "installed").length;
   if (installed === known.length) {
     return known.length > 1
       ? `Installed on ${known.length} machines`
@@ -45,12 +66,49 @@ export function summarizeMachineStatuses(
   if (installed > 0) {
     return `Installed on ${installed} of ${known.length} machines`;
   }
-  return known.some((status) => status === "outdated")
-    ? "Out of date"
-    : "Not installed";
+  return "Not installed";
+}
+
+export function getCliSkillsPresentation(
+  statuses: readonly { name: string; status: CliSkillMachineStatus }[],
+  hasConnectedMachine = true,
+): {
+  action: CliSkillsAction;
+  actionLabel?: string;
+  statusBadge: string | null;
+} {
+  const knownStatuses = statuses.filter(({ status }) => status !== "unknown");
+  const installedCount = knownStatuses.filter(
+    ({ status }) => status === "installed",
+  ).length;
+  const missingCount = knownStatuses.filter(
+    ({ status }) => status === "missing",
+  ).length;
+  const hasOutdated = knownStatuses.some(({ status }) => status === "outdated");
+  const allKnownInstalled =
+    knownStatuses.length > 0 && installedCount === knownStatuses.length;
+  const action: CliSkillsAction = !hasConnectedMachine
+    ? "install"
+    : hasOutdated
+      ? "update"
+      : allKnownInstalled
+        ? "reinstall"
+        : "install";
+  const actionLabel =
+    action === "install" && installedCount > 0 && missingCount > 0
+      ? `Install on ${missingCount} more`
+      : undefined;
+
+  return {
+    action,
+    ...(actionLabel === undefined ? {} : { actionLabel }),
+    statusBadge: summarizeMachineStatuses(statuses),
+  };
 }
 
 export function CliSkillsSettingsSectionContent({
+  action = "install",
+  actionLabel,
   hasConnectedMachine,
   onOpenPicker,
   pending,
@@ -61,17 +119,29 @@ export function CliSkillsSettingsSectionContent({
       <SettingsWithControl
         label={CLI_SKILLS_SETTING_LABEL}
         {...(statusBadge === null ? {} : { labelBadge: statusBadge })}
-        description={installDescription(hasConnectedMachine)}
+        description={installDescription(hasConnectedMachine, action, statusBadge)}
       >
         <Button
           type="button"
-          variant="outline"
+          variant={action === "reinstall" ? "secondary" : "outline"}
           size="sm"
+          className="max-sm:min-h-11"
           disabled={!hasConnectedMachine || pending}
           onClick={onOpenPicker}
-          aria-label={`Install ${CLI_SKILLS_SETTING_LABEL}`}
+          aria-label={`${actionLabel ?? (action === "update" ? "Update" : action === "reinstall" ? "Reinstall" : "Install")} ${CLI_SKILLS_SETTING_LABEL}`}
         >
-          {pending ? "Installing…" : "Install"}
+          {pending
+            ? action === "update"
+              ? "Updating…"
+              : action === "reinstall"
+                ? "Reinstalling…"
+                : "Installing…"
+            : actionLabel ??
+              (action === "update"
+                ? "Update"
+                : action === "reinstall"
+                  ? "Reinstall"
+                  : "Install")}
         </Button>
       </SettingsWithControl>
     </SettingsSection>
@@ -111,13 +181,22 @@ export function CliSkillsSettingsSection() {
     [hostsQuery.data],
   );
   const statuses = statusByHostId(statusQuery.data);
+  const statusItems = statusQuery.data?.machines.map((machine) => ({
+    name: machine.hostName,
+    status: machine.status,
+  })) ?? [];
+  const hasConnectedMachine = hosts.some((host) => host.status === "connected");
+  const { action, actionLabel, statusBadge } =
+    getCliSkillsPresentation(statusItems, hasConnectedMachine);
 
   return (
     <>
       <CliSkillsSettingsSectionContent
-        hasConnectedMachine={hosts.some((host) => host.status === "connected")}
+        hasConnectedMachine={hasConnectedMachine}
+        action={action}
+        {...(actionLabel === undefined ? {} : { actionLabel })}
         pending={installCliSkills.isPending}
-        statusBadge={summarizeMachineStatuses([...statuses.values()])}
+        statusBadge={statusBadge}
         onOpenPicker={() => setPickerOpen(true)}
       />
       <InstallCliSkillsDialog
@@ -125,6 +204,7 @@ export function CliSkillsSettingsSection() {
         onOpenChange={setPickerOpen}
         hosts={hosts}
         statusByHostId={statuses}
+        action={action}
         pending={installCliSkills.isPending}
         onCancel={() => setPickerOpen(false)}
         onInstall={(hostIds) =>

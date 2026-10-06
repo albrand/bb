@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CliSkillsSettingsSectionContent,
+  getCliSkillsPresentation,
   summarizeMachineStatuses,
 } from "./CliSkillsSettingsSection";
 
@@ -12,7 +13,7 @@ afterEach(() => {
 });
 
 function installButton(): HTMLButtonElement {
-  const button = screen.getByRole("button", { name: "Install bb CLI skills" });
+  const button = screen.getByRole("button", { name: /bb CLI skills/ });
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error("Install control is not a button");
   }
@@ -31,6 +32,64 @@ describe("CliSkillsSettingsSectionContent", () => {
     );
 
     expect(installButton().disabled).toBe(false);
+    expect(installButton().textContent).toBe("Install");
+  });
+
+  it("offers a quiet reinstall when all known machines already have the skills", () => {
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge="Installed on 3 machines"
+        action="reinstall"
+      />,
+    );
+
+    expect(installButton().textContent).toBe("Reinstall");
+    expect(installButton().className).toContain("bg-secondary");
+    expect(installButton().getAttribute("aria-label")).toBe(
+      "Reinstall bb CLI skills",
+    );
+    expect(
+      screen.getByText(
+        "Installed in ~/.agents/skills and ~/.claude/skills on all your machines, so agents outside bb can use the bb CLI.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("counts remaining machines and gives outdated machines an update action", () => {
+    const onOpenPicker = () => undefined;
+    const { rerender } = render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={onOpenPicker}
+        pending={false}
+        statusBadge="Installed on 1 of 3 machines"
+        action="install"
+        actionLabel="Install on 2 more"
+      />,
+    );
+
+    expect(installButton().textContent).toBe("Install on 2 more");
+    expect(installButton().getAttribute("aria-label")).toBe(
+      "Install on 2 more bb CLI skills",
+    );
+
+    rerender(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={onOpenPicker}
+        pending={false}
+        statusBadge="Out of date on Studio"
+        action="update"
+      />,
+    );
+
+    expect(installButton().textContent).toBe("Update");
+    expect(installButton().getAttribute("aria-label")).toBe(
+      "Update bb CLI skills",
+    );
   });
 
   it("explains why the install is unavailable with no connected machine", () => {
@@ -44,6 +103,9 @@ describe("CliSkillsSettingsSectionContent", () => {
     );
 
     expect(installButton().disabled).toBe(true);
+    expect(installButton().getAttribute("aria-label")).toBe(
+      "Install bb CLI skills",
+    );
     expect(
       screen.getByText(
         "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.",
@@ -68,25 +130,107 @@ describe("CliSkillsSettingsSectionContent", () => {
 
 describe("summarizeMachineStatuses", () => {
   it("reports a single machine plainly", () => {
-    expect(summarizeMachineStatuses(["installed"])).toBe("Installed");
-    expect(summarizeMachineStatuses(["outdated"])).toBe("Out of date");
-    expect(summarizeMachineStatuses(["missing"])).toBe("Not installed");
+    expect(
+      summarizeMachineStatuses([{ status: "installed", name: "Laptop" }]),
+    ).toBe("Installed");
+    expect(
+      summarizeMachineStatuses([{ status: "outdated", name: "Laptop" }]),
+    ).toBe("Out of date on Laptop");
+    expect(
+      summarizeMachineStatuses([{ status: "missing", name: "Laptop" }]),
+    ).toBe("Not installed");
   });
 
   it("counts a mixed fleet instead of claiming either extreme", () => {
-    expect(summarizeMachineStatuses(["installed", "outdated", "missing"])).toBe(
-      "Installed on 1 of 3 machines",
-    );
-    expect(summarizeMachineStatuses(["installed", "installed"])).toBe(
-      "Installed on 2 machines",
-    );
+    expect(
+      summarizeMachineStatuses([
+        { status: "installed", name: "Laptop" },
+        { status: "outdated", name: "Studio" },
+        { status: "missing", name: "Travel PC" },
+      ]),
+    ).toBe("Out of date on Studio");
+    expect(
+      summarizeMachineStatuses([
+        { status: "installed", name: "Laptop" },
+        { status: "installed", name: "Studio" },
+      ]),
+    ).toBe("Installed on 2 machines");
   });
 
   it("ignores machines it could not ask, and shows nothing if that is all of them", () => {
-    expect(summarizeMachineStatuses(["installed", "unknown"])).toBe(
-      "Installed",
-    );
-    expect(summarizeMachineStatuses(["unknown", "unknown"])).toBe(null);
+    expect(
+      summarizeMachineStatuses([
+        { status: "installed", name: "Laptop" },
+        { status: "unknown", name: "Studio" },
+      ]),
+    ).toBe("Installed");
+    expect(
+      summarizeMachineStatuses([
+        { status: "unknown", name: "Laptop" },
+        { status: "unknown", name: "Studio" },
+      ]),
+    ).toBe(null);
     expect(summarizeMachineStatuses([])).toBe(null);
+  });
+});
+
+describe("getCliSkillsPresentation", () => {
+  it("reinstalls when every known machine already has the skills", () => {
+    expect(
+      getCliSkillsPresentation([
+        { name: "Laptop", status: "installed" },
+        { name: "Studio", status: "installed" },
+        { name: "Unknown box", status: "unknown" },
+      ]),
+    ).toEqual({
+      action: "reinstall",
+      statusBadge: "Installed on 2 machines",
+    });
+  });
+
+  it("installs on missing machines when only some machines already have the skills", () => {
+    expect(
+      getCliSkillsPresentation([
+        { name: "Laptop", status: "installed" },
+        { name: "Studio", status: "missing" },
+        { name: "Travel PC", status: "missing" },
+      ]),
+    ).toEqual({
+      action: "install",
+      actionLabel: "Install on 2 more",
+      statusBadge: "Installed on 1 of 3 machines",
+    });
+  });
+
+  it("updates outdated machines and names them in the badge", () => {
+    expect(
+      getCliSkillsPresentation([
+        { name: "Laptop", status: "installed" },
+        { name: "Studio", status: "outdated" },
+        { name: "Build Mac", status: "outdated" },
+        { name: "Travel PC", status: "missing" },
+      ]),
+    ).toEqual({
+      action: "update",
+      statusBadge: "Out of date on Studio, Build Mac",
+    });
+  });
+
+  it("keeps first-install copy when no machine has the skills or the status is unknown", () => {
+    expect(
+      getCliSkillsPresentation([{ name: "Laptop", status: "missing" }]),
+    ).toEqual({ action: "install", statusBadge: "Not installed" });
+    expect(
+      getCliSkillsPresentation([{ name: "Laptop", status: "unknown" }]),
+    ).toEqual({ action: "install", statusBadge: null });
+  });
+
+  it("keeps the disabled install action when no machine is connected", () => {
+    expect(
+      getCliSkillsPresentation(
+        [{ name: "Laptop", status: "installed" }],
+        false,
+      ),
+    ).toEqual({ action: "install", statusBadge: "Installed" });
   });
 });

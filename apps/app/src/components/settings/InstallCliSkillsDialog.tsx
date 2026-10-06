@@ -12,8 +12,10 @@ import {
   DialogTitle,
 } from "@bb/shared-ui/dialog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
+import type { CliSkillsAction } from "@/components/settings/CliSkillsSettingsSection";
 
 interface InstallCliSkillsDialogContentProps {
+  action?: CliSkillsAction;
   hosts: readonly Host[];
   onCancel: () => void;
   onInstall: (hostIds: string[]) => void;
@@ -41,6 +43,7 @@ function machineStatusLabel(args: {
 }
 
 function InstallCliSkillsDialogContent({
+  action = "install",
   hosts,
   onCancel,
   onInstall,
@@ -51,21 +54,48 @@ function InstallCliSkillsDialogContent({
     () => hosts.filter(isConnected).map((host) => host.id),
     [hosts],
   );
+  const installedHostIds = connectedHostIds.filter(
+    (hostId) => statusByHostId.get(hostId) === "installed",
+  );
+  const targetHostIds = connectedHostIds.filter((hostId) => {
+    const status = statusByHostId.get(hostId);
+    if (action === "update") return status === "outdated";
+    if (action === "install" && installedHostIds.length > 0) {
+      return status === "missing";
+    }
+    return true;
+  });
   const [selectedHostIds, setSelectedHostIds] =
-    useState<readonly string[]>(connectedHostIds);
+    useState<readonly string[]>(targetHostIds);
   const choosable = hosts.length > 1;
   const selected = choosable
     ? selectedHostIds.filter((hostId) => connectedHostIds.includes(hostId))
-    : connectedHostIds;
+    : targetHostIds;
+  const actionTitle =
+    action === "update"
+      ? "Update"
+      : action === "reinstall"
+        ? "Reinstall"
+        : "Install";
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Install bb CLI skills</DialogTitle>
+        <DialogTitle>{actionTitle} bb CLI skills</DialogTitle>
         <DialogDescription>
           {choosable
-            ? "Choose the machines to install them onto. Each one gets the skills in ~/.agents/skills and ~/.claude/skills, replacing any copy already there."
-            : `The skills go in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}, replacing any copy already there.`}
+            ? action === "update"
+              ? "Choose the machines to update. Their older copies in ~/.agents/skills and ~/.claude/skills will be replaced."
+              : action === "reinstall"
+                ? "Choose the machines to reinstall. Existing copies in ~/.agents/skills and ~/.claude/skills will be replaced."
+                : installedHostIds.length > 0
+                  ? "Choose the remaining machines to install them onto. Each selected machine gets the skills in ~/.agents/skills and ~/.claude/skills."
+                  : "Choose the machines to install them onto. Each one gets the skills in ~/.agents/skills and ~/.claude/skills, replacing any copy already there."
+            : action === "update"
+              ? `The latest skills will replace the older copies in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}.`
+              : action === "reinstall"
+                ? `The skills will be reinstalled into ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}.`
+                : `The skills go in ~/.agents/skills and ~/.claude/skills on ${hosts[0]?.name ?? "the selected machine"}, replacing any copy already there.`}
         </DialogDescription>
       </DialogHeader>
 
@@ -118,10 +148,17 @@ function InstallCliSkillsDialogContent({
         </Button>
         <Button
           type="button"
+          variant={action === "reinstall" ? "secondary" : "default"}
           disabled={pending || selected.length === 0}
           onClick={() => onInstall([...selected])}
         >
-          {pending ? "Installing…" : "Install"}
+          {pending
+            ? action === "update"
+              ? "Updating…"
+              : action === "reinstall"
+                ? "Reinstalling…"
+                : "Installing…"
+            : actionTitle}
         </Button>
       </DialogFooter>
     </>
