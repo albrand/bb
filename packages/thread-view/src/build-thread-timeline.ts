@@ -1173,7 +1173,7 @@ function buildTimelineRows(
   }
 
   return orderRowsAfterExternalUserBoundary(
-    rows,
+    placeRejectedSteerRows(rows),
     collectExternalUserBoundarySeqs(projection),
   );
 }

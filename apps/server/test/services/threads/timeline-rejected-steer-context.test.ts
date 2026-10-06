@@ -227,9 +227,16 @@ describe("rejected steer turn context", () => {
     },
   );
 
-  it.each(["flat", "collapse"] as const)(
-    "preserves unrelated accepted agent message order across full and paged %s views",
-    (display) => {
+  it.each([
+    ["agent", "flat"],
+    ["agent", "collapse"],
+    ["user", "flat"],
+    ["user", "collapse"],
+    ["system", "flat"],
+    ["system", "collapse"],
+  ] as const)(
+    "preserves unrelated accepted agent order after a rejected %s steer in %s views",
+    (initiator, display) => {
       withTestThread((testThread) => {
         const [t2Start, ...t2Rest] = turn("t2");
         const [t3Start, ...t3Rest] = turn("t3");
@@ -265,16 +272,49 @@ describe("rejected steer turn context", () => {
                 row.text !== "Late rejected steer",
             )
             .map((row) => row.id);
+        const [liveStart, liveAnswer, liveCompleted] = turn("live");
+        appendRows(testThread, [liveStart]);
         const before = load(testThread, 10_000, 100, display);
+        loadThreadConversationOutline(testThread.db, testThread.thread, {
+          ...outlineOptions(testThread),
+          completedTurnDisplay: display,
+        });
         const late = request();
         appendRows(testThread, [
-          { ...late, data: { ...late.data, initiator: "agent" } },
+          { ...late, data: { ...late.data, initiator } },
           rejected(),
+          liveAnswer,
+          liveCompleted,
         ]);
         const full = load(testThread, 10_000, 100, display);
-        expect(unaffected(full.response.rows)).toEqual(
-          unaffected(before.response.rows),
-        );
+        expect(
+          unaffected(full.response.rows).filter((id) =>
+            unaffected(before.response.rows).includes(id),
+          ),
+        ).toEqual(unaffected(before.response.rows));
+        const options = {
+          ...outlineOptions(testThread),
+          completedTurnDisplay: display,
+        };
+        const unaffectedIds = unaffected(full.response.rows);
+        for (const outline of [
+          buildThreadConversationOutline(
+            testThread.db,
+            testThread.thread,
+            options,
+          ),
+          loadThreadConversationOutline(
+            testThread.db,
+            testThread.thread,
+            options,
+          ),
+        ]) {
+          expect(
+            outline.items
+              .filter((item) => unaffectedIds.includes(item.id))
+              .map((item) => item.id),
+          ).toEqual(unaffectedIds);
+        }
         const pageRows: TimelineRow[][] = [];
         let page = load(testThread, 64, 1, display).response;
         for (let index = 0; index < 10; index += 1) {
