@@ -157,6 +157,54 @@ describe("createConnection", () => {
     },
   );
 
+  it("names the event-loop work and the callers of a slow transaction", () => {
+    const logger = new CapturingSlowQueryLogger();
+    let workLabel: string | null = "sweep:thread-pruning";
+    const db = createConnection(":memory:", {
+      slowQueryLogger: logger,
+      slowQueryThresholdMs: 0,
+      slowQueryWorkLabel: () => workLabel,
+    });
+    migrate(db);
+    try {
+      const transaction = db.$client.transaction(() => {
+        db.$client.prepare("SELECT 1").get();
+      });
+      function pruneThreadForSlowQueryTest(): void {
+        transaction.immediate();
+      }
+      logger.clear();
+      pruneThreadForSlowQueryTest();
+
+      const statement = logger.infoLogs.find(
+        (log) => log.fields.operation === "get",
+      );
+      const timedTransaction = logger.infoLogs.find(
+        (log) => log.fields.operation === "transaction",
+      );
+      expect(statement?.fields.eventLoopWork).toBe("sweep:thread-pruning");
+      expect(statement?.fields.callers).toBeUndefined();
+      expect(timedTransaction?.fields.eventLoopWork).toBe(
+        "sweep:thread-pruning",
+      );
+      expect(timedTransaction?.fields.callers?.[0]).toMatch(
+        /^pruneThreadForSlowQueryTest /u,
+      );
+      expect(
+        timedTransaction?.fields.callers?.some((frame) =>
+          frame.includes("runTimedStatementOperation"),
+        ),
+      ).toBe(false);
+
+      workLabel = null;
+      logger.clear();
+      db.$client.prepare("SELECT 1").get();
+      expect(getOnlyInfoLog(logger).fields.eventLoopWork).toBeNull();
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("logs slow prepared statement executions without parameter values", () => {
     const logger = new CapturingSlowQueryLogger();
     const db = createConnection(":memory:", {
