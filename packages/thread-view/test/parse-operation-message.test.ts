@@ -112,6 +112,42 @@ describe("parseOperationMessage operation titles", () => {
     });
   });
 
+  it("masks plaintext plugin and core values and keeps shell values", () => {
+    const event: ThreadEvent = {
+      type: "provider.env-resolved",
+      threadId: THREAD_ID,
+      providerThreadId: "provider-thread-1",
+      scope: { kind: "thread" },
+      entries: [
+        { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+        {
+          name: "PLUGIN_TOKEN",
+          source: { plugin: "auth-proxy" },
+          value: "fake-secret-123",
+        },
+        {
+          name: "CORE_TOKEN",
+          source: { core: "machine-environment" },
+          value: "fake-core-secret-456",
+        },
+      ],
+    };
+    const message = parseOperationMessage(
+      event,
+      { id: "event-provider-env", seq: 1, createdAt: 1 },
+      { includeDiagnosticOperations: true, threadName: "" },
+    );
+
+    expect(message).toMatchObject({
+      kind: "operation",
+      detail: [
+        "PATH=/fake/shell/bin (shell)",
+        "PLUGIN_TOKEN=•••••• (auth-proxy)",
+        "CORE_TOKEN=•••••• (machine-environment)",
+      ].join("\n"),
+    });
+  });
+
   describe("provider-unhandled", () => {
     it("uses the projected provider display name for dynamic providers", () => {
       const row = factory().providerUnhandled({

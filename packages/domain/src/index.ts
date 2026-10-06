@@ -43,6 +43,7 @@ export * from "./protocol-ids.js";
 export * from "./queued-message.js";
 export * from "./system-message.js";
 export * from "./provider-event.js";
+export * from "./provider-environment.js";
 export * from "./provider-extension-kind.js";
 export * from "./provider-fork.js";
 export * from "./provider-model-catalog.js";

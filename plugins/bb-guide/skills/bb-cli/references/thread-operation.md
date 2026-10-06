@@ -133,6 +133,9 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
   `--after-seq <seq>` or pass `--all`.
   Grep the `--all` output, not the default page, when checking whether a
   thread ever received a message.
+  `provider.env-resolved` events keep each variable's name, source and reason,
+  but plugin and core values read `{"masked": true}` in every format. Shell
+  values (PATH and bb's own `BB_*` variables) stay readable.
 - Read a message reference (`@thread:<id>#msg=<seq>` or a `…/threads/<id>#msg=<seq>`
   link) with `bb thread log <id> --message <seq> [--context <n>]`.
 - Use `bb thread output <thread-id>` to read the latest final output, or

@@ -1,4 +1,5 @@
 import {
+  maskResolvedProviderEnvironmentRow,
   parseThreadEventRow,
   type PromptInput,
   type PendingInteraction,
@@ -859,7 +860,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     );
   const events: ThreadEventsArea = {
     async list(input) {
-      return transport.readJson(
+      const rows = await transport.readJson(
         transport.api.v1.threads[":id"].events.$get(
           {
             param: { id: input.threadId },
@@ -868,6 +869,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           ...signalRequestArgs(input.signal),
         ),
       );
+      return rows.map(maskResolvedProviderEnvironmentRow);
     },
     async wait(input) {
       const response = await transport.resolve(

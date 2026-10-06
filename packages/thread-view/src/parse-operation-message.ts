@@ -579,7 +579,10 @@ export function parseOperationMessage(
             : "plugin" in entry.source
               ? entry.source.plugin
               : entry.source.core;
-        const value = typeof entry.value === "string" ? entry.value : "••••••";
+        const value =
+          entry.source === "shell" && typeof entry.value === "string"
+            ? entry.value
+            : "••••••";
         const reason = entry.reason ? ` — ${entry.reason}` : "";
         return `${entry.name}=${value} (${source})${reason}`;
       })

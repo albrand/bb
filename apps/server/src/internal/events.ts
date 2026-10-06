@@ -30,6 +30,7 @@ import {
 } from "@bb/host-daemon-contract";
 import {
   getThreadEventScopeTurnId,
+  maskResolvedProviderEnvironment,
   requireThreadEventScopeTurnId,
   systemThreadInterruptedEventDataSchema,
   type ChildThreadOutcome,
@@ -1186,7 +1187,12 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         }
         throw error;
       }
-      const events = ungroupHostDaemonEvents(payload.eventGroups);
+      const events = ungroupHostDaemonEvents(payload.eventGroups).map(
+        (envelope) => ({
+          ...envelope,
+          event: maskResolvedProviderEnvironment(envelope.event),
+        }),
+      );
       const { entries: ownedEntries, rejectedEvents } =
         resolvePostableEventBatchEntries(deps, {
           hostId: session.hostId,
