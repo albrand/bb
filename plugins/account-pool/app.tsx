@@ -725,7 +725,7 @@ function AddSubscriptionMenu({
           "api-key",
           "Lock",
           "Add Anthropic API key…",
-          "Metered fallback, never routes first",
+          "Billed per use; subscriptions with headroom go first",
         )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Codex</DropdownMenuLabel>
