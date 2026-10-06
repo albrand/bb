@@ -245,6 +245,7 @@ export function SidebarNavigationRegion({
       aria-label="Sidebar navigation"
       data-testid="sidebar-navigation-region"
       className={cn(
+        "min-h-0 overflow-y-auto",
         isCustomizing && isCompactViewport && "flex min-h-0 flex-1 flex-col",
       )}
     >

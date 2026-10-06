@@ -228,7 +228,7 @@ export function AppSidebar({
           onNavigate={closeOnMobile}
         />
       </SidebarContent>
-      <SidebarFooter className="relative min-h-0">
+      <SidebarFooter className="relative max-h-[calc(100%_-_var(--bb-app-chrome-row-height))] min-h-0 shrink-0">
         <OverflowFade placement="above" tone="sidebar" size="sm" />
         {isFooterCustomizing ? (
           <div className="max-h-[50svh] overflow-y-auto">
