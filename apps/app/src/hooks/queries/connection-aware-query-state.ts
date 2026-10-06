@@ -3,6 +3,8 @@ import type { WebSocketConnectionState } from "@/lib/ws";
 import { useServerConnectionState } from "../useServerConnectionState";
 
 const CONNECTION_GRACE_PERIOD_MS = 10_000;
+export const RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS = 1_000;
+const RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS = 30_000;
 
 export type ConnectionAwareQueryStatus = "loading" | "ready" | "unavailable";
 
@@ -11,6 +13,10 @@ interface ConnectionAwareQuerySnapshot {
   isFetching: boolean;
   isLoadingError: boolean;
   isRecoverableLoadingError?: boolean;
+}
+
+interface UseConnectionAwareQueryStateArgs extends ConnectionAwareQuerySnapshot {
+  refetch: () => unknown;
 }
 
 export interface ConnectionAwareQueryStateArgs extends ConnectionAwareQuerySnapshot {
@@ -78,14 +84,65 @@ function useServerConnectionGracePeriodElapsed(): boolean {
   return elapsed;
 }
 
+function useRecoverableLoadingRetry({
+  hasResolvedData,
+  isFetching,
+  isLoadingError,
+  isRecoverableLoadingError,
+  refetch,
+  serverConnectionState,
+}: UseConnectionAwareQueryStateArgs & {
+  serverConnectionState: WebSocketConnectionState;
+}): void {
+  const [attempt, setAttempt] = useState(0);
+  const isAwaitingRetry =
+    !hasResolvedData &&
+    !isFetching &&
+    isLoadingError &&
+    isRecoverableLoadingError === true &&
+    serverConnectionState === "connected";
+
+  useEffect(() => {
+    if (hasResolvedData) {
+      setAttempt(0);
+    }
+  }, [hasResolvedData]);
+
+  useEffect(() => {
+    if (!isAwaitingRetry) {
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        setAttempt((current) => current + 1);
+        void refetch();
+      },
+      Math.min(
+        RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 2 ** attempt,
+        RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS,
+      ),
+    );
+    return () => clearTimeout(timer);
+  }, [attempt, isAwaitingRetry, refetch]);
+}
+
 export function useConnectionAwareQueryState({
   hasResolvedData,
   isFetching,
   isLoadingError,
   isRecoverableLoadingError,
-}: ConnectionAwareQuerySnapshot): ConnectionAwareQueryState {
+  refetch,
+}: UseConnectionAwareQueryStateArgs): ConnectionAwareQueryState {
   const serverConnectionState = useServerConnectionState();
   const connectionGracePeriodElapsed = useServerConnectionGracePeriodElapsed();
+  useRecoverableLoadingRetry({
+    hasResolvedData,
+    isFetching,
+    isLoadingError,
+    isRecoverableLoadingError,
+    refetch,
+    serverConnectionState,
+  });
 
   return useMemo(
     () =>

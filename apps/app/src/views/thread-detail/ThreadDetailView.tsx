@@ -542,6 +542,7 @@ function ThreadDetailViewInternal(
     isFetching,
     isLoadingError,
     error,
+    refetch: refetchThread,
   } = useThread(threadId, {
     enabled: hasThreadDetailBootstrapSettled,
     refetchOnMount: didThreadDetailBootstrapRefreshAfterMount(
@@ -651,6 +652,7 @@ function ThreadDetailViewInternal(
     isFetching: threadDetailBootstrapQuery.isFetching || isFetching,
     isLoadingError,
     isRecoverableLoadingError: isTransientReadError(error),
+    refetch: refetchThread,
   });
   const threadOriginKind = thread?.originKind ?? null;
   const isSideChatThread =

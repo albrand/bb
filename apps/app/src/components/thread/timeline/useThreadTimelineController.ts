@@ -305,6 +305,7 @@ export function useThreadTimelineController({
     isFetching: latestTimelineQuery.isFetching,
     isLoadingError: latestTimelineQuery.isLoadingError,
     isRecoverableLoadingError: isTransientReadError(latestTimelineQuery.error),
+    refetch: refetchLatestTimeline,
   });
   const timelineLoading =
     latestTimelineQuery.isLoading ||
