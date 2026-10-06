@@ -97,11 +97,10 @@ import {
   createDesktopOwnedRuntimeRecovery,
   watchOwnedRuntimeExit,
 } from "./owned-runtime-recovery.js";
+import { waitForOwnedRuntimeStartup } from "./owned-runtime-startup.js";
 import {
   probeBbServer,
-  waitForCompatibleServer,
   type CompatibleServerProbeResult,
-  type ServerProbeResult,
 } from "./server-probe.js";
 import { loadRemoteServerPage } from "./remote-server-load.js";
 import {
@@ -282,7 +281,6 @@ import {
   DEFAULT_BB_SERVER_URL,
   PROCESS_LOG_LINE_LIMIT,
   STARTUP_POLL_INTERVAL_MS,
-  STARTUP_TIMEOUT_MS,
   type RuntimeOwnership,
   type WindowStateKey,
 } from "./types.js";
@@ -343,19 +341,6 @@ interface LoadLogViewerWindowArgs {
   preloadPath: string;
 }
 
-type StartupRaceResult =
-  | ProcessExitedStartupRaceResult
-  | ServerProbeStartupRaceResult;
-
-interface ProcessExitedStartupRaceResult {
-  exit: BbAppProcessExit;
-  kind: "process-exited";
-}
-
-interface ServerProbeStartupRaceResult {
-  kind: "server-probe";
-  result: ServerProbeResult;
-}
 
 interface ResolveDataDirFromEnvArgs {
   env: NodeJS.ProcessEnv;
@@ -2496,20 +2481,10 @@ async function startOwnedRuntime(
 ): Promise<DesktopRuntime | null> {
   const { bbProcess, runtime } = await spawnOwnedRuntime(args);
 
-  const raceResult = await Promise.race<StartupRaceResult>([
-    waitForCompatibleServer({
-      intervalMs: STARTUP_POLL_INTERVAL_MS,
-      serverUrl: args.serverUrl,
-      timeoutMs: STARTUP_TIMEOUT_MS,
-    }).then((result) => ({
-      kind: "server-probe",
-      result,
-    })),
-    bbProcess.exit.then((exit) => ({
-      exit,
-      kind: "process-exited",
-    })),
-  ]);
+  const raceResult = await waitForOwnedRuntimeStartup({
+    exit: bbProcess.exit,
+    serverUrl: args.serverUrl,
+  });
 
   if (raceResult.kind === "process-exited") {
     if (!options.suppressStartupError) {

@@ -5,7 +5,7 @@ const DEFAULT_WINDOW_WIDTH = 1280;
 export const MIN_WINDOW_HEIGHT = 600;
 export const MIN_WINDOW_WIDTH = 500;
 export const STARTUP_POLL_INTERVAL_MS = 250;
-export const STARTUP_TIMEOUT_MS = 60_000;
+export const STARTUP_TIMEOUT_MS = 180_000;
 export const ATTACH_PROBE_TIMEOUT_MS = 1_500;
 export const PROCESS_LOG_LINE_LIMIT = 200;
 
