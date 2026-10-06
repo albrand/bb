@@ -2868,6 +2868,36 @@ export function getStoredConversationOutlineProjectionState(
   };
 }
 
+export interface ConversationOutlineBackgroundTaskSpan {
+  endSequence: number | null;
+  startSequence: number;
+}
+
+export function listConversationOutlineBackgroundTaskSpans(
+  db: DbConnection,
+  args: ListStoredConversationOutlineEventRowsArgs,
+): ConversationOutlineBackgroundTaskSpan[] {
+  return db
+    .select({
+      startSequence: sql<number>`min(${events.sequence})`,
+      endSequence: sql<
+        number | null
+      >`CASE WHEN max(${events.type} IN ('item/completed', 'item/backgroundTask/completed')) = 1 THEN max(${events.sequence}) END`,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        gte(events.sequence, args.sequenceStart),
+        inArray(events.type, conversationOutlineStructuralLifecycleTypes),
+        eq(events.itemKind, "backgroundTask"),
+        isNotNull(events.itemId),
+      ),
+    )
+    .groupBy(events.itemId)
+    .all();
+}
+
 function selectStoredConversationOutlineEventRows(
   db: DbConnection,
   args: ListStoredConversationOutlineEventRowsArgs,

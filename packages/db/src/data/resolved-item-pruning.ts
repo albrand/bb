@@ -166,6 +166,20 @@ function pruneResolvedItemCandidates(
     processed += 1;
     reset();
   }
+  const rewritesConversationOutline =
+    args.kind === "deltas" &&
+    discarded.length > 0 &&
+    db.get(sql`SELECT 1 FROM events AS delta
+      JOIN events AS completion INDEXED BY events_thread_turn_type_item_sequence_idx
+        ON completion.thread_id = delta.thread_id AND completion.turn_id = delta.turn_id
+        AND completion.type = 'item/completed' AND completion.item_id = delta.item_id
+      WHERE delta.id IN (${sql.join(
+        discarded.map((id) => sql`${id}`),
+        sql`, `,
+      )}) AND delta.type = 'item/agentMessage/delta'
+        AND completion.item_kind = 'agentMessage'
+        AND COALESCE(CASE WHEN json_valid(completion.data) THEN length(json_extract(completion.data, '$.item.text')) END, 0) = 0
+      LIMIT 1`) !== undefined;
   const deletedRows =
     discarded.length === 0
       ? []
@@ -183,6 +197,7 @@ function pruneResolvedItemCandidates(
   return {
     removed: deletedRows.length,
     removedBytes,
+    rewritesConversationOutline,
     sequence,
     complete: processed === rows.length,
   };
@@ -202,7 +217,13 @@ export function advanceLiveEventPruning(
       sql`SELECT sequence FROM events WHERE thread_id = ${args.threadId} ORDER BY sequence DESC LIMIT 1`,
     );
     if (!latest)
-      return { removed: 0, removedBytes: 0, scanned: 0, complete: true };
+      return {
+        removed: 0,
+        removedBytes: 0,
+        rewritesConversationOutline: false,
+        scanned: 0,
+        complete: true,
+      };
     cursor = db
       .insert(threadPruningCursors)
       .values({
@@ -265,6 +286,7 @@ export function advanceLiveEventPruning(
   return {
     removed: result.removed,
     removedBytes: result.removedBytes,
+    rewritesConversationOutline: result.rewritesConversationOutline,
     scanned: candidates.length,
     complete,
   };

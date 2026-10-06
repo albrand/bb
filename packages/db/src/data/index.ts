@@ -411,6 +411,7 @@ export {
   listEvents,
   listStoredConversationOutlineEventRows,
   listStoredRootConversationOutlineEventRows,
+  listConversationOutlineBackgroundTaskSpans,
   getStoredConversationOutlineProjectionState,
   listTimelineWindowHintsDescending,
   getFirstParentedTimelineBoundarySequence,
@@ -458,6 +459,7 @@ export {
 } from "./events.js";
 export {
   getDatabaseDataVersion,
+  getThreadConversationOutlineRewriteGeneration,
   getThreadEventRewriteGeneration,
 } from "./event-rewrite-generation.js";
 export {
@@ -480,6 +482,7 @@ export type {
   AppendDaemonEventInput,
   AppendDaemonEventsResult,
   AppendStoredThreadEventArgs,
+  ConversationOutlineBackgroundTaskSpan,
   OpenBackgroundTaskItemRow,
   InlineOutputCharLimit,
   ScopedItemRef,
