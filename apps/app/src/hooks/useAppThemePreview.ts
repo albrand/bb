@@ -7,11 +7,8 @@ import {
   clearResolvedCodeThemePreview,
   previewResolvedCodeTheme,
 } from "@/lib/code-theme";
-import {
-  clearAppThemePreview,
-  previewAppThemeCss,
-  resolveAppThemeCss,
-} from "@/lib/themes";
+import { clearAppThemePreview, previewAppThemeCss } from "@/lib/app-theme-css";
+import { preloadAppThemeCss, resolveAppThemeCss } from "@/lib/themes";
 
 export interface AppThemePreview {
   prefetchThemes(themeIds: readonly string[]): void;
@@ -24,8 +21,8 @@ function clearPreview(): void {
   refreshThemeColorMeta();
 }
 
-function showPreview(theme: AppTheme): void {
-  previewAppThemeCss(resolveAppThemeCss(theme));
+function showPreview(theme: AppTheme, css: string): void {
+  previewAppThemeCss(css);
   previewResolvedCodeTheme(theme.resolvedCodeTheme);
   refreshThemeColorMeta();
 }
@@ -47,6 +44,7 @@ export function useAppThemePreview(): AppThemePreview {
       prefetchThemes(themeIds) {
         for (const themeId of themeIds) {
           void queryClient.prefetchQuery(systemThemeQueryOptions(themeId));
+          preloadAppThemeCss(themeId);
         }
       },
       previewTheme(themeId) {
@@ -56,12 +54,16 @@ export function useAppThemePreview(): AppThemePreview {
           clearPreview();
           return;
         }
-        void queryClient.fetchQuery(systemThemeQueryOptions(themeId)).then(
-          (theme) => {
-            if (requestRef.current === request) showPreview(theme);
-          },
-          () => {},
-        );
+        void queryClient
+          .fetchQuery(systemThemeQueryOptions(themeId))
+          .then(async (theme) => ({
+            theme,
+            css: await resolveAppThemeCss(theme),
+          }))
+          .then(({ theme, css }) => {
+            if (requestRef.current === request) showPreview(theme, css);
+          })
+          .catch(() => undefined);
       },
     }),
     [queryClient],

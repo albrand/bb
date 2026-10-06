@@ -52,6 +52,7 @@ const STORY_THEME_STYLE_ID = "story-git-diff-theme";
 
 function usePaletteCss(themeId: BuiltInThemeId) {
   useEffect(() => {
+    let active = true;
     let el = document.getElementById(
       STORY_THEME_STYLE_ID,
     ) as HTMLStyleElement | null;
@@ -60,10 +61,15 @@ function usePaletteCss(themeId: BuiltInThemeId) {
       el.id = STORY_THEME_STYLE_ID;
       document.head.appendChild(el);
     }
-    el.textContent = resolveAppThemeCss({
+    void resolveAppThemeCss({
       ...defaultAppTheme,
       themeId,
+    }).then((css) => {
+      if (active && el) el.textContent = css;
     });
+    return () => {
+      active = false;
+    };
   }, [themeId]);
   useEffect(
     () => () => document.getElementById(STORY_THEME_STYLE_ID)?.remove(),

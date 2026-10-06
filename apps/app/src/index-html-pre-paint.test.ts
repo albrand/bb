@@ -7,7 +7,7 @@ import {
   APP_THEME_CSS_STORAGE_KEY,
   applyAppThemeCss,
   applyCachedAppThemeCss,
-} from "./lib/themes";
+} from "./lib/app-theme-css";
 
 const indexHtml = readFileSync(
   resolve(import.meta.dirname, "../index.html"),

@@ -6,7 +6,7 @@ import {
   clearAppThemePreview,
   getAppThemeEpoch,
   previewAppThemeCss,
-} from "./index";
+} from "../app-theme-css";
 
 const COMMITTED = ":root { --canvas: white; }";
 const PREVIEW = ":root { --canvas: black; }";
