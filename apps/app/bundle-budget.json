@@ -228,17 +228,25 @@
       "ThreadPage",
       "NewThreadPage"
     ],
+    "src/components/promptbox/PromptHistorySearchBody.tsx": [
+      "boot",
+      "ThreadPage",
+      "NewThreadPage"
+    ],
     "src/components/dialogs/ProjectPathDialog.tsx": [
       "boot",
-      "SplitWorkspaceRoute"
+      "ThreadPage",
+      "NewThreadPage"
     ],
     "src/components/dialogs/RemotePathBrowser.tsx": [
       "boot",
-      "SplitWorkspaceRoute"
+      "ThreadPage",
+      "NewThreadPage"
     ],
     "src/components/settings/MicrophonePreferences.tsx": [
       "boot",
-      "SplitWorkspaceRoute"
+      "ThreadPage",
+      "NewThreadPage"
     ],
     "src/components/thread/terminal/ThreadTerminalPanel.tsx": [
       "boot",

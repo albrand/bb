@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   act,
   cleanup,
@@ -23,6 +23,7 @@ import { PromptHistorySearchDialog } from "./PromptHistorySearchDialog";
 const mocks = vi.hoisted(() => ({
   copy: vi.fn(),
   warning: vi.fn(),
+  afterClose: vi.fn(),
 }));
 
 vi.mock("@bb/client-core", () => ({
@@ -79,10 +80,14 @@ function deferredCopy() {
 }
 
 function Harness() {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("Current draft");
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <>
+      <button ref={triggerRef} type="button" onClick={() => setOpen(true)}>
+        Search prompts
+      </button>
       <textarea
         aria-label="Composer"
         value={draft}
@@ -93,10 +98,18 @@ function Harness() {
         projectId="proj_current"
         onOpenChange={setOpen}
         onInsert={(nextDraft) => setDraft(nextDraft.text)}
-        onAfterClose={() => undefined}
+        onAfterClose={() => {
+          mocks.afterClose();
+          triggerRef.current?.focus();
+        }}
       />
     </>
   );
+}
+
+async function openDialog() {
+  fireEvent.click(screen.getByRole("button", { name: "Search prompts" }));
+  await screen.findByRole("option");
 }
 
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -121,6 +134,7 @@ describe("PromptHistorySearchDialog", () => {
       const pending = deferredCopy();
       mocks.copy.mockReturnValueOnce(pending.promise);
       render(<Harness />);
+      await openDialog();
 
       fireEvent.click(screen.getByRole("option"));
       expect(mocks.copy).toHaveBeenCalledOnce();
@@ -128,6 +142,7 @@ describe("PromptHistorySearchDialog", () => {
       await waitFor(() =>
         expect(screen.queryByTestId("prompt-history-search")).toBeNull(),
       );
+      expect(mocks.afterClose).toHaveBeenCalledOnce();
       const composer = screen.getByRole("textbox", { name: "Composer" });
       fireEvent.change(composer, { target: { value: "Newer draft" } });
 
@@ -145,6 +160,7 @@ describe("PromptHistorySearchDialog", () => {
   it("inserts a selected prompt after its attachment copy completes", async () => {
     mocks.copy.mockResolvedValueOnce(undefined);
     render(<Harness />);
+    await openDialog();
 
     fireEvent.click(screen.getByRole("option"));
 
@@ -159,6 +175,7 @@ describe("PromptHistorySearchDialog", () => {
   it("warns only when an active insertion omits an attachment", async () => {
     mocks.copy.mockRejectedValueOnce(new Error("copy failed"));
     render(<Harness />);
+    await openDialog();
 
     fireEvent.click(screen.getByRole("option"));
 
@@ -169,5 +186,24 @@ describe("PromptHistorySearchDialog", () => {
       );
       expect(mocks.warning).toHaveBeenCalledOnce();
     });
+  });
+
+  it("loads on first open and can reopen after restoring focus on close", async () => {
+    render(<Harness />);
+
+    await openDialog();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("prompt-history-search")).toBeNull(),
+    );
+    expect(mocks.afterClose).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Search prompts" }),
+    );
+
+    await openDialog();
+    expect(
+      screen.getByRole("combobox", { name: "Search prompts you have sent" }),
+    ).toBeDefined();
   });
 });

@@ -182,9 +182,7 @@ describe("ThreadActionsMenu", () => {
     expect(drawers).toHaveLength(1);
     const drawer = drawers[0];
     expect(drawer).not.toBeNull();
-    await waitFor(() => {
-      expect(drawer?.textContent).toContain("Target project");
-    });
+    expect(drawer?.textContent).toContain("Target project");
 
     fireEvent.click(
       await screen.findByRole("option", { name: "Target project" }),
