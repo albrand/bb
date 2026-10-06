@@ -53,6 +53,7 @@ import {
 } from "./queue-waits.js";
 import { applyLoggedThreadLifecycleEventInTransaction } from "./lifecycle-outcome.js";
 import { buildExecutionOptions } from "./thread-commands.js";
+import { childThreadModel } from "./child-thread-model.js";
 import { getActiveTurnId, isManualCompactionActive } from "./thread-events.js";
 import { requireThreadCommandEnvironment } from "./thread-command-environment.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
@@ -293,7 +294,7 @@ async function runDispatchAttempt(
 
   const execution = await buildExecutionOptions(
     deps,
-    payload,
+    withChildThreadModel(thread, payload),
     args.executionDefaults ?? { threadId: thread.id },
   );
   let resolvedPayload = resolveExecutionIntoPayload(payload, execution);
@@ -662,6 +663,36 @@ class PendingThreadAdmissionLost extends Error {
   }
 }
 
+type ExecutionRequest = Parameters<typeof buildExecutionOptions>[1];
+
+// A child thread runs every turn on its provider's child model, whatever the
+// caller, a sticky update or the project defaults asked for. Setting it on the
+// request keeps it inside the normal model validation.
+function withChildThreadModel<TRequest extends ExecutionRequest>(
+  thread: Pick<Thread, "parentThreadId" | "providerId">,
+  request: TRequest,
+): TRequest {
+  const model = childThreadModel({
+    parentThreadId: thread.parentThreadId,
+    providerId: thread.providerId,
+  });
+  if (model === null) {
+    return request;
+  }
+  return {
+    ...request,
+    model,
+    ...(request.executionInputSources !== undefined
+      ? {
+          executionInputSources: {
+            ...request.executionInputSources,
+            model: "explicit",
+          },
+        }
+      : {}),
+  };
+}
+
 async function admitPendingThread(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AdmitPendingThreadArgs,
@@ -678,9 +709,11 @@ async function admitPendingThread(
       `Thread ${args.thread.id} is pending but has no start context to dispatch`,
     );
   }
-  const execution = await buildExecutionOptions(deps, args.payload, {
-    threadId: args.thread.id,
-  });
+  const execution = await buildExecutionOptions(
+    deps,
+    withChildThreadModel(args.thread, args.payload),
+    { threadId: args.thread.id },
+  );
   const claimedRow = args.claimed?.[0] ?? null;
   let startingThread: Thread;
   try {

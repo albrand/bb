@@ -350,6 +350,12 @@ describe("public thread default routes", () => {
       name: "child naming Opus",
       parent: true,
       model: "claude-opus-5-5",
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      name: "top-level thread naming Opus",
+      parent: false,
+      model: "claude-opus-5-5",
       expected: "claude-opus-5-5",
     },
     {
@@ -408,6 +414,69 @@ describe("public thread default routes", () => {
             command.threadId === createdThread.id,
         );
         expect(queuedStart.command).toMatchObject({
+          options: { model: expected, reasoningLevel: "high" },
+        });
+      });
+    },
+  );
+
+  it.each([
+    { name: "child", parent: true, expected: "claude-sonnet-5-5" },
+    { name: "top-level thread", parent: false, expected: "claude-opus-5-5" },
+  ])(
+    "runs a Claude $name's follow-up naming Opus on $expected",
+    async ({ parent, expected }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/thread-defaults-claude-followup",
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/thread-defaults-claude-followup",
+        });
+        const parentThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+        });
+        const thread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+          providerId: "claude-code",
+          parentThreadId: parent ? parentThread.id : null,
+          status: "idle",
+        });
+        seedThreadRuntimeState(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-claude-followup",
+        });
+
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/send`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              input: [{ type: "text", text: "Keep going", mentions: [] }],
+              mode: "steer-if-active",
+              model: "claude-opus-5-5",
+              permissionMode: "full",
+              reasoningLevel: "high",
+              serviceTier: "default",
+            }),
+          },
+        );
+
+        expect(response.status).toBe(200);
+        const dispatched = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "turn.submit" && command.threadId === thread.id,
+        );
+        expect(dispatched.command).toMatchObject({
           options: { model: expected, reasoningLevel: "high" },
         });
       });
