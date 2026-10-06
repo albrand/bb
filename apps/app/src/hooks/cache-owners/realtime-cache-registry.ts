@@ -73,6 +73,7 @@ import {
   threadStorageLocationQueryKey,
   threadStoragePathsForThreadQueryKeyPrefix,
   threadTimelineQueryKeyPrefix,
+  threadSpendSummaryQueryKey,
 } from "../queries/query-keys";
 import { systemEnvironmentProvidersQueryKey } from "../queries/environment-provider-queries";
 import { schedulePluginFrontendReconcile } from "../../lib/plugin-frontend-lazy";
@@ -353,6 +354,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadDetailQueriesForBackgroundActivity,
       dirtyThreadSearchQueriesForCompletedTurn,
       dirtyThreadTimelineQueries,
+      dirtyThreadSpendSummaryQueries,
       dirtyThreadPullRequestQueryForCompletedTurn,
       dirtyThreadTurnRequestQueries,
     ],
@@ -810,6 +812,12 @@ function dirtyThreadDetailQueries({
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
   return getThreadDetailInvalidationQueryKeys({ threadId });
+}
+
+function dirtyThreadSpendSummaryQueries({
+  threadId,
+}: ThreadRealtimeDirtyContext): QueryKey[] {
+  return threadId ? [threadSpendSummaryQueryKey(threadId)] : [];
 }
 
 function dirtyThreadDefaultExecutionOptionsQueries({

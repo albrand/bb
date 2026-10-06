@@ -7,7 +7,11 @@ import type {
   ThreadSpendBreakdownResponse,
 } from "@bb/server-contract";
 import { tokenBreakdownLabels } from "@bb/domain";
-import { useThreadSpendSummary } from "@/hooks/queries/thread-queries";
+import { estimateCompactionSavings, summarizeTokenWeather } from "@bb/domain";
+import {
+  useThreadSpendSummary,
+  useThreadTimeline,
+} from "@/hooks/queries/thread-queries";
 import { sdk } from "@/lib/sdk";
 import { useThreadRoutePath } from "./ThreadTitleMentions";
 import { useQuery } from "@tanstack/react-query";
@@ -35,9 +39,18 @@ function exactTokens(value: number | null): string {
 export function ThreadTurnTokenTooltipContent({
   turn,
   reasoningDisplayValue,
+  providerId,
+  weatherMetrics,
 }: {
   turn: ThreadSpendBreakdownResponse;
   reasoningDisplayValue: number | null;
+  providerId: string;
+  weatherMetrics?: {
+    cacheReuseShare: number | null;
+    freshInputChange: number | null;
+    sameModelMedian: number | null;
+    weather: string;
+  };
 }) {
   const labels = tokenBreakdownLabels(reasoningDisplayValue);
   return (
@@ -46,7 +59,7 @@ export function ThreadTurnTokenTooltipContent({
       className="max-w-[min(24rem,calc(100vw-1rem))]"
     >
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs tabular-nums">
-        <span>{labels.input}</span>
+        <span>Fresh input</span>
         <span>{exactTokens(turn.inputTokens)}</span>
         <span>Output</span>
         <span>{exactTokens(turn.outputTokens)}</span>
@@ -64,9 +77,39 @@ export function ThreadTurnTokenTooltipContent({
         <span>{exactTokens(turn.cachedInputTokens)}</span>
         <span>Total</span>
         <span>{exactTokens(turn.totalTokens)}</span>
+        <span>Provider / model</span>
+        <span>
+          {providerId} / {turn.model ?? "Unknown"}
+        </span>
+        {weatherMetrics ? (
+          <>
+            <span>Weather</span>
+            <span className="capitalize">{weatherMetrics.weather}</span>
+            <span>Cached share</span>
+            <span>{formatPercent(weatherMetrics.cacheReuseShare)}</span>
+            <span>Fresh input vs same-model median</span>
+            <span>
+              {weatherMetrics.freshInputChange === null
+                ? "Unavailable"
+                : `${weatherMetrics.freshInputChange >= 0 ? "+" : ""}${formatPercent(weatherMetrics.freshInputChange)}`}
+            </span>
+            <span>Reference median</span>
+            <span>{exactTokens(weatherMetrics.sameModelMedian)}</span>
+            <span className="col-span-2 text-muted-foreground">
+              Per-turn rules: stormy at ≥50% fresh-input growth with under 20%
+              cache reuse; cloudy at ≥25% growth or under 35% reuse; clear when
+              measured reuse is ≥35% and growth is under 25%. The thread panel
+              also applies its latest reported context fill.
+            </span>
+          </>
+        ) : null}
       </div>
     </TooltipContent>
   );
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? "Unavailable" : `${Math.round(value * 100)}%`;
 }
 
 export function ThreadTurnTokenSummary({
@@ -94,6 +137,20 @@ export function ThreadTurnTokenSummary({
   }
   const reasoningDisplayValue =
     data?.total.reasoningOutputTokens === 0 ? 0 : turn.reasoningOutputTokens;
+  const weatherMetrics = data
+    ? summarizeTokenWeather({
+        turns: [...data.turns].reverse().map((item) => ({
+          cachedInputTokens: item.cachedInputTokens,
+          inputTokens: item.inputTokens,
+          model: item.model ?? null,
+          outputTokens: item.outputTokens,
+          providerId: data.providerId ?? "unknown",
+          reasoningOutputTokens: item.reasoningOutputTokens,
+          totalTokens: item.totalTokens,
+          turnId: item.turnId,
+        })),
+      }).turns.find((item) => item.turnId === turnId)
+    : undefined;
   const compact = (value: number) => compactTokens(value);
   const hasTotalTokens = hasTokens(turn.totalTokens);
   const tightSummaryValue = hasTotalTokens
@@ -112,7 +169,9 @@ export function ThreadTurnTokenSummary({
             <span data-token-part="input">in {compact(turn.inputTokens)}</span>
           ) : null}
           {hasTokens(turn.outputTokens) ? (
-            <span data-token-part="output">out {compact(turn.outputTokens)}</span>
+            <span data-token-part="output">
+              out {compact(turn.outputTokens)}
+            </span>
           ) : null}
           {reasoningDisplayValue !== null && reasoningDisplayValue > 0 ? (
             <span data-token-part="reasoning">
@@ -153,6 +212,8 @@ export function ThreadTurnTokenSummary({
       <ThreadTurnTokenTooltipContent
         turn={turn}
         reasoningDisplayValue={reasoningDisplayValue}
+        providerId={data?.providerId ?? "Unknown"}
+        weatherMetrics={weatherMetrics}
       />
     </Tooltip>
   );
@@ -175,7 +236,10 @@ export function ThreadUsageAndAgents({
     staleTime: 30_000,
   });
   const count = childSummary?.nonDeletedChildCount ?? 0;
-  if (count === 0) return null;
+  const tokenWeather = (
+    <ThreadTokenWeatherControl compact={compact} threadId={threadId} />
+  );
+  if (count === 0) return tokenWeather;
   const working = childSummary?.working ?? 0;
   const childRows = (childSummary?.children ?? []).map((child) => (
     <li key={child.id} className="min-w-0">
@@ -189,14 +253,19 @@ export function ThreadUsageAndAgents({
   ));
 
   if (compact) {
-    return childSummary ? (
-      <CompactThreadUsageDrawer
-        childRows={childRows}
-        count={count}
-        working={working}
-        childSummary={childSummary}
-      />
-    ) : null;
+    return (
+      <div className="flex min-w-0 items-center gap-1">
+        {tokenWeather}
+        {childSummary ? (
+          <CompactThreadUsageDrawer
+            childRows={childRows}
+            count={count}
+            working={working}
+            childSummary={childSummary}
+          />
+        ) : null}
+      </div>
+    );
   }
 
   return (
@@ -206,6 +275,7 @@ export function ThreadUsageAndAgents({
       data-adaptive-summary={compactSummary ? "true" : "false"}
       className="relative min-w-0 shrink-0 text-xs"
     >
+      {tokenWeather}
       {childSummary ? (
         <details className="relative min-w-0 text-muted-foreground">
           <summary
@@ -228,9 +298,10 @@ export function ThreadUsageAndAgents({
                     Ran {count} {count === 1 ? "agent" : "agents"}
                   </span>
                   <span className="tabular-nums">
-                    {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
-                    waiting · {childSummary.idle ?? 0} idle ·{" "}
-                    {childSummary.failed ?? 0} failed
+                    {childSummary.working ?? 0} working ·{" "}
+                    {childSummary.waiting ?? 0} waiting ·{" "}
+                    {childSummary.idle ?? 0} idle · {childSummary.failed ?? 0}{" "}
+                    failed
                     {childSummary.totalTokens === null
                       ? null
                       : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
@@ -243,9 +314,9 @@ export function ThreadUsageAndAgents({
                   Ran {count} {count === 1 ? "agent" : "agents"}
                 </span>
                 <span className="tabular-nums">
-                  {childSummary.working ?? 0} working · {childSummary.waiting ?? 0}{" "}
-                  waiting · {childSummary.idle ?? 0} idle ·{" "}
-                  {childSummary.failed ?? 0} failed
+                  {childSummary.working ?? 0} working ·{" "}
+                  {childSummary.waiting ?? 0} waiting · {childSummary.idle ?? 0}{" "}
+                  idle · {childSummary.failed ?? 0} failed
                   {childSummary.totalTokens === null
                     ? null
                     : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
@@ -262,7 +333,8 @@ export function ThreadUsageAndAgents({
                 <li className="border-b border-border/70 pb-2 text-muted-foreground">
                   Ran {count} {count === 1 ? "agent" : "agents"} · {working}{" "}
                   working · {childSummary.waiting ?? 0} waiting ·{" "}
-                  {childSummary.idle ?? 0} idle · {childSummary.failed ?? 0} failed
+                  {childSummary.idle ?? 0} idle · {childSummary.failed ?? 0}{" "}
+                  failed
                   {childSummary.totalTokens === null
                     ? null
                     : ` · Σ ${compactTokens(childSummary.totalTokens)}`}
@@ -274,6 +346,203 @@ export function ThreadUsageAndAgents({
         </details>
       ) : null}
     </div>
+  );
+}
+
+function ThreadTokenWeatherControl({
+  compact,
+  threadId,
+}: {
+  compact: boolean;
+  threadId: string;
+}) {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { isContentRealized } = useResponsiveDrawerRealization({
+    open: isDrawerOpen,
+  });
+  const { data: spend } = useThreadSpendSummary(threadId);
+  const { data: timeline } = useThreadTimeline(threadId, {
+    enabled: isDrawerOpen,
+    staleTime: 10_000,
+  });
+  const contextFill =
+    timeline?.contextWindowUsage &&
+    timeline.contextWindowUsage.modelContextWindow > 0
+      ? timeline.contextWindowUsage.usedTokens /
+        timeline.contextWindowUsage.modelContextWindow
+      : null;
+  const turns = (spend?.turns ?? []).map((turn) => ({
+    cachedInputTokens: turn.cachedInputTokens,
+    inputTokens: turn.inputTokens,
+    model: turn.model ?? null,
+    outputTokens: turn.outputTokens,
+    providerId: spend?.providerId ?? "unknown",
+    reasoningOutputTokens: turn.reasoningOutputTokens,
+    totalTokens: turn.totalTokens,
+    turnId: turn.turnId,
+  }));
+  const chronologicalTurns = [...turns].reverse();
+  const weather = spend
+    ? summarizeTokenWeather({
+        contextFill,
+        turns: chronologicalTurns,
+      })
+    : null;
+  const compactionTurnIds = (timeline?.rows ?? []).flatMap((row) =>
+    row.kind === "system" &&
+    row.systemKind === "operation" &&
+    row.operationKind === "compaction" &&
+    row.turnId !== null
+      ? [row.turnId]
+      : [],
+  );
+  const compactions = estimateCompactionSavings({
+    compactionTurnIds,
+    turns: chronologicalTurns,
+  });
+  return (
+    <>
+      <button
+        type="button"
+        data-token-weather-open=""
+        className={
+          compact
+            ? "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background px-2 text-xs text-muted-foreground hover:bg-state-hover"
+            : "inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-state-hover"
+        }
+        aria-label="Open token weather and compaction savings"
+        onClick={() => setIsDrawerOpen(true)}
+      >
+        {compact ? "Σ" : "Token weather"}
+      </button>
+      <PersistentResponsiveDrawerShell
+        open={isDrawerOpen}
+        onOpenChange={setIsDrawerOpen}
+        srLabel="Token weather and compaction savings"
+        contentClassName="max-h-[min(80dvh,42rem)]"
+      >
+        {isContentRealized ? (
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-5 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-medium">Token weather</h2>
+              <button
+                type="button"
+                className="min-h-11 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-state-hover"
+                onClick={() => setIsDrawerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            {weather ? (
+              <>
+                <p className="capitalize">
+                  {weather.weather} ·{" "}
+                  {spend?.historyComplete
+                    ? "Complete history"
+                    : "Partial history"}
+                </p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border border-border/70 p-3 tabular-nums">
+                  <span>Fresh input total</span>
+                  <span>{exactTokens(weather.totals.inputTokens)}</span>
+                  <span>Cached input</span>
+                  <span>{exactTokens(weather.totals.cachedInputTokens)}</span>
+                  <span>Output</span>
+                  <span>{exactTokens(weather.totals.outputTokens)}</span>
+                  <span>Reasoning reported</span>
+                  <span>
+                    {exactTokens(weather.totals.reasoningOutputTokens)}
+                  </span>
+                  <span>Total</span>
+                  <span>{exactTokens(weather.totals.totalTokens)}</span>
+                  <span>Cache reuse share (approx.)</span>
+                  <span>{formatPercent(weather.cacheReuseShare)}</span>
+                  <span>Context fill (latest report)</span>
+                  <span>{formatPercent(contextFill)}</span>
+                  <span>Fresh input median / range</span>
+                  <span>
+                    {weather.medianFreshInput === null
+                      ? "Unavailable"
+                      : `${exactTokens(weather.medianFreshInput)} / ${exactTokens(weather.rangeFreshInput?.min ?? null)}–${exactTokens(weather.rangeFreshInput?.max ?? null)}`}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Clear: cache reuse ≥35% and same-model fresh-input growth
+                  under 25%, with context fill under 70% when reported. Cloudy:
+                  fill ≥70%, growth ≥25%, or reuse under 35%. Stormy: fill ≥85%,
+                  or growth ≥50% with reuse under 20%. Cached input combines
+                  reads and writes, so reuse is approximate. Reasoning is
+                  reported metadata and is not added again to total. Missing
+                  values remain unavailable.
+                </p>
+                <div className="grid gap-2">
+                  <h3 className="font-medium">Per-turn changes</h3>
+                  {weather.turns.map((turn) => (
+                    <div
+                      key={turn.turnId}
+                      className="grid grid-cols-[1fr_auto] gap-x-3 rounded-md border border-border/70 p-3"
+                    >
+                      <span className="truncate">
+                        {turn.providerId} / {turn.model ?? "Unknown model"}
+                      </span>
+                      <span className="capitalize">{turn.weather}</span>
+                      <span>Fresh input {exactTokens(turn.inputTokens)}</span>
+                      <span>
+                        {turn.freshInputChange === null
+                          ? "No same-model baseline"
+                          : `${turn.freshInputChange >= 0 ? "+" : ""}${formatPercent(turn.freshInputChange)} vs ${exactTokens(turn.sameModelMedian)}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p>Token usage is unavailable.</p>
+            )}
+            <div className="grid gap-2">
+              <h3 className="font-medium">Compaction savings (estimates)</h3>
+              {compactions.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No compaction with enough measured turns to estimate savings.
+                </p>
+              ) : (
+                compactions.map((compaction) => (
+                  <div
+                    key={compaction.turnId}
+                    className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border border-border/70 p-3 tabular-nums"
+                  >
+                    <span>Context before / after</span>
+                    <span>
+                      {compactTokens(compaction.beforeTokens)} /{" "}
+                      {compactTokens(compaction.afterTokens)}
+                    </span>
+                    <span>Compaction cost</span>
+                    <span>
+                      {compactTokens(compaction.compactionCostTokens)}
+                    </span>
+                    <span>Later observed below trend</span>
+                    <span>
+                      {compactTokens(compaction.observedSavingsTokens)}
+                    </span>
+                    <span>Likely paid for itself</span>
+                    <span>
+                      {compaction.likelyPaidForItself
+                        ? "Likely, estimated"
+                        : "Not yet, estimated"}
+                    </span>
+                  </div>
+                ))
+              )}
+              <p className="text-xs text-muted-foreground">
+                Before is the median fresh input from up to three earlier
+                same-model turns; after is the first later same-model input.
+                Estimated savings compare up to three later inputs against that
+                pre-compaction median and subtract no cache-price assumption.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </PersistentResponsiveDrawerShell>
+    </>
   );
 }
 
@@ -327,8 +596,8 @@ function CompactThreadUsageDrawer({
             </div>
             <p className="shrink-0 text-sm text-muted-foreground">
               Ran {count} {count === 1 ? "agent" : "agents"} · {working} working
-              · {childSummary.waiting} waiting · {childSummary.idle} idle
-              · {childSummary.failed} failed
+              · {childSummary.waiting} waiting · {childSummary.idle} idle ·{" "}
+              {childSummary.failed} failed
               {childSummary.totalTokens === null
                 ? null
                 : ` · Σ ${compactTokens(childSummary.totalTokens)}`}

@@ -12,6 +12,7 @@ function ensureThreadTurnSpendTable(db: DbConnection): void {
       thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
       turn_id TEXT NOT NULL,
       provider_thread_id TEXT NOT NULL,
+      model TEXT,
       input_tokens INTEGER,
       cached_input_tokens INTEGER,
       output_tokens INTEGER,
@@ -21,6 +22,14 @@ function ensureThreadTurnSpendTable(db: DbConnection): void {
       PRIMARY KEY (thread_id, turn_id, provider_thread_id)
     )
   `);
+  const columns = db.$client
+    .prepare<[], { name: string }>(`PRAGMA table_info(${THREAD_TURN_SPEND_TABLE})`)
+    .all();
+  if (!columns.some((column) => column.name === "model")) {
+    db.$client.exec(
+      `ALTER TABLE ${THREAD_TURN_SPEND_TABLE} ADD COLUMN model TEXT`,
+    );
+  }
   db.$client.exec(`
     CREATE INDEX IF NOT EXISTS ${THREAD_TURN_SPEND_TABLE}_thread_idx
       ON ${THREAD_TURN_SPEND_TABLE} (thread_id, turn_id)
@@ -33,6 +42,7 @@ export interface ThreadTurnSpendContribution {
   providerThreadId: string;
   threadId: string;
   turnId: string;
+  model?: string | null;
   usage: {
     cachedInputTokens: number | null;
     inputTokens: number | null;
@@ -44,6 +54,7 @@ export interface ThreadTurnSpendContribution {
 
 export interface ThreadTurnSpendRow {
   turnId: string;
+  model: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
   outputTokens: number | null;
@@ -58,14 +69,19 @@ export function recordThreadTurnSpendContribution(
   ensureThreadTurnSpendTable(db);
   db.$client
     .prepare<
-      [string, string, string, number | null, number | null, number | null, number | null, number, number]
+      [string, string, string, string | null, number | null, number | null, number | null, number | null, number, number]
     >(
       `INSERT INTO ${THREAD_TURN_SPEND_TABLE} (
-        thread_id, turn_id, provider_thread_id, input_tokens,
+        thread_id, turn_id, provider_thread_id, model, input_tokens,
         cached_input_tokens, output_tokens, reasoning_output_tokens,
         total_tokens, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (thread_id, turn_id, provider_thread_id) DO UPDATE SET
+        model = CASE
+          WHEN model IS NULL THEN excluded.model
+          WHEN excluded.model IS NULL OR model = excluded.model THEN model
+          ELSE NULL
+        END,
         input_tokens = CASE WHEN input_tokens IS NULL OR excluded.input_tokens IS NULL
           THEN NULL ELSE input_tokens + excluded.input_tokens END,
         cached_input_tokens = CASE WHEN cached_input_tokens IS NULL OR excluded.cached_input_tokens IS NULL
@@ -81,6 +97,7 @@ export function recordThreadTurnSpendContribution(
       contribution.threadId,
       contribution.turnId,
       contribution.providerThreadId,
+      contribution.model ?? null,
       contribution.usage.inputTokens,
       contribution.usage.cachedInputTokens,
       contribution.usage.outputTokens,
@@ -98,6 +115,8 @@ export function listThreadTurnSpend(
   return db
     .$client.prepare<[string], ThreadTurnSpendRow>(
       `SELECT turn_id AS turnId,
+        CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(model) = COUNT(*)
+          THEN MIN(model) ELSE NULL END AS model,
         CASE WHEN COUNT(*) = COUNT(input_tokens)
           THEN SUM(input_tokens) ELSE NULL END AS inputTokens,
         CASE WHEN COUNT(*) = COUNT(cached_input_tokens)

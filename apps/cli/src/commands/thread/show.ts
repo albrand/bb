@@ -7,6 +7,8 @@ import {
 import {
   resolveEnvironmentMergeBaseBranch,
   tokenBreakdownLabels,
+  estimateCompactionSavings,
+  summarizeTokenWeather,
   type Environment,
   type Thread,
   type ThreadEventRow,
@@ -53,6 +55,7 @@ interface ThreadShowCommandOptions {
   diffSha?: string;
   diffMergeBase?: string;
   json?: boolean;
+  usage?: boolean;
 }
 
 interface ThreadLogCommandOptions {
@@ -89,6 +92,7 @@ interface ThreadShowJsonPayload extends ThreadStatusPayload {
   execution: ThreadExecutionProfileResult | null;
   childSummary: ThreadChildSummaryResult | null;
   spendSummary: ThreadSpendSummaryResult | null;
+  usageTimeline?: ThreadTimelineResponse | null;
   workStatus?: WorkspaceStatus | null;
   gitDiff?: ThreadGitDiffResponse | null;
 }
@@ -279,6 +283,51 @@ function printSpendSummary(summary: ThreadSpendSummaryResult): void {
   }
 }
 
+function printTokenWeather(
+  summary: ThreadSpendSummaryResult,
+  timeline: ThreadTimelineResponse | null,
+): void {
+  const providerId = summary.providerId ?? "unknown";
+  const turns = [...summary.turns].reverse().map((turn) => ({
+    ...turn,
+    model: turn.model ?? null,
+    providerId,
+  }));
+  const contextUsage = timeline?.contextWindowUsage;
+  const contextFill = contextUsage
+    ? contextUsage.usedTokens / contextUsage.modelContextWindow
+    : null;
+  const weather = summarizeTokenWeather({ turns, contextFill });
+  const compactionTurnIds = (timeline?.rows ?? []).flatMap((row) =>
+    row.kind === "system" &&
+    row.systemKind === "operation" &&
+    row.operationKind === "compaction" &&
+    row.turnId !== null
+      ? [row.turnId]
+      : [],
+  );
+  const compactions = estimateCompactionSavings({
+    compactionTurnIds,
+    turns,
+  });
+  console.log(
+    `  Weather: ${weather.weather} · cache reuse ${weather.cacheReuseShare === null ? "unavailable" : `${Math.round(weather.cacheReuseShare * 100)}%`} · context fill ${contextFill === null ? "unavailable" : `${Math.round(contextFill * 100)}%`}`,
+  );
+  console.log(
+    `  Fresh input median/range: ${weather.medianFreshInput?.toLocaleString("en") ?? "unavailable"} / ${weather.rangeFreshInput ? `${weather.rangeFreshInput.min.toLocaleString("en")}–${weather.rangeFreshInput.max.toLocaleString("en")}` : "unavailable"}`,
+  );
+  if (compactions.length === 0) {
+    console.log(
+      "  Compaction savings: unavailable (no compaction with enough measured turns)",
+    );
+  }
+  for (const compaction of compactions) {
+    console.log(
+      `  Compaction ${compaction.turnId}: estimated context ${compaction.beforeTokens.toLocaleString("en")} → ${compaction.afterTokens.toLocaleString("en")} · own cost ${compaction.compactionCostTokens.toLocaleString("en")} · later observed below trend ${compaction.observedSavingsTokens.toLocaleString("en")} · ${compaction.likelyPaidForItself ? "likely paid for itself" : "not yet paid for itself"} (estimate)`,
+    );
+  }
+}
+
 function printChildSummary(summary: ThreadChildSummaryResult): void {
   if (summary.nonDeletedChildCount === 0) return;
   console.log("");
@@ -308,6 +357,7 @@ export function registerShowCommand(
       "all",
     )
     .option("--diff-sha <sha>", "Commit SHA for --diff-target commit")
+    .option("--usage", "Show token weather and compaction savings estimates")
     .option(
       "--diff-merge-base <branch>",
       "Merge base branch for --diff-target branch_committed or all",
@@ -324,9 +374,14 @@ export function registerShowCommand(
 
         const statusPayload: ThreadStatusPayload =
           thread.status === "error" ? { lastError, thread } : { thread };
-        const [childSummary, spendSummary] = await Promise.all([
+        const [childSummary, spendSummary, usageTimeline] = await Promise.all([
           sdk.threads.childSummary({ threadId }).catch(() => null),
           sdk.threads.spendSummary({ threadId }).catch(() => null),
+          opts.usage
+            ? sdk.threads
+                .timeline({ threadId, summaryOnly: "true" })
+                .catch(() => null)
+            : Promise.resolve(null),
         ]);
         let environment: Environment | null | undefined;
         const getEnvironment = async () => {
@@ -446,6 +501,7 @@ export function registerShowCommand(
             execution,
             childSummary,
             spendSummary,
+            ...(opts.usage ? { usageTimeline } : {}),
           };
           if (fetchedWorkStatus !== undefined) {
             jsonPayload.workStatus = fetchedWorkStatus.available
@@ -465,6 +521,7 @@ export function registerShowCommand(
         printExecutionProfile(execution);
         if (spendSummary) {
           printSpendSummary(spendSummary);
+          if (opts.usage) printTokenWeather(spendSummary, usageTimeline);
         } else {
           console.log("");
           console.log("Token usage: unavailable");

@@ -71,6 +71,7 @@ const HOST_PROVIDER_CLI_STATUS_QUERY_KEY = "hostProviderCliStatus";
 const SYSTEM_PROVIDER_STATES_QUERY_KEY = "systemProviderStates";
 const HOST_PATH_EXISTENCE_QUERY_KEY = "hostPathExistence";
 const PROJECT_SKILLS_QUERY_KEY = "projectSkills";
+const THREAD_SPEND_SUMMARY_QUERY_KEY = "threadSpendSummary";
 export const SKILL_CONTENT_QUERY_KEY = "skillContent";
 export const SKILL_FILES_QUERY_KEY = "skillFiles";
 const PLUGIN_LIST_QUERY_KEY = "plugin-list";
@@ -134,7 +135,11 @@ type ProjectSourceBranchesQueryKeyPrefix = readonly [
 ];
 type ProjectDefaultExecutionOptionsQueryKey =
   | readonly [typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, string]
-  | readonly [typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY, string, string];
+  | readonly [
+      typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY,
+      string,
+      string,
+    ];
 type ProjectPromptHistoryQueryKeyPrefix = readonly [
   typeof PROJECT_PROMPT_HISTORY_QUERY_KEY,
 ];
@@ -926,6 +931,14 @@ export function threadTimelineQueryKey(
   threadId: string,
 ): ThreadTimelineQueryKey {
   return [THREAD_TIMELINE_QUERY_KEY, threadId];
+}
+
+export function threadSpendSummaryQueryKey(threadId: string) {
+  return [THREAD_SPEND_SUMMARY_QUERY_KEY, threadId] as const;
+}
+
+export function allThreadSpendSummaryQueryKeyPrefix() {
+  return [THREAD_SPEND_SUMMARY_QUERY_KEY] as const;
 }
 
 export function threadConversationOutlineQueryKey(

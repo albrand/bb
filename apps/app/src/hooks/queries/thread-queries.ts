@@ -83,6 +83,7 @@ import {
   threadHostFilePreviewQueryKey,
   threadConversationOutlineQueryKey,
   threadTimelineQueryKey,
+  threadSpendSummaryQueryKey,
   threadTimelineTurnSummaryDetailsQueryKey,
   threadsQueryKey,
   type ThreadTimelineTurnSummaryDetailsQueryIdentity,
@@ -1096,7 +1097,7 @@ export function useThreadTimelineTurnSummaryDetails(
 
 export function useThreadSpendSummary(threadId: string) {
   return useQuery<ThreadSpendSummaryResponse>({
-    queryKey: ["threadSpendSummary", threadId],
+    queryKey: threadSpendSummaryQueryKey(threadId),
     queryFn: ({ signal }) =>
       sdk.threads.spendSummary({
         threadId: requireThreadId(threadId, "useThreadSpendSummary"),

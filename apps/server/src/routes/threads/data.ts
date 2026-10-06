@@ -491,6 +491,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           turnId,
           {
             turnId,
+            model: null,
             inputTokens: null,
             cachedInputTokens: null,
             outputTokens: null,
@@ -499,7 +500,9 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           },
         ]),
     );
-    const turns = [...recordedTurns, ...unavailableTurns.values()];
+    const turns = [...recordedTurns, ...unavailableTurns.values()].map(
+      ({ model, ...turn }) => (model === null ? turn : { ...turn, model }),
+    );
     const sumDaily = (
       field:
         | "inputTokens"
@@ -523,6 +526,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       historyComplete: isSpendThreadHistoryComplete(deps.db, {
         threadId: thread.id,
       }),
+      providerId: thread.providerId,
       total,
       turns,
     };

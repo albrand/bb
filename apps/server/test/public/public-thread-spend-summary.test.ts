@@ -261,6 +261,7 @@ describe("public thread spend summaries", () => {
 
       expect(spend).toEqual({
         historyComplete: false,
+        providerId: "claude-code",
         total: {
           cachedInputTokens: 9_000_000,
           inputTokens: 1_000,

@@ -40,7 +40,7 @@ Fields beyond those shown exist; these are the ones scripts use.
   bb thread list --json
     [{id, projectId, environmentId, providerId, title, status, parentThreadId, sectionId, visibility, archivedAt, pinnedAt, createdAt, updatedAt, activity}]    (bare array; title can be null)
 
-  bb thread show <id> --json
+  bb thread show <id> [--usage] --json
     {thread: {id, status, title, projectId, environmentId, parentThreadId, ...}, environment: {id, hostId, path, branchName, ...} | null, pendingTodos}    (thread fields are under .thread)
 
   bb thread log <id> --json

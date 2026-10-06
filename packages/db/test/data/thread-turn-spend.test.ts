@@ -47,6 +47,7 @@ describe("thread turn spend runtime table", () => {
       expect(hasTable(writeDb, "fork_thread_turn_spend")).toBe(false);
       recordThreadTurnSpendContribution(writeDb, {
         at: 10,
+        model: "gpt-5-codex",
         providerThreadId: "provider-thread-1",
         threadId: thread.id,
         turnId: "turn-1",
@@ -63,6 +64,7 @@ describe("thread turn spend runtime table", () => {
         [
           {
             turnId: "turn-1",
+            model: "gpt-5-codex",
             inputTokens: 100,
             cachedInputTokens: null,
             outputTokens: 20,

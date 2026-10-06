@@ -49,6 +49,7 @@ import {
   threadTimelineQueryKey,
   threadTimelineQueryKeyPrefix,
   threadTimelineTurnSummaryDetailsQueryKey,
+  threadSpendSummaryQueryKey,
 } from "./queries/query-keys";
 import { pluginContributionsQueryKey } from "./queries/query-keys";
 import { systemEnvironmentProvidersQueryKey } from "./queries/environment-provider-queries";
@@ -675,6 +676,8 @@ describe("createRealtimeCacheEffects", () => {
       limitPerGroup: 20,
       query: "needle",
     });
+    const spendSummaryKey = threadSpendSummaryQueryKey("thr_1");
+    queryClient.setQueryData(spendSummaryKey, { total: {} });
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -706,6 +709,9 @@ describe("createRealtimeCacheEffects", () => {
     vi.advanceTimersByTime(50);
 
     expect(queryClient.getQueryState(threadSearchKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(spendSummaryKey)?.isInvalidated).toBe(
       true,
     );
 
