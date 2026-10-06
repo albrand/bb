@@ -313,7 +313,6 @@ beforeEach(() => {
     isAtBottom: false,
     scrollToBottom: vi.fn(),
     scrollElementIntoView,
-    scrollElementIntoViewClampedToMaxScroll: vi.fn(),
     captureScrollAnchor: vi.fn(),
     holdContentPosition: vi.fn(),
   } as unknown as ReturnType<typeof useBottomAnchoredScroll>);

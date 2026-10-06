@@ -3,7 +3,6 @@ import {
   memo,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -176,7 +175,6 @@ export interface ThreadTimelineRowsProps {
   threadId?: string;
   threadIsActive?: boolean;
   threadRuntimeDisplayStatus: ThreadRuntimeDisplayStatus;
-  unreadDividerAutoScroll?: boolean;
   unreadDividerPlacement?: ThreadTimelineUnreadDividerPlacement | null;
   workspaceRootPath: string | undefined;
 }
@@ -230,12 +228,7 @@ interface TimelineRowsListProps {
   showAssistantMessageActions: boolean;
   spacing: TimelineRowsListSpacing;
   className?: string;
-  unreadDividerAutoScroll: boolean;
   unreadDividerPlacement: ThreadTimelineUnreadDividerPlacement | null;
-}
-
-interface TimelineUnreadDividerProps {
-  autoScroll: boolean;
 }
 
 interface TimelineRowViewProps {
@@ -1191,34 +1184,9 @@ const ConversationRowContent = memo(function ConversationRowContent({
   );
 });
 
-function TimelineUnreadDivider({ autoScroll }: TimelineUnreadDividerProps) {
-  const bottomAnchor = useBottomAnchoredScroll();
-  const dividerRef = useRef<HTMLDivElement>(null);
-  const hasScrolledRef = useRef(false);
-
-  useEffect(() => {
-    if (!autoScroll || !bottomAnchor || hasScrolledRef.current) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      const divider = dividerRef.current;
-      if (!divider) {
-        return;
-      }
-
-      hasScrolledRef.current = true;
-      bottomAnchor.scrollElementIntoViewClampedToMaxScroll({
-        element: divider,
-      });
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [autoScroll, bottomAnchor]);
-
+function TimelineUnreadDivider() {
   return (
     <div
-      ref={dividerRef}
       role="separator"
       aria-label="New messages"
       className={cn(
@@ -1275,7 +1243,6 @@ function TimelineExpandableBody({
           showAssistantMessageActions={showAssistantMessageActions}
           compactActivityIntents={true}
           spacing="bundle"
-          unreadDividerAutoScroll={false}
           unreadDividerPlacement={null}
         />
       );
@@ -1322,7 +1289,6 @@ function TimelineExpandableBody({
                   showAssistantMessageActions={false}
                   compactActivityIntents={false}
                   spacing="nested"
-                  unreadDividerAutoScroll={false}
                   unreadDividerPlacement={null}
                 />
               ) : null}
@@ -1431,7 +1397,6 @@ function TurnRowBody({
       compactActivityIntents={compactActivityIntents}
       spacing="nested"
       className={NESTED_TIMELINE_GROUP_LINE_CLASS_NAME}
-      unreadDividerAutoScroll={false}
       unreadDividerPlacement={null}
     />
   );
@@ -1501,7 +1466,6 @@ function LazyTurnRowBody({
           compactActivityIntents={compactActivityIntents}
           spacing="nested"
           className={NESTED_TIMELINE_GROUP_LINE_CLASS_NAME}
-          unreadDividerAutoScroll={false}
           unreadDividerPlacement={null}
         />
       </div>
@@ -2016,7 +1980,6 @@ function TimelineRowsList({
   showAssistantMessageActions,
   spacing,
   className,
-  unreadDividerAutoScroll,
   unreadDividerPlacement,
 }: TimelineRowsListProps) {
   const { threadId } = useTimelineRendererStaticContext();
@@ -2154,9 +2117,7 @@ function TimelineRowsList({
                     style={windowedState.itemStyle}
                   >
                     {windowedState.isRealized ? (
-                      <TimelineUnreadDivider
-                        autoScroll={unreadDividerAutoScroll}
-                      />
+                      <TimelineUnreadDivider />
                     ) : null}
                   </div>
                 );
@@ -2476,9 +2437,6 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
                           showAssistantMessageActions={true}
                           compactActivityIntents={false}
                           spacing="top-level"
-                          unreadDividerAutoScroll={
-                            props.unreadDividerAutoScroll ?? true
-                          }
                           unreadDividerPlacement={
                             props.unreadDividerPlacement ?? null
                           }

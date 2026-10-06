@@ -50,6 +50,7 @@ export interface UseThreadTimelineControllerResult {
   goal: ThreadTimelineResponse["goal"];
   modelFallback: ThreadTimelineResponse["modelFallback"];
   hasOlderTimelineRows: boolean;
+  hasUnseenTimelineEvents: boolean;
   isCatchingUpTimeline: boolean;
   isLoadingOlderTimelineRows: boolean;
   loadOlderTimelineRows: (commit?: CommitOlderTimelineRows) => Promise<void>;
@@ -351,6 +352,7 @@ export function useThreadTimelineController({
     goal: latestTimeline?.goal ?? null,
     modelFallback: latestTimeline?.modelFallback ?? null,
     hasOlderTimelineRows,
+    hasUnseenTimelineEvents: mountFetchHasNewEvents,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,
