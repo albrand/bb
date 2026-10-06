@@ -80,6 +80,7 @@ export interface ImportedProviderAccount {
   label: string;
   email: string | null;
   accountUuid?: string;
+  organizationUuid?: string;
   codexAccountId?: string;
   subscriptionType: string | null;
   rateLimitTier: string | null;

@@ -81,6 +81,7 @@ import {
 import { blockingResetAt } from "./src/quota.js";
 import {
   foldSubscriptions,
+  subscriptionMembers,
   subscriptionRepresentative,
 } from "./src/subscriptions.js";
 import { SubscriptionPicker } from "./subscription-picker.js";
@@ -1300,10 +1301,12 @@ function AccountPoolSettings() {
       return;
     }
     await run(`${action}-${account.id}`, async () => {
-      if (action === "toggle")
-        await rpc.call(account.enabled ? "account.disable" : "account.enable", {
-          id: account.id,
-        });
+      if (action === "toggle" && account.enabled) {
+        for (const member of subscriptionMembers(accounts, account.id))
+          if (member.enabled)
+            await rpc.call("account.disable", { id: member.id });
+      } else if (action === "toggle")
+        await rpc.call("account.enable", { id: account.id });
       if (action === "refresh")
         await rpc.call("account.refreshUsage", { accountId: account.id });
     });

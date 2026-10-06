@@ -858,6 +858,85 @@ describe("Account Pool settings", () => {
     },
   );
 
+  function foldedTwins(enabled: boolean) {
+    return [
+      account({
+        id: "a1111111-1111-4111-8111-111111111111",
+        label: "Gmail twin",
+        email: "Twin@Example.com",
+        enabled,
+        active: true,
+      }),
+      account({
+        id: "b2222222-2222-4222-8222-222222222222",
+        label: "Gmail copy",
+        email: "twin@example.com",
+        enabled,
+      }),
+      account({
+        id: "c3333333-3333-4333-8333-333333333333",
+        label: "Gmail lapsed",
+        email: "twin@example.com",
+        enabled: false,
+        signInExpired: true,
+        status: "error",
+        error: "OAuth refresh failed with HTTP 400.",
+      }),
+      account({
+        id: "d4444444-4444-4444-8444-444444444444",
+        label: "Other login",
+        email: "other@example.com",
+        accountUuid: "44444444-4444-4444-8444-444444444444",
+      }),
+    ];
+  }
+
+  it("turns off every enabled record of a folded subscription with one switch", async () => {
+    const slot = render(foldedTwins(true), {
+      "account.disable": () => ({ account: null }),
+    });
+    expect(await slot.findByText("2 subscriptions · 2 on")).toBeTruthy();
+    fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "account.disable"),
+      ).toEqual([
+        {
+          method: "account.disable",
+          input: { id: "a1111111-1111-4111-8111-111111111111" },
+        },
+        {
+          method: "account.disable",
+          input: { id: "b2222222-2222-4222-8222-222222222222" },
+        },
+      ]),
+    );
+    expect(slot.rpcCalls.some((call) => call.method === "account.enable")).toBe(
+      false,
+    );
+  });
+
+  it("turns a folded subscription back on through its representative only", async () => {
+    const slot = render(foldedTwins(false), {
+      "account.enable": () => ({ account: null }),
+    });
+    expect(await slot.findByText("2 subscriptions · 1 on")).toBeTruthy();
+    fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "account.enable"),
+      ).toEqual([
+        {
+          method: "account.enable",
+          input: { id: "a1111111-1111-4111-8111-111111111111" },
+        },
+      ]),
+    );
+    expect(
+      slot.rpcCalls.some((call) => call.method === "account.disable"),
+    ).toBe(false);
+  });
+
   it("dispatches Refresh usage to its RPC contract", async () => {
     const slot = render([account()], {
       "account.refreshUsage": () => ({ account: null }),

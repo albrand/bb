@@ -16,16 +16,25 @@ type SubscriptionRecord = Pick<
   | "active"
 >;
 
-function loginKey(account: SubscriptionRecord): string | null {
-  const email = account.email?.trim().toLowerCase() ?? "";
+function normalizedEmail(account: SubscriptionRecord): string {
+  return account.email?.trim().toLowerCase() ?? "";
+}
+
+function loginKey(
+  account: SubscriptionRecord,
+  emailByAccountUuid: ReadonlyMap<string, string>,
+): string | null {
+  const email = normalizedEmail(account);
   if (account.provider === "codex")
     return email === ""
       ? null
       : `codex:${email}:${account.codexAccountId ?? ""}`;
   if (email !== "") return `claude:${email}`;
-  return account.accountUuid === null
-    ? null
-    : `claude:uuid:${account.accountUuid}`;
+  if (account.accountUuid === null) return null;
+  const known = emailByAccountUuid.get(account.accountUuid);
+  return known === undefined
+    ? `claude:uuid:${account.accountUuid}`
+    : `claude:${known}`;
 }
 
 function plan(account: SubscriptionRecord): string | null {
@@ -37,8 +46,19 @@ export function subscriptionKeys(
 ): Map<string, string> {
   const keys = new Map<string, string>();
   const logins = new Map<string, SubscriptionRecord[]>();
+  const emailByAccountUuid = new Map<string, string>();
   for (const account of accounts) {
-    const login = loginKey(account);
+    const email = normalizedEmail(account);
+    if (
+      account.provider === "claude" &&
+      account.accountUuid !== null &&
+      email !== "" &&
+      !emailByAccountUuid.has(account.accountUuid)
+    )
+      emailByAccountUuid.set(account.accountUuid, email);
+  }
+  for (const account of accounts) {
+    const login = loginKey(account, emailByAccountUuid);
     if (login === null) keys.set(account.id, `record:${account.id}`);
     else logins.set(login, [...(logins.get(login) ?? []), account]);
   }
@@ -109,6 +129,17 @@ export function subscriptionRepresentative<T extends SubscriptionRecord>(
   return key === undefined
     ? undefined
     : representatives(accounts, keys).get(key);
+}
+
+export function subscriptionMembers<T extends SubscriptionRecord>(
+  accounts: readonly T[],
+  accountId: string,
+): T[] {
+  const keys = subscriptionKeys(accounts);
+  const key = keys.get(accountId);
+  return key === undefined
+    ? []
+    : accounts.filter((account) => keys.get(account.id) === key);
 }
 
 export function foldSubscriptions<T extends SubscriptionRecord>(

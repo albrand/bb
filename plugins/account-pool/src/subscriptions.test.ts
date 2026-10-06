@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   foldSubscriptions,
+  subscriptionMembers,
   subscriptionRepresentative,
 } from "./subscriptions.js";
 
@@ -118,6 +119,24 @@ describe("subscription folding", () => {
         record({ id: "key-two", email: null, accountUuid: null }),
       ]),
     ).toEqual(["uuid-one", "key-one", "key-two"]);
+  });
+
+  it("folds a record without an email into the login that shares its account UUID", () => {
+    const named = record({ id: "named" });
+    const unnamed = record({ id: "unnamed", email: null, enabled: false });
+    const other = record({
+      id: "other",
+      email: null,
+      accountUuid: "22222222-2222-4222-8222-222222222222",
+    });
+    expect(ids([unnamed, named, other])).toEqual(["named", "other"]);
+    expect(
+      subscriptionMembers([unnamed, named, other], "named").map(({ id }) => id),
+    ).toEqual(["unnamed", "named"]);
+    expect(
+      subscriptionMembers([unnamed, named, other], "other").map(({ id }) => id),
+    ).toEqual(["other"]);
+    expect(subscriptionMembers([named], "missing")).toEqual([]);
   });
 
   it("folds Codex records by email and ChatGPT workspace only", () => {

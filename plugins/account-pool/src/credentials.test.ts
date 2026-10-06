@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexCredentials } from "./credentials.js";
+import {
+  parseClaudeAccountIdentity,
+  parseCodexCredentials,
+} from "./credentials.js";
 
 function token(payload: object): string {
   return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
@@ -45,5 +48,47 @@ describe("Codex credential import", () => {
         }),
       ),
     ).toThrow("ChatGPT account id");
+  });
+});
+
+describe("Claude account identity", () => {
+  const login = {
+    emailAddress: "person@example.com",
+    accountUuid: "11111111-1111-4111-8111-111111111111",
+  };
+
+  it("reads the organization of the signed-in Claude login", () => {
+    expect(
+      parseClaudeAccountIdentity({
+        oauthAccount: {
+          ...login,
+          organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          organizationName: "Personal",
+        },
+      }),
+    ).toEqual({
+      email: "person@example.com",
+      accountUuid: "11111111-1111-4111-8111-111111111111",
+      organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+  });
+
+  it("keeps the login when the organization is missing or malformed", () => {
+    for (const organizationUuid of [undefined, null, "not-a-uuid", 7]) {
+      expect(
+        parseClaudeAccountIdentity({
+          oauthAccount: { ...login, organizationUuid },
+        }),
+      ).toEqual({
+        email: "person@example.com",
+        accountUuid: "11111111-1111-4111-8111-111111111111",
+        organizationUuid: null,
+      });
+    }
+    expect(parseClaudeAccountIdentity({})).toEqual({
+      email: null,
+      accountUuid: null,
+      organizationUuid: null,
+    });
   });
 });

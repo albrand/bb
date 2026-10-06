@@ -65,6 +65,9 @@ export function createClaudeAdapter(options: {
         ...(imported.accountUuid === null
           ? {}
           : { accountUuid: imported.accountUuid }),
+        ...(imported.organizationUuid === null
+          ? {}
+          : { organizationUuid: imported.organizationUuid }),
         subscriptionType: imported.subscriptionType,
         rateLimitTier: imported.rateLimitTier,
         secret: {

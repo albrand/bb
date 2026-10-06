@@ -98,6 +98,56 @@ describe("AccountStore", () => {
       [first.id, second.id].sort(),
     );
   });
+
+  it("forgets a removed account's organization and keeps the others", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
+    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    const store = new AccountStore(
+      host.bb.storage.kv,
+      path.join(dataDir, "secrets"),
+    );
+    await store.initialize();
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const add = (label: string) =>
+      store.add(
+        {
+          provider: "claude",
+          kind: "oauth",
+          label,
+          email: `${label}@example.com`,
+          accountUuid: null,
+          subscriptionType: null,
+          rateLimitTier: null,
+          enabled: true,
+          priority: 1,
+        },
+        {
+          kind: "oauth",
+          accessToken: `${label}-access`,
+          refreshToken: `${label}-refresh`,
+          expiresAt: null,
+        },
+      );
+    const removed = await add("removed");
+    const kept = await add("kept");
+    await store.setOrganization(
+      removed.id,
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    await store.setOrganization(
+      kept.id,
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+
+    expect(await store.remove(removed.id)).toBe(true);
+
+    expect(await host.bb.storage.kv.get("organizations:v1")).toEqual({
+      [kept.id]: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+  });
 });
 
 describe("QuotaStore", () => {

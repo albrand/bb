@@ -166,6 +166,11 @@ export class PoolOperations {
       },
       imported.secret,
     );
+    if (imported.organizationUuid !== undefined)
+      await this.accounts.setOrganization(
+        account.id,
+        imported.organizationUuid,
+      );
     this.onAccountsChanged();
     await this.onAccountEnabled(account.id);
     return account;

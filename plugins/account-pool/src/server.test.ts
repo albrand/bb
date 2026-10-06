@@ -394,6 +394,7 @@ function importedCredentials(
     rateLimitTier: "max_5x",
     email: "pool@example.com",
     accountUuid: "11111111-1111-4111-8111-111111111111",
+    organizationUuid: null,
     ...overrides,
   };
 }
@@ -8807,6 +8808,139 @@ describe("Account Pool subscription sign-in repair", () => {
       organizationUuid: personal,
       signInExpired: true,
     });
+  });
+
+  it("learns each record's organization on a usage refresh and splits one login into its organizations", async () => {
+    const organizations = new Map([
+      ["Bearer personal-access", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+      ["Bearer team-access", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+    ]);
+    const imports = ["personal-access", "team-access"];
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-profile-org-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      usageUrl: "https://upstream.example/usage",
+      oauthProfileUrl: "https://upstream.example/profile",
+      importCredentials: async () =>
+        importedCredentials({
+          accessToken: imports.shift() ?? "unexpected-access",
+          email: "shared@example.com",
+          accountUuid: null,
+        }),
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/profile") {
+          const uuid = organizations.get(
+            new Headers(init?.headers).get("authorization") ?? "",
+          );
+          return Response.json({
+            ...SHARED_LOGIN,
+            ...(uuid === undefined ? {} : { organization: { uuid } }),
+          });
+        }
+        if (url.pathname === "/usage")
+          return Response.json({ seven_day: { utilization: 13 } });
+        return Response.json({ ok: true });
+      },
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    for (const label of ["Personal seat", "Team seat"])
+      await host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "import" },
+        label,
+        priority: 100,
+      });
+    const list = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null));
+    for (const { id } of await list())
+      await host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: id,
+      });
+    const accounts = await list();
+    expect(
+      accounts.map(({ label, accountUuid, organizationUuid }) => ({
+        label,
+        accountUuid,
+        organizationUuid,
+      })),
+    ).toEqual([
+      {
+        label: "Personal seat",
+        accountUuid: SHARED_LOGIN.account.uuid,
+        organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      {
+        label: "Team seat",
+        accountUuid: SHARED_LOGIN.account.uuid,
+        organizationUuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    ]);
+    expect(
+      usageResourceListSchema
+        .parse(await host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual(accounts.map(({ id }) => id));
+  });
+
+  it("stores the organization of an imported Claude login", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-import-org-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      usageUrl: "data:application/json,{}",
+      importCredentials: async () =>
+        importedCredentials({ organizationUuid: personal }),
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    await host.harness.behavior.callRpc("account.add", {
+      provider: "claude",
+      source: { kind: "import" },
+      label: null,
+      priority: 100,
+    });
+    expect(
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null))
+        .map(({ organizationUuid }) => organizationUuid),
+    ).toEqual([personal]);
+  });
+
+  it("stores the organization of a sign-in again on a record that had none", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    profile.current = {
+      ...SHARED_LOGIN,
+      organization: { uuid: personal },
+    };
+    await pool.signIn({ accountId: pool.previous.id });
+    expect(
+      (await pool.list()).map(({ id, organizationUuid }) => ({
+        id,
+        organizationUuid,
+      })),
+    ).toEqual([
+      { id: pool.principal.id, organizationUuid: null },
+      { id: pool.previous.id, organizationUuid: personal },
+    ]);
   });
 
   it("signs in again to an expired Claude subscription in place", async () => {
