@@ -314,6 +314,8 @@ export function PluginSidebarFooterItems({
                       tooltip={{ children: label, hidden: false, side: "top" }}
                       className={cn(
                         SIDEBAR_FOOTER_ACTION_CLASS,
+                        item.kind === "plugin" &&
+                          "pointer-coarse:min-h-11 pointer-coarse:min-w-11",
                         active &&
                           "bg-sidebar-accent text-sidebar-accent-foreground [&>[data-icon-root]]:opacity-100",
                       )}
