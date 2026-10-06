@@ -184,8 +184,9 @@ the provider usage sources, and in the Subscription selector. The selector
 still shows a folded record while a conversation is set to it. The other records
 stay in the pool and still appear in `account list`, `status`, and
 `account reorder`. Dragging a row keeps folded records in their places.
-A subscription's switch turns its representative on or off. When other records
-of that subscription are still on, switching it off first asks, naming them,
+A subscription's switch turns its representative on or off. When another record
+of that subscription is still on and can send (its sign-in has not expired),
+switching it off first asks, naming every enabled record,
 and Turn off all disables every enabled record in one write so none of them
 routes; Cancel changes nothing. Records already off are never touched, and
 turning a subscription on enables only its representative.

@@ -40,7 +40,7 @@ bb pool account sign-in-again <id> [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
-bb pool account disable <id>
+bb pool account disable <id> [--subscription]
 bb pool account priority <id> <n>
 bb pool account reorder <claude|codex> <id>...
 bb pool account refresh <id>
@@ -70,7 +70,10 @@ sign-in expired (the `account list` Sign-in column shows `expired`), and the
 matching `login-complete` or `login-poll` replaces its credential in place,
 keeping its ID, label, and priority. A sign-in that belongs to a different
 account is refused and changes nothing. `bb pool account local` lists the bb
-server host's provider logins that are not in the pool.
+server host's provider logins that are not in the pool. Settings fold records of
+one login into one subscription; `bb pool account disable <id> --subscription`
+turns off every enabled record of that subscription in one write, while plain
+`enable` and `disable` act on one record.
 
 The hub starts immediately, even before an account is configured, so newly
 added or enabled accounts are available without a plugin reload. With an

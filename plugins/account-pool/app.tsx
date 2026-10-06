@@ -342,7 +342,7 @@ function turnOffCopy(
 ): string {
   const names = twins.map((twin) => twin.label).join(", ");
   const one = twins.length === 1;
-  return `${names} ${one ? "is" : "are"} also on for this login, so ${account.label} would keep sending through ${one ? "it" : "them"}. Turning it off turns ${one ? "both" : "all of them"} off; they stay in the pool, and turning it on again uses ${account.label} only.`;
+  return `Also on for this login: ${names}. ${account.label} keeps sending through ${one ? "it" : "them"} unless ${one ? "it is" : "they are"} turned off too. ${one ? "It stays" : "They stay"} in the pool, and turning ${account.label} on again uses it only.`;
 }
 
 const restrictAccountDragToVerticalAxis: Modifier = ({ transform }) => ({
@@ -1316,7 +1316,7 @@ function AccountPoolSettings() {
     if (
       action === "toggle" &&
       account.enabled &&
-      enabledTwins(account).length > 0
+      enabledTwins(account).some((twin) => !twin.signInExpired)
     ) {
       setDialog({ kind: "turn-off", accountId: account.id });
       return;

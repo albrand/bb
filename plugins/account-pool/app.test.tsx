@@ -904,7 +904,7 @@ describe("Account Pool settings", () => {
       name: "Turn off Gmail twin?",
     });
     expect(dialog.textContent).toContain(
-      "Gmail copy is also on for this login, so Gmail twin would keep sending through it.",
+      "Also on for this login: Gmail copy. Gmail twin keeps sending through it unless it is turned off too.",
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
@@ -923,6 +923,37 @@ describe("Account Pool settings", () => {
         },
       ]),
     );
+  });
+
+  it("turns a subscription off without asking when its other enabled record can't send", async () => {
+    const [copy, twin, ...rest] = foldedTwins(true);
+    const slot = render(
+      [
+        {
+          ...copy!,
+          signInExpired: true,
+          status: "error",
+          error: "OAuth refresh failed with HTTP 401.",
+        },
+        twin!,
+        ...rest,
+      ],
+      { "account.disable": () => ({ account: null }) },
+    );
+    fireEvent.click(
+      await slot.findByRole("switch", { name: "Use Gmail twin" }),
+    );
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.filter((call) => call.method.startsWith("account.")),
+      ).toEqual([
+        {
+          method: "account.disable",
+          input: { id: "a1111111-1111-4111-8111-111111111111" },
+        },
+      ]),
+    );
+    expect(slot.queryByRole("dialog")).toBeNull();
   });
 
   it("leaves a folded, disabled record untouched when its subscription is switched off and on", async () => {
