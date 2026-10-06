@@ -30,6 +30,17 @@ vi.mock("@/lib/sdk", () => ({ sdk: { threads: { childSummary } } }));
 describe("thread usage summary", () => {
   afterEach(cleanup);
 
+  it("keeps token-summary taps above the composer resize handle on short viewports", () => {
+    const messageActionBarStyles = readFileSync(
+      "src/components/thread/timeline/message-action-bar.css",
+      "utf8",
+    );
+
+    expect(messageActionBarStyles).toMatch(
+      /@media \(max-height: 500px\) \{\s*\.thread-turn-token-analysis-trigger\s*\{\s*position: relative;\s*z-index: 21;\s*\}\s*\}/,
+    );
+  });
+
   beforeEach(() => {
     useThreadSpendSummary.mockReset();
     useThreadTimeline.mockReset();
