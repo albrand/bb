@@ -67,6 +67,10 @@ export const accountPoolRpcContract = defineRpcContract({
     input: accountIdInputSchema,
     output: z.object({ account: accountSchema.nullable() }).strict(),
   },
+  "account.disableSubscription": {
+    input: accountIdInputSchema,
+    output: z.object({ accounts: z.array(accountSchema).nullable() }).strict(),
+  },
   "account.setPriority": {
     input: accountPriorityInputSchema,
     output: z.object({ account: accountSchema.nullable() }).strict(),
@@ -195,6 +199,9 @@ export function createRpcHandlers(
     }),
     "account.disable": async ({ id }) => ({
       account: await operations.disable(id),
+    }),
+    "account.disableSubscription": async ({ id }) => ({
+      accounts: await operations.disableSubscription(id),
     }),
     "account.setPriority": async ({ accountId, priority }) => ({
       account: await operations.setPriority(accountId, priority),

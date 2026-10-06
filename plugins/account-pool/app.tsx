@@ -91,7 +91,7 @@ import {
 } from "./src/realtime.js";
 
 type DialogState =
-  | { kind: "account" | "priority" | "remove"; accountId: string }
+  | { kind: "account" | "priority" | "remove" | "turn-off"; accountId: string }
   | { kind: "claude-login" | "codex-login"; accountId: string | null }
   | { kind: "api-key" }
   | null;
@@ -334,6 +334,15 @@ function providerTitle(provider: PoolProvider): string {
 function removeCopy(account: AccountSummary): string {
   const name = providerTitle(account.provider);
   return `bb deletes its saved ${account.kind === "api-key" ? "key" : "sign-in"}. Conversations on Automatic move to your other ${name} subscriptions; conversations set to this one stop until you choose another. ${account.kind === "api-key" ? "To use it again, add the key again." : "To use it again, sign in again."}`;
+}
+
+function turnOffCopy(
+  account: AccountSummary,
+  twins: readonly AccountSummary[],
+): string {
+  const names = twins.map((twin) => twin.label).join(", ");
+  const one = twins.length === 1;
+  return `${names} ${one ? "is" : "are"} also on for this login, so ${account.label} would keep sending through ${one ? "it" : "them"}. Turning it off turns ${one ? "both" : "all of them"} off; they stay in the pool, and turning it on again uses ${account.label} only.`;
 }
 
 const restrictAccountDragToVerticalAxis: Modifier = ({ transform }) => ({
@@ -1147,6 +1156,10 @@ function AccountPoolSettings() {
     nextAccountId === null
       ? null
       : (subscriptionRepresentative(accounts, nextAccountId)?.id ?? null);
+  const enabledTwins = (account: AccountSummary) =>
+    subscriptionMembers(accounts, account.id).filter(
+      (member) => member.id !== account.id && member.enabled,
+    );
   const selectedAccount =
     dialog === null || dialog.kind === "api-key" || dialog.accountId === null
       ? null
@@ -1300,13 +1313,19 @@ function AccountPoolSettings() {
       else await startCodex(account);
       return;
     }
+    if (
+      action === "toggle" &&
+      account.enabled &&
+      enabledTwins(account).length > 0
+    ) {
+      setDialog({ kind: "turn-off", accountId: account.id });
+      return;
+    }
     await run(`${action}-${account.id}`, async () => {
-      if (action === "toggle" && account.enabled) {
-        for (const member of subscriptionMembers(accounts, account.id))
-          if (member.enabled)
-            await rpc.call("account.disable", { id: member.id });
-      } else if (action === "toggle")
-        await rpc.call("account.enable", { id: account.id });
+      if (action === "toggle")
+        await rpc.call(account.enabled ? "account.disable" : "account.enable", {
+          id: account.id,
+        });
       if (action === "refresh")
         await rpc.call("account.refreshUsage", { accountId: account.id });
     });
@@ -1809,6 +1828,36 @@ function AccountPoolSettings() {
           >
             <p className="text-sm text-muted-foreground">
               {removeCopy(selectedAccount)}
+            </p>
+          </DialogFrame>
+        ) : null}
+        {dialog?.kind === "turn-off" && selectedAccount !== null ? (
+          <DialogFrame
+            title={`Turn off ${selectedAccount.label}?`}
+            footer={
+              <>
+                <span className="flex-1" />
+                <Button variant="outline" onClick={closeDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={pending !== null}
+                  onClick={() =>
+                    void run(`toggle-${selectedAccount.id}`, async () => {
+                      await rpc.call("account.disableSubscription", {
+                        id: selectedAccount.id,
+                      });
+                      setDialog(null);
+                    })
+                  }
+                >
+                  Turn off all
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm text-muted-foreground">
+              {turnOffCopy(selectedAccount, enabledTwins(selectedAccount))}
             </p>
           </DialogFrame>
         ) : null}

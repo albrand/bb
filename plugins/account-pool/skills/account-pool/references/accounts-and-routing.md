@@ -33,7 +33,7 @@ bb pool account sign-in-again <id> [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
-bb pool account disable <id>
+bb pool account disable <id> [--subscription]
 bb pool account priority <id> <n>
 bb pool account reorder <claude|codex> <id>...
 bb pool account refresh <id>
@@ -182,11 +182,16 @@ login has several known organizations, it joins the one with its plan. The
 healthiest record (then the active one, then the most recently used) represents the subscription in settings, in
 the provider usage sources, and in the Subscription selector. The selector
 still shows a folded record while a conversation is set to it. The other records
-stay in the pool unchanged and still appear in `account list`, `status`, and
+stay in the pool and still appear in `account list`, `status`, and
 `account reorder`. Dragging a row keeps folded records in their places.
-Turning a subscription off disables each of its enabled records, so none of
-them routes; turning it on enables only the record that represents it. From
-the CLI, `account disable` and `account enable` act on one record.
+A subscription's switch turns its representative on or off. When other records
+of that subscription are still on, switching it off first asks, naming them,
+and Turn off all disables every enabled record in one write so none of them
+routes; Cancel changes nothing. Records already off are never touched, and
+turning a subscription on enables only its representative.
+`bb pool account disable <id> --subscription` (RPC
+`account.disableSubscription`) does the same from the CLI and SDK; without
+`--subscription`, `account disable` and `account enable` act on one record.
 `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.

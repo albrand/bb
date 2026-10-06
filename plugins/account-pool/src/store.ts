@@ -146,6 +146,21 @@ export class AccountStore {
     return this.update(id, (account) => ({ ...account, enabled }));
   }
 
+  async disableAll(ids: readonly string[]): Promise<Account[]> {
+    return this.serialized(async () => {
+      const targets = new Set(ids);
+      const disabled: Account[] = [];
+      const accounts = (await this.list()).map((account) => {
+        if (!targets.has(account.id) || !account.enabled) return account;
+        const updated = { ...account, enabled: false };
+        disabled.push(updated);
+        return updated;
+      });
+      if (disabled.length > 0) await this.kv.set(ACCOUNTS_KEY, accounts);
+      return disabled;
+    });
+  }
+
   async setPriority(id: string, priority: number): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, priority }));
   }

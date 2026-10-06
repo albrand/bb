@@ -8892,6 +8892,79 @@ describe("Account Pool subscription sign-in repair", () => {
     ).toEqual(accounts.map(({ id }) => id));
   });
 
+  it("turns a subscription off in one write and leaves its disabled record untouched", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    profile.current = OTHER_LOGIN;
+    const other = await pool.signIn(null, "Claude Max 20x (other login)");
+    const protectedBefore = (await pool.list()).find(
+      ({ id }) => id === pool.previous.id,
+    );
+    const protectedSecret = await pool.secretOf(pool.previous.id);
+    expect(protectedBefore).toMatchObject({
+      enabled: false,
+      signInExpired: true,
+    });
+
+    const result = z
+      .object({ accounts: z.array(accountSchema).nullable() })
+      .parse(
+        await pool.host.harness.behavior.callRpc(
+          "account.disableSubscription",
+          { id: pool.principal.id },
+        ),
+      );
+
+    expect(result.accounts?.map(({ id }) => id)).toEqual([
+      pool.principal.id,
+      twin.id,
+    ]);
+    const after = await pool.list();
+    expect(after.find(({ id }) => id === pool.previous.id)).toEqual(
+      protectedBefore,
+    );
+    expect(await pool.secretOf(pool.previous.id)).toEqual(protectedSecret);
+    expect(after.map(({ id, enabled }) => ({ id, enabled }))).toEqual([
+      { id: pool.principal.id, enabled: false },
+      { id: pool.previous.id, enabled: false },
+      { id: twin.id, enabled: false },
+      { id: other.id, enabled: true },
+    ]);
+    expect(
+      await pool.host.harness.behavior.callRpc("account.disableSubscription", {
+        id: "99999999-9999-4999-8999-999999999999",
+      }),
+    ).toEqual({ accounts: null });
+
+    const byCli = await pool.host.harness.behavior.runCli([
+      "account",
+      "disable",
+      other.id,
+      "--subscription",
+      "--json",
+    ]);
+    expect(byCli.exitCode).toBe(0);
+    expect(
+      z
+        .object({ accounts: z.array(accountSchema) })
+        .parse(JSON.parse(byCli.stdout))
+        .accounts.map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([{ id: other.id, enabled: false }]);
+    const again = await pool.host.harness.behavior.runCli([
+      "account",
+      "disable",
+      other.id,
+      "--subscription",
+    ]);
+    expect(again.stdout).toBe(
+      `No record of the subscription of ${other.id} was enabled.\n`,
+    );
+    expect(
+      (await pool.list()).find(({ id }) => id === pool.previous.id),
+    ).toEqual(protectedBefore);
+  });
+
   it("stores the organization of an imported Claude login", async () => {
     const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-import-org-"));

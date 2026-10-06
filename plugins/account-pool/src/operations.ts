@@ -18,6 +18,7 @@ import type {
 } from "./store.js";
 import type { ClaudeOAuthAccount } from "./oauth-login.js";
 import type { CodexDeviceAccount } from "./codex-device-login.js";
+import { subscriptionMembers } from "./subscriptions.js";
 
 interface PoolHost {
   id: string;
@@ -425,6 +426,24 @@ export class PoolOperations {
     const account = await this.accounts.setEnabled(id, false);
     if (account !== null) this.onAccountsChanged();
     return account;
+  }
+
+  async disableSubscription(id: string): Promise<Account[] | null> {
+    const accounts = await this.accounts.list();
+    if (!accounts.some((account) => account.id === id)) return null;
+    const organizations = await this.accounts.organizations();
+    const members = subscriptionMembers(
+      accounts.map((account) => ({
+        ...account,
+        organizationUuid: organizations.get(account.id) ?? null,
+      })),
+      id,
+    );
+    const disabled = await this.accounts.disableAll(
+      members.filter((account) => account.enabled).map(({ id }) => id),
+    );
+    if (disabled.length > 0) this.onAccountsChanged();
+    return disabled;
   }
 
   async setPriority(id: string, priority: number): Promise<Account | null> {

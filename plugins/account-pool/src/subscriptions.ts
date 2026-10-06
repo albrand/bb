@@ -1,6 +1,6 @@
 import type { AccountSummary } from "./contracts.js";
 
-type SubscriptionRecord = Pick<
+type IdentityRecord = Pick<
   AccountSummary,
   | "id"
   | "provider"
@@ -10,19 +10,20 @@ type SubscriptionRecord = Pick<
   | "codexAccountId"
   | "subscriptionType"
   | "rateLimitTier"
-  | "signInExpired"
-  | "enabled"
-  | "status"
-  | "active"
-  | "lastUsedAt"
 >;
 
-function normalizedEmail(account: SubscriptionRecord): string {
+type SubscriptionRecord = IdentityRecord &
+  Pick<
+    AccountSummary,
+    "signInExpired" | "enabled" | "status" | "active" | "lastUsedAt"
+  >;
+
+function normalizedEmail(account: IdentityRecord): string {
   return account.email?.trim().toLowerCase() ?? "";
 }
 
 function loginKey(
-  account: SubscriptionRecord,
+  account: IdentityRecord,
   emailByAccountUuid: ReadonlyMap<string, string>,
 ): string | null {
   const email = normalizedEmail(account);
@@ -38,15 +39,15 @@ function loginKey(
     : `claude:${known}`;
 }
 
-function plan(account: SubscriptionRecord): string | null {
+function plan(account: IdentityRecord): string | null {
   return account.rateLimitTier ?? account.subscriptionType;
 }
 
 export function subscriptionKeys(
-  accounts: readonly SubscriptionRecord[],
+  accounts: readonly IdentityRecord[],
 ): Map<string, string> {
   const keys = new Map<string, string>();
-  const logins = new Map<string, SubscriptionRecord[]>();
+  const logins = new Map<string, IdentityRecord[]>();
   const emailByAccountUuid = new Map<string, string>();
   for (const account of accounts) {
     const email = normalizedEmail(account);
@@ -132,7 +133,7 @@ export function subscriptionRepresentative<T extends SubscriptionRecord>(
     : representatives(accounts, keys).get(key);
 }
 
-export function subscriptionMembers<T extends SubscriptionRecord>(
+export function subscriptionMembers<T extends IdentityRecord>(
   accounts: readonly T[],
   accountId: string,
 ): T[] {

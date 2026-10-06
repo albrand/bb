@@ -655,12 +655,35 @@ export function registerPoolCli(
         "account disable": cliCommand({
           summary: "Disable an account",
           positionals: [ACCOUNT_ID_POSITIONAL],
-          options: { json: JSON_OPTION },
+          options: {
+            json: JSON_OPTION,
+            subscription: {
+              type: "boolean",
+              description:
+                "Disable every enabled record of the subscription this account belongs to",
+            },
+          },
           run: (input) =>
             attempt(async () => {
               const { id } = accountIdInputSchema.parse({
                 id: input.positionals.id,
               });
+              if (input.options.subscription) {
+                const accounts = await operations.disableSubscription(id);
+                if (accounts === null) {
+                  throw new PluginCliError(`Account ${id} does not exist.`, {
+                    code: "account_not_found",
+                  });
+                }
+                return {
+                  exitCode: 0,
+                  stdout: input.options.json
+                    ? json({ ok: true, accounts })
+                    : accounts.length === 0
+                      ? `No record of the subscription of ${id} was enabled.\n`
+                      : `Disabled ${accounts.map((account) => account.id).join(", ")}.\n`,
+                };
+              }
               const account = await operations.disable(id);
               if (account === null) {
                 throw new PluginCliError(`Account ${id} does not exist.`, {

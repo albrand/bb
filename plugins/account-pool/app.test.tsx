@@ -892,28 +892,112 @@ describe("Account Pool settings", () => {
     ];
   }
 
-  it("turns off every enabled record of a folded subscription with one switch", async () => {
+  it("asks before turning off a subscription whose other records are still on, naming them", async () => {
     const slot = render(foldedTwins(true), {
-      "account.disable": () => ({ account: null }),
+      "account.disableSubscription": () => ({ accounts: [] }),
     });
+    const accountCalls = () =>
+      slot.rpcCalls.filter((call) => call.method.startsWith("account."));
     expect(await slot.findByText("2 subscriptions · 2 on")).toBeTruthy();
     fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    const dialog = await slot.findByRole("dialog", {
+      name: "Turn off Gmail twin?",
+    });
+    expect(dialog.textContent).toContain(
+      "Gmail copy is also on for this login, so Gmail twin would keep sending through it.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    expect(accountCalls()).toEqual([]);
+    fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    fireEvent.click(
+      within(
+        await slot.findByRole("dialog", { name: "Turn off Gmail twin?" }),
+      ).getByRole("button", { name: "Turn off all" }),
+    );
     await waitFor(() =>
-      expect(
-        slot.rpcCalls.filter((call) => call.method === "account.disable"),
-      ).toEqual([
+      expect(accountCalls()).toEqual([
         {
-          method: "account.disable",
-          input: { id: "b2222222-2222-4222-8222-222222222222" },
-        },
-        {
-          method: "account.disable",
+          method: "account.disableSubscription",
           input: { id: "a1111111-1111-4111-8111-111111111111" },
         },
       ]),
     );
-    expect(slot.rpcCalls.some((call) => call.method === "account.enable")).toBe(
-      false,
+  });
+
+  it("leaves a folded, disabled record untouched when its subscription is switched off and on", async () => {
+    const PROTECTED = "f5c490bc-0000-4000-8000-000000000000";
+    const pool = (principalEnabled: boolean) => [
+      account({
+        id: PROTECTED,
+        label: "Previous login",
+        email: "Gmail@Example.com",
+        enabled: false,
+        signInExpired: true,
+        status: "error",
+        error: "OAuth refresh failed with HTTP 400.",
+        priority: 1,
+        lastUsedAt: 1,
+      }),
+      account({
+        id: "b2222222-2222-4222-8222-222222222222",
+        label: "principal",
+        email: "gmail@example.com",
+        enabled: principalEnabled,
+        active: true,
+        priority: 2,
+        lastUsedAt: 5,
+      }),
+      account({
+        id: "c3333333-3333-4333-8333-333333333333",
+        label: "Alexandre",
+        email: "icloud@example.com",
+        accountUuid: "44444444-4444-4444-8444-444444444444",
+        priority: 3,
+      }),
+    ];
+    const off = render(pool(true), {
+      "account.disable": () => ({ account: null }),
+    });
+    expect(await off.findByText("2 subscriptions · 2 on")).toBeTruthy();
+    fireEvent.click(off.getByRole("switch", { name: "Use principal" }));
+    await waitFor(() =>
+      expect(off.rpcCalls).toContainEqual({
+        method: "account.disable",
+        input: { id: "b2222222-2222-4222-8222-222222222222" },
+      }),
+    );
+    expect(off.queryByRole("dialog")).toBeNull();
+    const offCalls = off.rpcCalls;
+    cleanup();
+    const on = render(pool(false), {
+      "account.enable": () => ({ account: null }),
+    });
+    expect(await on.findByText("2 subscriptions · 1 on")).toBeTruthy();
+    expect(on.queryByText("Previous login")).toBeNull();
+    fireEvent.click(on.getByRole("switch", { name: "Use principal" }));
+    await waitFor(() =>
+      expect(on.rpcCalls).toContainEqual({
+        method: "account.enable",
+        input: { id: "b2222222-2222-4222-8222-222222222222" },
+      }),
+    );
+    expect(
+      [...offCalls, ...on.rpcCalls].filter((call) =>
+        call.method.startsWith("account."),
+      ),
+    ).toEqual([
+      {
+        method: "account.disable",
+        input: { id: "b2222222-2222-4222-8222-222222222222" },
+      },
+      {
+        method: "account.enable",
+        input: { id: "b2222222-2222-4222-8222-222222222222" },
+      },
+    ]);
+    expect(JSON.stringify([...offCalls, ...on.rpcCalls])).not.toContain(
+      PROTECTED,
     );
   });
 
