@@ -230,8 +230,9 @@ Inspecting:
   on stderr when more events exist beyond the printed page. Human-format --all
   walks a consistent history snapshot and joins paginated group contents.
   Appends stay outside that walk; rerun the command if a history edit invalidates it.
-  Every format masks plugin and core provider environment values: JSON reports
-  them as {masked: true}, and the diagnostic timeline prints NAME=••••••.
+  Every format masks provider environment values other than PATH and bb's own
+  BB_* variables: JSON reports them as {masked: true}, and the diagnostic
+  timeline prints NAME=••••••.
 
   bb thread output [id]                    Get the final output of a thread
     --self                                 Target current thread

@@ -9,11 +9,33 @@ type ProviderEnvironmentResolvedEvent = Extract<
 export type ResolvedProviderEnvironmentEntry =
   ProviderEnvironmentResolvedEvent["entries"][number];
 
+const READABLE_SHELL_ENVIRONMENT_NAMES: ReadonlySet<string> = new Set([
+  "PATH",
+  "BB_CLI",
+  "BB_SERVER_URL",
+  "BB_HOST_DAEMON_PORT",
+  "PSExecutionPolicyPreference",
+  "BB_PROJECT_ID",
+  "BB_THREAD_STORAGE",
+  "BB_THREAD_ID",
+  "BB_ENVIRONMENT_ID",
+]);
+
+export function isReadableProviderEnvironmentEntry(
+  entry: Pick<ResolvedProviderEnvironmentEntry, "name" | "source">,
+): boolean {
+  return (
+    entry.source === "shell" && READABLE_SHELL_ENVIRONMENT_NAMES.has(entry.name)
+  );
+}
+
 export function maskResolvedProviderEnvironmentEntries(
   entries: readonly ResolvedProviderEnvironmentEntry[],
 ): ResolvedProviderEnvironmentEntry[] {
   return entries.map((entry) =>
-    entry.source === "shell" ? entry : { ...entry, value: { masked: true } },
+    isReadableProviderEnvironmentEntry(entry)
+      ? entry
+      : { ...entry, value: { masked: true } },
   );
 }
 
@@ -35,7 +57,10 @@ export function maskResolvedProviderEnvironment(
 export function maskResolvedProviderEnvironmentRow(
   row: ThreadEventRow,
 ): ThreadEventRow {
-  if (row.type !== "provider.env-resolved") {
+  if (
+    row.type !== "provider.env-resolved" ||
+    !Array.isArray(row.data.entries)
+  ) {
     return row;
   }
   return {

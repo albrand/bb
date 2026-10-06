@@ -7,6 +7,7 @@ describe("resolveThreadEnvironment", () => {
       baseShellEnv: {
         PATH: "/fake/shell/bin",
         BB_SERVER_URL: "http://127.0.0.1:3334",
+        STALE_MACHINE_TOKEN: "fake-machine-secret-789",
       },
       contributedEnv: [
         {
@@ -37,14 +38,26 @@ describe("resolveThreadEnvironment", () => {
       FAKE_PLUGIN_TOKEN: "fake-secret-123",
       FAKE_PROXY_URL: "http://127.0.0.1:3334/plugins/fake-pool/proxy",
       GH_TOKEN: "fake-core-secret-456",
+      STALE_MACHINE_TOKEN: "fake-machine-secret-789",
     });
     const reported = JSON.stringify(resolved.entries);
     expect(reported).not.toContain("fake-secret-123");
     expect(reported).not.toContain("fake-core-secret-456");
+    expect(reported).not.toContain("fake-machine-secret-789");
     expect(reported).not.toContain("/plugins/fake-pool/proxy");
     expect(resolved.entries).toEqual(
       expect.arrayContaining([
         { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+        {
+          name: "BB_SERVER_URL",
+          source: "shell",
+          value: "http://127.0.0.1:3334",
+        },
+        {
+          name: "STALE_MACHINE_TOKEN",
+          source: "shell",
+          value: { masked: true },
+        },
         {
           name: "FAKE_PLUGIN_TOKEN",
           source: { plugin: "fake-pool" },

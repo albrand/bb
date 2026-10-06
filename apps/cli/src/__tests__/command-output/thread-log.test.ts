@@ -266,6 +266,7 @@ describe("bb thread log command output", () => {
   it("bb thread log --json masks plugin environment values a server returns in plaintext", async () => {
     const entries = [
       { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+      { name: "GH_TOKEN", source: "shell", value: "fake-machine-secret-789" },
       {
         name: "FAKE_PLUGIN_TOKEN",
         source: { plugin: "fake-pool" },
@@ -291,11 +292,13 @@ describe("bb thread log command output", () => {
 
     const output = String(vi.mocked(console.log).mock.calls[0]?.[0]);
     expect(output).not.toContain("fake-secret-123");
+    expect(output).not.toContain("fake-machine-secret-789");
     expect(JSON.parse(output)).toMatchObject([
       {
         data: {
           entries: [
             { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+            { name: "GH_TOKEN", source: "shell", value: { masked: true } },
             {
               name: "FAKE_PLUGIN_TOKEN",
               source: { plugin: "fake-pool" },

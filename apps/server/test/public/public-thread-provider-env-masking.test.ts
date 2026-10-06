@@ -19,10 +19,12 @@ import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const PLUGIN_SECRET = "fake-secret-123";
 const CORE_SECRET = "fake-core-secret-456";
+const MACHINE_SECRET = "fake-machine-secret-789";
 const SHELL_PATH = "/fake/shell/bin";
 
 const stockDaemonEntries = [
   { name: "PATH", source: "shell", value: SHELL_PATH },
+  { name: "GH_TOKEN", source: "shell", value: MACHINE_SECRET },
   {
     name: "FAKE_PLUGIN_TOKEN",
     source: { plugin: "fake-pool" },
@@ -38,6 +40,7 @@ const stockDaemonEntries = [
 
 const maskedEntries = [
   { name: "PATH", source: "shell", value: SHELL_PATH },
+  { name: "GH_TOKEN", source: "shell", value: { masked: true } },
   {
     name: "FAKE_PLUGIN_TOKEN",
     source: { plugin: "fake-pool" },
@@ -73,6 +76,7 @@ async function readText(
 function expectNoSecrets(text: string): void {
   expect(text).not.toContain(PLUGIN_SECRET);
   expect(text).not.toContain(CORE_SECRET);
+  expect(text).not.toContain(MACHINE_SECRET);
 }
 
 describe("provider environment values", () => {
@@ -168,6 +172,7 @@ describe("provider environment values", () => {
         expect(timelineText).toContain("Provider environment resolved");
         expectNoSecrets(timelineText);
         expect(timelineText).toContain(`PATH=${SHELL_PATH} (shell)`);
+        expect(timelineText).toContain("GH_TOKEN=•••••• (shell)");
         expect(timelineText).toContain("FAKE_PLUGIN_TOKEN=•••••• (fake-pool)");
         expect(timelineText).toContain(
           "FAKE_CORE_TOKEN=•••••• (project-environment)",

@@ -112,7 +112,7 @@ describe("parseOperationMessage operation titles", () => {
     });
   });
 
-  it("masks plaintext plugin and core values and keeps shell values", () => {
+  it("masks plaintext plugin, core and machine values and keeps bb shell values", () => {
     const event: ThreadEvent = {
       type: "provider.env-resolved",
       threadId: THREAD_ID,
@@ -120,6 +120,7 @@ describe("parseOperationMessage operation titles", () => {
       scope: { kind: "thread" },
       entries: [
         { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+        { name: "GH_TOKEN", source: "shell", value: "fake-machine-secret-789" },
         {
           name: "PLUGIN_TOKEN",
           source: { plugin: "auth-proxy" },
@@ -142,6 +143,7 @@ describe("parseOperationMessage operation titles", () => {
       kind: "operation",
       detail: [
         "PATH=/fake/shell/bin (shell)",
+        "GH_TOKEN=•••••• (shell)",
         "PLUGIN_TOKEN=•••••• (auth-proxy)",
         "CORE_TOKEN=•••••• (machine-environment)",
       ].join("\n"),

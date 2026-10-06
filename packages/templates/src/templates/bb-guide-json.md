@@ -45,7 +45,7 @@ Fields beyond those shown exist; these are the ones scripts use.
 
   bb thread log <id> --json
     [{id, seq, type, createdAt, threadId, scope, data}]    (bare array of raw events, oldest first; page with --after-seq <seq>); with --message: {message, before, after} of conversation rows
-    provider.env-resolved events keep each entry's name, source and reason; values from plugin and core sources read {masked: true}
+    provider.env-resolved events keep each entry's name, source and reason; every value except PATH and bb's own BB_* variables reads {masked: true}
 
   bb thread output <id> --json
     {output}

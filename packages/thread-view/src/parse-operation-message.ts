@@ -12,6 +12,7 @@ import {
   THREAD_CONTEXT_CLEAR_OPERATION,
   isApprovalInteractionLifecycle,
   isPluginInteractionLifecycle,
+  isReadableProviderEnvironmentEntry,
   isUserQuestionInteractionLifecycle,
   ownershipChangeOperationMetadataSchema,
 } from "@bb/domain";
@@ -580,7 +581,8 @@ export function parseOperationMessage(
               ? entry.source.plugin
               : entry.source.core;
         const value =
-          entry.source === "shell" && typeof entry.value === "string"
+          isReadableProviderEnvironmentEntry(entry) &&
+          typeof entry.value === "string"
             ? entry.value
             : "••••••";
         const reason = entry.reason ? ` — ${entry.reason}` : "";
