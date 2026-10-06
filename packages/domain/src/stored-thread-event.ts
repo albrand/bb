@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { convertLegacyStoredThreadEvent } from "./legacy-thread-events.js";
+import { maskResolvedProviderEnvironment } from "./provider-environment.js";
 import { threadEventSchema, threadEventTypeSchema } from "./provider-event.js";
 import {
   systemMessageKindSchema,
@@ -130,15 +131,17 @@ export function parseStoredThreadEvent(
     ? storedTurnRequestEventDataSchema.parse(stored.data)
     : stored.data;
 
-  return threadEventSchema.parse({
-    ...omitStoredScopeFields(eventData),
-    ...(args.providerThreadId != null
-      ? { providerThreadId: args.providerThreadId }
-      : {}),
-    scope,
-    threadId: args.threadId,
-    type: stored.type,
-  });
+  return maskResolvedProviderEnvironment(
+    threadEventSchema.parse({
+      ...omitStoredScopeFields(eventData),
+      ...(args.providerThreadId != null
+        ? { providerThreadId: args.providerThreadId }
+        : {}),
+      scope,
+      threadId: args.threadId,
+      type: stored.type,
+    }),
+  );
 }
 
 export function buildThreadEventRow(

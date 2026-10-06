@@ -212,8 +212,9 @@ calls it for each matching session and turn with the thread, project, and host
 ids, validates at most 32 environment entries, resolves registration conflicts
 in plugin load order, and sends the winning values to the host. A value may be
 a literal string or a server-relative path that the host expands against its
-authenticated `BB_SERVER_URL`. Contributions override the shell environment and
-their values are reported as-is in provider environment events. The resolver
+authenticated `BB_SERVER_URL`. Contributions override the shell environment.
+Provider environment events report their names, sources, and reasons with
+values masked. The resolver
 receives `ExperimentalPluginProviderEnvContext` and returns
 `ExperimentalPluginProviderEnvEntry` values.
 

@@ -263,6 +263,54 @@ describe("bb thread log command output", () => {
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
   });
 
+  it("bb thread log --json masks plugin environment values a server returns in plaintext", async () => {
+    const entries = [
+      { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+      { name: "GH_TOKEN", source: "shell", value: "fake-machine-secret-789" },
+      {
+        name: "FAKE_PLUGIN_TOKEN",
+        source: { plugin: "fake-pool" },
+        value: "fake-secret-123",
+        reason: "Route the agent through the fake pool",
+      },
+    ];
+    stubServerApi({
+      "v1.threads.:id.events.$get": vi.fn(async () => [
+        {
+          id: "evt-1",
+          scope: { kind: "thread" },
+          threadId: "thread-json-log",
+          type: "provider.env-resolved",
+          data: { providerThreadId: "provider-thread", entries },
+          createdAt: 20,
+          seq: 1,
+        },
+      ]),
+    });
+
+    await runCommand(["thread", "log", "thread-json-log", "--json"], register);
+
+    const output = String(vi.mocked(console.log).mock.calls[0]?.[0]);
+    expect(output).not.toContain("fake-secret-123");
+    expect(output).not.toContain("fake-machine-secret-789");
+    expect(JSON.parse(output)).toMatchObject([
+      {
+        data: {
+          entries: [
+            { name: "PATH", source: "shell", value: "/fake/shell/bin" },
+            { name: "GH_TOKEN", source: "shell", value: { masked: true } },
+            {
+              name: "FAKE_PLUGIN_TOKEN",
+              source: { plugin: "fake-pool" },
+              value: { masked: true },
+              reason: "Route the agent through the fake pool",
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("bb thread log --json --all pages through every event with --after-seq", async () => {
     const makeEvent = (seq: number) => ({
       id: `evt-${seq}`,
