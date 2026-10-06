@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Thread } from "@bb/domain";
 import { isThreadRead, type ThreadReadState } from "@bb/client-core";
 import {
+  getDocumentVisibilityRevision,
   isDocumentVisible,
   useDocumentVisibilityRevision,
 } from "@/lib/document-visibility";
@@ -39,8 +40,6 @@ export function useThreadReadTracking({
   const suppressedManualUnreadKeysRef = useRef<Set<string>>(new Set());
   const previousSnapshotRef = useRef<ReadTrackingSnapshot | null>(null);
   const visibilityRevision = useDocumentVisibilityRevision();
-  const visibilityRevisionRef = useRef(visibilityRevision);
-  visibilityRevisionRef.current = visibilityRevision;
   const isVisible = isDocumentVisible();
 
   useEffect(() => {
@@ -139,7 +138,7 @@ export function useThreadReadTracking({
         }
         failedReadRevisionsRef.current.set(
           marker,
-          visibilityRevisionRef.current,
+          getDocumentVisibilityRevision(),
         );
       })
       .finally(() => {
