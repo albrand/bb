@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useMutationState } from "@tanstack/react-query";
+import { useMutationState, useQueryClient } from "@tanstack/react-query";
 import type { Thread } from "@bb/domain";
 import { isThreadRead, type ThreadReadState } from "@bb/client-core";
 import {
@@ -31,7 +31,7 @@ interface ReadTrackingSnapshot {
 }
 
 interface ManualUnreadRequest {
-  submittedAt: number;
+  mutationId: number;
   threadId: string | null;
 }
 
@@ -47,16 +47,26 @@ function readMutationThreadId(variables: unknown): string | null {
   return null;
 }
 
-function getLatestManualUnreadAt(
+function getLatestManualUnreadId(
   requests: readonly ManualUnreadRequest[],
   threadId: string | undefined,
 ): number | null {
   let latest: number | null = null;
   for (const request of requests) {
     if (request.threadId !== threadId) continue;
-    if (latest === null || request.submittedAt > latest) {
-      latest = request.submittedAt;
+    if (latest === null || request.mutationId > latest) {
+      latest = request.mutationId;
     }
+  }
+  return latest;
+}
+
+function getLatestMutationId(
+  mutations: readonly { mutationId: number }[],
+): number {
+  let latest = 0;
+  for (const mutation of mutations) {
+    latest = Math.max(latest, mutation.mutationId);
   }
   return latest;
 }
@@ -71,18 +81,19 @@ export function useThreadReadTracking({
     new Map(),
   );
   const suppressedManualUnreadKeysRef = useRef<Set<string>>(new Set());
-  const readStartedAtRef = useRef<Map<string, number>>(new Map());
+  const unreadIdAtReadStartRef = useRef<Map<string, number>>(new Map());
   const previousSnapshotRef = useRef<ReadTrackingSnapshot | null>(null);
   const visibilityRevision = useDocumentVisibilityRevision();
   const isVisible = isDocumentVisible();
+  const queryClient = useQueryClient();
   const manualUnreadRequests = useMutationState({
     filters: { mutationKey: MARK_THREAD_UNREAD_MUTATION_KEY },
     select: (mutation): ManualUnreadRequest => ({
-      submittedAt: mutation.state.submittedAt,
+      mutationId: mutation.mutationId,
       threadId: readMutationThreadId(mutation.state.variables),
     }),
   });
-  const latestManualUnreadAt = getLatestManualUnreadAt(
+  const latestManualUnreadId = getLatestManualUnreadId(
     manualUnreadRequests,
     thread?.id,
   );
@@ -126,7 +137,7 @@ export function useThreadReadTracking({
       previousSnapshot.latestAttentionAt !== thread.latestAttentionAt;
     if (isOpenedThread || hasNewAttention) {
       suppressedManualUnreadKeysRef.current.clear();
-      readStartedAtRef.current.clear();
+      unreadIdAtReadStartRef.current.clear();
     }
 
     if (threadIsRead) {
@@ -145,11 +156,11 @@ export function useThreadReadTracking({
       wasCancelled ||
       (failedReadRevision !== undefined &&
         failedReadRevision !== visibilityRevision);
-    const readStartedAt = readStartedAtRef.current.get(marker);
+    const unreadIdAtReadStart = unreadIdAtReadStartRef.current.get(marker);
     const wasMarkedUnreadSinceRead =
-      readStartedAt !== undefined &&
-      latestManualUnreadAt !== null &&
-      latestManualUnreadAt >= readStartedAt;
+      unreadIdAtReadStart !== undefined &&
+      latestManualUnreadId !== null &&
+      latestManualUnreadId > unreadIdAtReadStart;
     const becameManuallyUnread =
       wasMarkedUnreadSinceRead ||
       (previousSnapshot?.threadId === thread.id &&
@@ -181,7 +192,14 @@ export function useThreadReadTracking({
     cancelledReadKeysRef.current.delete(marker);
     const controller = new AbortController();
     const requestVisibilityRevision = getDocumentVisibilityRevision();
-    readStartedAtRef.current.set(marker, Date.now());
+    unreadIdAtReadStartRef.current.set(
+      marker,
+      getLatestMutationId(
+        queryClient
+          .getMutationCache()
+          .findAll({ mutationKey: MARK_THREAD_UNREAD_MUTATION_KEY }),
+      ),
+    );
     pendingReadControllersRef.current.set(marker, controller);
     void markThreadRead
       .mutateAsync({ signal: controller.signal, threadId: thread.id })
@@ -199,8 +217,9 @@ export function useThreadReadTracking({
       });
   }, [
     isVisible,
-    latestManualUnreadAt,
+    latestManualUnreadId,
     markThreadRead,
+    queryClient,
     thread,
     visibilityRevision,
   ]);

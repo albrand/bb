@@ -222,6 +222,38 @@ it("keeps a manual unread that lands in the same render as the read failure", as
   ).toBeNull();
 });
 
+it("retries a failed read after reopening when an older manual unread has the same timestamp", async () => {
+  const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+  try {
+    const { requests, result, rerender } = setup();
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => requests[0]?.resolve());
+    vi.mocked(sdk.threads.markUnread).mockResolvedValue(
+      makeThreadResponse({ id: "A", lastReadAt: null, latestAttentionAt: 20 }),
+    );
+    await act(async () => {
+      await result.current.mutateAsync({ threadId: "A" });
+    });
+    rerender({ id: "B" });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    rerender({ id: "A" });
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]?.threadId).toBe("A");
+
+    await act(async () => requests[2]?.reject());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(requests).toHaveLength(3);
+
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(requests[3]?.threadId).toBe("A");
+  } finally {
+    now.mockRestore();
+  }
+});
+
 it("keeps a manual unread made after a failed read was retried", async () => {
   const { requests, result, queryClient } = setup(true);
   await waitFor(() => expect(requests).toHaveLength(1));
