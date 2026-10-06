@@ -147,6 +147,18 @@ function tokenUsage(threadId: string, sequence: number): InsertEventInput {
   });
 }
 
+function rateLimits(threadId: string, sequence: number): InsertEventInput {
+  return row(threadId, sequence, "provider/rateLimits/updated", {
+    rateLimits: { providerId: "codex" },
+  });
+}
+
+function turnDiff(threadId: string, sequence: number): InsertEventInput {
+  return row(threadId, sequence, "turn/diff/updated", {
+    diff: `diff ${sequence}`,
+  });
+}
+
 function taskProgress(threadId: string, sequence: number): InsertEventInput {
   return row(
     threadId,
@@ -240,6 +252,25 @@ describe("thread event rewrite generation", () => {
     },
     resolvedDeltaCase("a resolved delta prune", "chunk 1chunk 2chunk 3"),
     resolvedDeltaCase("a resolved delta prune without final text", ""),
+    {
+      name: "a rate-limit prune",
+      conversationOutline: false,
+      seed: (threadId) => [rateLimits(threadId, 1)],
+      noop: (db) => pruneThreadEvents(db, "rate-limits"),
+      between: (threadId) => [rateLimits(threadId, 2)],
+      rewrite: (db) => pruneThreadEvents(db, "rate-limits"),
+    },
+    {
+      name: "a turn-diff prune",
+      conversationOutline: false,
+      seed: (threadId) => [turnDiff(threadId, 1)],
+      noop: (db) => pruneThreadEvents(db, "turn-diffs"),
+      between: (threadId) =>
+        Array.from({ length: 302 }, (_, index) =>
+          turnDiff(threadId, index + 2),
+        ),
+      rewrite: (db) => pruneThreadEvents(db, "turn-diffs"),
+    },
     {
       name: "a background task progress prune",
       conversationOutline: false,

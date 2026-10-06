@@ -196,6 +196,23 @@ describe("createConnection", () => {
         ),
       ).toBe(false);
 
+      function pruneThroughDrizzleForSlowQueryTest(): void {
+        db.transaction((tx) => tx.select().from(hosts).all(), {
+          behavior: "immediate",
+        });
+      }
+      logger.clear();
+      pruneThroughDrizzleForSlowQueryTest();
+      const drizzleTransaction = logger.infoLogs.find(
+        (log) => log.fields.operation === "transaction",
+      );
+      expect(drizzleTransaction?.fields.sql).toBe("TRANSACTION IMMEDIATE");
+      expect(
+        drizzleTransaction?.fields.callers?.some((frame) =>
+          frame.startsWith("pruneThroughDrizzleForSlowQueryTest "),
+        ),
+      ).toBe(true);
+
       workLabel = null;
       logger.clear();
       db.$client.prepare("SELECT 1").get();
