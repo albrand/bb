@@ -117,7 +117,7 @@ describe("thread usage summary", () => {
     expect(screen.getByText("Writer · idle")).toBeTruthy();
   });
 
-  it("opens thread analysis from the per-turn tooltip without adding a header control", async () => {
+  it("opens thread analysis when the per-turn token summary is tapped", async () => {
     const queryClient = new QueryClient();
     const { container } = render(
       <TooltipProvider>
@@ -131,15 +131,8 @@ describe("thread usage summary", () => {
     );
 
     expect(container.querySelector("[data-token-weather-open]")).toBeNull();
-    fireEvent.pointerMove(
-      container.querySelector("[data-thread-turn-tokens]")!,
-    );
     fireEvent.click(
-      (
-        await screen.findAllByRole("button", {
-          name: "Open thread token analysis",
-        })
-      )[0]!,
+      screen.getByRole("button", { name: /Open thread token analysis/ }),
     );
 
     expect(

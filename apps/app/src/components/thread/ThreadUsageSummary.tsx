@@ -42,12 +42,10 @@ export function ThreadTurnTokenTooltipContent({
   reasoningDisplayValue,
   providerId = "Unknown",
   weatherMetrics,
-  onOpenThreadAnalysis,
 }: {
   turn: ThreadSpendBreakdownResponse;
   reasoningDisplayValue: number | null;
   providerId?: string;
-  onOpenThreadAnalysis?: () => void;
   weatherMetrics?: {
     cacheReuseShare: number | null;
     freshInputChange: number | null;
@@ -107,15 +105,6 @@ export function ThreadTurnTokenTooltipContent({
           </>
         ) : null}
       </div>
-      {onOpenThreadAnalysis ? (
-        <button
-          type="button"
-          className="mt-3 min-h-11 w-full rounded-md px-3 text-left text-sm text-foreground hover:bg-state-hover"
-          onClick={onOpenThreadAnalysis}
-        >
-          Open thread token analysis
-        </button>
-      ) : null}
     </TooltipContent>
   );
 }
@@ -174,9 +163,12 @@ export function ThreadTurnTokenSummary({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
+        <button
+          type="button"
           data-thread-turn-tokens=""
-          className="thread-turn-token-breakdown min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
+          aria-label={`Open thread token analysis. Fresh input ${exactTokens(turn.inputTokens)}, cached input ${exactTokens(turn.cachedInputTokens)}, output ${exactTokens(turn.outputTokens)}, reasoning ${exactTokens(reasoningDisplayValue)}, total ${exactTokens(turn.totalTokens)}`}
+          className="thread-turn-token-breakdown min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-1 whitespace-normal rounded-md border-0 bg-transparent p-0 text-left font-mono text-xs tabular-nums tracking-tight text-muted-foreground"
+          onClick={() => setIsAnalysisOpen(true)}
         >
           {hasTokens(turn.inputTokens) ? (
             <span data-token-part="input">in {compact(turn.inputTokens)}</span>
@@ -220,14 +212,13 @@ export function ThreadTurnTokenSummary({
               ) : null}
             </span>
           ) : null}
-        </span>
+        </button>
       </TooltipTrigger>
       <ThreadTurnTokenTooltipContent
         turn={turn}
         reasoningDisplayValue={reasoningDisplayValue}
         providerId={data?.providerId ?? "Unknown"}
         weatherMetrics={weatherMetrics}
-        onOpenThreadAnalysis={() => setIsAnalysisOpen(true)}
       />
       {isAnalysisOpen ? (
         <ThreadTokenWeatherPanel
