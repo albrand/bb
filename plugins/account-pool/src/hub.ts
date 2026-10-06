@@ -475,7 +475,7 @@ export class AccountPoolHub {
   }
 
   async bindingPreview(threadId: string | null): Promise<BindingPreview> {
-    const preview = await this.nextAccountPreview("claude");
+    const preview = await this.previewAccountChoice("claude");
     const now = this.options.now();
     let binding: AccountBinding | null = null;
     for (const [key, value] of this.affinityBindings) {
@@ -494,28 +494,18 @@ export class AccountPoolHub {
       )
         binding = value;
     }
+    const bindingEligibleIds = new Set(preview.bindingEligibleAccountIds);
     const status = await this.options.accounts.list();
     const account =
       binding === null
         ? null
-        : status.find((candidate) => {
-            if (
-              candidate.id !== binding?.accountId ||
-              candidate.provider !== "claude" ||
-              !candidate.enabled
-            )
-              return false;
-            const quota = this.options.quotas.get(candidate.id);
-            const threshold = this.options.getSettings().switchThreshold;
-            return (
-              quota.error === null &&
-              !isUsageRestricted(quota, now) &&
-              (!isSharedQuotaExhausted(quota, threshold, now) ||
-                hasExtraUsage(quota)) &&
-              (!isQuotaExhausted(quota, "other", threshold, now) ||
-                hasExtraUsage(quota))
-            );
-          });
+        : status.find(
+            (candidate) =>
+              candidate.id === binding?.accountId &&
+              candidate.provider === "claude" &&
+              candidate.enabled &&
+              bindingEligibleIds.has(candidate.id),
+          );
     const headroom = preview.headroom;
     return {
       boundAccountId: account?.id ?? null,
@@ -532,6 +522,24 @@ export class AccountPoolHub {
         balance: AccountBalance;
         eligible: boolean;
       }>;
+    }
+  > {
+    const preview = await this.previewAccountChoice(provider);
+    return {
+      nextAccountId: preview.nextAccountId,
+      reason: preview.reason,
+      headroom: preview.headroom,
+    };
+  }
+
+  private async previewAccountChoice(provider: PoolProvider): Promise<
+    NextAccountPreview & {
+      headroom: Array<{
+        accountId: string;
+        balance: AccountBalance;
+        eligible: boolean;
+      }>;
+      bindingEligibleAccountIds: string[];
     }
   > {
     const now = this.options.now();
@@ -565,6 +573,7 @@ export class AccountPoolHub {
       )
     )
       eligible = included;
+    const bindingEligibleAccountIds = eligible.map(({ account }) => account.id);
     eligible = eligible.filter(
       ({ quota }) => quota.heldUntil === null || quota.heldUntil <= now,
     );
@@ -583,6 +592,7 @@ export class AccountPoolHub {
         balance: accountBalance(this.options.quotas.get(account.id), null, now),
         eligible: eligibleIds.has(account.id),
       })),
+      bindingEligibleAccountIds,
     };
   }
 

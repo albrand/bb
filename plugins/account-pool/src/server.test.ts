@@ -6676,6 +6676,46 @@ describe("Account Pool plugin", () => {
       });
     });
 
+    it("does not report an extra-usage bound account when routing narrows below threshold", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_extrausagerebalance", "session-extrausagerebalance");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.98,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        extraUsage: { status: "allowed", observedAt: now, source: "usage" },
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.5,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_extrausagerebalance", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: null,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+
+      await pool.send("thr_extrausagerebalance", "session-extrausagerebalance");
+      expect(pool.seen).toEqual(["sk-first", "sk-second"]);
+    });
+
     it("uses hysteresis for new conversations and switches after a 10-point lead", async () => {
       const pool = await fixtureWithAccounts();
       setQuota(pool.fixture, pool.fixture.account.id, {
