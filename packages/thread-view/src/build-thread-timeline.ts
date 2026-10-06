@@ -1109,6 +1109,39 @@ function orderRowsAfterExternalUserBoundary(
   return [...rows.slice(0, suffixStartIndex), ...orderedSuffix];
 }
 
+function placeRejectedSteerRows(rows: TimelineRow[]): TimelineRow[] {
+  const rejected: TimelineRow[] = [];
+  const remaining: TimelineRow[] = [];
+  for (const row of rows) {
+    if (
+      row.kind === "conversation" &&
+      row.role === "user" &&
+      row.turnId !== null &&
+      row.turnRequest?.kind === "steer" &&
+      row.turnRequest.status === "rejected"
+    ) {
+      rejected.push(row);
+    } else {
+      remaining.push(row);
+    }
+  }
+  if (rejected.length === 0) return rows;
+  rejected.sort(compareTimelineRowsBySource);
+  const ordered: TimelineRow[] = [];
+  let nextRejected = 0;
+  for (const row of remaining) {
+    while (
+      nextRejected < rejected.length &&
+      rejected[nextRejected]!.sourceSeqStart < row.sourceSeqStart
+    ) {
+      ordered.push(rejected[nextRejected++]!);
+    }
+    ordered.push(row);
+  }
+  ordered.push(...rejected.slice(nextRejected));
+  return ordered;
+}
+
 function materializeTimelinePlan(
   item: TimelineRowPlan,
   options: BuildTimelineRowsOptions,
@@ -1140,7 +1173,7 @@ function buildTimelineRows(
   }
 
   return orderRowsAfterExternalUserBoundary(
-    rows,
+    placeRejectedSteerRows(rows),
     collectExternalUserBoundarySeqs(projection),
   );
 }
@@ -1161,7 +1194,7 @@ export function buildThreadTimelineFromEvents(
   } satisfies Parameters<typeof buildEventProjection>[1];
   const projection = buildEventProjection(args.events, projectionOptions);
 
-  const rows = [
+  const rows = placeRejectedSteerRows([
     ...buildTimelineRows(projection, {
       completedTurnDisplay: args.options.completedTurnDisplay,
       includeNestedRows: args.options.includeNestedRows,
@@ -1173,7 +1206,7 @@ export function buildThreadTimelineFromEvents(
       args.events,
       args.options,
     ),
-  ];
+  ]);
 
   return {
     activePromptMode: !args.options.isLatestPage
