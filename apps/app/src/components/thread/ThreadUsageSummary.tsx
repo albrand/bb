@@ -131,8 +131,9 @@ export function ThreadTurnTokenTooltipContent({
             <span className="col-span-2 text-muted-foreground">
               Per-turn rules: stormy at ≥50% fresh-input growth with under 20%
               cache reuse; cloudy at ≥25% growth or under 35% reuse; clear when
-              measured reuse is ≥35% and growth is under 25%. The thread panel
-              also applies its latest reported context fill.
+              measured reuse is ≥35% and growth is under 25%. Overall thread
+              weather follows durable cache reuse; context fill is shown
+              separately.
             </span>
           </>
         ) : null}

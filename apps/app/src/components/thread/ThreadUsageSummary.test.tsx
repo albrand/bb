@@ -262,6 +262,10 @@ describe("thread usage summary", () => {
       (await screen.findAllByText("Cached (read + write)")).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText("Included in output").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Overall thread weather follows durable cache reuse/),
+    ).not.toHaveLength(0);
+    expect(screen.queryByText(/latest reported context fill/i)).toBeNull();
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
     expect(screen.getByText(/Σ 64.4M/)).toBeTruthy();
 
