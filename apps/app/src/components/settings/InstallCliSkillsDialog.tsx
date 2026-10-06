@@ -61,15 +61,14 @@ function InstallCliSkillsDialogContent({
   const missingHostIds = connectedHostIds.filter(
     (hostId) => statusByHostId.get(hostId) === "missing",
   );
+  const partialInstall = action === "install" && installedHostIds.length > 0;
   const targetHostIds = connectedHostIds.filter((hostId) => {
     const status = statusByHostId.get(hostId);
     if (action === "update") {
       return status === "outdated" || status === "missing";
     }
     if (action === "reinstall") return status === "installed";
-    if (action === "install" && installedHostIds.length > 0) {
-      return status === "missing";
-    }
+    if (partialInstall) return status === "missing";
     return true;
   });
   const targetHostIdsKey = JSON.stringify([
@@ -137,6 +136,8 @@ function InstallCliSkillsDialogContent({
                   disabled={
                     !connected ||
                     pending ||
+                    (partialInstall &&
+                      statusByHostId.get(host.id) !== "missing") ||
                     (action === "reinstall" &&
                       statusByHostId.get(host.id) !== "installed") ||
                     (action === "update" &&

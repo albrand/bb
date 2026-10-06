@@ -99,7 +99,7 @@ describe("InstallCliSkillsDialog", () => {
         open={true}
         onOpenChange={() => undefined}
         hosts={partialHosts}
-        statusByHostId={new Map([
+        statusByHostId={new Map<string, CliSkillMachineStatus>([
           ["host-laptop", "installed"],
           ["host-studio", "missing"],
           ["host-travel", "missing"],
@@ -122,6 +122,39 @@ describe("InstallCliSkillsDialog", () => {
         "Choose the remaining machines to install them onto. Each selected machine gets the skills in ~/.agents/skills and ~/.claude/skills.",
       ),
     ).toBeDefined();
+  });
+
+  it("limits partial-install targets to missing machines", () => {
+    const onInstall = vi.fn();
+    const partialHosts = [
+      hosts[0],
+      hosts[1],
+      host({ id: "host-unknown", name: "Unknown box" }),
+    ];
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={partialHosts}
+        statusByHostId={new Map<string, CliSkillMachineStatus>([
+          ["host-laptop", "installed"],
+          ["host-studio", "missing"],
+          ["host-unknown", "unknown"],
+        ])}
+        action="install"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    expect(checkbox("Unknown box").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(checkbox("Laptop"));
+    fireEvent.click(checkbox("Unknown box"));
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
   });
 
   it("updates the default selection when partial statuses load while open", () => {
