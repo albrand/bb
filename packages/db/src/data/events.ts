@@ -2884,13 +2884,15 @@ export function listConversationOutlineBackgroundTaskSpans(
         number | null
       >`CASE WHEN max(${events.type} IN ('item/completed', 'item/backgroundTask/completed')) = 1 THEN max(${events.sequence}) END`,
     })
-    .from(events)
+    .from(
+      sql`${events} INDEXED BY events_background_task_thread_type_item_sequence_idx`,
+    )
     .where(
       and(
         eq(events.threadId, args.threadId),
         gte(events.sequence, args.sequenceStart),
         inArray(events.type, conversationOutlineStructuralLifecycleTypes),
-        eq(events.itemKind, "backgroundTask"),
+        sql`${events.itemKind} = 'backgroundTask'`,
         isNotNull(events.itemId),
       ),
     )

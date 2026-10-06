@@ -31,6 +31,7 @@ import {
   listOpenTurnInputAcceptedRowsByThreadIds,
   listLatestThreadStateEventRowsByThreadIds,
   listLatestOpenBackgroundTaskStateRowsForThread,
+  listConversationOutlineBackgroundTaskSpans,
   listStoredConversationOutlineEventRows,
   listStoredDelegatingItemRowsByItemIds,
   listStoredEventRows,
@@ -1353,6 +1354,74 @@ describe("slow query index plans", () => {
       "SEARCH events USING INDEX events_thread_sequence_idx (thread_id=? AND sequence=?)",
     );
     expect(details).not.toMatch(/CORRELATED/);
+
+    db.$client.close();
+  });
+
+  it("seeks outline background-task spans through the background-task index when an item-ordered index exists", () => {
+    const { db, thread } = setup();
+    db.$client.exec(
+      "CREATE INDEX fork_events_item_completion_lookup_idx ON events (thread_id, item_id, type, parent_tool_call_id)",
+    );
+    const backgroundEvent = (
+      sequence: number,
+      itemId: string,
+      type:
+        | "item/started"
+        | "item/backgroundTask/progress"
+        | "item/backgroundTask/completed",
+    ) => ({
+      threadId: thread.id,
+      sequence,
+      type,
+      scope: threadScope(),
+      itemId,
+      itemKind: "backgroundTask" as const,
+      parentToolCallId: null,
+      data: JSON.stringify({ item: { status: "running" } }),
+    });
+    insertEvents(db, noopNotifier, [
+      backgroundEvent(1, "task-early", "item/started"),
+      backgroundEvent(2, "task-early", "item/backgroundTask/completed"),
+      ...Array.from({ length: 40 }, (_, index) => ({
+        threadId: thread.id,
+        sequence: index + 3,
+        type: "item/completed" as const,
+        scope: turnScope(`turn-${index}`),
+        itemId: `message-${index}`,
+        itemKind: "agentMessage" as const,
+        parentToolCallId: null,
+        data: JSON.stringify({}),
+      })),
+      backgroundEvent(43, "task-done", "item/started"),
+      backgroundEvent(44, "task-done", "item/backgroundTask/progress"),
+      backgroundEvent(45, "task-done", "item/backgroundTask/completed"),
+      backgroundEvent(46, "task-open", "item/started"),
+      backgroundEvent(47, "task-open", "item/backgroundTask/progress"),
+    ]);
+
+    let spans: ReturnType<typeof listConversationOutlineBackgroundTaskSpans> =
+      [];
+    const captured = captureStatements(db, () => {
+      spans = listConversationOutlineBackgroundTaskSpans(db, {
+        threadId: thread.id,
+        sequenceStart: 3,
+      });
+    });
+    expect(
+      [...spans].sort(
+        (left, right) => left.startSequence - right.startSequence,
+      ),
+    ).toEqual([
+      { startSequence: 43, endSequence: 45 },
+      { startSequence: 46, endSequence: null },
+    ]);
+    expect(captured).toHaveLength(1);
+    const details = queryPlanDetails({ db, ...captured[0]! });
+    expect(details).toContain(
+      "SEARCH events USING COVERING INDEX events_background_task_thread_type_item_sequence_idx",
+    );
+    expect(details).not.toContain("fork_events_item_completion_lookup_idx");
 
     db.$client.close();
   });
