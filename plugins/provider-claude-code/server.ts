@@ -107,8 +107,6 @@ export default function plugin(bb: BbPluginApi) {
     },
     models: {
       scope: "host",
-      // Agents' helpers run on Sonnet; Opus stays with the threads the user
-      // starts, which orchestrate them.
       childThreadModel: "claude-sonnet-5-5",
       fallback: CLAUDE_CODE_ACTIVE_CATALOG_DATA.map((entry) => ({
         id: entry.model,
