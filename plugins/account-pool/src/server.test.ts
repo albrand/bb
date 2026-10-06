@@ -25,6 +25,7 @@ import {
   routedThreadStatusListSchema,
   statusReportSchema,
   statusSchema,
+  type AccountQuota,
   type AccountSummary,
 } from "./contracts.js";
 import { z } from "zod";
@@ -285,6 +286,17 @@ describe("Explicit subscription routing", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ accountId: null });
   });
 
+  it("preserves the original thread ID validation for selection RPCs", async () => {
+    const { fixture } = await twoSubscriptions();
+
+    await expect(
+      fixture.host.harness.behavior.callRpc("routing.selection.get", {
+        threadId: "thr_invalid-id",
+        provider: "claude",
+      }),
+    ).rejects.toThrow();
+  });
+
   it("rejects selection changes while a conversation has active or queued work", async () => {
     const { fixture } = await twoSubscriptions();
     fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
@@ -505,6 +517,15 @@ function authHeaders(key: string): Record<string, string> {
     "content-type": "application/json",
     "anthropic-version": "2023-06-01",
   };
+}
+
+function setQuota(
+  fixture: Fixture,
+  accountId: string,
+  update: Partial<AccountQuota>,
+): void {
+  const quotas = new QuotaStore(fixture.host.bb.storage.database());
+  quotas.put({ ...quotas.get(accountId), ...update });
 }
 
 async function addApiAccount(
@@ -4086,7 +4107,7 @@ describe("Account Pool plugin", () => {
     );
 
     it.each(["claude", "codex"] as const)(
-      "lets new %s conversations bypass long holds while preserving established pins",
+      "routes %s conversations around long holds according to provider affinity",
       async (provider) => {
         let now = 1_800_000_000_000;
         let limited = false;
@@ -4123,20 +4144,32 @@ describe("Account Pool plugin", () => {
         };
         await send("warm");
         limited = true;
-        await send("warm", 429);
+        await send("warm", provider === "claude" ? 200 : 429);
         await send("fresh");
-        await send("warm", 429);
+        await send("warm", provider === "claude" ? 200 : 429);
         now += 60_000;
         limited = false;
         await send("warm");
         await send("fresh-after-recovery");
-        expect(attempts).toEqual([
-          "sk-first",
-          "sk-first",
-          "sk-second",
-          "sk-first",
-          "sk-second",
-        ]);
+        expect(attempts).toEqual(
+          provider === "claude"
+            ? [
+                "sk-first",
+                "sk-first",
+                "sk-second",
+                "sk-second",
+                "sk-second",
+                "sk-first",
+                "sk-second",
+              ]
+            : [
+                "sk-first",
+                "sk-first",
+                "sk-second",
+                "sk-first",
+                "sk-second",
+              ],
+        );
       },
     );
 
@@ -4250,7 +4283,7 @@ describe("Account Pool plugin", () => {
     );
 
     it.each(["claude", "codex"] as const)(
-      "runs %s sequentially across conversations and keeps a recovered earlier account as backup",
+      "routes %s across conversations and keeps a recovered earlier account as backup",
       async (provider) => {
         let now = 1_800_000_000_000;
         let rejected: string | null = null;
@@ -4307,18 +4340,32 @@ describe("Account Pool plugin", () => {
           await (await send("new-after-recovery")).text();
           await (await send("original")).text();
           await (await send("another-new")).text();
-          expect(attempts).toEqual([
-            "sk-first",
-            "sk-first",
-            "sk-first",
-            "sk-second",
-            "sk-second",
-            "sk-first",
-            "sk-second",
-          ]);
+          expect(attempts).toEqual(
+            provider === "claude"
+              ? [
+                  "sk-first",
+                  "sk-first",
+                  "sk-first",
+                  "sk-second",
+                  "sk-first",
+                  "sk-first",
+                  "sk-first",
+                ]
+              : [
+                  "sk-first",
+                  "sk-first",
+                  "sk-first",
+                  "sk-second",
+                  "sk-second",
+                  "sk-first",
+                  "sk-second",
+                ],
+          );
           rejected = "sk-second";
           await (await send("wrap")).text();
-          expect(attempts.slice(-2)).toEqual(["sk-second", "sk-first"]);
+          expect(attempts.slice(provider === "claude" ? -1 : -2)).toEqual(
+            provider === "claude" ? ["sk-first"] : ["sk-second", "sk-first"],
+          );
         } finally {
           await first.body?.cancel();
         }
@@ -5395,12 +5442,18 @@ describe("Account Pool plugin", () => {
         });
         await (await sendClaude()).text();
         await (await sendCodex()).text();
-        expect(attempts).toEqual([
-          "sk-claude-first",
+        const claudeAccount = attempts[0];
+        expect(["sk-claude-first", "sk-claude-second"]).toContain(
+          claudeAccount,
+        );
+        expect(attempts.filter((_, index) => index % 2 === 0)).toEqual([
+          claudeAccount,
+          claudeAccount,
+          claudeAccount,
+        ]);
+        expect(attempts.filter((_, index) => index % 2 === 1)).toEqual([
           "Bearer sk-first",
-          "sk-claude-first",
           "Bearer sk-first",
-          "sk-claude-first",
           "Bearer sk-first",
         ]);
       } finally {
@@ -6249,6 +6302,674 @@ describe("Account Pool plugin", () => {
     );
     expect(rejected.status).toBe(503);
   });
+
+  describe("Automatic account balancing", () => {
+    const now = 1_800_000_000_000;
+
+    async function fixtureWithAccounts(): Promise<{
+      fixture: Fixture;
+      second: AccountSummary;
+      seen: string[];
+      send: (
+        threadId: string,
+        sessionId: string,
+        model?: string,
+      ) => Promise<void>;
+    }> {
+      const seen: string[] = [];
+      const upstream = await startUpstream((request, response) => {
+        seen.push(String(request.headers["x-api-key"]));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      });
+      cleanups.push(upstream.close);
+      const fixture = await createFixture({
+        upstreamUrl: upstream.url,
+        apiKey: "sk-first",
+        options: { now: () => now },
+      });
+      const second = await addApiAccount(fixture, "sk-second", 200);
+      return {
+        fixture,
+        second,
+        seen,
+        async send(threadId, sessionId, model = "claude-opus-4-1") {
+          const token = await resolveToken(fixture.host, "host-one", threadId);
+          const response = await fixture.host.harness.behavior.fetchHttp(
+            "POST",
+            "/v1/messages",
+            {
+              headers: authHeaders(token),
+              body: JSON.stringify({
+                model,
+                metadata: {
+                  user_id: JSON.stringify({ session_id: sessionId }),
+                },
+              }),
+            },
+          );
+          expect(response.status).toBe(200);
+          await response.text();
+        },
+      };
+    }
+
+    it("chooses 2% weekly usage over an account at 100%", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 1,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.02,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-weekly", "session-weekly");
+
+      expect(pool.seen).toEqual(["sk-second"]);
+      const status = statusSchema.parse(
+        await pool.fixture.host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(
+        status.accounts.find(({ id }) => id === pool.second.id),
+      ).toMatchObject({
+        balance: {
+          bindingWindow: "weekly",
+          bindingHeadroom: 0.98,
+        },
+        lastAutomaticChoice: {
+          reason: "most headroom",
+          balance: { bindingWindow: "weekly", bindingHeadroom: 0.98 },
+        },
+      });
+      const cliStatus = await pool.fixture.host.harness.behavior.runCli([
+        "status",
+      ]);
+      expect(cliStatus.exitCode).toBe(0);
+      expect(cliStatus.stdout).toContain("Binding window");
+      expect(cliStatus.stdout).toContain("Headroom");
+      expect(cliStatus.stdout).toContain("most headroom");
+    });
+
+    it("clears weekly utilization when its reset time has passed", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.97,
+        sevenDayResetAt: now - 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.9,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-expired-week", "session-expired-week");
+
+      expect(pool.seen).toEqual(["sk-first"]);
+    });
+
+    it("clears rejected utilization when its reset time has passed", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        fiveHourUtilization: 1,
+        fiveHourStatus: "rejected",
+        fiveHourResetAt: now - 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        fiveHourUtilization: 0.95,
+        fiveHourStatus: "allowed",
+        fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-rejected-window", "session-rejected-window");
+
+      expect(pool.seen).toEqual(["sk-first"]);
+    });
+
+    it("ranks known headroom before unknown headroom but keeps unknown as a fallback", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        fiveHourUtilization: 0.2,
+        fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-known-quota", "session-known-quota");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        fiveHourUtilization: 0.98,
+        fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thread-unknown-fallback", "session-unknown-fallback");
+
+      expect(pool.seen).toEqual(["sk-first", "sk-second"]);
+    });
+
+    it("chooses the account with more binding headroom when weekly usage is low", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        fiveHourUtilization: 0.95,
+        fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+        sevenDayUtilization: 0.02,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        fiveHourUtilization: 0.12,
+        fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+        sevenDayUtilization: 0.02,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-five-hour", "session-five-hour");
+
+      expect(pool.seen).toEqual(["sk-second"]);
+    });
+
+    it("uses priority as the final tie-breaker for equal headroom", async () => {
+      const pool = await fixtureWithAccounts();
+      await pool.fixture.host.harness.behavior.callRpc("account.setPriority", {
+        accountId: pool.fixture.account.id,
+        priority: 10,
+      });
+      for (const accountId of [pool.fixture.account.id, pool.second.id])
+        setQuota(pool.fixture, accountId, {
+          fiveHourUtilization: 0.2,
+          fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+          sevenDayUtilization: 0.2,
+          sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        });
+
+      await pool.send("thread-priority", "session-priority");
+
+      expect(pool.seen).toEqual(["sk-first"]);
+    });
+
+    it("uses reset recovery to break equal-headroom ties", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 60 * 60 * 1_000,
+      });
+
+      await pool.send("thread-reset-tie", "session-reset-tie");
+
+      expect(pool.seen).toEqual(["sk-second"]);
+    });
+
+    it("includes the requested model-family quota in binding headroom", async () => {
+      const pool = await fixtureWithAccounts();
+      for (const accountId of [pool.fixture.account.id, pool.second.id]) {
+        const quota = new QuotaStore(
+          pool.fixture.host.bb.storage.database(),
+        ).get(accountId);
+        setQuota(pool.fixture, accountId, {
+          sevenDayUtilization: 0.1,
+          sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+          familyWeekly: {
+            ...quota.familyWeekly,
+            fable: {
+              utilization: accountId === pool.fixture.account.id ? 0.9 : 0.2,
+              resetAt: now + 7 * 24 * 60 * 60 * 1_000,
+              status: "allowed",
+              observedAt: now,
+              source: "usage",
+            },
+          },
+        });
+      }
+
+      await pool.send("thread-fable", "session-fable", "claude-fable-5");
+
+      expect(pool.seen).toEqual(["sk-second"]);
+    });
+
+    it("keeps an affinity until its account crosses a quota threshold and reports a different next pick", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_balancer_affinity", "session-affinity");
+      expect(pool.seen).toEqual(["sk-first"]);
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.6,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.1,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_balancer_affinity", provider: "claude" },
+      );
+      expect(binding).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+        reason: "most headroom",
+      });
+      await pool.send("thr_balancer_affinity", "session-affinity");
+      expect(pool.seen).toEqual(["sk-first", "sk-first"]);
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.98,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_balancer_affinity", "session-affinity");
+      expect(pool.seen).toEqual(["sk-first", "sk-first", "sk-second"]);
+    });
+
+    it("returns the binding for the requested thread when another thread was used later", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_balancerthreadone", "session-thread-one");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.6,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.1,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_balancerthreadtwo", "session-thread-two");
+
+      const first = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_balancerthreadone", provider: "claude" },
+      );
+      const second = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_balancerthreadtwo", provider: "claude" },
+      );
+
+      expect(first).toMatchObject({ boundAccountId: pool.fixture.account.id });
+      expect(second).toMatchObject({ boundAccountId: pool.second.id });
+    });
+
+    it("reports all enabled accounts in binding headroom when none are eligible", async () => {
+      const pool = await fixtureWithAccounts();
+      for (const accountId of [pool.fixture.account.id, pool.second.id])
+        setQuota(pool.fixture, accountId, {
+          fiveHourUtilization: 0.98,
+          fiveHourResetAt: now + 5 * 60 * 60 * 1_000,
+          sevenDayUtilization: 0.98,
+          sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_exhaustedpreview", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: null,
+        nextAccountId: null,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: false },
+        ],
+      });
+    });
+
+    it("excludes held accounts from the binding preview", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.1,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.3,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      const next = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.next",
+        { provider: "claude" },
+      );
+
+      expect(next).toMatchObject({ nextAccountId: pool.second.id });
+    });
+
+    it("keeps a held account bound while previewing another account for new work", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_heldbindingpreview", "session-heldbindingpreview");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_heldbindingpreview", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+    });
+
+    it("keeps an Automatic conversation bound through a hold and returns to it afterward", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+      const before = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_longholdrebalance", provider: "claude" },
+      );
+      expect(before).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      expect(pool.seen).toEqual(["sk-first", "sk-second"]);
+      const after = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_longholdrebalance", provider: "claude" },
+      );
+      expect(after).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.second.id,
+      });
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: null,
+      });
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+      await pool.send("thr_longholdrebalance", "session-longholdrebalance");
+
+      expect(pool.seen).toEqual([
+        "sk-first",
+        "sk-second",
+        "sk-first",
+        "sk-first",
+      ]);
+    });
+
+    it("keeps an explicitly pinned conversation on its account during a long hold", async () => {
+      const pool = await fixtureWithAccounts();
+      pool.fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+        makeThreadResponse({
+          id: threadId,
+          providerId: "claude-code",
+          status: "idle",
+        }),
+      );
+      pool.fixture.host.harness.sdk.stub(
+        "threads.queuedMessages.list",
+        async () => [],
+      );
+      await pool.fixture.host.harness.behavior.callRpc("routing.selection.set", {
+        threadId: "thr_longholdpin",
+        provider: "claude",
+        accountId: pool.fixture.account.id,
+      });
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        heldUntil: now + 60 * 1_000,
+      });
+
+      const token = await resolveToken(
+        pool.fixture.host,
+        "host-one",
+        "thr_longholdpin",
+      );
+      const response = await pool.fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        "/v1/messages",
+        {
+          headers: authHeaders(token),
+          body: JSON.stringify({
+            model: "claude-opus-4-1",
+            messages: [],
+            max_tokens: 1,
+          }),
+        },
+      );
+
+      expect(response.status).toBe(429);
+      await response.text();
+      expect(pool.seen).toEqual([]);
+    });
+
+    it("keeps an extra-usage eligible bound account in the binding preview", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_extrausagepreview", "session-extrausagepreview");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.98,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        extraUsage: { status: "allowed", observedAt: now, source: "usage" },
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.98,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_extrausagepreview", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: pool.fixture.account.id,
+        nextAccountId: pool.fixture.account.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: true },
+          { accountId: pool.second.id, eligible: false },
+        ],
+      });
+    });
+
+    it("does not report an extra-usage bound account when routing narrows below threshold", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.2,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thr_extrausagerebalance", "session-extrausagerebalance");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.98,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        extraUsage: { status: "allowed", observedAt: now, source: "usage" },
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.5,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      const binding = await pool.fixture.host.harness.behavior.callRpc(
+        "routing.binding.get",
+        { threadId: "thr_extrausagerebalance", provider: "claude" },
+      );
+
+      expect(binding).toMatchObject({
+        boundAccountId: null,
+        nextAccountId: pool.second.id,
+        headroom: [
+          { accountId: pool.fixture.account.id, eligible: false },
+          { accountId: pool.second.id, eligible: true },
+        ],
+      });
+
+      await pool.send("thr_extrausagerebalance", "session-extrausagerebalance");
+      expect(pool.seen).toEqual(["sk-first", "sk-second"]);
+    });
+
+    it("uses hysteresis for new conversations and switches after a 10-point lead", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.3,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.35,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thread-hysteresis-1", "session-hysteresis-1");
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.5,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.45,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thread-hysteresis-2", "session-hysteresis-2");
+      expect(pool.seen).toEqual(["sk-first", "sk-first"]);
+
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.65,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      await pool.send("thread-hysteresis-3", "session-hysteresis-3");
+      expect(pool.seen).toEqual(["sk-first", "sk-first", "sk-second"]);
+    });
+
+    it("keeps explicit thread pins independent from automatic headroom", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.02,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.9,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      const configure =
+        pool.fixture.host.harness.registrations.hooks[
+          "experimental_thread.configure"
+        ];
+      if (configure === null) throw new Error("Thread configure hook missing.");
+      await configure({
+        thread: { id: "thr_balancer_pin", providerId: "claude-code" },
+        data: { provider: "claude", accountId: pool.second.id },
+      });
+
+      await pool.send("thr_balancer_pin", "session-pinned");
+
+      expect(pool.seen).toEqual(["sk-second"]);
+    });
+
+    it("balances across three accounts", async () => {
+      const pool = await fixtureWithAccounts();
+      const third = await addApiAccount(pool.fixture, "sk-third", 300);
+      for (const [accountId, utilization] of [
+        [pool.fixture.account.id, 0.9],
+        [pool.second.id, 0.3],
+        [third.id, 0.1],
+      ] as const)
+        setQuota(pool.fixture, accountId, {
+          sevenDayUtilization: utilization,
+          sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+        });
+
+      await pool.send("thread-three", "session-three");
+
+      expect(pool.seen).toEqual(["sk-third"]);
+    });
+
+    it("strictly validates binding RPC inputs and exposes the pool-wide marker", async () => {
+      const pool = await fixtureWithAccounts();
+      setQuota(pool.fixture, pool.fixture.account.id, {
+        sevenDayUtilization: 0.4,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+      setQuota(pool.fixture, pool.second.id, {
+        sevenDayUtilization: 0.1,
+        sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
+      });
+
+      await expect(
+        pool.fixture.host.harness.behavior.callRpc("routing.binding.get", {
+          threadId: "thread-binding-rpc",
+          provider: "claude",
+          extra: true,
+        }),
+      ).rejects.toThrow();
+      await expect(
+        pool.fixture.host.harness.behavior.callRpc("routing.binding.get", {
+          threadId: "invalid thread",
+          provider: "claude",
+        }),
+      ).rejects.toThrow();
+      await expect(
+        pool.fixture.host.harness.behavior.callRpc("routing.binding.next", {
+          provider: "claude",
+        }),
+      ).resolves.toEqual({
+        nextAccountId: pool.second.id,
+        reason: "most headroom",
+      });
+    });
+  });
 });
 
 describe("sequential pool recovery", () => {
@@ -7078,7 +7799,7 @@ describe("sequential pool recovery", () => {
       "sk-third",
       "sk-third",
       "sk-third",
-      "sk-second",
+      "sk-first",
     ]);
     const negativePriority = await fixture.host.harness.behavior.runCli([
       "account",
@@ -7241,7 +7962,13 @@ it("publishes pooled usage without a display plugin and does not invent unobserv
     fixture.host.harness.registrations.experimental_publishedRpcMethods.map(
       (entry) => entry.method,
     ),
-  ).toEqual([usageListMethod, usageFetchMethod, "bypass.get"]);
+  ).toEqual([
+    usageListMethod,
+    usageFetchMethod,
+    "bypass.get",
+    "routing.binding.get",
+    "routing.binding.next",
+  ]);
 });
 
 it("publishes an empty shared usage group before any accounts or settings are configured", async () => {

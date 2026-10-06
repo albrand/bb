@@ -1,12 +1,15 @@
 import type {
   Account,
+  AccountBalance,
   AccountPoolConfig,
   AccountQuota,
   AccountSecret,
   ModelFamily,
   PoolProvider,
   PoolStatus,
+  LastAutomaticChoice,
 } from "./contracts.js";
+import { accountBalance, chooseBalancedCandidate } from "./balancer.js";
 import { createClaudeAdapter } from "./claude-adapter.js";
 import {
   createCodexAdapter,
@@ -99,6 +102,7 @@ interface SelectedAccount {
   account: Account;
   quota: AccountQuota;
   keepAffinity: boolean;
+  automaticChoice: LastAutomaticChoice | null;
   accept: () => void;
 }
 
@@ -117,6 +121,23 @@ interface RoutingAttempt {
   pinnedAccountId: string | null;
   selectionAccountId: string | null;
 }
+
+export interface BindingPreview {
+  boundAccountId: string | null;
+  nextAccountId: string | null;
+  reason: string;
+  headroom: Array<{
+    accountId: string;
+    balance: AccountBalance;
+    eligible: boolean;
+  }>;
+}
+
+export interface NextAccountPreview {
+  nextAccountId: string | null;
+  reason: string;
+}
+
 interface UpstreamResult {
   response: Response;
   controller: AbortController;
@@ -424,6 +445,7 @@ export class AccountPoolHub {
   async status(): Promise<Omit<PoolStatus, "routing" | "parent">> {
     const settings = this.options.getSettings();
     const now = this.options.now();
+    const automaticChoices = this.options.affinity.loadAutomaticChoices();
     const accounts = (await this.options.accounts.list()).sort(
       (left, right) => left.priority - right.priority,
     );
@@ -440,12 +462,137 @@ export class AccountPoolHub {
           ...account,
           active:
             this.activeAccounts.get(account.provider)?.accountId === account.id,
+          balance: accountBalance(quota, null, now),
+          lastAutomaticChoice:
+            automaticChoices.get(`${account.provider}:${account.id}`) ?? null,
           lastUsedHostName: null,
           ...quotaFields,
           inFlight: this.inFlightByAccount.get(account.id) ?? 0,
           status: accountStatus(account, quota, settings.switchThreshold, now),
         };
       }),
+    };
+  }
+
+  async bindingPreview(threadId: string | null): Promise<BindingPreview> {
+    const preview = await this.previewAccountChoice("claude");
+    const now = this.options.now();
+    let binding: AccountBinding | null = null;
+    for (const [key, value] of this.affinityBindings) {
+      let identity: unknown;
+      try {
+        identity = JSON.parse(key);
+      } catch {
+        continue;
+      }
+      if (
+        Array.isArray(identity) &&
+        identity[0] === "claude" &&
+        identity[2] === threadId &&
+        value.lastUsedAt > (binding?.lastUsedAt ?? 0) &&
+        now - value.lastUsedAt < AFFINITY_IDLE_TTL_MS
+      )
+        binding = value;
+    }
+    const bindingEligibleIds = new Set(preview.bindingEligibleAccountIds);
+    const status = await this.options.accounts.list();
+    const account =
+      binding === null
+        ? null
+        : status.find(
+            (candidate) =>
+              candidate.id === binding?.accountId &&
+              candidate.provider === "claude" &&
+              candidate.enabled &&
+              bindingEligibleIds.has(candidate.id),
+          );
+    const headroom = preview.headroom;
+    return {
+      boundAccountId: account?.id ?? null,
+      nextAccountId: preview.nextAccountId,
+      reason: preview.reason,
+      headroom,
+    };
+  }
+
+  async nextAccountPreview(provider: PoolProvider): Promise<
+    NextAccountPreview & {
+      headroom: Array<{
+        accountId: string;
+        balance: AccountBalance;
+        eligible: boolean;
+      }>;
+    }
+  > {
+    const preview = await this.previewAccountChoice(provider);
+    return {
+      nextAccountId: preview.nextAccountId,
+      reason: preview.reason,
+      headroom: preview.headroom,
+    };
+  }
+
+  private async previewAccountChoice(provider: PoolProvider): Promise<
+    NextAccountPreview & {
+      headroom: Array<{
+        accountId: string;
+        balance: AccountBalance;
+        eligible: boolean;
+      }>;
+      bindingEligibleAccountIds: string[];
+    }
+  > {
+    const now = this.options.now();
+    const threshold = this.options.getSettings().switchThreshold;
+    const enabled = (await this.options.accounts.list()).filter(
+      (account) => account.provider === provider && account.enabled,
+    );
+    const available = enabled
+      .map((account) => ({
+        account,
+        quota: this.options.quotas.get(account.id),
+      }))
+      .filter(
+        ({ quota }) =>
+          quota.error === null &&
+          !isUsageRestricted(quota, now) &&
+          (!isSharedQuotaExhausted(quota, threshold, now) ||
+            hasExtraUsage(quota)),
+      );
+    let eligible = available.filter(
+      ({ quota }) =>
+        !isQuotaExhausted(quota, "other", threshold, now) ||
+        hasExtraUsage(quota),
+    );
+    const included = eligible.filter(
+      ({ quota }) => !isQuotaExhausted(quota, "other", threshold, now),
+    );
+    if (
+      included.some(
+        ({ quota }) => quota.heldUntil === null || quota.heldUntil <= now,
+      )
+    )
+      eligible = included;
+    const bindingEligibleAccountIds = eligible.map(({ account }) => account.id);
+    eligible = eligible.filter(
+      ({ quota }) => quota.heldUntil === null || quota.heldUntil <= now,
+    );
+    const eligibleIds = new Set(eligible.map(({ account }) => account.id));
+    const choice = chooseBalancedCandidate(
+      eligible,
+      "other",
+      now,
+      this.activeAccounts.get(provider)?.accountId ?? null,
+    );
+    return {
+      nextAccountId: choice.candidate?.account.id ?? null,
+      reason: choice.reason,
+      headroom: enabled.map((account) => ({
+        accountId: account.id,
+        balance: accountBalance(this.options.quotas.get(account.id), null, now),
+        eligible: eligibleIds.has(account.id),
+      })),
+      bindingEligibleAccountIds,
     };
   }
 
@@ -581,8 +728,8 @@ export class AccountPoolHub {
             continue;
           }
         }
-        previousAccountId = selected.account.id;
         attempted.add(selected.account.id);
+        previousAccountId = selected.account.id;
         const changed = await this.options.accounts.recordUsed(
           selected.account.id,
           this.options.now(),
@@ -961,6 +1108,10 @@ export class AccountPoolHub {
       boundAccountId !== null
         ? eligible.find(({ account }) => account.id === boundAccountId)
         : undefined;
+    const boundIsHeld =
+      bound !== undefined &&
+      bound.quota.heldUntil !== null &&
+      bound.quota.heldUntil > now;
     let inherited: (typeof candidates)[number] | undefined;
     if (bound === undefined && parentAffinityKey !== null) {
       const parent = this.affinityBindings.get(parentAffinityKey);
@@ -977,6 +1128,20 @@ export class AccountPoolHub {
     const activeAccount = eligible.find(
       ({ account }) => account.id === active?.accountId,
     );
+    const balanced =
+      provider === "claude"
+        ? chooseBalancedCandidate(
+            candidates,
+            family,
+            now,
+            activeAccount?.account.id ?? null,
+          )
+        : {
+            candidate: candidates[0] ?? null,
+            reason: "priority tie-break",
+          };
+    const selectedBound =
+      bound !== undefined && unattempted.includes(bound) ? bound : null;
     const anchorId = previousAccountId ?? boundAccountId ?? active?.accountId;
     const anchorIndex = accounts.findIndex(
       (account) => account.id === anchorId,
@@ -990,18 +1155,33 @@ export class AccountPoolHub {
         candidates.find((candidate) => candidate.account.id === account.id),
       )
       .find((candidate) => candidate !== undefined);
+    const legacyAutomatic =
+      boundAccountId === null &&
+      previousAccountId === null &&
+      activeAccount !== undefined &&
+      unattempted.includes(activeAccount)
+        ? activeAccount
+        : (next ?? null);
     const selected =
-      bound !== undefined && unattempted.includes(bound)
-        ? bound
-        : (inherited ??
-          (boundAccountId === null &&
-          previousAccountId === null &&
-          activeAccount !== undefined &&
-          unattempted.includes(activeAccount)
-            ? activeAccount
-            : next) ??
-          null);
+      selectedBound ??
+      inherited ??
+      (provider === "claude" ? balanced.candidate : legacyAutomatic);
     if (selected === null) return null;
+    const choiceReason =
+      selectedBound !== null || inherited !== undefined
+        ? null
+        : balanced.reason;
+    const automaticChoice =
+      provider !== "claude" ||
+      choiceReason === null ||
+      routing.selectionAccountId !== null
+        ? null
+        : {
+            chosenAt: now,
+            reason: choiceReason,
+            family,
+            balance: accountBalance(selected.quota, family, now),
+          };
     if (routing.active === null)
       routing.pinnedAccountId = boundAccountId ?? inherited?.account.id ?? null;
     if (affinityKey !== null && binding === undefined) {
@@ -1041,17 +1221,30 @@ export class AccountPoolHub {
       !familyDetour(boundAccountId) &&
       (bound === undefined ||
         bound.account.id === selected.account.id ||
-        (binding === routing.binding && attempted.has(bound.account.id)));
+        (binding === routing.binding &&
+          attempted.has(bound.account.id) &&
+          !boundIsHeld));
     const advance =
       routing.selectionAccountId === null &&
       !familyDetour(active.accountId) &&
       (activeAccount === undefined ||
         active.accountId === selected.account.id ||
-        (active === routing.active && attempted.has(active.accountId)));
+        (active === routing.active && attempted.has(active.accountId)) ||
+        (provider === "claude" && automaticChoice !== null));
     return {
       ...selected,
-      keepAffinity: selected.account.id === routing.pinnedAccountId,
+      keepAffinity:
+        selected.account.id === routing.pinnedAccountId &&
+        (provider !== "claude" || routing.selectionAccountId !== null),
+      automaticChoice,
       accept: () => {
+        if (automaticChoice !== null) {
+          this.options.affinity.putAutomaticChoice(
+            provider,
+            selected.account.id,
+            automaticChoice,
+          );
+        }
         if (rebind && this.affinityBindings.get(affinityKey) === binding) {
           const accepted = {
             accountId: selected.account.id,

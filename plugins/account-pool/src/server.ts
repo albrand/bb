@@ -33,8 +33,10 @@ import type {
 import { createHub } from "./hub.js";
 import { PoolOperations } from "./operations.js";
 import {
+  accountPoolBindingReadRpcContract,
   accountPoolBypassReadRpcContract,
   accountPoolRpcContract,
+  createBindingReadRpcHandlers,
   createRpcHandlers,
 } from "./rpc.js";
 import { ClaudeOAuthLogin } from "./oauth-login.js";
@@ -300,6 +302,11 @@ export function createAccountPoolPlugin(
     bb.rpc.register(
       accountPoolBypassReadRpcContract,
       { "bypass.get": ({ threadId }) => operations.getBypass(threadId) },
+      { experimental_discoverable: true },
+    );
+    bb.rpc.register(
+      accountPoolBindingReadRpcContract,
+      createBindingReadRpcHandlers(operations),
       { experimental_discoverable: true },
     );
     registerPoolCli(bb, operations, login, codexLogin, config);
