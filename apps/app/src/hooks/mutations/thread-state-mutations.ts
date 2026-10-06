@@ -356,10 +356,9 @@ export function useDeleteThread() {
     },
     onMutate: async ({ id }): Promise<DeleteThreadTransaction> =>
       beginDeleteThreadTransaction({ queryClient, threadId: id }),
-    onError: (_error, variables, context) => {
+    onError: (_error, _variables, context) => {
       rollbackDeleteThreadTransaction({
         queryClient,
-        threadId: variables.id,
         transaction: context,
       });
     },

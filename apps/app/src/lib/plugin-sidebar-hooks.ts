@@ -360,6 +360,9 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
       archive(threadId) {
         hostActions.requestArchive(requireEntry(threadId));
       },
+      experimental_archiveEnvironmentThreads(environmentId) {
+        return hostActions.archiveEnvironmentThreads(environmentId);
+      },
       requestDelete(threadId) {
         hostActions.requestDelete(requireEntry(threadId));
       },

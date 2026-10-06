@@ -256,9 +256,6 @@ function FollowUpPromptBoxWithComposer({
   const isLoadingExecutionOptions =
     submitMode.kind === "blocked" &&
     submitMode.reason === "loading-execution-options";
-  const isLoadingPendingInteractions =
-    submitMode.kind === "blocked" &&
-    submitMode.reason === "loading-pending-interactions";
   const isUnavailable =
     submitMode.kind === "blocked" && submitMode.reason === "unavailable";
   const onStopRuntime =
@@ -740,11 +737,9 @@ function FollowUpPromptBoxWithComposer({
             ? "Submitting..."
             : isLoadingExecutionOptions
               ? "Loading models..."
-              : isLoadingPendingInteractions
-                ? "Checking pending interactions..."
-                : isUnavailable
-                  ? "Unavailable"
-                  : undefined,
+              : isUnavailable
+                ? "Unavailable"
+                : undefined,
           onModifierSubmit,
           swapSubmitActions: steerOnPrimarySubmit,
           showModifierSubmitAction: submitMode.kind === "queue",
@@ -762,11 +757,9 @@ function FollowUpPromptBoxWithComposer({
                     : `Queue follow-up (Enter)${modifierSubmitHint("steer")}`
                   : isLoadingExecutionOptions
                     ? "Loading models..."
-                    : isLoadingPendingInteractions
-                      ? "Checking pending interactions..."
-                      : isUnavailable
-                        ? "Unavailable"
-                        : "Submit (Enter)",
+                    : isUnavailable
+                      ? "Unavailable"
+                      : "Submit (Enter)",
           isRunning: canStopRuntime,
         }}
         typeahead={typeahead}

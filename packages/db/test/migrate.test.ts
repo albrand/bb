@@ -1762,6 +1762,7 @@ describe("migrate", () => {
 
       expect(getAppSettings(db)).toEqual({
         showKeyboardHints: false,
+        showGitChanges: true,
         steerActiveThreadOnEnter: true,
         confirmThreadArchive: true,
         showDiagnosticEvents: true,

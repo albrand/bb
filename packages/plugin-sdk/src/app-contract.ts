@@ -1,4 +1,5 @@
 import type {
+  ComponentPropsWithRef,
   ComponentPropsWithoutRef,
   ComponentType,
   CSSProperties,
@@ -148,6 +149,31 @@ export interface ExperimentalQuestionFormHost {
    * function to unregister.
    */
   registerChoiceHandler(handler: (index: number) => boolean): () => void;
+}
+
+/**
+ * Props of the host-owned `experimental_VoiceInputTextarea`: a controlled
+ * textarea with bb's voice input. Other textarea attributes, including `ref`
+ * and `className`, reach the underlying `<textarea>`; the caller styles it and
+ * the host adds room for its microphone controls when voice input is
+ * available.
+ */
+export interface ExperimentalVoiceInputTextareaProps
+  extends Omit<
+    ComponentPropsWithRef<"textarea">,
+    "value" | "defaultValue" | "onChange" | "children"
+  > {
+  value: string;
+  /**
+   * Receives typed edits and finished transcripts, which the host appends to
+   * `value`. Transcripts stay editable and are never submitted.
+   */
+  onValueChange(value: string): void;
+  /**
+   * True from the start of recording until transcription finishes or is
+   * cancelled, and false on unmount. Hold submission while it is true.
+   */
+  onVoiceInputActiveChange?(active: boolean): void;
 }
 
 /**
@@ -1498,6 +1524,8 @@ export interface PluginSidebarThreadActions {
   rename(threadId: string, title: string): Promise<void>;
   /** Confirms before including child threads unless archive confirmation is disabled in Settings → General. */
   archive(threadId: string): void;
+  /** Archives an environment's active thread trees with bb's optimistic updates, pane cleanup, and one Undo toast. Rejects after bb shows an error toast on failure. */
+  experimental_archiveEnvironmentThreads(environmentId: string): Promise<void>;
   /**
    * Opens bb's delete confirmation, which counts child threads first. Deletion
    * is destructive and recursive, so the host owns the confirmation: there is
@@ -1744,6 +1772,13 @@ export interface ThreadChatMessageReference {
   /** Visible text of the message. */
   text: string;
   sourceSeqEnd: number;
+  /**
+   * The event sequence that recorded this message: the `msg` value of a
+   * message link and the seq that `sdk.threads.message` and
+   * `bb thread log --message` read. For a steer this is its request sequence,
+   * which can differ from the acceptance sequence in `sourceSeqEnd`.
+   */
+  experimental_messageSeq: number;
 }
 
 /**
@@ -1788,10 +1823,11 @@ export interface PluginMessageActionContext {
 }
 
 /**
- * An action on chat messages: an icon button in the per-message action bar
- * (user and assistant messages) and an entry in the assistant-message
- * text-selection menu. Host-rendered chrome — the plugin supplies title,
- * icon, and `run` behavior only. Resolved icon names take precedence over
+ * An action on chat messages in the main thread timeline: an icon button in
+ * the per-message action bar (user and assistant messages) and an entry in
+ * the assistant-message text-selection menu. Embedded `ThreadChat` timelines
+ * do not show slot-registered actions. Host-rendered chrome — the plugin
+ * supplies title, icon, and `run` behavior only. Resolved icon names take precedence over
  * plugin branding; omitted or unknown names fall back to branding.
  */
 export interface PluginMessageActionRegistration {
@@ -2899,8 +2935,9 @@ export type ExperimentalComposerSubmitOptions = ComposerSubmitOptions;
 /**
  * A consumer-supplied action on the messages of one `ThreadChat` instance,
  * rendered in the embedded timeline's per-message action bar alongside the
- * native and slot-registered actions. Unlike the `messageAction` slot this is
- * scoped to the rendering component, not registered globally.
+ * native actions. Slot-registered `messageAction`s do not appear there. Unlike
+ * the `messageAction` slot this is scoped to the rendering component, not
+ * registered globally.
  */
 export interface ThreadChatMessageAction {
   /** Unique within this ThreadChat instance; letters, digits, `-`, `_`. */
@@ -3618,10 +3655,14 @@ export interface PluginSdkApp {
    * surfaces without further work. Reserve `useRpc` for work that needs your
    * server: secrets, host files, or your plugin's own storage.
    *
-   * Thread title, section, and parent updates are optimistic in bb's surfaces
-   * and synchronous calls are applied as one cache transaction. Other writes
-   * land when their realtime update does. `experimental_useSidebarThreadActions()`
-   * stays the optimistic path for pin, read state, rename, and archive.
+   * Thread title, section, parent, pin, and unpin writes are optimistic in
+   * bb's surfaces. Synchronous calls share one cache transaction; writes to
+   * the same thread execute in order, so unpin and move can be submitted
+   * together. Unarchive, environment-group archive, project/machine/environment
+   * renames, and project/section removal are also optimistic and roll back on
+   * failure. Created sections enter the cache when the server assigns their id.
+   * `experimental_useSidebarThreadActions()` owns navigation, read state,
+   * archive confirmation, and delete confirmation.
    *
    * The client is stable for the plugin's lifetime, so it is safe in effect
    * and callback dependency lists.
@@ -3665,6 +3706,13 @@ export interface PluginSdkApp {
    * docs/api_to_audit.md for what to audit before the prefix drops.
    */
   experimental_NewThreadComposer: ComponentType<NewThreadComposerProps>;
+  /**
+   * BB's textarea with voice input (see
+   * {@link ExperimentalVoiceInputTextareaProps}): the same microphone
+   * preference, transcription service, and error handling as the prompt box.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_VoiceInputTextarea: ComponentType<ExperimentalVoiceInputTextareaProps>;
   /**
    * BB's controlled provider/model/reasoning picker. Provider changes emit
    * only after the new provider's verified defaults and capabilities resolve,

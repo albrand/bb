@@ -16,6 +16,7 @@ interface NativeBridgeGlobal {
   post(message: unknown): void;
   request(kind: string, payload: unknown): Promise<unknown>;
   copyTextAndImage?(text: string, imageUrl: string): Promise<unknown>;
+  copyRichText?(text: string, html: string): Promise<unknown>;
   subscribe(listener: (event: unknown) => void): () => void;
   safeArea?: unknown;
 }
@@ -27,6 +28,7 @@ export interface NativeShell {
   post(message: unknown): void;
   request(kind: string, payload: unknown): Promise<unknown>;
   copyTextAndImage?(text: string, imageUrl: string): Promise<unknown>;
+  copyRichText?(text: string, html: string): Promise<unknown>;
   subscribe(listener: (event: ShellToPageEvent) => void): () => void;
 }
 
@@ -54,6 +56,7 @@ function pickHandshakeFields(bridge: NativeBridgeGlobal): unknown {
   return {
     bridgeVersion: source.bridgeVersion,
     appVersion: source.appVersion,
+    androidVersionCode: source.androidVersionCode,
     platform: source.platform,
     profileMode: source.profileMode,
     secureContext: source.secureContext,
@@ -80,6 +83,10 @@ function buildNativeShell(): NativeShell | null {
     has: (capability) => capabilities.has(capability),
     post: (message) => bridge.post(message),
     request: (kind, payload) => bridge.request(kind, payload),
+    copyRichText:
+      typeof bridge.copyRichText === "function"
+        ? bridge.copyRichText.bind(bridge)
+        : undefined,
     copyTextAndImage:
       typeof bridge.copyTextAndImage === "function"
         ? bridge.copyTextAndImage.bind(bridge)

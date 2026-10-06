@@ -158,15 +158,15 @@
     "screenshots": []
   },
   "environment-project-checkout": {
-    "category": "environments",
+    "category": "cloud-and-remote",
     "screenshots": []
   },
   "environment-git-worktree": {
-    "category": "environments",
+    "category": "cloud-and-remote",
     "screenshots": []
   },
   "environment-personal-workspace": {
-    "category": "environments",
+    "category": "cloud-and-remote",
     "screenshots": []
   },
   "bb-guide": {
@@ -174,7 +174,11 @@
     "screenshots": []
   },
   "environment-modal-sandbox": {
-    "category": "environments",
+    "category": "cloud-and-remote",
+    "screenshots": []
+  },
+  "prompt-library": {
+    "category": "memory-and-context",
     "screenshots": []
   }
 }

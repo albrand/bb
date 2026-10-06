@@ -480,14 +480,15 @@ function ThreadRowComponent({
     label: "Thread name",
     onSave: handleRename,
   });
-  const { editor, isEditing, startEditing } = rename;
+  const { editor, isEditing, startEditing, startEditingFromDoubleClick } =
+    rename;
   const startTitleEditing = useCallback(
     (event: { preventDefault: () => void; stopPropagation: () => void }) => {
       event.preventDefault();
       event.stopPropagation();
-      startEditing();
+      startEditingFromDoubleClick();
     },
-    [startEditing],
+    [startEditingFromDoubleClick],
   );
   const miniMap = useThreadSplitMiniMap(thread.id);
   const { startedAt: automationStartedAt, elapsedMinutes } =
@@ -681,10 +682,12 @@ function ThreadRowComponent({
               openInSplit();
               return;
             }
-            if (consumeSidebarTitleDoubleClick(thread.id)) {
+            if (
+              consumeSidebarTitleDoubleClick(thread.id) &&
+              startEditingFromDoubleClick()
+            ) {
               event.preventDefault();
               event.stopPropagation();
-              startEditing();
               return;
             }
             onProjectSelect?.();

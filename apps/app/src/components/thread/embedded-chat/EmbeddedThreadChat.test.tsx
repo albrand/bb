@@ -265,7 +265,7 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
   isPendingInteractionStateUnknown: (
     interactions: readonly { createdAt: number }[] | undefined,
     isFetching: boolean,
-  ) => (!interactions || interactions.length === 0) && isFetching,
+  ) => (interactions?.length ?? 0) === 0 && isFetching,
 }));
 
 vi.mock(
@@ -635,7 +635,7 @@ describe("EmbeddedThreadChat", () => {
     expect(screen.getByTestId("embedded-chat-composer").hidden).toBe(true);
     expect(
       screen.getByTestId("embedded-chat-composer").dataset.submitReason,
-    ).toBe("loading-pending-interactions");
+    ).toBe("pending-interaction");
   });
 
   it("hides the composer while cached empty interactions refresh", () => {

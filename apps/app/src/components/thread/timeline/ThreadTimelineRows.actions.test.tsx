@@ -550,6 +550,17 @@ describe("ThreadTimelineRows actions", () => {
   it("renders send-to-main on assistant rows when the timeline supplies a handler", () => {
     const markup = toMarkup(
       <ThreadTimelineRows
+        threadId="thr_side_chat"
+        consumerMessageActions={[
+          {
+            id: "send-to-main",
+            pluginId: null,
+            icon: "ArrowTurnBackward",
+            label: "Send to main thread",
+            roles: ["assistant"],
+            run: () => undefined,
+          },
+        ]}
         timelineRows={[
           conversationRow({
             role: "assistant",
@@ -557,7 +568,6 @@ describe("ThreadTimelineRows actions", () => {
           }),
         ]}
         threadRuntimeDisplayStatus="idle"
-        onSendToMainMessage={() => undefined}
         workspaceRootPath={undefined}
       />,
     );
@@ -1335,6 +1345,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "An assistant answer.",
       sourceSeqEnd: 9,
+      experimental_messageSeq: 9,
     });
     expect(context.selectedText).toBeUndefined();
     expect(context.openPanel({ actionId: "panel", params: { a: 1 } })).toBe(
@@ -1465,6 +1476,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "An assistant answer.",
       sourceSeqEnd: 9,
+      experimental_messageSeq: 9,
     });
   });
 
@@ -1509,6 +1521,131 @@ describe("ThreadTimelineRows actions", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('messageAction "explodes" failed: kaboom'),
     );
+  });
+
+  it.each([
+    { isCompactViewport: false, isPointerCoarse: false },
+    { isCompactViewport: true, isPointerCoarse: false },
+    { isCompactViewport: true, isPointerCoarse: true },
+  ])(
+    "suppresses slot actions on embedded surfaces with media %j",
+    async (media) => {
+      mockSelectionMenuMedia(media);
+      const run = vi.fn();
+      const sendToMain = vi.fn();
+      const addToChat = vi.fn();
+      setPluginSlotRegistrations(
+        "demo",
+        messageActionRegistrationSet([
+          { id: "summarize", title: "Summarize selection", run },
+        ]),
+      );
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation(
+        (callback) => {
+          callback(performance.now());
+          return 1;
+        },
+      );
+      vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+      const view = renderWithRouter(
+        <ThreadTimelineRows
+          threadId="thr_main"
+          includePluginMessageActions={false}
+          onSelectionAddToChat={addToChat}
+          consumerMessageActions={[
+            {
+              id: "send",
+              pluginId: null,
+              icon: "ArrowTurnBackward",
+              label: "Send to main thread",
+              roles: ["assistant"],
+              run: sendToMain,
+            },
+          ]}
+          timelineRows={[
+            conversationRow({
+              id: "embedded_answer",
+              role: "assistant",
+              text: "Select this embedded answer.",
+              threadId: "thr_main",
+            }),
+          ]}
+          threadRuntimeDisplayStatus="idle"
+          workspaceRootPath={undefined}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "Summarize selection" }),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Send to main thread" }),
+      );
+      expect(sendToMain).toHaveBeenCalledTimes(1);
+      const textNode = screen.getByText(
+        "Select this embedded answer.",
+      ).firstChild;
+      mockWindowSelection({ node: textNode!, text: "embedded answer" });
+      fireEvent(document, new Event("selectionchange"));
+      const add = await screen.findByRole("button", { name: "Add to chat" });
+      expect(
+        screen.queryByRole("button", { name: "Summarize selection" }),
+      ).toBeNull();
+      expect(
+        screen.getAllByRole("button", { name: "Send to main thread" }),
+      ).toHaveLength(1);
+      fireEvent.click(add);
+      expect(addToChat).toHaveBeenCalledWith("embedded answer");
+      expect(run).not.toHaveBeenCalled();
+      view.unmount();
+    },
+  );
+
+  it("passes the recorded steer sequence to slot and consumer actions", () => {
+    const slotRun = vi.fn();
+    const consumerRun = vi.fn();
+    setPluginSlotRegistrations(
+      "demo",
+      messageActionRegistrationSet([
+        { id: "link", title: "Plugin link", run: slotRun },
+      ]),
+    );
+    renderWithRouter(
+      <ThreadTimelineRows
+        threadId="thr_main"
+        timelineRows={[
+          {
+            ...conversationRow({
+              role: "user",
+              text: "A steer.",
+              threadId: "thr_main",
+              sourceSeqEnd: 19,
+            }),
+            messageSeq: 12,
+          },
+        ]}
+        consumerMessageActions={[
+          {
+            id: "link",
+            pluginId: null,
+            icon: null,
+            label: "Consumer link",
+            run: consumerRun,
+          },
+        ]}
+        threadRuntimeDisplayStatus="idle"
+        workspaceRootPath={undefined}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Plugin link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Consumer link" }));
+    expect(slotRun.mock.calls[0]![0].message).toMatchObject({
+      sourceSeqEnd: 19,
+      experimental_messageSeq: 12,
+    });
+    expect(consumerRun.mock.calls[0]![0]).toMatchObject({
+      sourceSeqEnd: 19,
+      experimental_messageSeq: 12,
+    });
   });
 
   it("passes the highlighted text to plugin selection actions", async () => {
@@ -1566,6 +1703,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "Select part of this answer.",
       sourceSeqEnd: 11,
+      experimental_messageSeq: 11,
     });
     expect(context.openPanel({ actionId: "panel" })).toBe(false);
   });

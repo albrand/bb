@@ -860,11 +860,11 @@ interface RenderPromptAreaOptions {
   goal?: ThreadTimelineGoal | null;
   modelFallback?: ThreadTimelineModelFallback | null;
   pendingInteractions?: readonly PendingInteraction[];
+  pendingInteractionsInitialLoading?: boolean;
   childPendingInteractions?: readonly ChildThreadPendingAttention[];
   environmentGoneStatus?: ComponentProps<
     typeof ThreadDetailPromptArea
   >["environmentGoneStatus"];
-  pendingInteractionsInitialLoading?: boolean;
   queuedMessageCount?: number;
   sentMessageEdit?: ThreadDetailSentMessageEdit;
   thread?: ThreadWithRuntime;
@@ -878,9 +878,9 @@ function buildPromptAreaElement({
   goal = null,
   modelFallback = null,
   pendingInteractions = [],
+  pendingInteractionsInitialLoading = false,
   childPendingInteractions = [],
   environmentGoneStatus = null,
-  pendingInteractionsInitialLoading = false,
   queuedMessageCount = 0,
   sentMessageEdit,
   thread = makeThread(),
@@ -888,6 +888,7 @@ function buildPromptAreaElement({
   return (
     <QueryClientProvider client={testQueryClient}>
       <ThreadDetailPromptArea
+        showGitChanges={true}
         activeBackgroundAgentCount={0}
         activeBackgroundCommands={[]}
         activePromptMode={activePromptMode}
@@ -1853,25 +1854,6 @@ describe("ThreadDetailPromptArea", () => {
       expect(
         screen.queryByRole("button", { name: "Cancel queued edit" }),
       ).toBeNull(),
-    );
-  });
-
-  it("blocks submit while pending interactions are initially unknown", () => {
-    mocks.defaultExecutionOptions = {
-      model: "gpt-5",
-      permissionMode: "auto",
-      reasoningLevel: "medium",
-      serviceTier: "default",
-      source: "client/turn/requested",
-    };
-
-    renderPromptArea({
-      pendingInteractionsInitialLoading: true,
-      thread: makeThread({ environmentId: "env_1" }),
-    });
-
-    expect(screen.getByTestId("submit-mode").textContent).toBe(
-      "blocked:loading-pending-interactions",
     );
   });
 

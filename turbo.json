@@ -355,6 +355,11 @@
       "outputs": ["build-output/**"],
       "passThroughEnv": ["*"]
     },
+    "@bb/mobile#build:android:dev": {
+      "cache": false,
+      "outputs": ["build-output/**"],
+      "passThroughEnv": ["*"]
+    },
     "@bb/mobile#e2e:android": {
       "cache": false,
       "passThroughEnv": ["*"]
@@ -1286,6 +1291,16 @@
     },
     "bb-plugin-provider-reauth#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    },
+    "bb-plugin-bb--prompt-library#typecheck": {
+      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    },
+    "bb-plugin-bb--prompt-library#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@get-bb/plugin-sdk#build",
+        "topo"
+      ]
     },
     "bb-plugin-bb--provider-usage#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],

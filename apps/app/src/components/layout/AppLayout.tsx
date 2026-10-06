@@ -109,15 +109,14 @@ import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { useFaviconBadge } from "@/lib/favicon-color-preference";
 import { shouldShowFaviconAttentionDot } from "./faviconAttentionDot";
 import { AppLayoutSidebar } from "./AppLayoutSidebar";
+import { useNavigationRailExperiment } from "@/components/sidebar/navigationRailExperiment";
 import {
   useAppCommandHandler,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import {
-  shouldRestoreIOSViewportOnKeyboardDismissal,
-  useMobileVisualViewportHeight,
-} from "./useMobileVisualViewportHeight";
+import { useMobileVisualViewportHeight } from "./useMobileVisualViewportHeight";
+import { isIOSWebKit } from "@/lib/ios-webkit";
 import { wsManager } from "@/lib/ws";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { findPaneByThread } from "@/lib/split-layout";
@@ -406,7 +405,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const store = useStore();
   const [contentShell, setContentShell] = useState<HTMLDivElement | null>(null);
   const restoreIOSViewportOnKeyboardDismissal = useMemo(
-    () => shouldRestoreIOSViewportOnKeyboardDismissal(navigator),
+    () => isIOSWebKit(navigator),
     [],
   );
   useMobileVisualViewportHeight(
@@ -449,6 +448,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const { appRoutePath, settingsRoutePath, toolsBackRoutePath } =
     useAppSettingsRouteMemory();
+  const navigationRail = useNavigationRailExperiment();
   const setRootComposeProjectId = useSetRootComposeProjectId();
   useEffect(
     () =>
@@ -805,6 +805,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                           ? "skills"
                           : "app"
                   }
+                  navigationRail={navigationRail}
                   onResizeMouseDown={handleResizeMouseDown}
                   isResizing={isSidebarResizing}
                   appRoutePath={appRoutePath}

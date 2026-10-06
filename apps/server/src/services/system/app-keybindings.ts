@@ -150,6 +150,8 @@ const splitWithoutModal = {
 } as const;
 
 export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
+  binding("history.back", "[", { mod: true }, mainWithoutModal),
+  binding("history.forward", "]", { mod: true }, mainWithoutModal),
   binding("palette.open", "p", { mod: true, shift: true }, mainWithoutModal),
   binding("thread.new", "o", { mod: true, shift: true }, mainWithoutModal),
   binding(
@@ -206,8 +208,6 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     { mod: true, shift: true },
     mainWithoutModal,
   ),
-  binding("history.back", "[", { mod: true }, mainWithoutModal),
-  binding("history.forward", "]", { mod: true }, mainWithoutModal),
   ...numberedChatBindings(THREAD_JUMP_APP_COMMAND_IDS, mainWithoutModal),
   ...(
     [

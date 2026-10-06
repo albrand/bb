@@ -44,10 +44,13 @@ import {
 import { cn } from "@bb/shared-ui/lib/utils";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import {
-  getPullRequestAttentionDisplay,
+  describePullRequestStatus,
+  getPullRequestNextStep,
+  isPullRequestAutoMergeOn,
   getPullRequestGithubCheckStatus,
   PULL_REQUEST_STATE_DISPLAY,
 } from "@/lib/pull-request-display";
+import { PullRequestNextStepLabel } from "@/components/pull-request/PullRequestNextStepLabel";
 import { PullRequestStatusPill } from "@/components/pull-request/PullRequestStatusPill";
 import { AnimatedDisclosureBody } from "@/components/promptbox/banner/AnimatedBody";
 import {
@@ -304,9 +307,9 @@ const PARENT_SECTION_COPY: Record<
     ariaPrefix: "Forked from",
   },
   "side-chat": {
-    verb: "Side chat of",
-    bodyLead: "This thread is a side chat of ",
-    ariaPrefix: "Side chat of",
+    verb: "Side chat for",
+    bodyLead: "This side chat is for ",
+    ariaPrefix: "Side chat for",
   },
 };
 
@@ -316,7 +319,7 @@ const PARENT_SECTION_ICON: Record<
 > = {
   parent: "UserRound",
   fork: "Fork",
-  "side-chat": "SideChat",
+  "side-chat": "MessageSquare",
 };
 
 function useParentSectionAriaLabel(
@@ -369,8 +372,7 @@ function shouldShowPullRequestAttentionLabel(
 ): boolean {
   if (pullRequest.attention === "checks_failed") return false;
   return (
-    (pullRequest.state === "open" &&
-      (pullRequest.autoMerge || pullRequest.attention === "queued")) ||
+    (pullRequest.state === "open" && pullRequest.attention === "queued") ||
     pullRequest.attention === "changes_requested" ||
     pullRequest.attention === "review_requested" ||
     pullRequest.attention === "conflicts" ||
@@ -618,7 +620,7 @@ function PullRequestBannerLink({
   showLabel: boolean;
   showStateLabel: boolean;
 }) {
-  const attentionDisplay = getPullRequestAttentionDisplay(pullRequest);
+  const nextStep = getPullRequestNextStep(pullRequest);
   const stateDisplay = PULL_REQUEST_STATE_DISPLAY[pullRequest.state];
   const handlePullRequestClick = useUrlAnchorClickHandler(pullRequest.url);
   const showAttentionLabel =
@@ -629,7 +631,7 @@ function PullRequestBannerLink({
       target="_blank"
       rel="noopener noreferrer"
       onClick={handlePullRequestClick}
-      aria-label={`Pull request ${pullRequest.number}: ${attentionDisplay.label}`}
+      aria-label={`Pull request ${pullRequest.number}: ${describePullRequestStatus(pullRequest)}`}
       className={cn(
         "flex items-center gap-1.5 text-xs text-muted-foreground no-underline transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         PROMPT_STACK_INLAY_SEGMENT_CLASS,
@@ -651,10 +653,18 @@ function PullRequestBannerLink({
             : ""}
         </span>
       ) : null}
-      {showAttentionLabel ? (
-        <span className={cn("min-w-0 truncate", attentionDisplay.className)}>
-          · {attentionDisplay.label}
-        </span>
+      {showAttentionLabel && nextStep ? (
+        <>
+          <span aria-hidden>·</span>
+          <PullRequestNextStepLabel nextStep={nextStep} />
+        </>
+      ) : null}
+      {showLabel && isPullRequestAutoMergeOn(pullRequest) ? (
+        <Icon
+          name="Zap"
+          aria-label="Auto-merge on"
+          className="size-3 shrink-0 text-subtle-foreground"
+        />
       ) : null}
     </a>
   );
