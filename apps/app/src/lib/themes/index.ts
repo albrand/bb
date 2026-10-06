@@ -8,6 +8,14 @@ import { draculaThemeCss } from "./dracula";
 import { gruvboxThemeCss } from "./gruvbox";
 import { nordThemeCss } from "./nord";
 import { solarizedThemeCss } from "./solarized";
+import { createRetryableChunkImport } from "../retryable-chunk-import";
+
+const loadConductorTheme = createRetryableChunkImport(
+  () => import("./conductor"),
+);
+const loadConductorBlackTheme = createRetryableChunkImport(
+  () => import("./conductor-black"),
+);
 
 type EagerBuiltInThemeId = Exclude<
   BuiltInThemeId,
@@ -30,18 +38,18 @@ export async function resolveAppThemeCss(
     return appearance.customCss ?? "";
   }
   if (appearance.themeId === "conductor") {
-    return (await import("./conductor")).conductorThemeCss;
+    return (await loadConductorTheme()).conductorThemeCss;
   }
   if (appearance.themeId === "conductor-black") {
-    return (await import("./conductor-black")).conductorBlackThemeCss;
+    return (await loadConductorBlackTheme()).conductorBlackThemeCss;
   }
   return builtInThemeCss[appearance.themeId];
 }
 
 export function preloadAppThemeCss(themeId: string): void {
   if (themeId === "conductor") {
-    void import("./conductor").catch(() => undefined);
+    void loadConductorTheme().catch(() => undefined);
   } else if (themeId === "conductor-black") {
-    void import("./conductor-black").catch(() => undefined);
+    void loadConductorBlackTheme().catch(() => undefined);
   }
 }
