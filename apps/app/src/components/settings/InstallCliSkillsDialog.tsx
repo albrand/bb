@@ -197,6 +197,7 @@ function InstallCliSkillsDialogContent({
         <Button
           type="button"
           variant="outline"
+          className="max-md:pointer-coarse:min-h-11"
           disabled={pending}
           onClick={onCancel}
         >
@@ -205,6 +206,7 @@ function InstallCliSkillsDialogContent({
         <Button
           type="button"
           variant={action === "reinstall" ? "secondary" : "default"}
+          className="max-md:pointer-coarse:min-h-11"
           disabled={
             statusLoading || statusUnavailable || pending || selected.length === 0
           }

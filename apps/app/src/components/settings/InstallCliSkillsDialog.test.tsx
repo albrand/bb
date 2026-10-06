@@ -44,6 +44,30 @@ function checkbox(name: string): HTMLInputElement {
 }
 
 describe("InstallCliSkillsDialog", () => {
+  it("gives dialog actions 44px targets on compact coarse-pointer layouts only", () => {
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={[hosts[0]]}
+        statusByHostId={statuses}
+        action="reinstall"
+        onCancel={() => undefined}
+        onInstall={() => undefined}
+        pending={false}
+      />,
+    );
+
+    for (const name of ["Cancel", "Reinstall"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.classList.contains("max-md:pointer-coarse:min-h-11")).toBe(
+        true,
+      );
+      expect(button.classList.contains("min-h-11")).toBe(false);
+      expect(button.classList.contains("h-11")).toBe(false);
+    }
+  });
+
   it("installs only the machines left selected", () => {
     const onInstall = vi.fn();
     render(
