@@ -217,6 +217,9 @@ function EmbeddedThreadChatHostedFooter({
         key={surface.threadId}
         scrollBehavior="bottom-anchor"
         scrollAnchorThreadId={surface.threadId}
+        scrollAnchorMode={
+          surface.hasUnseenTimelineEvents ? "latest" : "restore"
+        }
         shellClassName="!mx-0 !mt-0 md:!mx-0 md:!mt-0"
         scrollAreaClassName="scroll-pt-4"
         contentClassName="gap-2 pt-4"
