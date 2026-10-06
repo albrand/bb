@@ -148,6 +148,115 @@ describe("AccountStore", () => {
       [kept.id]: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     });
   });
+
+  it("checks a turn-off selector against a write that held the store when it was called, and a refusal writes nothing", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
+    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const kv = host.bb.storage.kv;
+    const writes: string[] = [];
+    let holdNextAccountsWrite = false;
+    let held = () => {};
+    let release = () => {};
+    const writeHeld = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = new AccountStore(
+      {
+        get: (key) => kv.get(key),
+        async set(key, value) {
+          writes.push(`set ${key}`);
+          if (key === "accounts:v1" && holdNextAccountsWrite) {
+            holdNextAccountsWrite = false;
+            held();
+            await barrier;
+          }
+          await kv.set(key, value);
+        },
+        async delete(key) {
+          writes.push(`delete ${key}`);
+          await kv.delete(key);
+        },
+        list: (prefix) => kv.list(prefix),
+      },
+      path.join(dataDir, "secrets"),
+    );
+    await store.initialize();
+    const add = (label: string) =>
+      store.add(
+        {
+          provider: "claude",
+          kind: "oauth",
+          label,
+          email: "shared@example.com",
+          accountUuid: null,
+          subscriptionType: null,
+          rateLimitTier: null,
+          enabled: true,
+          priority: 1,
+        },
+        {
+          kind: "oauth",
+          accessToken: `${label}-access`,
+          refreshToken: `${label}-refresh`,
+          expiresAt: null,
+        },
+      );
+    const principal = await add("principal");
+    const twin = await add("twin");
+    writes.length = 0;
+
+    holdNextAccountsWrite = true;
+    const concurrent = store.setEnabled(twin.id, false);
+    await writeHeld;
+    const seen: Array<Array<{ id: string; enabled: boolean }>> = [];
+    const turnOff = store
+      .disableWhere((accounts) => {
+        seen.push(accounts.map(({ id, enabled }) => ({ id, enabled })));
+        if (accounts.some(({ enabled }) => !enabled)) {
+          throw new Error("changed");
+        }
+        return [principal.id, twin.id];
+      })
+      .then(
+        () => "turned off",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+    let turnOffSettled = false;
+    void turnOff.then(() => {
+      turnOffSettled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(seen).toEqual([]);
+    expect(turnOffSettled).toBe(false);
+    expect(writes).toEqual(["set accounts:v1"]);
+
+    release();
+    await concurrent;
+    expect(await turnOff).toBe("changed");
+    expect(seen).toEqual([
+      [
+        { id: principal.id, enabled: true },
+        { id: twin.id, enabled: false },
+      ],
+    ]);
+    expect(writes).toEqual(["set accounts:v1"]);
+    expect(
+      (await store.list()).map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([
+      { id: principal.id, enabled: true },
+      { id: twin.id, enabled: false },
+    ]);
+  });
 });
 
 describe("QuotaStore", () => {

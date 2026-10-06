@@ -9028,56 +9028,88 @@ describe("Account Pool subscription sign-in repair", () => {
     ]);
   });
 
-  it("checks a subscription turn off against the records written before it, so one enabled mid-flight blocks every write", async () => {
+  it("refuses a subscription turn off whose records change while it waits for the store, with no storage write", async () => {
     const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
     const twin = await pool.signIn(null, "Claude Max 20x (twin)");
     const named = [pool.principal.id, twin.id];
     const kv = pool.host.bb.storage.kv;
+    const get = kv.get.bind(kv);
     const set = kv.set.bind(kv);
-    let writes = 0;
-    let holding = false;
-    let reached = () => {};
+    const remove = kv.delete.bind(kv);
+    const log: string[] = [];
+    let holdNextAccountsWrite = false;
+    let held = () => {};
     let release = () => {};
-    const enableWriting = new Promise<void>((resolve) => {
-      reached = resolve;
+    const writeHeld = new Promise<void>((resolve) => {
+      held = resolve;
     });
     const barrier = new Promise<void>((resolve) => {
       release = resolve;
     });
+    kv.get = <T>(key: string): Promise<T | undefined> => {
+      log.push(`get ${key}`);
+      return get<T>(key);
+    };
     kv.set = async (key, value) => {
-      if (key === "accounts:v1") {
-        writes += 1;
-        if (!holding) {
-          holding = true;
-          reached();
-          await barrier;
-        }
+      log.push(`set ${key}`);
+      if (key === "accounts:v1" && holdNextAccountsWrite) {
+        holdNextAccountsWrite = false;
+        held();
+        await barrier;
+        await set(key, value);
+        log.push(`committed ${key}`);
+        return;
       }
-      return set(key, value);
+      await set(key, value);
+    };
+    kv.delete = async (key) => {
+      log.push(`delete ${key}`);
+      await remove(key);
     };
 
+    holdNextAccountsWrite = true;
     const enabling = pool.host.harness.behavior.callRpc("account.enable", {
       id: pool.previous.id,
     });
-    await enableWriting;
+    await writeHeld;
+    const contestedFrom = log.length;
+    let settledAt = -1;
     const turningOff = pool.host.harness.behavior
       .callRpc("account.disableSubscription", {
         id: pool.principal.id,
         expectedIds: named,
       })
       .then(
-        () => "turned off",
-        (error: unknown) =>
-          error instanceof Error ? error.message : String(error),
+        () => {
+          settledAt = log.length;
+          return "turned off";
+        },
+        (error: unknown) => {
+          settledAt = log.length;
+          return error instanceof Error ? error.message : String(error);
+        },
       );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (let turn = 0; turn < 5; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(settledAt).toBe(-1);
+    expect(log.slice(contestedFrom)).toEqual([]);
+
     release();
     await enabling;
-
     expect(await turningOff).toBe(
       "The records of this subscription changed. Review the updated list; nothing was turned off.",
     );
-    expect(writes).toBe(1);
+    const committed = log.indexOf("committed accounts:v1");
+    expect(committed).toBeGreaterThanOrEqual(contestedFrom);
+    const checked = log.slice(committed, settledAt);
+    expect(checked).toContain("get accounts:v1");
+    expect(
+      checked.filter(
+        (entry) => entry.startsWith("set ") || entry.startsWith("delete "),
+      ),
+    ).toEqual([]);
+    expect(log.filter((entry) => entry === "set accounts:v1")).toHaveLength(1);
     expect(
       (await pool.list()).map(({ id, enabled }) => ({ id, enabled })),
     ).toEqual([
