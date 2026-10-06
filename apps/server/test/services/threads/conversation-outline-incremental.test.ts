@@ -172,6 +172,29 @@ function seedStreamedHistory(
   appendRows(testThread, [started("live"), delta("live", "Live")]);
 }
 
+function backgroundDelegation(
+  type: "item/started" | "item/delegation/completed",
+  delegationId: string,
+  turnId?: string,
+): RowSpec {
+  return {
+    type,
+    turnId,
+    itemId: delegationId,
+    itemKind: "delegation",
+    data: {
+      item: {
+        id: delegationId,
+        type: "delegation",
+        childRef: "toolu_background",
+        label: "Background audit",
+        status: type === "item/started" ? "pending" : "completed",
+        background: true,
+      },
+    },
+  };
+}
+
 function pruneUntilResolvedItemsComplete(testThread: TestThread): number {
   const threadId = testThread.thread.id;
   let removed = 0;
@@ -747,6 +770,39 @@ describe("incremental conversation outlines", () => {
       expectMatchesFull(testThread);
     });
   });
+
+  it.each([
+    { display: "collapse", nestedChild: false },
+    { display: "collapse", nestedChild: true },
+    { display: "flat", nestedChild: false },
+    { display: "flat", nestedChild: true },
+  ] as const)(
+    "matches a full build when a background delegation from the prefix completes later ($display, nested child: $nestedChild)",
+    ({ display, nestedChild }) => {
+      withTestThread((testThread) => {
+        seed(
+          testThread,
+          100,
+          backgroundDelegation("item/started", "delegation-1", "turn-0"),
+        );
+        expectMatchesFull(testThread, display);
+        appendRows(testThread, [
+          ...(nestedChild
+            ? [
+                started("delegated-child", "delegation-1"),
+                message("delegated-child", "Delegated answer", "delegation-1"),
+                {
+                  ...completed("delegated-child"),
+                  parentToolCallId: "delegation-1",
+                },
+              ]
+            : []),
+          backgroundDelegation("item/delegation/completed", "delegation-1"),
+        ]);
+        expectMatchesFull(testThread, display);
+      });
+    },
+  );
 
   it("reuses the prefix before a still-open background task after settled ones", () => {
     withTestThread((testThread) => {
