@@ -58,9 +58,14 @@ function InstallCliSkillsDialogContent({
   const installedHostIds = connectedHostIds.filter(
     (hostId) => statusByHostId.get(hostId) === "installed",
   );
+  const missingHostIds = connectedHostIds.filter(
+    (hostId) => statusByHostId.get(hostId) === "missing",
+  );
   const targetHostIds = connectedHostIds.filter((hostId) => {
     const status = statusByHostId.get(hostId);
-    if (action === "update") return status === "outdated";
+    if (action === "update") {
+      return status === "outdated" || status === "missing";
+    }
     if (action === "reinstall") return status === "installed";
     if (action === "install" && installedHostIds.length > 0) {
       return status === "missing";
@@ -98,7 +103,9 @@ function InstallCliSkillsDialogContent({
         <DialogDescription>
           {choosable
             ? action === "update"
-              ? "Choose the machines to update. Their older copies in ~/.agents/skills and ~/.claude/skills will be replaced."
+              ? missingHostIds.length > 0
+                ? "Choose outdated machines to update and missing machines to install. Selected machines get the latest skills in ~/.agents/skills and ~/.claude/skills."
+                : "Choose the machines to update. Their older copies in ~/.agents/skills and ~/.claude/skills will be replaced."
               : action === "reinstall"
                 ? "Choose the machines to reinstall. Existing copies in ~/.agents/skills and ~/.claude/skills will be replaced."
                 : installedHostIds.length > 0
@@ -133,7 +140,8 @@ function InstallCliSkillsDialogContent({
                     (action === "reinstall" &&
                       statusByHostId.get(host.id) !== "installed") ||
                     (action === "update" &&
-                      statusByHostId.get(host.id) !== "outdated")
+                      statusByHostId.get(host.id) !== "outdated" &&
+                      statusByHostId.get(host.id) !== "missing")
                   }
                   onCheckedChange={(checked) =>
                     setSelectedHostIdsOverride((current) => {

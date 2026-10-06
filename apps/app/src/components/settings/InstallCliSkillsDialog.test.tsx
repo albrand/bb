@@ -330,6 +330,36 @@ describe("InstallCliSkillsDialog", () => {
     ).toBeDefined();
   });
 
+  it("keeps missing machines visible and installable in an Update flow", () => {
+    const onInstall = vi.fn();
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts.slice(0, 2)}
+        statusByHostId={new Map([
+          ["host-laptop", "missing"],
+          ["host-studio", "outdated"],
+        ])}
+        action="update"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(false);
+    expect(
+      screen.getByText(
+        "Choose outdated machines to update and missing machines to install. Selected machines get the latest skills in ~/.agents/skills and ~/.claude/skills.",
+      ),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    expect(onInstall).toHaveBeenCalledWith(["host-laptop", "host-studio"]);
+  });
+
   it("drops the machine list entirely when there is nothing to choose", () => {
     const onInstall = vi.fn();
     render(

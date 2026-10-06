@@ -231,7 +231,7 @@ describe("summarizeMachineStatuses", () => {
         { status: "outdated", name: "Studio" },
         { status: "missing", name: "Travel PC" },
       ]),
-    ).toBe("Out of date on Studio");
+    ).toBe("Out of date on Studio; not installed on Travel PC");
     expect(
       summarizeMachineStatuses([
         { status: "installed", name: "Laptop" },
@@ -296,7 +296,8 @@ describe("getCliSkillsPresentation", () => {
       ]),
     ).toEqual({
       action: "update",
-      statusBadge: "Out of date on Studio, Build Mac",
+      statusBadge:
+        "Out of date on Studio, Build Mac; not installed on Travel PC",
     });
   });
 

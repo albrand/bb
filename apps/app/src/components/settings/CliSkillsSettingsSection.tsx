@@ -49,7 +49,9 @@ function installDescription(
       : `Installed in ~/.agents/skills and ~/.claude/skills on every machine with a reported status; status unavailable on ${unknownMachines}.`;
   }
   if (action === "update") {
-    return "Update the bb CLI skills in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version.";
+    return statusBadge?.includes("; not installed on ")
+      ? "Update the outdated bb CLI skills and install them on the missing machines in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version."
+      : "Update the bb CLI skills in ~/.agents/skills and ~/.claude/skills so agents outside bb can use the latest version.";
   }
   const unknownMachines = statusBadge?.split("; status unavailable on ")[1];
   if (statusBadge?.startsWith("Installed on ") && unknownMachines !== undefined) {
@@ -85,8 +87,13 @@ export function summarizeMachineStatuses(
     return unavailable.length === 0 ? null : unavailable.join("; ");
   }
   const outdated = known.filter(({ status }) => status === "outdated");
+  const missing = known.filter(({ status }) => status === "missing");
   if (outdated.length > 0) {
-    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${unknownSummary}`;
+    const missingSummary =
+      missing.length === 0
+        ? ""
+        : `; not installed on ${missing.map(({ name }) => name).join(", ")}`;
+    return `Out of date on ${outdated.map(({ name }) => name).join(", ")}${missingSummary}${unknownSummary}`;
   }
   const installed = known.filter(({ status }) => status === "installed").length;
   if (installed === known.length) {
