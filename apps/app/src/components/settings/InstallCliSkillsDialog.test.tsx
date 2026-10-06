@@ -221,37 +221,9 @@ describe("InstallCliSkillsDialog", () => {
     expect(onInstall).not.toHaveBeenCalled();
   });
 
-  it("blocks submission until partial statuses load, then targets only missing machines", () => {
+  it("blocks cached targets during status refetch, then follows the refreshed status", () => {
     const onInstall = vi.fn();
     const { rerender } = render(
-      <InstallCliSkillsDialog
-        open={true}
-        onOpenChange={() => undefined}
-        hosts={hosts}
-        statusByHostId={new Map()}
-        action="install"
-        statusLoading={true}
-        onCancel={() => undefined}
-        onInstall={onInstall}
-        pending={false}
-      />,
-    );
-
-    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
-    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
-    expect(
-      screen.getByText(
-        "Checking machine statuses before choosing where to install the bb CLI skills.",
-      ),
-    ).toBeDefined();
-    const unresolvedInstall = screen.getByRole("button", { name: "Install" });
-    expect(unresolvedInstall.hasAttribute("disabled")).toBe(true);
-    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
-    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
-    fireEvent.click(unresolvedInstall);
-    expect(onInstall).not.toHaveBeenCalled();
-
-    rerender(
       <InstallCliSkillsDialog
         open={true}
         onOpenChange={() => undefined}
@@ -261,7 +233,7 @@ describe("InstallCliSkillsDialog", () => {
           ["host-studio", "missing"],
         ])}
         action="install"
-        statusLoading={false}
+        statusLoading={true}
         onCancel={() => undefined}
         onInstall={onInstall}
         pending={false}
@@ -270,9 +242,39 @@ describe("InstallCliSkillsDialog", () => {
 
     expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(
+      screen.getByText(
+        "Checking machine statuses before choosing where to install the bb CLI skills.",
+      ),
+    ).toBeDefined();
+    const unresolvedInstall = screen.getByRole("button", { name: "Install" });
+    expect(unresolvedInstall.hasAttribute("disabled")).toBe(true);
     expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(unresolvedInstall);
+    expect(onInstall).not.toHaveBeenCalled();
+
+    rerender(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts}
+        statusByHostId={new Map([
+          ["host-laptop", "missing"],
+          ["host-studio", "installed"],
+        ])}
+        action="install"
+        statusLoading={false}
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
+    expect(onInstall).toHaveBeenCalledWith(["host-laptop"]);
   });
 
   it("updates the default selection when outdated statuses load while open", () => {

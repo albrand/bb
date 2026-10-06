@@ -307,7 +307,7 @@ export function CliSkillsSettingsSection() {
         hosts={hosts}
         statusByHostId={statuses}
         action={action}
-        statusLoading={statusQuery.isPending}
+        statusLoading={statusQuery.isFetching}
         statusUnavailable={statusQuery.isError}
         pending={installCliSkills.isPending}
         onCancel={() => setPickerOpen(false)}
