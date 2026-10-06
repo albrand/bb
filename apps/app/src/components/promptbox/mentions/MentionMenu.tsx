@@ -291,7 +291,7 @@ function SuggestionRow({
         onApply();
       }}
       className={cn(
-        "w-full scroll-mt-7 rounded px-2 py-1.5 text-left text-xs",
+        "w-full scroll-mt-7 rounded px-2 py-1.5 text-left text-xs pointer-coarse:min-h-11",
         isSelected ? "bg-state-active text-foreground" : "hover:bg-state-hover",
       )}
       title={title}
