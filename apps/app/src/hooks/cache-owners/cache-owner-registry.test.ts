@@ -258,8 +258,15 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "threadTimelineTurnSummaryDetailsQueryKeyPrefix",
     "threadsQueryKey",
   ],
-  "hooks/cache-owners/thread-state-cache-owner.ts": [
+  "hooks/cache-owners/sidebar-group-cache-owner.ts": [
+    "allThreadQueryKeyPrefix",
+    "hostQueryKey",
+    "hostsQueryKey",
     "projectsQueryKey",
+    "sidebarNavigationQueryKey",
+    "threadsQueryKey",
+  ],
+  "hooks/cache-owners/thread-state-cache-owner.ts": [
     "sidebarNavigationQueryKey",
     "threadQueryKey",
     "threadSearchQueryKeyPrefix",
