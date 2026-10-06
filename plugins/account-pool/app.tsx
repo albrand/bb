@@ -356,6 +356,9 @@ const accountDragModifiers: Modifier[] = [restrictAccountDragToVerticalAxis];
 const LEDGER_ROW_CLASS =
   "grid grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto_auto] items-center gap-x-2 border-t border-border py-2 pl-1 pr-1 text-sm @[40rem]:grid-cols-[auto_minmax(0,1fr)_14rem_7rem_auto] @[40rem]:grid-rows-[auto_auto] @[40rem]:gap-x-3 @[40rem]:pr-2";
 
+const MENU_FITS_VIEWPORT_CLASS =
+  "max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto";
+
 type SubscriptionAction =
   | "toggle"
   | "priority"
@@ -426,7 +429,7 @@ function SubscriptionRow({
       >
         <Icon name="DragDropVertical" aria-hidden="true" />
       </Button>
-      <div className="col-start-2 row-start-1 flex min-w-0 items-start gap-2">
+      <div className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
         {renaming ? (
           <div
             className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
@@ -441,7 +444,7 @@ function SubscriptionRow({
             <Input
               autoFocus
               aria-label="Subscription name"
-              className="h-7 min-w-0 flex-1 basis-48 @[40rem]:max-w-80 pointer-coarse:h-10"
+              className="h-7 min-w-0 flex-1 basis-48 @[40rem]:max-w-80 pointer-coarse:h-11"
               value={draft}
               onFocus={(event) => event.currentTarget.select()}
               onChange={(event) => setDraft(event.target.value)}
@@ -459,7 +462,7 @@ function SubscriptionRow({
             <Button
               type="button"
               size="sm"
-              className="h-7 pointer-coarse:h-10"
+              className="h-7 pointer-coarse:h-11"
               onMouseDown={(event) => event.preventDefault()}
               onClick={commit}
             >
@@ -469,7 +472,7 @@ function SubscriptionRow({
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 pointer-coarse:h-10"
+              className="h-7 pointer-coarse:h-11"
               onMouseDown={(event) => event.preventDefault()}
               onClick={cancel}
             >
@@ -483,7 +486,7 @@ function SubscriptionRow({
               aria-label={`Rename ${account.label}`}
               disabled={pending}
               className={cn(
-                "inline-flex min-h-6 min-w-0 items-start gap-1.5 rounded-sm text-left font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-7",
+                "inline-flex min-h-6 min-w-0 items-start gap-1.5 rounded-sm text-left font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11 pointer-coarse:items-center",
                 !account.enabled && "text-foreground/75",
               )}
               onClick={() => {
@@ -497,7 +500,7 @@ function SubscriptionRow({
               <Icon
                 name="Pencil"
                 aria-hidden="true"
-                className="mt-1 size-3 shrink-0 text-muted-foreground opacity-70"
+                className="mt-1 size-3 shrink-0 text-muted-foreground opacity-70 pointer-coarse:mt-0"
               />
             </button>
             {plan === null ? null : (
@@ -537,20 +540,21 @@ function SubscriptionRow({
           variant="outline"
           disabled={pending}
           aria-label={`Sign in again to ${account.label}`}
-          className="col-start-2 row-start-3 mt-1.5 justify-self-start pointer-coarse:h-9 @[40rem]:col-start-4 @[40rem]:row-span-full @[40rem]:row-start-1 @[40rem]:mt-0 @[40rem]:justify-self-end"
+          className="col-start-2 row-start-3 mt-1.5 justify-self-start pointer-coarse:h-11 @[40rem]:col-start-4 @[40rem]:row-span-full @[40rem]:row-start-1 @[40rem]:mt-0 @[40rem]:justify-self-end"
           onClick={() => onAction("sign-in")}
         >
           <Icon name="UserRound" className="size-3.5" />
           Sign in again
         </Button>
       ) : (
-        <Switch
-          checked={account.enabled}
-          disabled={pending}
-          aria-label={`Use ${account.label}`}
-          className="col-start-3 row-span-full row-start-1 justify-self-end @[40rem]:col-start-4"
-          onCheckedChange={() => onAction("toggle")}
-        />
+        <label className="col-start-3 row-span-full row-start-1 inline-flex items-center justify-center justify-self-end pointer-coarse:size-11 @[40rem]:col-start-4">
+          <Switch
+            checked={account.enabled}
+            disabled={pending}
+            aria-label={`Use ${account.label}`}
+            onCheckedChange={() => onAction("toggle")}
+          />
+        </label>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -563,7 +567,14 @@ function SubscriptionRow({
             <Icon name="MoreHorizontal" className="size-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent
+          align="end"
+          collisionPadding={8}
+          className={cn(
+            "w-52 pointer-coarse:[&_[role=menuitem]]:min-h-11",
+            MENU_FITS_VIEWPORT_CLASS,
+          )}
+        >
           <DropdownMenuItem onSelect={() => onAction("details")}>
             <Icon name="ChartColumn" />
             Usage details
@@ -651,7 +662,7 @@ function LocalLoginRow({
         aria-hidden="true"
         className="col-start-1 row-span-full row-start-1 size-8 pointer-coarse:size-11"
       />
-      <div className="col-start-2 row-start-1 flex min-w-0 items-start gap-2">
+      <div className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
         <span className="line-clamp-2 min-w-0 break-words font-medium text-foreground @[40rem]:line-clamp-1">
           {login.displayName}
         </span>
@@ -674,7 +685,7 @@ function LocalLoginRow({
           variant="outline"
           disabled={pending}
           aria-label={`Add this Mac's ${login.displayName} login to the pool`}
-          className="col-start-3 row-span-full row-start-1 justify-self-end pointer-coarse:h-9 @[40rem]:col-start-4"
+          className="col-start-3 row-span-full row-start-1 justify-self-end pointer-coarse:h-11 @[40rem]:col-start-4"
           onClick={() => onAdd(poolProvider)}
         >
           <Icon name="Plus" className="size-3.5" />
@@ -700,7 +711,7 @@ function AddSubscriptionMenu({
     detail: string,
   ) => (
     <DropdownMenuItem
-      className="items-start py-2"
+      className="items-start py-2 pointer-coarse:min-h-11"
       onSelect={() => onChoose(provider, choice)}
     >
       <Icon name={icon} className="mt-0.5" />
@@ -713,12 +724,16 @@ function AddSubscriptionMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" className="pointer-coarse:h-11">
           <Icon name="Plus" className="size-3.5" />
           Add subscription
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
+      <DropdownMenuContent
+        align="end"
+        collisionPadding={8}
+        className={cn("w-72", MENU_FITS_VIEWPORT_CLASS)}
+      >
         <DropdownMenuLabel>Claude</DropdownMenuLabel>
         {item(
           "claude",
@@ -958,13 +973,13 @@ function DialogFrame({
     <DialogContent
       hideCloseButton
       className={cn(
-        "max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto]",
+        "max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] pointer-coarse:[&_button:not([role=switch])]:min-h-11 pointer-coarse:[&_input]:min-h-11",
         className,
       )}
     >
       <DialogHeader className="flex-row items-start justify-between gap-4 space-y-0">
         <DialogTitle>{title}</DialogTitle>
-        <DialogClose className="-mr-1 shrink-0 cursor-pointer rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+        <DialogClose className="-mr-1 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 pointer-coarse:-my-3 pointer-coarse:-mr-3 pointer-coarse:size-11">
           <Icon name="X" className="size-4" />
           <span className="sr-only">Close</span>
         </DialogClose>
@@ -982,23 +997,35 @@ function DialogFrame({
 function ConfigFieldRow({
   label,
   description,
+  control,
   error,
   children,
 }: {
   label: string;
   description: string;
+  control: "switch" | "field";
   error: string | null;
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2.5">
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4 py-2.5",
+        control === "field" && "flex-col gap-2 @[28rem]:flex-row @[28rem]:gap-4",
+      )}
+    >
       <div className="min-w-0">
         <div className="text-sm text-foreground">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">
           {description}
         </div>
       </div>
-      <div className="w-80 max-w-[50%] shrink-0">
+      <div
+        className={cn(
+          "shrink-0",
+          control === "field" && "w-full @[28rem]:w-80 @[28rem]:max-w-[50%]",
+        )}
+      >
         {children}
         {error === null ? null : (
           <p className="mt-1 text-xs text-destructive-text" role="alert">
@@ -1391,18 +1418,20 @@ function AccountPoolSettings() {
                 {parentBannerBody(parent)}
               </p>
             </div>
-            <Switch
-              checked={proxying}
-              disabled={pending !== null}
-              aria-label="Use the parent Account Pooler"
-              onCheckedChange={(enabled) =>
-                void run("parent-mode", async () => {
-                  await rpc.call("config.set", {
-                    parentMode: enabled ? "proxy" : "isolate",
-                  });
-                })
-              }
-            />
+            <label className="inline-flex shrink-0 items-center justify-center pointer-coarse:-my-2.5 pointer-coarse:size-11">
+              <Switch
+                checked={proxying}
+                disabled={pending !== null}
+                aria-label="Use the parent Account Pooler"
+                onCheckedChange={(enabled) =>
+                  void run("parent-mode", async () => {
+                    await rpc.call("config.set", {
+                      parentMode: enabled ? "proxy" : "isolate",
+                    });
+                  })
+                }
+              />
+            </label>
           </div>
         </div>
       )}
@@ -1501,7 +1530,7 @@ function AccountPoolSettings() {
                       {groupSummary}
                     </span>
                     <span className="flex-1" />
-                    <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-subtle-foreground">
+                    <label className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-subtle-foreground pointer-coarse:min-h-11">
                       Route {provider.title} threads
                       <Switch
                         checked={status?.routing[provider.id] ?? true}
@@ -1516,7 +1545,7 @@ function AccountPoolSettings() {
                           })
                         }
                       />
-                    </span>
+                    </label>
                   </div>
                   <DndContext
                     sensors={sensors}
@@ -1590,7 +1619,7 @@ function AccountPoolSettings() {
           {statusIsCached ? " · refreshing…" : null}
         </p>
         <Collapsible className="rounded-lg border border-border px-4">
-          <CollapsibleTrigger className="flex w-full items-center gap-2 py-2.5 text-sm font-medium text-foreground">
+          <CollapsibleTrigger className="flex w-full items-center gap-2 py-2.5 text-sm font-medium text-foreground pointer-coarse:min-h-11">
             <Icon
               name="ChevronRight"
               className="size-4 transition-transform [[data-state=open]>&]:rotate-90"
@@ -1598,7 +1627,7 @@ function AccountPoolSettings() {
             Advanced
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="divide-y divide-border border-t border-border">
+            <div className="@container divide-y divide-border border-t border-border pointer-coarse:[&_button:not([role=switch])]:min-h-11 pointer-coarse:[&_input]:min-h-11">
               {status === null
                 ? null
                 : PROVIDERS.filter(
@@ -1611,9 +1640,10 @@ function AccountPoolSettings() {
                       key={provider.id}
                       label={`Route ${provider.title} threads`}
                       description={`No ${provider.title} subscription is in the pool, so ${provider.title} threads use this Mac's own login. This applies once one is added.`}
+                      control="switch"
                       error={null}
                     >
-                      <div className="flex justify-end">
+                      <label className="ml-auto flex w-fit items-center justify-center pointer-coarse:size-11">
                         <Switch
                           checked={status.routing[provider.id]}
                           disabled={pending !== null}
@@ -1627,11 +1657,12 @@ function AccountPoolSettings() {
                             })
                           }
                         />
-                      </div>
+                      </label>
                     </ConfigFieldRow>
                   ))}
               <ConfigFieldRow
                 label="Anthropic upstream base URL"
+                control="field"
                 description="QA override for Anthropic traffic."
                 error={configErrors.anthropicUpstreamBaseUrl}
               >
@@ -1660,6 +1691,7 @@ function AccountPoolSettings() {
               </ConfigFieldRow>
               <ConfigFieldRow
                 label="Codex upstream base URL"
+                control="field"
                 description="QA override for ChatGPT Codex traffic."
                 error={configErrors.codexUpstreamBaseUrl}
               >
@@ -1686,6 +1718,7 @@ function AccountPoolSettings() {
               </ConfigFieldRow>
               <ConfigFieldRow
                 label="Quota switch threshold"
+                control="field"
                 description="Stop selecting an account at this quota fraction."
                 error={configErrors.switchThreshold}
               >
