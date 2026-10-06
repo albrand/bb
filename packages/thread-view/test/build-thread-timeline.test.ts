@@ -1849,6 +1849,36 @@ describe("buildThreadTimelineFromEvents", () => {
     ]);
   });
 
+  it("keeps a late-rejected steer in its turn while that turn is in the window", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const turnStarted = event.turnStarted({ turnId: "turn-1" });
+    const steerRequest = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "Steer that never landed",
+    });
+
+    const rows = buildTimelineRows(
+      fromRows([
+        turnStarted,
+        steerRequest,
+        event.turnCompleted({ turnId: "turn-1" }),
+        event.turnStarted({ turnId: "turn-2" }),
+        event.clientTurnRejected({ requestId: steerRequest.data.requestId }),
+      ]),
+      "idle",
+    );
+
+    expect(
+      rows.filter((row) => row.kind === "conversation" && row.role === "user"),
+    ).toEqual([
+      expect.objectContaining({
+        text: "Steer that never landed",
+        turnId: "turn-1",
+        turnRequest: expect.objectContaining({ status: "rejected" }),
+      }),
+    ]);
+  });
+
   it("uses accepted context to classify stale steers as messages when the accepted turn is visible", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const turnStarted = event.turnStarted({ turnId: "turn-1" });
