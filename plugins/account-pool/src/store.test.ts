@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import Database from "better-sqlite3";
 import type { PluginKvStorage } from "@get-bb/plugin-sdk";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Account } from "./contracts.js";
 import { AccountStore, QUOTA_MIGRATIONS, QuotaStore } from "./store.js";
 
@@ -211,10 +211,23 @@ describe("AccountStore", () => {
     const principal = await add("principal");
     const twin = await add("twin");
     writes.length = 0;
+    const lock = AccountStore.prototype as unknown as {
+      serialized(action: () => Promise<unknown>): Promise<unknown>;
+    };
+    const serialized = lock.serialized;
+    const queue = vi.spyOn(lock, "serialized").mockImplementation(function (
+      this: unknown,
+      action: () => Promise<unknown>,
+    ) {
+      writes.push("queued");
+      return serialized.call(this, action);
+    });
+    cleanups.push(async () => queue.mockRestore());
 
     holdNextAccountsWrite = true;
     const concurrent = store.setEnabled(twin.id, false);
     await writeHeld;
+    expect(writes).toEqual(["queued", "set accounts:v1"]);
     const seen: Array<Array<{ id: string; enabled: boolean }>> = [];
     const turnOff = store
       .disableWhere((accounts) => {
@@ -238,7 +251,7 @@ describe("AccountStore", () => {
     }
     expect(seen).toEqual([]);
     expect(turnOffSettled).toBe(false);
-    expect(writes).toEqual(["set accounts:v1"]);
+    expect(writes).toEqual(["queued", "set accounts:v1", "queued"]);
 
     release();
     await concurrent;
@@ -249,7 +262,7 @@ describe("AccountStore", () => {
         { id: twin.id, enabled: false },
       ],
     ]);
-    expect(writes).toEqual(["set accounts:v1"]);
+    expect(writes).toEqual(["queued", "set accounts:v1", "queued"]);
     expect(
       (await store.list()).map(({ id, enabled }) => ({ id, enabled })),
     ).toEqual([

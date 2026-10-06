@@ -9066,6 +9066,18 @@ describe("Account Pool subscription sign-in repair", () => {
       log.push(`delete ${key}`);
       await remove(key);
     };
+    const store = AccountStore.prototype as unknown as {
+      serialized(action: () => Promise<unknown>): Promise<unknown>;
+    };
+    const serialized = store.serialized;
+    const queue = vi.spyOn(store, "serialized").mockImplementation(function (
+      this: unknown,
+      action: () => Promise<unknown>,
+    ) {
+      log.push("queued");
+      return serialized.call(this, action);
+    });
+    cleanups.push(async () => queue.mockRestore());
 
     holdNextAccountsWrite = true;
     const enabling = pool.host.harness.behavior.callRpc("account.enable", {
@@ -9089,11 +9101,19 @@ describe("Account Pool subscription sign-in repair", () => {
           return error instanceof Error ? error.message : String(error);
         },
       );
+    for (
+      let turn = 0;
+      turn < 100 && !log.slice(contestedFrom).includes("queued");
+      turn += 1
+    ) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(log.slice(contestedFrom)).toEqual(["queued"]);
     for (let turn = 0; turn < 5; turn += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
     expect(settledAt).toBe(-1);
-    expect(log.slice(contestedFrom)).toEqual([]);
+    expect(log.slice(contestedFrom)).toEqual(["queued"]);
 
     release();
     await enabling;
@@ -9101,7 +9121,7 @@ describe("Account Pool subscription sign-in repair", () => {
       "The records of this subscription changed. Review the updated list; nothing was turned off.",
     );
     const committed = log.indexOf("committed accounts:v1");
-    expect(committed).toBeGreaterThanOrEqual(contestedFrom);
+    expect(committed).toBeGreaterThan(contestedFrom);
     const checked = log.slice(committed, settledAt);
     expect(checked).toContain("get accounts:v1");
     expect(
