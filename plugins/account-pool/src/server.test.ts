@@ -8811,6 +8811,43 @@ describe("Account Pool subscription sign-in repair", () => {
     });
   });
 
+  it("refuses a sign-in again whose Claude account can't be identified and leaves the subscription unchanged", async () => {
+    const anonymous = {
+      account: {
+        display_name: "No identity",
+        has_claude_max: true,
+        rate_limit_tier: "default_claude_max_20x",
+      },
+    };
+    const profile = { current: anonymous as object };
+    const pool = await claudeLoginHost(profile);
+    const unknown = await pool.signIn(null, "Claude Max 20x (no identity)");
+    expect(unknown).toMatchObject({ email: null, accountUuid: null });
+    pool.expire(unknown.id);
+    const unknownBefore = await pool.secretOf(unknown.id);
+    await expect(pool.signIn({ accountId: unknown.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (no identity); it was not changed. Try again, or remove it and add the login again.",
+    );
+    expect(await pool.secretOf(unknown.id)).toEqual(unknownBefore);
+    profile.current = SHARED_LOGIN;
+    await expect(pool.signIn({ accountId: unknown.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (no identity); it was not changed.",
+    );
+    const known = await pool.signIn(null, "Claude Max 20x (shared)");
+    pool.expire(known.id);
+    const knownBefore = await pool.secretOf(known.id);
+    profile.current = anonymous;
+    await expect(pool.signIn({ accountId: known.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (shared); it was not changed.",
+    );
+    expect(await pool.secretOf(unknown.id)).toEqual(unknownBefore);
+    expect(await pool.secretOf(known.id)).toEqual(knownBefore);
+    expect(await pool.list()).toMatchObject([
+      { id: unknown.id, email: null, signInExpired: true },
+      { id: known.id, email: "shared@example.com", signInExpired: true },
+    ]);
+  });
+
   it("refuses to start a sign-in again for a missing, API key, or other-provider subscription", async () => {
     const pool = await claudeLoginHost({ current: SHARED_LOGIN });
     const key = accountSchema.parse(

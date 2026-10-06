@@ -53,12 +53,29 @@ interface LoginIdentity {
   email: string | null;
 }
 
-function sameLogin(stored: LoginIdentity, presented: LoginIdentity): boolean {
+function compareLogins(
+  stored: LoginIdentity,
+  presented: LoginIdentity,
+): "same" | "different" | "unverified" {
   if (stored.id !== null && presented.id !== null)
-    return stored.id === presented.id;
+    return stored.id === presented.id ? "same" : "different";
   if (stored.email !== null && presented.email !== null)
-    return sameEmail(stored.email, presented.email);
-  return stored.id === null && stored.email === null;
+    return sameEmail(stored.email, presented.email) ? "same" : "different";
+  return "unverified";
+}
+
+function requireSameLogin(
+  account: Account,
+  stored: LoginIdentity,
+  presented: LoginIdentity,
+  different: string,
+): void {
+  const match = compareLogins(stored, presented);
+  if (match === "different") throw new Error(different);
+  if (match === "unverified")
+    throw new Error(
+      `bb couldn't confirm that this sign-in is the account behind ${account.label}; it was not changed. Try again, or remove it and add the login again.`,
+    );
 }
 
 function providerName(provider: PoolProvider): string {
@@ -236,15 +253,12 @@ export class PoolOperations {
     label?: string,
   ): Promise<Account> {
     const account = await this.requireReauthorizable(id, "claude");
-    if (
-      !sameLogin(
-        { id: account.accountUuid, email: account.email },
-        { id: authenticated.accountUuid, email: authenticated.email },
-      )
-    )
-      throw new Error(
-        `That code belongs to a different Claude account. Sign in as the account behind ${account.label}; it was not changed.`,
-      );
+    requireSameLogin(
+      account,
+      { id: account.accountUuid, email: account.email },
+      { id: authenticated.accountUuid, email: authenticated.email },
+      `That code belongs to a different Claude account. Sign in as the account behind ${account.label}; it was not changed.`,
+    );
     return this.reauthorize(
       account,
       {
@@ -269,15 +283,12 @@ export class PoolOperations {
     authenticated: CodexDeviceAccount,
   ): Promise<AccountSummary> {
     const account = await this.requireReauthorizable(id, "codex");
-    if (
-      !sameLogin(
-        { id: account.codexAccountId ?? null, email: account.email },
-        { id: authenticated.accountId, email: authenticated.email },
-      )
-    )
-      throw new Error(
-        `Codex sign-in belongs to a different ChatGPT account. Sign in as the account behind ${account.label}; it was not changed.`,
-      );
+    requireSameLogin(
+      account,
+      { id: account.codexAccountId ?? null, email: account.email },
+      { id: authenticated.accountId, email: authenticated.email },
+      `Codex sign-in belongs to a different ChatGPT account. Sign in as the account behind ${account.label}; it was not changed.`,
+    );
     const updated = await this.reauthorize(
       account,
       {

@@ -98,8 +98,9 @@ the same Claude or Codex login as `add --login`, and the matching
 `login-complete` or `login-poll` replaces that account's credential in place,
 keeping its ID, label, priority, enabled state, and conversation choices. bb
 refuses the sign-in, and leaves the account unchanged, when it belongs to a
-different Claude account (account UUID, else email) or ChatGPT account. It does
-not compare Claude organizations, which the pool does not store. API key
+different Claude account (account UUID, else email) or ChatGPT account, or when
+neither login carries an identity it can compare. It does not compare Claude
+organizations, which the pool does not store. API key
 accounts cannot sign in again. The RPCs are `login.start` and
 `codexLogin.start` with `{accountId}` instead of `null`.
 `bb pool account local` (RPC `local.logins`) lists the bb server host's own
