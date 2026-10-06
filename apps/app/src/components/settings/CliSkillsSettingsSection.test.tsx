@@ -172,6 +172,30 @@ describe("CliSkillsSettingsSectionContent", () => {
     ).toBeDefined();
   });
 
+  it("shows unknown connected and disconnected machines in the status badge", () => {
+    const presentation = getCliSkillsPresentation([
+      { name: "Laptop", status: "unknown", connected: true },
+      { name: "Studio", status: "outdated", connected: false },
+    ]);
+    render(
+      <CliSkillsSettingsSectionContent
+        hasConnectedMachine={true}
+        onOpenPicker={() => undefined}
+        pending={false}
+        statusBadge={presentation.statusBadge}
+        action={presentation.action}
+      />,
+    );
+
+    expect(installButton().disabled).toBe(false);
+    expect(installButton().textContent).toBe("Install");
+    expect(
+      screen.getByText(
+        "Status unavailable on Laptop; Disconnected: Studio",
+      ),
+    ).toBeDefined();
+  });
+
   it("blocks reopening the picker while an install is running", () => {
     render(
       <CliSkillsSettingsSectionContent
@@ -228,7 +252,7 @@ describe("summarizeMachineStatuses", () => {
         { status: "unknown", name: "Laptop" },
         { status: "unknown", name: "Studio" },
       ]),
-    ).toBe(null);
+    ).toBe("Status unavailable on Laptop, Studio");
     expect(summarizeMachineStatuses([])).toBe(null);
   });
 });
@@ -294,7 +318,10 @@ describe("getCliSkillsPresentation", () => {
     ).toEqual({ action: "install", statusBadge: "Not installed" });
     expect(
       getCliSkillsPresentation([{ name: "Laptop", status: "unknown" }]),
-    ).toEqual({ action: "install", statusBadge: null });
+    ).toEqual({
+      action: "install",
+      statusBadge: "Status unavailable on Laptop",
+    });
   });
 
   it("keeps the disabled install action when no machine is connected", () => {

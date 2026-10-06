@@ -74,9 +74,15 @@ export function summarizeMachineStatuses(
           .join(", ")}`;
   const known = available.filter(({ status }) => status !== "unknown");
   if (known.length === 0) {
-    return offline.length === 0
-      ? null
-      : `Disconnected: ${offline.map(({ name }) => name).join(", ")}`;
+    const unavailable = [
+      ...(unknown.length === 0
+        ? []
+        : [`Status unavailable on ${unknown.map(({ name }) => name).join(", ")}`]),
+      ...(offline.length === 0
+        ? []
+        : [`Disconnected: ${offline.map(({ name }) => name).join(", ")}`]),
+    ];
+    return unavailable.length === 0 ? null : unavailable.join("; ");
   }
   const outdated = known.filter(({ status }) => status === "outdated");
   if (outdated.length > 0) {
