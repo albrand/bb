@@ -94,7 +94,6 @@ function ComposerPopupContent({
     );
     const originalMaxHeight = composer.style.maxHeight;
     const originalOverflowY = composer.style.overflowY;
-    const originalScrollTop = composer.scrollTop;
     const restoreComposer = () => {
       composer.style.maxHeight = originalMaxHeight;
       composer.style.overflowY = originalOverflowY;
@@ -183,7 +182,6 @@ function ComposerPopupContent({
       viewport?.removeEventListener("resize", position);
       viewport?.removeEventListener("scroll", position);
       restoreComposer();
-      composer.scrollTop = originalScrollTop;
     };
   }, [compact, composerRef, interactive, open, placement, popupRef]);
 

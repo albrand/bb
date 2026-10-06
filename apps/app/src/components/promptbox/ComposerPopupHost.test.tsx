@@ -146,8 +146,13 @@ it.each([true, false])(
     expect(close).not.toHaveBeenCalled();
     fireEvent.pointerDown(document.body);
     expect(close).toHaveBeenCalledWith(false);
+    const caretScrollTop = composer.scrollTop;
     rerender(<Fixture open={false} />);
     expect(composer.getBoundingClientRect().height).toBe(136);
+    expect(composer.scrollTop).toBe(caretScrollTop);
+    expect(caret.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      composer.getBoundingClientRect().bottom - 8,
+    );
     expect(screen.getByRole("button", { name: "Composer tools" })).toBeTruthy();
   },
 );
