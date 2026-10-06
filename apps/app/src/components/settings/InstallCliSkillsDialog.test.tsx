@@ -355,4 +355,30 @@ describe("InstallCliSkillsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reinstall" }));
     expect(onInstall).toHaveBeenCalledWith(["host-laptop"]);
   });
+
+  it("does not reinstall a connected machine whose status is unknown", () => {
+    const onInstall = vi.fn();
+    render(
+      <InstallCliSkillsDialog
+        open={true}
+        onOpenChange={() => undefined}
+        hosts={hosts.slice(0, 2)}
+        statusByHostId={new Map([
+          ["host-laptop", "installed"],
+          ["host-studio", "unknown"],
+        ])}
+        action="reinstall"
+        onCancel={() => undefined}
+        onInstall={onInstall}
+        pending={false}
+      />,
+    );
+
+    expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Studio").getAttribute("aria-checked")).toBe("false");
+    expect(checkbox("Studio").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Status unavailable")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Reinstall" }));
+    expect(onInstall).toHaveBeenCalledWith(["host-laptop"]);
+  });
 });

@@ -39,6 +39,7 @@ function machineStatusLabel(args: {
   status: CliSkillMachineStatus | undefined;
 }): string | null {
   if (!args.connected) return "Disconnected";
+  if (args.status === "unknown") return "Status unavailable";
   return args.status === undefined ? null : MACHINE_STATUS_LABELS[args.status];
 }
 
@@ -60,6 +61,7 @@ function InstallCliSkillsDialogContent({
   const targetHostIds = connectedHostIds.filter((hostId) => {
     const status = statusByHostId.get(hostId);
     if (action === "update") return status === "outdated";
+    if (action === "reinstall") return status === "installed";
     if (action === "install" && installedHostIds.length > 0) {
       return status === "missing";
     }
@@ -128,6 +130,8 @@ function InstallCliSkillsDialogContent({
                   disabled={
                     !connected ||
                     pending ||
+                    (action === "reinstall" &&
+                      statusByHostId.get(host.id) !== "installed") ||
                     (action === "update" &&
                       statusByHostId.get(host.id) !== "outdated")
                   }
