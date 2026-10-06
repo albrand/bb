@@ -1,8 +1,24 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createConnection, migrate, type DbConnection } from "../src/index.js";
 
 const INDEX_NAME = "fork_events_item_completion_lookup_idx";
 const LIVE_DEFINITION = `CREATE INDEX ${INDEX_NAME} ON events (thread_id, item_id, type, parent_tool_call_id)`;
+const INDEXED_COLUMNS = ["thread_id", "item_id", "type", "parent_tool_call_id"];
+const MIGRATIONS_FOLDER = new URL("../drizzle/", import.meta.url);
+const MIGRATIONS_REBUILDING_EVENTS_BEFORE_THE_FORK_INDEX = [
+  "0016_salty_arclight.sql",
+];
+
+function migrationSql(): { file: string; sql: string }[] {
+  return readdirSync(MIGRATIONS_FOLDER)
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+    .map((file) => ({
+      file,
+      sql: readFileSync(new URL(file, MIGRATIONS_FOLDER), "utf8"),
+    }));
+}
 
 interface IndexMasterRow {
   rootpage: number;
@@ -104,5 +120,31 @@ describe("fork item-completion lookup index", () => {
     } finally {
       db.$client.close();
     }
+  });
+
+  it("flags any new upstream migration that rebuilds events, because existing databases would rebuild the fork index during startup", () => {
+    const rebuilding = migrationSql()
+      .filter(({ sql }) =>
+        /DROP TABLE\s+[`"]?events[`"]?\s*;|RENAME TO\s+[`"]?events[`"]?\s*;/iu.test(
+          sql,
+        ),
+      )
+      .map(({ file }) => file);
+
+    expect(rebuilding).toEqual(
+      MIGRATIONS_REBUILDING_EVENTS_BEFORE_THE_FORK_INDEX,
+    );
+  });
+
+  it("flags any upstream migration that drops an indexed events column, because SQLite refuses it while the fork index exists", () => {
+    const columns = INDEXED_COLUMNS.join("|");
+    const dropping = migrationSql().filter(({ sql }) =>
+      new RegExp(
+        `ALTER TABLE\\s+[\`"]?events[\`"]?\\s+DROP COLUMN\\s+[\`"]?(${columns})[\`"]?`,
+        "iu",
+      ).test(sql),
+    );
+
+    expect(dropping).toEqual([]);
   });
 });
