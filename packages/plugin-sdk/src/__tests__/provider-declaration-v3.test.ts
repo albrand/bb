@@ -299,6 +299,28 @@ describe("provider declaration target-state fields", () => {
     ).toThrow(/models\.scope must be one of host, workspace/u);
   });
 
+  it("carries a declared child-thread model and omits an undeclared one", () => {
+    expect(
+      validatePluginProviderDeclaration(
+        declaration({ models: { childThreadModel: "child-model" } }),
+      ).models.childThreadModel,
+    ).toBe("child-model");
+    expect(
+      "childThreadModel" in validatePluginProviderDeclaration(declaration()).models,
+    ).toBe(false);
+  });
+
+  it.each([42, "", " child-model", "x".repeat(201)])(
+    "rejects the child-thread model %j",
+    (childThreadModel) => {
+      expect(() =>
+        validatePluginProviderDeclaration(
+          declaration({ models: { childThreadModel: childThreadModel as never } }),
+        ),
+      ).toThrow(/models\.childThreadModel must be a trimmed string/u);
+    },
+  );
+
   it("defaults the model catalog scope to workspace", () => {
     expect(validatePluginProviderDeclaration(declaration()).models.scope).toBe(
       "workspace",

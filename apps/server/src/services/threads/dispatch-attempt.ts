@@ -671,14 +671,15 @@ type ExecutionRequest = Parameters<typeof buildExecutionOptions>[1];
 // thread another thread spawned counts as a child too. Setting it on the
 // request keeps it inside the normal model validation.
 function withChildThreadModel<TRequest extends ExecutionRequest>(
-  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db" | "providerRegistry">,
   thread: Pick<Thread, "id" | "parentThreadId" | "providerId">,
   request: TRequest,
 ): TRequest {
   const model = childThreadModel({
     parentThreadId:
       thread.parentThreadId ?? getThreadSpawner(deps.db, thread.id),
-    providerId: thread.providerId,
+    declaredChildModel: deps.providerRegistry.get(thread.providerId)
+      ?.childThreadModel,
   });
   if (model === null) {
     return request;
