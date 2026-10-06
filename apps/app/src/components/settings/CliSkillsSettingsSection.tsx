@@ -287,6 +287,7 @@ export function CliSkillsSettingsSection() {
         hosts={hosts}
         statusByHostId={statuses}
         action={action}
+        statusLoading={statusQuery.isPending}
         pending={installCliSkills.isPending}
         onCancel={() => setPickerOpen(false)}
         onInstall={(hostIds) =>

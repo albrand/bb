@@ -157,7 +157,8 @@ describe("InstallCliSkillsDialog", () => {
     expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
   });
 
-  it("updates the default selection when partial statuses load while open", () => {
+  it("blocks submission until partial statuses load, then targets only missing machines", () => {
+    const onInstall = vi.fn();
     const { rerender } = render(
       <InstallCliSkillsDialog
         open={true}
@@ -165,14 +166,24 @@ describe("InstallCliSkillsDialog", () => {
         hosts={hosts}
         statusByHostId={new Map()}
         action="install"
+        statusLoading={true}
         onCancel={() => undefined}
-        onInstall={() => undefined}
+        onInstall={onInstall}
         pending={false}
       />,
     );
 
     expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("true");
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(
+      screen.getByText(
+        "Checking machine statuses before choosing where to install the bb CLI skills.",
+      ),
+    ).toBeDefined();
+    const unresolvedInstall = screen.getByRole("button", { name: "Install" });
+    expect(unresolvedInstall.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(unresolvedInstall);
+    expect(onInstall).not.toHaveBeenCalled();
 
     rerender(
       <InstallCliSkillsDialog
@@ -184,14 +195,18 @@ describe("InstallCliSkillsDialog", () => {
           ["host-studio", "missing"],
         ])}
         action="install"
+        statusLoading={false}
         onCancel={() => undefined}
-        onInstall={() => undefined}
+        onInstall={onInstall}
         pending={false}
       />,
     );
 
     expect(checkbox("Laptop").getAttribute("aria-checked")).toBe("false");
     expect(checkbox("Studio").getAttribute("aria-checked")).toBe("true");
+    expect(checkbox("Laptop").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(onInstall).toHaveBeenCalledWith(["host-studio"]);
   });
 
   it("updates the default selection when outdated statuses load while open", () => {

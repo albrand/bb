@@ -20,6 +20,7 @@ interface InstallCliSkillsDialogContentProps {
   onCancel: () => void;
   onInstall: (hostIds: string[]) => void;
   pending: boolean;
+  statusLoading?: boolean;
   statusByHostId: ReadonlyMap<string, CliSkillMachineStatus>;
 }
 
@@ -49,6 +50,7 @@ function InstallCliSkillsDialogContent({
   onCancel,
   onInstall,
   pending,
+  statusLoading = false,
   statusByHostId,
 }: InstallCliSkillsDialogContentProps) {
   const connectedHostIds = useMemo(
@@ -100,7 +102,9 @@ function InstallCliSkillsDialogContent({
       <DialogHeader>
         <DialogTitle>{actionTitle} bb CLI skills</DialogTitle>
         <DialogDescription>
-          {choosable
+          {statusLoading
+            ? "Checking machine statuses before choosing where to install the bb CLI skills."
+            : choosable
             ? action === "update"
               ? missingHostIds.length > 0
                 ? "Choose outdated machines to update and missing machines to install. Selected machines get the latest skills in ~/.agents/skills and ~/.claude/skills."
@@ -186,7 +190,7 @@ function InstallCliSkillsDialogContent({
         <Button
           type="button"
           variant={action === "reinstall" ? "secondary" : "default"}
-          disabled={pending || selected.length === 0}
+          disabled={statusLoading || pending || selected.length === 0}
           onClick={() => onInstall([...selected])}
         >
           {pending
