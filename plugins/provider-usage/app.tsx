@@ -850,7 +850,7 @@ export function ProviderUsageStatusContent({
             })}
           </div>
         )}
-        <div className="flex min-w-0 flex-1 justify-end">
+        <div className="flex min-w-0 flex-1 justify-end pointer-coarse:min-w-11">
           {machines.length === 0 ? null : (
             <MachineSelector
               machines={machines}
