@@ -491,6 +491,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           turnId,
           {
             turnId,
+            model: null,
             inputTokens: null,
             cachedInputTokens: null,
             outputTokens: null,
@@ -523,6 +524,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       historyComplete: isSpendThreadHistoryComplete(deps.db, {
         threadId: thread.id,
       }),
+      providerId: thread.providerId,
       total,
       turns,
     };

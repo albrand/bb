@@ -73,6 +73,8 @@ import {
   threadStorageLocationQueryKey,
   threadStoragePathsForThreadQueryKeyPrefix,
   threadTimelineQueryKeyPrefix,
+  threadSpendSummaryQueryKey,
+  threadCompactionTurnIdsQueryKey,
 } from "../queries/query-keys";
 import { systemEnvironmentProvidersQueryKey } from "../queries/environment-provider-queries";
 import { schedulePluginFrontendReconcile } from "../../lib/plugin-frontend-lazy";
@@ -353,6 +355,8 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadDetailQueriesForBackgroundActivity,
       dirtyThreadSearchQueriesForCompletedTurn,
       dirtyThreadTimelineQueries,
+      dirtyThreadCompactionTurnIdsQueriesForCompletedTurn,
+      dirtyThreadSpendSummaryQueriesForUsageUpdate,
       dirtyThreadPullRequestQueryForCompletedTurn,
       dirtyThreadTurnRequestQueries,
     ],
@@ -810,6 +814,40 @@ function dirtyThreadDetailQueries({
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
   return getThreadDetailInvalidationQueryKeys({ threadId });
+}
+
+function dirtyThreadSpendSummaryQueriesForUsageUpdate({
+  eventTypes,
+  flushOnce,
+  threadId,
+}: ThreadRealtimeDirtyContext): QueryKey[] {
+  if (
+    !threadId ||
+    !eventTypes?.some(
+      (eventType) =>
+        eventType === "turn/completed" ||
+        eventType === "thread/tokenUsage/updated",
+    ) ||
+    !flushOnce("thread-spend-summary:usage-update")
+  ) {
+    return [];
+  }
+  return [threadSpendSummaryQueryKey(threadId)];
+}
+
+function dirtyThreadCompactionTurnIdsQueriesForCompletedTurn({
+  eventTypes,
+  flushOnce,
+  threadId,
+}: ThreadRealtimeDirtyContext): QueryKey[] {
+  if (
+    !threadId ||
+    !eventTypes?.includes("turn/completed") ||
+    !flushOnce("thread-compaction-turn-ids:turn-completed")
+  ) {
+    return [];
+  }
+  return [threadCompactionTurnIdsQueryKey(threadId)];
 }
 
 function dirtyThreadDefaultExecutionOptionsQueries({

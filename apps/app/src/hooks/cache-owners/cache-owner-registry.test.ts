@@ -163,6 +163,8 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "threadQueryKey",
     "threadTabsQueryKey",
     "threadSearchQueryKeyPrefix",
+    "threadSpendSummaryQueryKey",
+    "threadCompactionTurnIdsQueryKey",
     "threadStorageFilePreviewQueryKeyPrefix",
     "threadStorageFilesForThreadQueryKeyPrefix",
     "threadStorageLocationQueryKey",

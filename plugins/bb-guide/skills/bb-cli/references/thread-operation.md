@@ -122,6 +122,11 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
   cached and total token counts. Parent threads include child agent counts by
   state and their combined token total; JSON includes `spendSummary` and
   `childSummary`.
+- Add `--usage` to `bb thread show <thread-id>` for per-turn token weather,
+  same-model input trends, context fill, and compaction savings estimates.
+  Cached input combines reads and writes, and compaction payback is explicitly
+  estimated. Add `--json` to include `usageTimeline` compaction rows for savings
+  estimates.
 - Use `bb thread show <thread-id> --git-diff` to review file changes.
 - Use `bb thread log <thread-id>` to inspect the conversation. The default
   shows only the newest 20 user-message turns and ends with a notice when older

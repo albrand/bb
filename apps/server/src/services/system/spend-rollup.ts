@@ -195,6 +195,7 @@ function rollUpObservations(
       if (observation.turnId !== null) {
         recordThreadTurnSpendContribution(db, {
           at: observation.createdAt,
+          model: model || null,
           providerThreadId: observation.providerThreadId,
           threadId: observation.threadId,
           turnId: observation.turnId,
@@ -288,8 +289,7 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   );
   const turnsToRepair = new Set(
     [...completedTurnIds].filter(
-      (turnId) =>
-        !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
+      (turnId) => !existingTurnIds.has(turnId) && !repairedTurnIds.has(turnId),
     ),
   );
   const dailyRepairRecorded = db.$client
@@ -305,7 +305,9 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
   if (turnsToRepair.size === 0 && !repairDailyRollup) return;
   const states = new Map<string, SpendCursorState>();
   const dailyContributions: SpendContribution[] = [];
-  for (const row of listStoredTokenUsageEvents(db, { threadId: args.threadId })) {
+  for (const row of listStoredTokenUsageEvents(db, {
+    threadId: args.threadId,
+  })) {
     const record = JSON.parse(row.data) as Record<string, unknown>;
     const usage = (record.tokenUsage ?? {}) as Record<string, unknown>;
     const providerThreadId =
@@ -351,6 +353,7 @@ function repairThreadTurnSpendFromStoredEventsInTransaction(
     ) {
       recordThreadTurnSpendContribution(db, {
         at: row.createdAt,
+        model: model || null,
         providerThreadId,
         threadId: row.threadId,
         turnId: row.turnId,

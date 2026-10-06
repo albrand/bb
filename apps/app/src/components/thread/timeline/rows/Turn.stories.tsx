@@ -569,6 +569,8 @@ export function TokenFooterTooltip() {
           </TooltipTrigger>
           <ThreadTurnTokenTooltipContent
             turn={{
+              turnId: "story-turn",
+              model: null,
               inputTokens: 6_442,
               outputTokens: 1_809_971,
               reasoningOutputTokens: 500,
