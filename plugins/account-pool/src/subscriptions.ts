@@ -39,6 +39,10 @@ function loginKey(
     : `claude:${known}`;
 }
 
+function byId(left: { id: string }, right: { id: string }): number {
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
 function plan(account: IdentityRecord): string | null {
   return account.rateLimitTier ?? account.subscriptionType;
 }
@@ -49,7 +53,8 @@ export function subscriptionKeys(
   const keys = new Map<string, string>();
   const logins = new Map<string, IdentityRecord[]>();
   const emailByAccountUuid = new Map<string, string>();
-  for (const account of accounts) {
+  const ordered = [...accounts].sort(byId);
+  for (const account of ordered) {
     const email = normalizedEmail(account);
     if (
       account.provider === "claude" &&
@@ -59,7 +64,7 @@ export function subscriptionKeys(
     )
       emailByAccountUuid.set(account.accountUuid, email);
   }
-  for (const account of accounts) {
+  for (const account of ordered) {
     const login = loginKey(account, emailByAccountUuid);
     if (login === null) keys.set(account.id, `record:${account.id}`);
     else logins.set(login, [...(logins.get(login) ?? []), account]);
@@ -105,7 +110,9 @@ function represents(
   const difference = health(candidate) - health(current);
   if (difference !== 0) return difference < 0;
   if (candidate.active !== current.active) return candidate.active;
-  return (candidate.lastUsedAt ?? -1) > (current.lastUsedAt ?? -1);
+  const recency = (candidate.lastUsedAt ?? -1) - (current.lastUsedAt ?? -1);
+  if (recency !== 0) return recency > 0;
+  return byId(candidate, current) < 0;
 }
 
 function representatives<T extends SubscriptionRecord>(

@@ -409,11 +409,16 @@ export function createCodexAdapter(options: {
   return {
     provider: "codex",
     upstreamName: "ChatGPT",
-    async localPlanLabel() {
+    async localLogin() {
       const imported = await (
         options.importCredentials ?? importCodexCredentials
       )().catch(() => null);
-      return imported === null ? null : chatgptPlanLabel(imported.planType);
+      return imported === null
+        ? null
+        : {
+            email: imported.email,
+            planLabel: chatgptPlanLabel(imported.planType),
+          };
     },
     async importAccount() {
       const imported = await (

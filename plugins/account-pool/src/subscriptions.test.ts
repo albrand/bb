@@ -70,9 +70,9 @@ describe("subscription folding", () => {
     expect(subscriptionRepresentative([twin, principal], "twin")?.id).toBe(
       "principal",
     );
-    expect(ids([unused, record({ id: "also-unused", ...off })])).toEqual([
-      "unused",
-    ]);
+    const alsoUnused = record({ id: "also-unused", ...off });
+    expect(ids([unused, alsoUnused])).toEqual(["also-unused"]);
+    expect(ids([alsoUnused, unused])).toEqual(["also-unused"]);
   });
 
   it("keeps one login folded after its plan changes or goes unreported on one record", () => {
@@ -123,6 +123,47 @@ describe("subscription folding", () => {
     expect(
       subscriptionRepresentative([personal, team, legacy], "personal")?.id,
     ).toBe("legacy");
+  });
+
+  it("gives the same subscriptions and representatives in every input order", () => {
+    const seats = [
+      record({ id: "seat-a", organizationUuid: PERSONAL }),
+      record({ id: "seat-a2", organizationUuid: PERSONAL }),
+      record({
+        id: "seat-b",
+        organizationUuid: TEAM,
+        rateLimitTier: "default_claude_team",
+      }),
+      record({
+        id: "seat-c",
+        rateLimitTier: "default_claude_max_5x",
+        signInExpired: true,
+      }),
+    ];
+    const orders = (items: Record[]): Record[][] =>
+      items.length <= 1
+        ? [items]
+        : items.flatMap((item, index) =>
+            orders(items.filter((_, other) => other !== index)).map((rest) => [
+              item,
+              ...rest,
+            ]),
+          );
+    const shape = (accounts: Record[]) =>
+      seats.map(({ id }) => ({
+        id,
+        members: subscriptionMembers(accounts, id)
+          .map((member) => member.id)
+          .sort(),
+        representative: subscriptionRepresentative(accounts, id)?.id,
+      }));
+    const all = orders(seats);
+    expect(all).toHaveLength(24);
+    const expected = shape(seats);
+    for (const order of all) expect(shape(order)).toEqual(expected);
+    expect(new Set(all.map((order) => ids(order).sort().join(","))).size).toBe(
+      1,
+    );
   });
 
   it("folds by account UUID without an email and never folds records with neither", () => {

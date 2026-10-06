@@ -146,11 +146,19 @@ export class AccountStore {
     return this.update(id, (account) => ({ ...account, enabled }));
   }
 
-  async disableAll(ids: readonly string[]): Promise<Account[]> {
+  async disableWhere(
+    select: (
+      accounts: readonly Account[],
+      organizations: ReadonlyMap<string, string>,
+    ) => readonly string[] | null,
+  ): Promise<Account[] | null> {
     return this.serialized(async () => {
+      const current = await this.list();
+      const ids = select(current, await this.organizations());
+      if (ids === null) return null;
       const targets = new Set(ids);
       const disabled: Account[] = [];
-      const accounts = (await this.list()).map((account) => {
+      const accounts = current.map((account) => {
         if (!targets.has(account.id) || !account.enabled) return account;
         const updated = { ...account, enabled: false };
         disabled.push(updated);

@@ -9028,6 +9028,65 @@ describe("Account Pool subscription sign-in repair", () => {
     ]);
   });
 
+  it("checks a subscription turn off against the records written before it, so one enabled mid-flight blocks every write", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    const named = [pool.principal.id, twin.id];
+    const kv = pool.host.bb.storage.kv;
+    const set = kv.set.bind(kv);
+    let writes = 0;
+    let holding = false;
+    let reached = () => {};
+    let release = () => {};
+    const enableWriting = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    kv.set = async (key, value) => {
+      if (key === "accounts:v1") {
+        writes += 1;
+        if (!holding) {
+          holding = true;
+          reached();
+          await barrier;
+        }
+      }
+      return set(key, value);
+    };
+
+    const enabling = pool.host.harness.behavior.callRpc("account.enable", {
+      id: pool.previous.id,
+    });
+    await enableWriting;
+    const turningOff = pool.host.harness.behavior
+      .callRpc("account.disableSubscription", {
+        id: pool.principal.id,
+        expectedIds: named,
+      })
+      .then(
+        () => "turned off",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await enabling;
+
+    expect(await turningOff).toBe(
+      "The records of this subscription changed. Review the updated list; nothing was turned off.",
+    );
+    expect(writes).toBe(1);
+    expect(
+      (await pool.list()).map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([
+      { id: pool.principal.id, enabled: true },
+      { id: pool.previous.id, enabled: true },
+      { id: twin.id, enabled: true },
+    ]);
+  });
+
   it("stores the organization of an imported Claude login", async () => {
     const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-import-org-"));
@@ -9404,5 +9463,30 @@ describe("Account Pool subscription sign-in repair", () => {
     expect(cli.stdout).toContain(
       "Cursor\tPro\texpired\tcursor@example.com\tcan't be pooled",
     );
+    pool.host.harness.sdk.stub("system.providerStates", async () => ({
+      providers: [
+        {
+          providerId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          accountEmail: "other.codex@example.com",
+          planLabel: null,
+        },
+      ],
+    }));
+    expect(
+      z
+        .array(localLoginSchema)
+        .parse(await pool.host.harness.behavior.callRpc("local.logins", null)),
+    ).toEqual([
+      {
+        providerId: "codex",
+        displayName: "Codex",
+        email: "other.codex@example.com",
+        planLabel: null,
+        status: "ready",
+        poolProvider: "codex",
+      },
+    ]);
   });
 });

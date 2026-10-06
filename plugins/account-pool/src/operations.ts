@@ -372,12 +372,12 @@ export class PoolOperations {
       this.providerStates(null),
       this.accounts.list(),
     ]);
-    const codexPlan = states.some(
+    const codexLogin = states.some(
       (state) =>
         poolProviderFor(state.providerId) === "codex" &&
         state.planLabel === null,
     )
-      ? await this.hub.localPlanLabel("codex").catch(() => null)
+      ? await this.hub.localLogin("codex").catch(() => null)
       : null;
     return states.flatMap((state): LocalLogin[] => {
       if (state.status !== "ready" && state.status !== "expired") return [];
@@ -399,7 +399,12 @@ export class PoolOperations {
           displayName: state.displayName,
           email: state.accountEmail,
           planLabel:
-            state.planLabel ?? (poolProvider === "codex" ? codexPlan : null),
+            state.planLabel ??
+            (poolProvider === "codex" &&
+            codexLogin !== null &&
+            sameEmail(codexLogin.email, state.accountEmail)
+              ? codexLogin.planLabel
+              : null),
           status: state.status,
           poolProvider,
         },
@@ -440,30 +445,32 @@ export class PoolOperations {
     id: string,
     expectedIds?: readonly string[],
   ): Promise<Account[] | null> {
-    const accounts = await this.accounts.list();
-    if (!accounts.some((account) => account.id === id)) return null;
-    const organizations = await this.accounts.organizations();
-    const targets = subscriptionMembers(
-      accounts.map((account) => ({
-        ...account,
-        organizationUuid: organizations.get(account.id) ?? null,
-      })),
-      id,
-    )
-      .filter((account) => account.enabled)
-      .map((account) => account.id);
-    const expected = new Set(expectedIds);
-    if (
-      expectedIds !== undefined &&
-      (expected.size !== targets.length ||
-        targets.some((target) => !expected.has(target)))
-    ) {
-      throw new Error(
-        "The records of this subscription changed. Review the updated list; nothing was turned off.",
-      );
-    }
-    const disabled = await this.accounts.disableAll(targets);
-    if (disabled.length > 0) this.onAccountsChanged();
+    const disabled = await this.accounts.disableWhere(
+      (accounts, organizations) => {
+        if (!accounts.some((account) => account.id === id)) return null;
+        const targets = subscriptionMembers(
+          accounts.map((account) => ({
+            ...account,
+            organizationUuid: organizations.get(account.id) ?? null,
+          })),
+          id,
+        )
+          .filter((account) => account.enabled)
+          .map((account) => account.id);
+        const expected = new Set(expectedIds);
+        if (
+          expectedIds !== undefined &&
+          (expected.size !== targets.length ||
+            targets.some((target) => !expected.has(target)))
+        ) {
+          throw new Error(
+            "The records of this subscription changed. Review the updated list; nothing was turned off.",
+          );
+        }
+        return targets;
+      },
+    );
+    if (disabled !== null && disabled.length > 0) this.onAccountsChanged();
     return disabled;
   }
 

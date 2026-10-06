@@ -110,7 +110,8 @@ accounts cannot sign in again. The RPCs are `login.start` and
 `bb pool account local` (RPC `local.logins`) lists the bb server host's own
 provider logins that are not in the pool, and which ones `add --import` can
 pool. A Codex login's plan (such as ChatGPT Pro) comes from the
-`chatgpt_plan_type` claim of that login's tokens. A 401 or 403 on a
+`chatgpt_plan_type` claim of the host's Codex tokens when their email matches
+that login. A 401 or 403 on a
 freshly refreshed OAuth token is treated as an upstream failure instead: the
 request gets HTTP 503, and that token is held out of routing for one minute.
 Account tables add columns for observed model-family buckets; JSON status
@@ -196,9 +197,10 @@ turning a subscription on enables only its representative.
 `bb pool account disable <id> --subscription` (RPC
 `account.disableSubscription`) does the same from the CLI and SDK; without
 `--subscription`, `account disable` and `account enable` act on one record.
-The RPC's optional `expectedIds` names the records the caller confirmed; when
-the subscription's enabled records differ by the time it runs, it refuses and
-turns nothing off. Settings pass the names shown in the dialog, then show the
+The RPC's optional `expectedIds` names the records the caller confirmed. The
+check and the write happen in one step against the stored records, so when the
+subscription's enabled records differ by then, it refuses and turns nothing off.
+Which records share a subscription does not depend on list order or priority. Settings pass the names shown in the dialog, then show the
 refusal and the updated list.
 `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
