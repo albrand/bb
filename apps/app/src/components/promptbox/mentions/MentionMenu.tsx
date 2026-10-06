@@ -291,7 +291,7 @@ function SuggestionRow({
         onApply();
       }}
       className={cn(
-        "w-full scroll-mt-7 rounded px-2 py-1.5 text-left text-xs pointer-coarse:min-h-11",
+        "w-full scroll-mt-7 rounded px-2 py-1.5 text-left text-xs pointer-coarse:min-h-11 [[data-promptbox-typeahead-constrained]_&]:scroll-mt-0",
         isSelected ? "bg-state-active text-foreground" : "hover:bg-state-hover",
       )}
       title={title}
@@ -383,7 +383,7 @@ function MenuSectionHeader({
   return (
     <div
       className={cn(
-        "sticky top-0 z-10 bg-background text-xs text-muted-foreground",
+        "sticky top-0 z-10 bg-background text-xs text-muted-foreground [[data-promptbox-typeahead-constrained]_&]:static",
         onDismiss
           ? "flex h-11 items-center justify-between pl-3 pr-1"
           : "px-3 pb-1 pt-1.5",
