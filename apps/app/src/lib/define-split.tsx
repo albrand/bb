@@ -81,9 +81,7 @@ export function defineSplit<P extends object>({
   const warm = async () => {
     await loadModule().catch(() => undefined);
   };
-  const onIntent = () => {
-    void warm().catch(() => undefined);
-  };
+  const onIntent = () => warm().catch(() => undefined);
   if (tier === "preload") queueSplitPreload(warm);
 
   function SplitContent(props: P) {
