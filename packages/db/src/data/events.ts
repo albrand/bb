@@ -3071,13 +3071,13 @@ export function listTimelineOrderingContext(
       parentToolCallId: sql<string | null>`${events.parentToolCallId}`,
       requestId: sql<
         string | null
-      >`json_extract(${events.data}, '$.requestId')`,
+      >`CASE WHEN ${events.type} = 'client/turn/requested' THEN json_extract(${events.data}, '$.requestId') END`,
       clientRequestId: sql<
         string | null
-      >`json_extract(${events.data}, '$.clientRequestId')`,
+      >`CASE WHEN ${events.type} = 'turn/input/accepted' THEN json_extract(${events.data}, '$.clientRequestId') END`,
       expectedTurnId: sql<
         string | null
-      >`json_extract(${events.data}, '$.target.expectedTurnId')`,
+      >`CASE WHEN ${events.type} = 'client/turn/requested' THEN json_extract(${events.data}, '$.target.expectedTurnId') END`,
       hasVisibleUserInput: sql<number>`CASE
         WHEN ${events.type} = 'client/turn/requested'
           AND json_extract(${events.data}, '$.initiator') = 'user'

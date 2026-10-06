@@ -14,7 +14,6 @@ interface ThreadTimelinePaneProps extends ThreadTimelineSurfaceProps {
   onLoadOlderRows: () => void;
   resolveMentionLink: PromptMentionLinkResolver;
   stoppingAnchorAt: number;
-  unreadDividerAutoScroll: boolean;
   unreadDividerPlacement: ThreadTimelineUnreadDividerPlacement | null;
 }
 

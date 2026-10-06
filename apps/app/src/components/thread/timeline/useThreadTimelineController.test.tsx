@@ -263,7 +263,6 @@ function installAutoLoadEnvironment() {
     getScrollElement: () => scrollElement,
     isAtBottom: false,
     scrollElementIntoView: vi.fn(),
-    scrollElementIntoViewClampedToMaxScroll: vi.fn(),
     scrollToBottom: vi.fn(),
   };
   const emitIntersection = () => {
@@ -1656,5 +1655,6 @@ describe("useThreadTimelineController commits", () => {
       ]);
     });
     expect(hasThreadTimelineUnseenEvents(queryClient, "thread-1")).toBe(false);
+    expect(view.latest().hasUnseenTimelineEvents).toBe(true);
   });
 });

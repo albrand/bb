@@ -37,6 +37,7 @@ export interface ThreadTimelineSurfaceProps {
   canSpawnChild?: boolean;
   contextBoundarySeq: number | null;
   hasOlderTimelineRows?: boolean;
+  hasUnseenTimelineEvents?: boolean;
   hostConnectionNotice?: HostConnectionNotice | null;
   isCatchingUpTimeline?: boolean;
   isLoadingOlderTimelineRows?: boolean;
@@ -68,7 +69,6 @@ export interface ThreadTimelineSurfaceProps {
   threadId: string;
   threadIsActive?: boolean;
   threadRuntimeDisplayStatus: ThreadRuntimeDisplayStatus;
-  unreadDividerAutoScroll?: boolean;
   unreadDividerPlacement?: ThreadTimelineUnreadDividerPlacement | null;
   workspaceRootPath: string | undefined;
 }
@@ -170,7 +170,6 @@ export function ThreadTimelineSurface({
   threadId,
   threadIsActive,
   threadRuntimeDisplayStatus,
-  unreadDividerAutoScroll,
   unreadDividerPlacement,
   workspaceRootPath,
 }: ThreadTimelineSurfaceProps) {
@@ -245,7 +244,6 @@ export function ThreadTimelineSurface({
             threadId={threadId}
             threadIsActive={threadIsActive}
             threadRuntimeDisplayStatus={threadRuntimeDisplayStatus}
-            unreadDividerAutoScroll={unreadDividerAutoScroll}
             unreadDividerPlacement={unreadDividerPlacement}
             workspaceRootPath={workspaceRootPath}
           />

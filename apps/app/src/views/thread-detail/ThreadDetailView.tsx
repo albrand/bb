@@ -539,6 +539,8 @@ function ThreadDetailViewInternal(
     threadDetailBootstrapQuery.isSuccess || threadDetailBootstrapQuery.isError;
   const {
     data: queriedThread,
+    isFetchedAfterMount,
+    isError: isThreadQueryError,
     isFetching,
     isLoadingError,
     error,
@@ -678,10 +680,6 @@ function ThreadDetailViewInternal(
   );
   const hasPendingInteraction =
     getLatestPendingInteraction(pendingInteractions) !== null;
-  const unreadDividerState = useThreadUnreadDividerState({
-    routeThreadId: threadId,
-    thread,
-  });
   const [hasRequestedMergeBaseOptions, setHasRequestedMergeBaseOptions] =
     useState(false);
   const [shouldAutoFocusNewTab, setShouldAutoFocusNewTab] = useState(false);
@@ -892,6 +890,7 @@ function ThreadDetailViewInternal(
     contextWindowUsage,
     goal,
     hasOlderTimelineRows,
+    hasUnseenTimelineEvents,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,
@@ -903,6 +902,13 @@ function ThreadDetailViewInternal(
   } = useThreadTimelineController({
     threadId,
     enabled: timelineEnabled,
+  });
+  const unreadDividerState = useThreadUnreadDividerState({
+    bootstrapQuery: threadDetailBootstrapQuery,
+    threadQuery: { isFetchedAfterMount, isError: isThreadQueryError },
+    hasUnseenTimelineEvents,
+    routeThreadId: threadId,
+    thread,
   });
   const sendMessage = useSendThreadMessage();
   const editMessage = useEditThreadMessage();
@@ -1230,7 +1236,9 @@ function ThreadDetailViewInternal(
     },
     [composerActions, dismissCompactKeyboard],
   );
-  const sideChatConsumerMessageActions = useMemo<ThreadTimelineConsumerMessageAction[]>(
+  const sideChatConsumerMessageActions = useMemo<
+    ThreadTimelineConsumerMessageAction[]
+  >(
     () =>
       isSideChatThread && thread !== undefined && threadSourceThreadId !== null
         ? [
@@ -3069,6 +3077,8 @@ function ThreadDetailViewInternal(
               canSpawnChild: thread.canSpawnChild,
               contextBoundarySeq,
               hasOlderTimelineRows,
+              hasUnseenTimelineEvents:
+                unreadDividerState.hasUnseenTimelineEvents,
               hostConnectionNotice,
               isCatchingUpTimeline,
               isLoadingOlderTimelineRows,
@@ -3102,7 +3112,6 @@ function ThreadDetailViewInternal(
               threadId: thread.id,
               threadIsActive: thread.status === "active",
               threadRuntimeDisplayStatus: thread.runtime.displayStatus,
-              unreadDividerAutoScroll: unreadDividerState.autoScroll,
               unreadDividerPlacement: unreadDividerState.placement,
               workspaceRootPath: environment?.path ?? undefined,
             }}

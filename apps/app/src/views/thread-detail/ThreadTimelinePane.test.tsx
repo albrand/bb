@@ -54,7 +54,6 @@ it("forwards pane callbacks to the timeline and conversation outline", () => {
       threadRuntimeDisplayStatus="idle"
       timelineError={false}
       timelineRows={[]}
-      unreadDividerAutoScroll={false}
       unreadDividerPlacement={null}
       workspaceRootPath={undefined}
     />,
