@@ -165,6 +165,8 @@ describe("rejected steer turn context", () => {
         const full = load(testThread, 10_000, 100, display);
         const rejectedRow = steer(full)[0];
         expect(rejectedRow).toBeDefined();
+        if (rejectedRow?.kind !== "conversation")
+          throw new Error("Rejected conversation row missing");
         const relevant = (rows: readonly TimelineRow[]) =>
           rows.filter(
             (row) =>
@@ -210,7 +212,7 @@ describe("rejected steer turn context", () => {
         }
         const context = getThreadMessage(testThread.db, testThread.thread, {
           ...options,
-          seq: rejectedRow!.messageSeq!,
+          seq: rejectedRow.messageSeq,
           before: 1,
           after: 1,
         });
