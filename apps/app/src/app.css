@@ -221,7 +221,7 @@
   [data-promptbox-compact-content] .ProseMirror[contenteditable] > *,
   [data-promptbox-compact-content]
     .ProseMirror[contenteditable]
-    :where(blockquote, h1, h2, h3, h4, h5, h6, li, ol, p, ul) {
+    :where(blockquote, p) {
     display: inline;
     margin: 0;
     padding: 0;
@@ -240,14 +240,9 @@
     + *::before,
   [data-promptbox-compact-content]
     .ProseMirror[contenteditable]
-    :where(blockquote, li)
+    :where(blockquote)
     > *
-    + *::before,
-  [data-promptbox-compact-content]
-    .ProseMirror[contenteditable]
-    :where(ol, ul)
-    > li
-    + li::before {
+    + *::before {
     content: " ";
   }
 
@@ -600,7 +595,7 @@
     [data-promptbox]:not([data-promptbox-voice-active])
     [data-promptbox-editor-content]
     .ProseMirror[contenteditable]
-    :where(blockquote, h1, h2, h3, h4, h5, h6, li, ol, p, ul) {
+    :where(blockquote, p) {
     display: inline;
     margin: 0;
     padding: 0;
@@ -623,16 +618,9 @@
     [data-promptbox]:not([data-promptbox-voice-active])
     [data-promptbox-editor-content]
     .ProseMirror[contenteditable]
-    :where(blockquote, li)
+    :where(blockquote)
     > *
-    + *::before,
-  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
-    [data-promptbox]:not([data-promptbox-voice-active])
-    [data-promptbox-editor-content]
-    .ProseMirror[contenteditable]
-    :where(ol, ul)
-    > li
-    + li::before {
+    + *::before {
     content: " ";
   }
 

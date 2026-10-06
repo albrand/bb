@@ -254,6 +254,7 @@ function installAutoLoadEnvironment() {
   );
   const anchor: BottomAnchorContextValue = {
     captureScrollAnchor: vi.fn(),
+    holdContentPosition: vi.fn(),
     getScrollElement: () => scrollElement,
     isAtBottom: false,
     scrollElementIntoView: vi.fn(),
