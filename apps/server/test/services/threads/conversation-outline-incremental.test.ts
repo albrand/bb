@@ -483,6 +483,53 @@ describe("incremental conversation outlines", () => {
     });
   });
 
+  it("keeps a rejected system steer inside collapsed work and visible when flat", () => {
+    withTestThread((testThread) => {
+      const requestId = "creq_abcdefghij";
+      const systemRequest = request(requestId, "earlier");
+      appendRows(testThread, [
+        started("earlier"),
+        parentCall("earlier", "before"),
+        {
+          ...systemRequest,
+          data: {
+            ...systemRequest.data,
+            initiator: "system",
+            systemMessageKind: "child-completed",
+            systemMessageSubject: {
+              kind: "thread",
+              threadId: testThread.thread.id,
+              threadName: "Child",
+              outcomes: [
+                { threadId: testThread.thread.id, status: "completed" },
+              ],
+            },
+            input: [{ type: "text", text: "Rejected child notification" }],
+          },
+        },
+        {
+          type: "client/turn/rejected",
+          data: {
+            requestId,
+            reason: "host_unavailable",
+            message: "Host disconnected",
+          },
+        },
+        parentCall("earlier", "after"),
+        message("earlier", "Final answer"),
+        completed("earlier"),
+      ]);
+      expect(
+        expectMatchesFull(testThread, "collapse").items.map(
+          (item) => item.preview,
+        ),
+      ).toEqual(["Final answer"]);
+      expect(
+        expectMatchesFull(testThread, "flat").items.map((item) => item.preview),
+      ).toEqual(["Rejected child notification", "Final answer"]);
+    });
+  });
+
   it.each(["collapse", "flat"] as const)(
     "retains completed nested history while updating the live tail (%s)",
     (display) => {
