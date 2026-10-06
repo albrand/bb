@@ -1750,6 +1750,7 @@ function selectThreadConversationOutline(
   options: BuildThreadConversationOutlineOptions,
   sequenceStart: number,
   precedingAgentMessageDeltaCount: number,
+  orderingBoundarySequence: number | null,
   rootProjection: { summaryCompactionEnabled: boolean } | null,
 ): ConversationOutlineSelection {
   const selectRows =
@@ -1803,7 +1804,10 @@ function selectThreadConversationOutline(
         },
       });
       const items: ReturnType<ConversationOutlineSelection["project"]> = [];
-      for (const row of timeline.rows) {
+      for (const row of orderTimelineRowsUsingContext(
+        timeline.rows,
+        orderingBoundarySequence,
+      )) {
         if (row.kind !== "conversation") {
           continue;
         }
@@ -1836,12 +1840,18 @@ export function buildThreadConversationOutline(
         atOrBeforeSequence: options.maxSeq,
         threadId: thread.id,
       }) ?? 0;
+    const { orderingBoundarySequence } = getTimelineGroupingContext(db, {
+      maxSeq: options.maxSeq,
+      sequenceStart,
+      threadId: thread.id,
+    });
     const selection = selectThreadConversationOutline(
       db,
       thread,
       options,
       sequenceStart,
       0,
+      orderingBoundarySequence,
       null,
     );
     return {
@@ -1969,7 +1979,6 @@ export function loadThreadConversationOutline(
           key: buildThreadConversationOutlineCheckpointKey(thread, options),
           maxSeq: options.maxSeq,
           contextBoundarySeq,
-          orderingBoundarySequence,
           resolveProjectionState: (classificationSequenceStart, previous) => {
             const state = getStoredConversationOutlineProjectionState(db, {
               threadId: thread.id,
@@ -1993,6 +2002,7 @@ export function loadThreadConversationOutline(
               options,
               sequenceStart,
               precedingAgentMessageDeltaCount,
+              orderingBoundarySequence,
               state.includeNestedEvents
                 ? null
                 : { summaryCompactionEnabled: state.summaryCompactionEnabled },

@@ -177,7 +177,6 @@ function canReuse(
 function nextCheckpoint(
   projection: ConversationOutlineProjection,
   previous: Checkpoint,
-  orderingBoundarySequence: number | null,
   backgroundTaskSpans: readonly SequenceSpan[],
 ): Checkpoint {
   const activeTurns = new Set<string>();
@@ -274,7 +273,6 @@ export function projectConversationOutlineIncrementally(args: {
   key: string;
   maxSeq: number;
   contextBoundarySeq: number;
-  orderingBoundarySequence: number | null;
   resolveProjectionState: (
     sequenceStart: number,
     previous: ConversationOutlineProjectionState | null,
@@ -361,7 +359,6 @@ export function projectConversationOutlineIncrementally(args: {
   const next = nextCheckpoint(
     projection,
     checkpoint,
-    args.orderingBoundarySequence,
     projection.events.some(({ event }) => backgroundTaskItemId(event) !== null)
       ? mergeBackgroundTaskSpans(
           listConversationOutlineBackgroundTaskSpans(args.db, {
@@ -381,10 +378,7 @@ export function projectConversationOutlineIncrementally(args: {
             ...next.requestIds,
             ...next.parentItemIds,
             ...next.backgroundItemIds,
-          ].reduce(
-            (sum, id) => sum + id.length,
-            0,
-          );
+          ].reduce((sum, id) => sum + id.length, 0);
     if (chars <= MAX_CHARS) {
       cache.entries.set(args.threadId, {
         agentMessageDeltaCount,
