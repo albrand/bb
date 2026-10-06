@@ -441,7 +441,7 @@ describe("public thread spend summaries", () => {
     });
   });
 
-  it("reads completed turns once per request, and once more only inside a repair", async () => {
+  it("reads completed turns once per request, with or without a repair", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { providerId: "codex" },
@@ -484,13 +484,38 @@ describe("public thread spend summaries", () => {
       expect(noRepairResponse.status).toBe(200);
       expect(countCompletedTurnReads()).toBe(1);
 
+      const repairUsage = {
+        totalTokens: 45,
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        cacheReadInputTokens: 10,
+        cacheWriteInputTokens: 0,
+        outputTokens: 15,
+        reasoningOutputTokens: 0,
+      };
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "provider-read-count",
         sequence: 2,
+        type: "thread/tokenUsage/updated",
+        scope: turnScope("turn-repaired"),
+        data: {
+          providerThreadId: "provider-read-count",
+          tokenUsage: {
+            total: repairUsage,
+            last: repairUsage,
+            modelContextWindow: 200_000,
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-read-count",
+        sequence: 3,
         type: "turn/completed",
-        scope: turnScope("turn-unrecorded"),
+        scope: turnScope("turn-repaired"),
         data: { providerThreadId: "provider-read-count", status: "completed" },
       });
       prepareSpy.mockClear();
@@ -499,15 +524,21 @@ describe("public thread spend summaries", () => {
         `/api/v1/threads/${thread.id}/spend-summary`,
       );
       expect(repairResponse.status).toBe(200);
-      expect(countCompletedTurnReads()).toBe(2);
+      expect(countCompletedTurnReads()).toBe(1);
       expect(
-        threadSpendSummaryResponseSchema
-          .parse(await readJson(repairResponse))
-          .turns.map((turn) => turn.turnId)
-          .sort(),
-      ).toEqual(["turn-recorded", "turn-unrecorded"]);
+        threadSpendSummaryResponseSchema.parse(await readJson(repairResponse))
+          .turns,
+      ).toContainEqual({
+        turnId: "turn-repaired",
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        outputTokens: 15,
+        reasoningOutputTokens: null,
+        totalTokens: 45,
+      });
 
       prepareSpy.mockClear();
+      harness.db.$client.exec("PRAGMA query_only = ON");
       const repairedResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/spend-summary`,
       );
