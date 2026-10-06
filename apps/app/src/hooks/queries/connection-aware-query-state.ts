@@ -4,7 +4,14 @@ import { useServerConnectionState } from "../useServerConnectionState";
 
 const CONNECTION_GRACE_PERIOD_MS = 10_000;
 export const RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS = 1_000;
-const RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS = 30_000;
+const RECOVERABLE_LOADING_RETRY_SLOW_DELAY_MS = 30_000;
+const RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS = 300_000;
+const RECOVERABLE_LOADING_RETRY_FAST_ATTEMPTS = Math.ceil(
+  Math.log2(
+    RECOVERABLE_LOADING_RETRY_SLOW_DELAY_MS /
+      RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS,
+  ),
+);
 
 export type ConnectionAwareQueryStatus = "loading" | "ready" | "unavailable";
 
@@ -86,6 +93,17 @@ function useServerConnectionGracePeriodElapsed(): boolean {
   return elapsed;
 }
 
+function getRecoverableLoadingRetryDelayMs(attempt: number): number {
+  if (attempt < RECOVERABLE_LOADING_RETRY_FAST_ATTEMPTS) {
+    return RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 2 ** attempt;
+  }
+  return Math.min(
+    RECOVERABLE_LOADING_RETRY_SLOW_DELAY_MS *
+      2 ** (attempt - RECOVERABLE_LOADING_RETRY_FAST_ATTEMPTS),
+    RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS,
+  );
+}
+
 function useRecoverableLoadingRetry({
   enabled,
   hasResolvedData,
@@ -119,10 +137,7 @@ function useRecoverableLoadingRetry({
         setRetry((current) => ({ ...current, attempt: current.attempt + 1 }));
         void refetch();
       },
-      Math.min(
-        RECOVERABLE_LOADING_RETRY_BASE_DELAY_MS * 2 ** retry.attempt,
-        RECOVERABLE_LOADING_RETRY_MAX_DELAY_MS,
-      ),
+      getRecoverableLoadingRetryDelayMs(retry.attempt),
     );
     return () => clearTimeout(timer);
   }, [isAwaitingRetry, refetch, retry.attempt, retryKey]);

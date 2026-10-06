@@ -150,11 +150,14 @@ describe("useConnectionAwareQueryState retry", () => {
     expect(refetch).toHaveBeenCalledTimes(calls + 1);
   }
 
-  it("backs off from one second to a thirty second cap while the error persists", () => {
+  it("backs off from one second, then from thirty seconds to a five minute cap while the error persists", () => {
     const { refetch, result } = renderRetry(awaitingRetry);
 
     expect(result.current.status).toBe("loading");
-    for (const delayMs of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+    for (const delayMs of [
+      1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000, 120_000, 240_000,
+      300_000, 300_000,
+    ]) {
       expectNextRetryAfter(refetch, delayMs);
     }
   });
