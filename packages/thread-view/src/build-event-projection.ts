@@ -48,6 +48,7 @@ import {
   parseLegacyUserMessage,
   parseProviderUserMessage,
 } from "./user-message-parsing.js";
+import { eventProjectionMessageThreadScopeFields } from "./message-scope.js";
 import { isTerminalBufferedTextFlushEvent } from "./assistant-buffering.js";
 import {
   flushToolActivityBeforeNonToolMessage,
@@ -719,7 +720,16 @@ function buildFlatProjectionData(
           meta,
           options: args.options,
         })) {
-          appendProjectedUserMessage(state, rejectedMessage);
+          appendProjectedUserMessage(
+            state,
+            rejectedMessage.scope.kind === "turn" &&
+              !selectedStartedTurnIds.has(rejectedMessage.scope.turnId)
+              ? {
+                  ...rejectedMessage,
+                  ...eventProjectionMessageThreadScopeFields(),
+                }
+              : rejectedMessage,
+          );
         }
       }
       continue;
