@@ -75,6 +75,8 @@ interface ThreadReadMutationInput {
   threadId: string;
 }
 
+export const MARK_THREAD_UNREAD_MUTATION_KEY = ["mark-thread-unread"] as const;
+
 export function useUpdateThread(options?: UpdateThreadMutationOptions) {
   const queryClient = useQueryClient();
 
@@ -410,6 +412,7 @@ export function useMarkThreadUnread() {
       errorMessage: "Failed to mark thread unread.",
       showErrorToast: false,
     },
+    mutationKey: MARK_THREAD_UNREAD_MUTATION_KEY,
     mutationFn: (input: ThreadReadMutationInput) =>
       sdk.threads.markUnread(input),
     onMutate: (input): Promise<ThreadReadStateTransaction> =>

@@ -199,6 +199,29 @@ it("keeps a manual unread made during a read after that read fails", async () =>
   ).toBeNull();
 });
 
+it("keeps a manual unread that lands in the same render as the read failure", async () => {
+  const { requests, result, queryClient } = setup(true);
+  await waitFor(() => expect(requests).toHaveLength(1));
+  vi.mocked(sdk.threads.markUnread).mockResolvedValue(
+    makeThreadResponse({ id: "A", lastReadAt: null, latestAttentionAt: 20 }),
+  );
+  await act(async () => {
+    const unread = result.current.mutateAsync({ threadId: "A" });
+    requests[0]?.reject();
+    await unread;
+  });
+  act(() => window.dispatchEvent(new Event("pageshow")));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  expect(requests).toHaveLength(1);
+  expect(
+    queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey("A"))
+      ?.lastReadAt,
+  ).toBeNull();
+});
+
 it("keeps a manual unread made after a failed read was retried", async () => {
   const { requests, result, queryClient } = setup(true);
   await waitFor(() => expect(requests).toHaveLength(1));
