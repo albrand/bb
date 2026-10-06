@@ -1053,9 +1053,8 @@ function isRootOwnedHumanSteerRow(row: TimelineRow): boolean {
   );
 }
 
-function collectTimelineOrderingBoundarySeqs(
+function collectExternalUserBoundarySeqs(
   projection: EventProjection,
-  rows: readonly TimelineRow[],
 ): number[] {
   const boundarySeqs = new Set<number>();
   for (const entry of projection.entries) {
@@ -1064,17 +1063,6 @@ function collectTimelineOrderingBoundarySeqs(
     }
     for (const seq of entry.turn.externalUserBoundarySeqs ?? []) {
       boundarySeqs.add(seq);
-    }
-  }
-  for (const row of rows) {
-    if (
-      row.kind === "conversation" &&
-      row.role === "user" &&
-      row.turnId !== null &&
-      row.turnRequest?.kind === "steer" &&
-      row.turnRequest.status === "rejected"
-    ) {
-      boundarySeqs.add(row.sourceSeqStart);
     }
   }
   return [...boundarySeqs].sort((left, right) => left - right);
@@ -1093,7 +1081,7 @@ function compareTimelineRowsBySource(
   return 0;
 }
 
-function orderRowsAfterBoundary(
+function orderRowsAfterExternalUserBoundary(
   rows: TimelineRow[],
   boundarySeqs: readonly number[],
 ): TimelineRow[] {
@@ -1119,6 +1107,39 @@ function orderRowsAfterBoundary(
     .map(({ row }) => row);
 
   return [...rows.slice(0, suffixStartIndex), ...orderedSuffix];
+}
+
+function placeRejectedSteerRows(rows: TimelineRow[]): TimelineRow[] {
+  const rejected: TimelineRow[] = [];
+  const remaining: TimelineRow[] = [];
+  for (const row of rows) {
+    if (
+      row.kind === "conversation" &&
+      row.role === "user" &&
+      row.turnId !== null &&
+      row.turnRequest?.kind === "steer" &&
+      row.turnRequest.status === "rejected"
+    ) {
+      rejected.push(row);
+    } else {
+      remaining.push(row);
+    }
+  }
+  if (rejected.length === 0) return rows;
+  rejected.sort(compareTimelineRowsBySource);
+  const ordered: TimelineRow[] = [];
+  let nextRejected = 0;
+  for (const row of remaining) {
+    while (
+      nextRejected < rejected.length &&
+      rejected[nextRejected]!.sourceSeqStart < row.sourceSeqStart
+    ) {
+      ordered.push(rejected[nextRejected++]!);
+    }
+    ordered.push(row);
+  }
+  ordered.push(...rejected.slice(nextRejected));
+  return ordered;
 }
 
 function materializeTimelinePlan(
@@ -1151,9 +1172,11 @@ function buildTimelineRows(
     appendRows(rows, materializeTimelinePlan(item, options));
   }
 
-  return orderRowsAfterBoundary(
-    rows,
-    collectTimelineOrderingBoundarySeqs(projection, rows),
+  return placeRejectedSteerRows(
+    orderRowsAfterExternalUserBoundary(
+      rows,
+      collectExternalUserBoundarySeqs(projection),
+    ),
   );
 }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TimelineRow } from "@bb/server-contract";
 import { THREAD_CONTEXT_CLEAR_OPERATION } from "@bb/domain";
 import {
   getLatestStoredConversationOutlineSequence,
@@ -123,6 +124,82 @@ function outlineOptions(testThread: TestThread) {
 }
 
 describe("rejected steer turn context", () => {
+  it.each(["flat", "collapse"] as const)(
+    "preserves unrelated accepted agent message order across full and paged %s views",
+    (display) => {
+      withTestThread((testThread) => {
+        const [t2Start, ...t2Rest] = turn("t2");
+        const [t3Start, ...t3Rest] = turn("t3");
+        const agentRequestId = "creq_kmnpqrstuv";
+        const requested = request("t2");
+        appendRows(testThread, [
+          ...turn(targetTurnId),
+          t2Start,
+          {
+            ...requested,
+            data: {
+              ...requested.data,
+              initiator: "agent",
+              requestId: agentRequestId,
+              target: { kind: "auto", expectedTurnId: "t2" },
+              input: [{ type: "text", text: "Accepted agent tell" }],
+            },
+          },
+          ...t2Rest,
+          t3Start,
+          {
+            type: "turn/input/accepted",
+            turnId: "t3",
+            data: { clientRequestId: agentRequestId },
+          },
+          ...t3Rest,
+        ]);
+        const unaffected = (rows: readonly TimelineRow[]) =>
+          rows
+            .filter(
+              (row) =>
+                row.kind === "conversation" &&
+                row.text !== "Late rejected steer",
+            )
+            .map((row) => row.id);
+        const before = load(testThread, 10_000, 100, display);
+        const late = request();
+        appendRows(testThread, [
+          { ...late, data: { ...late.data, initiator: "agent" } },
+          rejected(),
+        ]);
+        const full = load(testThread, 10_000, 100, display);
+        expect(unaffected(full.response.rows)).toEqual(
+          unaffected(before.response.rows),
+        );
+        const pageRows: TimelineRow[][] = [];
+        let page = load(testThread, 64, 1, display).response;
+        for (let index = 0; index < 10; index += 1) {
+          pageRows.unshift(page.rows);
+          const beforeCursor = page.timelinePage.olderCursor;
+          if (beforeCursor === null) break;
+          page = buildThreadTimelineWithProfile(
+            testThread.db,
+            testThread.thread,
+            {
+              completedTurnDisplay: display,
+              eventBudget: 64,
+              includeNestedRows: true,
+              includeDiagnosticOperations: false,
+              maxInlineOutputChars: null,
+              maxSeq: full.response.maxSeq,
+              page: { kind: "older", beforeCursor, segmentLimit: 1 },
+            },
+          ).response;
+        }
+        expect(page.timelinePage.olderCursor).toBeNull();
+        expect([...new Set(unaffected(pageRows.flat()))]).toEqual(
+          unaffected(full.response.rows),
+        );
+      });
+    },
+  );
+
   it.each(["agent", "system", "user"] as const)(
     "keeps a rejected %s steer visible without replacing a historical summary",
     (initiator) => {
