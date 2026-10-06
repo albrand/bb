@@ -261,10 +261,7 @@ import type {
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
 import { useThreadGitActions } from "./useThreadGitActions";
 import { useThreadReadTracking } from "@/hooks/useThreadReadTracking";
-import {
-  shouldOpenThreadAtLatest,
-  useThreadUnreadDividerState,
-} from "./useThreadUnreadDividerState";
+import { useThreadUnreadDividerState } from "./useThreadUnreadDividerState";
 import {
   buildTerminalSyncedSecondaryFileTabs,
   syncTerminalTabsInFixedPanelState,
@@ -543,6 +540,7 @@ function ThreadDetailViewInternal(
   const {
     data: queriedThread,
     isFetchedAfterMount,
+    isError: isThreadQueryError,
     isFetching,
     isLoadingError,
     error,
@@ -682,14 +680,6 @@ function ThreadDetailViewInternal(
   );
   const hasPendingInteraction =
     getLatestPendingInteraction(pendingInteractions) !== null;
-  const unreadDividerState = useThreadUnreadDividerState({
-    isOpening:
-      !didThreadDetailBootstrapRefreshAfterMount(threadDetailBootstrapQuery) &&
-      !isFetchedAfterMount &&
-      !isLoadingError,
-    routeThreadId: threadId,
-    thread,
-  });
   const [hasRequestedMergeBaseOptions, setHasRequestedMergeBaseOptions] =
     useState(false);
   const [shouldAutoFocusNewTab, setShouldAutoFocusNewTab] = useState(false);
@@ -912,6 +902,13 @@ function ThreadDetailViewInternal(
   } = useThreadTimelineController({
     threadId,
     enabled: timelineEnabled,
+  });
+  const unreadDividerState = useThreadUnreadDividerState({
+    bootstrapQuery: threadDetailBootstrapQuery,
+    threadQuery: { isFetchedAfterMount, isError: isThreadQueryError },
+    hasUnseenTimelineEvents,
+    routeThreadId: threadId,
+    thread,
   });
   const sendMessage = useSendThreadMessage();
   const editMessage = useEditThreadMessage();
@@ -3080,11 +3077,8 @@ function ThreadDetailViewInternal(
               canSpawnChild: thread.canSpawnChild,
               contextBoundarySeq,
               hasOlderTimelineRows,
-              hasUnseenTimelineEvents: shouldOpenThreadAtLatest({
-                hasUnseenTimelineEvents,
-                hasUnseenUpdatesOnOpen:
-                  unreadDividerState.hasUnseenUpdatesOnOpen,
-              }),
+              hasUnseenTimelineEvents:
+                unreadDividerState.hasUnseenTimelineEvents,
               hostConnectionNotice,
               isCatchingUpTimeline,
               isLoadingOlderTimelineRows,

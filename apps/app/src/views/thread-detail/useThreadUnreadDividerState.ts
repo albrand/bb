@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ThreadTimelineUnreadDividerPlacement } from "@/components/thread/timeline";
+import { didThreadDetailBootstrapRefreshAfterMount } from "@/hooks/queries/thread-queries";
 
 interface ThreadUnreadDividerThreadState {
   id: string;
@@ -16,7 +17,7 @@ interface ThreadUnreadDividerSnapshot {
 }
 
 interface ThreadUnreadDividerState {
-  hasUnseenUpdatesOnOpen: boolean;
+  hasUnseenTimelineEvents: boolean;
   placement: ThreadTimelineUnreadDividerPlacement | null;
 }
 
@@ -31,17 +32,21 @@ interface IsThreadUnreadArgs {
 }
 
 interface UseThreadUnreadDividerStateArgs {
-  isOpening: boolean;
+  bootstrapQuery: Parameters<
+    typeof didThreadDetailBootstrapRefreshAfterMount
+  >[0];
+  threadQuery: { isFetchedAfterMount: boolean; isError: boolean };
+  hasUnseenTimelineEvents: boolean;
   routeThreadId: string | undefined;
   thread: ThreadUnreadDividerThreadState | undefined;
 }
 
 const NO_UNREAD_DIVIDER_STATE: ThreadUnreadDividerState = {
-  hasUnseenUpdatesOnOpen: false,
+  hasUnseenTimelineEvents: false,
   placement: null,
 };
 
-export function shouldOpenThreadAtLatest({
+function shouldOpenThreadAtLatest({
   hasUnseenTimelineEvents,
   hasUnseenUpdatesOnOpen,
 }: {
@@ -85,10 +90,16 @@ function buildUnreadDividerPlacement(
 }
 
 export function useThreadUnreadDividerState({
-  isOpening,
+  bootstrapQuery,
+  threadQuery,
+  hasUnseenTimelineEvents,
   routeThreadId,
   thread,
 }: UseThreadUnreadDividerStateArgs): ThreadUnreadDividerState {
+  const isOpening =
+    !didThreadDetailBootstrapRefreshAfterMount(bootstrapQuery) &&
+    !threadQuery.isFetchedAfterMount &&
+    !threadQuery.isError;
   const [snapshot, setSnapshot] = useState<ThreadUnreadDividerSnapshot | null>(
     null,
   );
@@ -117,6 +128,10 @@ export function useThreadUnreadDividerState({
     };
 
     setSnapshot((currentSnapshot) => {
+      const nextIsOpening =
+        currentSnapshot?.threadId === threadId
+          ? currentSnapshot.isOpening && isOpening
+          : isOpening;
       if (
         currentSnapshot?.threadId === threadId &&
         currentSnapshot.attentionAt === threadLatestAttentionAt
@@ -125,14 +140,14 @@ export function useThreadUnreadDividerState({
           return {
             attentionAt: threadLatestAttentionAt,
             hasUnseenUpdatesOnOpen: currentSnapshot.hasUnseenUpdatesOnOpen,
-            isOpening,
+            isOpening: nextIsOpening,
             placement: { kind: "before-first" },
             threadId,
           };
         }
-        return currentSnapshot.isOpening === isOpening
+        return currentSnapshot.isOpening === nextIsOpening
           ? currentSnapshot
-          : { ...currentSnapshot, isOpening };
+          : { ...currentSnapshot, isOpening: nextIsOpening };
       }
 
       const placement = buildUnreadDividerPlacement(threadState);
@@ -143,7 +158,7 @@ export function useThreadUnreadDividerState({
             ? currentSnapshot.hasUnseenUpdatesOnOpen ||
               (currentSnapshot.isOpening && placement !== null)
             : placement !== null,
-        isOpening,
+        isOpening: nextIsOpening,
         placement,
         threadId,
       };
@@ -169,22 +184,26 @@ export function useThreadUnreadDividerState({
         latestAttentionAt: threadLatestAttentionAt,
       }))
   ) {
-    return NO_UNREAD_DIVIDER_STATE;
+    return { ...NO_UNREAD_DIVIDER_STATE, hasUnseenTimelineEvents };
   }
 
-  return {
-    hasUnseenUpdatesOnOpen:
-      snapshot !== null && snapshot.threadId === threadId
-        ? snapshot.hasUnseenUpdatesOnOpen ||
-          (snapshot.isOpening &&
-            isThreadUnread({
-              lastReadAt: threadLastReadAt,
-              latestAttentionAt: threadLatestAttentionAt,
-            }))
-        : isThreadUnread({
+  const hasUnseenUpdatesOnOpen =
+    snapshot !== null && snapshot.threadId === threadId
+      ? snapshot.hasUnseenUpdatesOnOpen ||
+        (snapshot.isOpening &&
+          isThreadUnread({
             lastReadAt: threadLastReadAt,
             latestAttentionAt: threadLatestAttentionAt,
-          }),
+          }))
+      : isThreadUnread({
+          lastReadAt: threadLastReadAt,
+          latestAttentionAt: threadLatestAttentionAt,
+        });
+  return {
+    hasUnseenTimelineEvents: shouldOpenThreadAtLatest({
+      hasUnseenTimelineEvents,
+      hasUnseenUpdatesOnOpen,
+    }),
     placement:
       snapshot !== null && snapshot.threadId === threadId
         ? snapshot.placement

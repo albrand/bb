@@ -7,10 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { threadTimelineScrollAnchorAtomFamily } from "@/lib/thread-timeline-scroll-anchor";
 import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
-import {
-  shouldOpenThreadAtLatest,
-  useThreadUnreadDividerState,
-} from "@/views/thread-detail/useThreadUnreadDividerState";
+import { useThreadUnreadDividerState } from "@/views/thread-detail/useThreadUnreadDividerState";
 import { ThreadTimelinePane } from "@/views/thread-detail/ThreadTimelinePane";
 import { ThreadProviderContext } from "../thread-provider-context";
 
@@ -98,17 +95,31 @@ function OpenThread({
   hasUnseenTimelineEvents,
   latestAttentionAt = 300,
   isOpening = false,
+  bootstrapUpdatedAt = 0,
+  isThreadQueryError = false,
 }: {
   lastReadAt: number;
   hasUnseenTimelineEvents: boolean;
   latestAttentionAt?: number;
   isOpening?: boolean;
+  bootstrapUpdatedAt?: number;
+  isThreadQueryError?: boolean;
 }) {
-  const { placement, hasUnseenUpdatesOnOpen } = useThreadUnreadDividerState({
-    routeThreadId: THREAD_ID,
-    isOpening,
-    thread: { id: THREAD_ID, lastReadAt, latestAttentionAt },
-  });
+  const { placement, hasUnseenTimelineEvents: openAtLatest } =
+    useThreadUnreadDividerState({
+      routeThreadId: THREAD_ID,
+      bootstrapQuery: {
+        dataUpdatedAt: bootstrapUpdatedAt,
+        isFetchedAfterMount: false,
+        isSuccess: bootstrapUpdatedAt > 0,
+      },
+      threadQuery: {
+        isFetchedAfterMount: !isOpening,
+        isError: isThreadQueryError,
+      },
+      hasUnseenTimelineEvents,
+      thread: { id: THREAD_ID, lastReadAt, latestAttentionAt },
+    });
   return (
     <ThreadTimelinePane
       footer={<div>Composer</div>}
@@ -121,10 +132,7 @@ function OpenThread({
       stoppingAnchorAt={0}
       activeThinking={null}
       contextBoundarySeq={null}
-      hasUnseenTimelineEvents={shouldOpenThreadAtLatest({
-        hasUnseenTimelineEvents,
-        hasUnseenUpdatesOnOpen,
-      })}
+      hasUnseenTimelineEvents={openAtLatest}
       isThreadTimelinePending={false}
       timelineError={false}
       showOngoingIndicator={false}
@@ -141,12 +149,14 @@ function renderThread(
   lastReadAt = 150,
   hasUnseenTimelineEvents = false,
   isOpening = false,
+  bootstrapUpdatedAt = 0,
 ) {
   const queryClient = new QueryClient();
   const element = (
     unseen: boolean,
     latestAttentionAt = 300,
     opening = isOpening,
+    queryError = false,
   ) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -158,6 +168,8 @@ function renderThread(
             hasUnseenTimelineEvents={unseen}
             latestAttentionAt={latestAttentionAt}
             isOpening={opening}
+            bootstrapUpdatedAt={bootstrapUpdatedAt}
+            isThreadQueryError={queryError}
           />
         </ThreadProviderContext.Provider>
       </MemoryRouter>
@@ -181,6 +193,9 @@ function renderThread(
     catchUp: () => rerender(element(true)),
     receiveAttention: () => rerender(element(false, 400)),
     finishOpeningWithAttention: () => rerender(element(false, 400, false)),
+    changeOpening: (opening: boolean) => rerender(element(false, 300, opening)),
+    receiveOpeningAttention: () => rerender(element(false, 400, true)),
+    failOpening: () => rerender(element(false, 300, true, true)),
   };
 }
 
@@ -309,6 +324,78 @@ describe("opening an unseen timeline", () => {
     resize();
     flushFrames();
     expect(area.scrollTop).toBe(3300);
+  });
+
+  it("never re-arms a settled opening when the bootstrap freshness signal changes", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, changeOpening, receiveOpeningAttention } = renderThread(
+      350,
+      false,
+      true,
+      Date.now(),
+    );
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    act(() => vi.advanceTimersByTime(6000));
+    changeOpening(true);
+    receiveOpeningAttention();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+  });
+
+  it("keeps the restored position when attention follows opening settlement", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, changeOpening, receiveAttention } = renderThread(
+      350,
+      false,
+      true,
+    );
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    changeOpening(false);
+    receiveAttention();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+  });
+
+  it("settles an opening when a refetch errors with cached thread data", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, failOpening, receiveOpeningAttention } = renderThread(
+      350,
+      false,
+      true,
+    );
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    failOpening();
+    receiveOpeningAttention();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
   });
 
   it.each([false, true])(
