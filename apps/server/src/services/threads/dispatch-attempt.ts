@@ -7,6 +7,7 @@ import {
   deleteClaimedQueuedThreadMessageBatchInTransaction,
   getEnvironment,
   getThread,
+  getThreadSpawner,
   isThreadQueueAutoSendPaused,
   listRunningThreads,
   type ClaimedQueuedThreadMessageRow,
@@ -294,7 +295,7 @@ async function runDispatchAttempt(
 
   const execution = await buildExecutionOptions(
     deps,
-    withChildThreadModel(thread, payload),
+    withChildThreadModel(deps, thread, payload),
     args.executionDefaults ?? { threadId: thread.id },
   );
   let resolvedPayload = resolveExecutionIntoPayload(payload, execution);
@@ -666,14 +667,17 @@ class PendingThreadAdmissionLost extends Error {
 type ExecutionRequest = Parameters<typeof buildExecutionOptions>[1];
 
 // A child thread runs every turn on its provider's child model, whatever the
-// caller, a sticky update or the project defaults asked for. Setting it on the
+// caller, a sticky update or the project defaults asked for. A top-level
+// thread another thread spawned counts as a child too. Setting it on the
 // request keeps it inside the normal model validation.
 function withChildThreadModel<TRequest extends ExecutionRequest>(
-  thread: Pick<Thread, "parentThreadId" | "providerId">,
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  thread: Pick<Thread, "id" | "parentThreadId" | "providerId">,
   request: TRequest,
 ): TRequest {
   const model = childThreadModel({
-    parentThreadId: thread.parentThreadId,
+    parentThreadId:
+      thread.parentThreadId ?? getThreadSpawner(deps.db, thread.id),
     providerId: thread.providerId,
   });
   if (model === null) {
@@ -711,7 +715,7 @@ async function admitPendingThread(
   }
   const execution = await buildExecutionOptions(
     deps,
-    withChildThreadModel(args.thread, args.payload),
+    withChildThreadModel(deps, args.thread, args.payload),
     { threadId: args.thread.id },
   );
   const claimedRow = args.claimed?.[0] ?? null;

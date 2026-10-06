@@ -17,6 +17,10 @@ export {
 
 export { countAppliedMigrations, migrate } from "./migrate.js";
 export {
+  getThreadSpawner,
+  recordThreadSpawner,
+} from "./fork-thread-spawners.js";
+export {
   isSqliteForeignKeyConstraint,
   isSqliteUniqueConstraintOnColumns,
 } from "./sqlite-errors.js";

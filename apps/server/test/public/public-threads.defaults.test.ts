@@ -7,6 +7,7 @@ import {
   createProjectSource,
   getProjectExecutionDefaults,
   listThreadsWithPendingInteractionState,
+  recordThreadSpawner,
   setExperiments,
   upsertProjectExecutionDefaults,
 } from "@bb/db";
@@ -364,9 +365,29 @@ describe("public thread default routes", () => {
       model: undefined,
       expected: "claude-opus-5-5",
     },
-  ])(
+    {
+      name: "top-level thread another thread spawned, naming Opus",
+      parent: false,
+      spawnedBy: "parent",
+      model: "claude-opus-5-5",
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      name: "top-level thread naming a spawner that does not exist",
+      parent: false,
+      spawnedBy: "thr_missing",
+      model: "claude-opus-5-5",
+      expected: "claude-opus-5-5",
+    },
+  ] as Array<{
+    name: string;
+    parent: boolean;
+    spawnedBy?: string;
+    model: string | undefined;
+    expected: string;
+  }>)(
     "starts a Claude $name on $expected",
-    async ({ parent, model, expected }) => {
+    async ({ parent, spawnedBy, model, expected }) => {
       await withTestHarness(async (harness) => {
         const { host } = seedHostSession(harness.deps);
         const { project } = seedProjectWithSource(harness.deps, {
@@ -402,6 +423,12 @@ describe("public thread default routes", () => {
             input: [{ type: "text", text: "Review the change" }],
             environment: { type: "reuse", environmentId: environment.id },
             ...(parent ? { parentThreadId: parentThread.id } : {}),
+            ...(spawnedBy === undefined
+              ? {}
+              : {
+                  spawnedByThreadId:
+                    spawnedBy === "parent" ? parentThread.id : spawnedBy,
+                }),
           }),
         });
 
@@ -423,9 +450,20 @@ describe("public thread default routes", () => {
   it.each([
     { name: "child", parent: true, expected: "claude-sonnet-5-5" },
     { name: "top-level thread", parent: false, expected: "claude-opus-5-5" },
-  ])(
+    {
+      name: "top-level thread another thread spawned",
+      parent: false,
+      spawned: true,
+      expected: "claude-sonnet-5-5",
+    },
+  ] as Array<{
+    name: string;
+    parent: boolean;
+    spawned?: boolean;
+    expected: string;
+  }>)(
     "runs a Claude $name's follow-up naming Opus on $expected",
-    async ({ parent, expected }) => {
+    async ({ parent, spawned, expected }) => {
       await withTestHarness(async (harness) => {
         const { host } = seedHostSession(harness.deps);
         const { project } = seedProjectWithSource(harness.deps, {
@@ -448,6 +486,12 @@ describe("public thread default routes", () => {
           parentThreadId: parent ? parentThread.id : null,
           status: "idle",
         });
+        if (spawned) {
+          recordThreadSpawner(harness.db, {
+            threadId: thread.id,
+            spawnedByThreadId: parentThread.id,
+          });
+        }
         seedThreadRuntimeState(harness.deps, {
           threadId: thread.id,
           environmentId: environment.id,

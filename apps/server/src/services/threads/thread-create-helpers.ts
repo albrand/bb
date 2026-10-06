@@ -6,6 +6,7 @@ import {
   getProject,
   getThread,
   isSqliteForeignKeyConstraint,
+  recordThreadSpawner,
 } from "@bb/db";
 import type { DbNotifier } from "@bb/db";
 import type { HostDaemonCommand } from "@bb/host-daemon-contract";
@@ -124,6 +125,14 @@ export function createThreadRecord(
       status: "pending",
       startupContext: args.startupContext,
     });
+    const spawnedByThreadId = args.request.spawnedByThreadId;
+    if (
+      spawnedByThreadId !== undefined &&
+      spawnedByThreadId !== thread.id &&
+      getThread(deps.db, spawnedByThreadId) !== null
+    ) {
+      recordThreadSpawner(deps.db, { threadId: thread.id, spawnedByThreadId });
+    }
     emitPluginThreadCreated(thread);
     return thread;
   } catch (error) {

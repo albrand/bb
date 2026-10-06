@@ -109,6 +109,9 @@ export const createThreadRequestSchema = z
     executionInputSources: createExecutionInputSourcesSchema.optional(),
     environment: createThreadEnvironmentArgsSchema,
     parentThreadId: z.string().min(1).optional(),
+    // The thread an agent spawned this one from (the CLI sends BB_THREAD_ID),
+    // recorded even when it is not the parent: such a thread is a child agent.
+    spawnedByThreadId: z.string().min(1).optional(),
     sectionId: z.string().min(1).nullable().optional(),
     pinned: z.boolean().optional(),
     sourceThreadId: z.string().min(1).optional(),

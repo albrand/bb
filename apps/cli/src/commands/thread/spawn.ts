@@ -559,6 +559,9 @@ export function registerSpawnCommand(
           parentSelf: opts.parentSelf,
           parentThread: opts.parentThread,
         });
+        // Run from inside a thread, the spawn is an agent's: record who made it
+        // so the server treats an unparented thread as that thread's child.
+        const spawnedByThreadId = resolveContextThreadId();
         if (opts.originKind !== undefined && opts.originKind !== "fork") {
           throw new Error("--origin-kind must be fork.");
         }
@@ -613,6 +616,9 @@ export function registerSpawnCommand(
             startedOnBehalfOf: null,
             originKind: opts.originKind ?? null,
             ...(parentThreadId ? { parentThreadId } : {}),
+            ...(spawnedByThreadId && !parentThreadId
+              ? { spawnedByThreadId }
+              : {}),
             ...(opts.lifecycleOwnerThread !== undefined
               ? { lifecycleOwnerThreadId: opts.lifecycleOwnerThread }
               : {}),
