@@ -10,6 +10,7 @@ interface ThreadUnreadDividerThreadState {
 interface ThreadUnreadDividerSnapshot {
   attentionAt: number;
   hasUnseenUpdatesOnOpen: boolean;
+  isOpening: boolean;
   placement: ThreadTimelineUnreadDividerPlacement | null;
   threadId: string;
 }
@@ -30,6 +31,7 @@ interface IsThreadUnreadArgs {
 }
 
 interface UseThreadUnreadDividerStateArgs {
+  isOpening: boolean;
   routeThreadId: string | undefined;
   thread: ThreadUnreadDividerThreadState | undefined;
 }
@@ -38,6 +40,16 @@ const NO_UNREAD_DIVIDER_STATE: ThreadUnreadDividerState = {
   hasUnseenUpdatesOnOpen: false,
   placement: null,
 };
+
+export function shouldOpenThreadAtLatest({
+  hasUnseenTimelineEvents,
+  hasUnseenUpdatesOnOpen,
+}: {
+  hasUnseenTimelineEvents: boolean;
+  hasUnseenUpdatesOnOpen: boolean;
+}): boolean {
+  return hasUnseenTimelineEvents || hasUnseenUpdatesOnOpen;
+}
 
 function shouldTrackThreadUnreadDivider({
   routeThreadId,
@@ -73,6 +85,7 @@ function buildUnreadDividerPlacement(
 }
 
 export function useThreadUnreadDividerState({
+  isOpening,
   routeThreadId,
   thread,
 }: UseThreadUnreadDividerStateArgs): ThreadUnreadDividerState {
@@ -112,11 +125,14 @@ export function useThreadUnreadDividerState({
           return {
             attentionAt: threadLatestAttentionAt,
             hasUnseenUpdatesOnOpen: currentSnapshot.hasUnseenUpdatesOnOpen,
+            isOpening,
             placement: { kind: "before-first" },
             threadId,
           };
         }
-        return currentSnapshot;
+        return currentSnapshot.isOpening === isOpening
+          ? currentSnapshot
+          : { ...currentSnapshot, isOpening };
       }
 
       const placement = buildUnreadDividerPlacement(threadState);
@@ -124,13 +140,21 @@ export function useThreadUnreadDividerState({
         attentionAt: threadLatestAttentionAt,
         hasUnseenUpdatesOnOpen:
           currentSnapshot?.threadId === threadId
-            ? currentSnapshot.hasUnseenUpdatesOnOpen
+            ? currentSnapshot.hasUnseenUpdatesOnOpen ||
+              (currentSnapshot.isOpening && placement !== null)
             : placement !== null,
+        isOpening,
         placement,
         threadId,
       };
     });
-  }, [routeThreadId, threadId, threadLastReadAt, threadLatestAttentionAt]);
+  }, [
+    isOpening,
+    routeThreadId,
+    threadId,
+    threadLastReadAt,
+    threadLatestAttentionAt,
+  ]);
 
   if (
     !shouldTrackThreadUnreadDivider({
@@ -151,7 +175,12 @@ export function useThreadUnreadDividerState({
   return {
     hasUnseenUpdatesOnOpen:
       snapshot !== null && snapshot.threadId === threadId
-        ? snapshot.hasUnseenUpdatesOnOpen
+        ? snapshot.hasUnseenUpdatesOnOpen ||
+          (snapshot.isOpening &&
+            isThreadUnread({
+              lastReadAt: threadLastReadAt,
+              latestAttentionAt: threadLatestAttentionAt,
+            }))
         : isThreadUnread({
             lastReadAt: threadLastReadAt,
             latestAttentionAt: threadLatestAttentionAt,

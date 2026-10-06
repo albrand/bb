@@ -261,7 +261,10 @@ import type {
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
 import { useThreadGitActions } from "./useThreadGitActions";
 import { useThreadReadTracking } from "@/hooks/useThreadReadTracking";
-import { useThreadUnreadDividerState } from "./useThreadUnreadDividerState";
+import {
+  shouldOpenThreadAtLatest,
+  useThreadUnreadDividerState,
+} from "./useThreadUnreadDividerState";
 import {
   buildTerminalSyncedSecondaryFileTabs,
   syncTerminalTabsInFixedPanelState,
@@ -539,6 +542,7 @@ function ThreadDetailViewInternal(
     threadDetailBootstrapQuery.isSuccess || threadDetailBootstrapQuery.isError;
   const {
     data: queriedThread,
+    isFetchedAfterMount,
     isFetching,
     isLoadingError,
     error,
@@ -679,6 +683,10 @@ function ThreadDetailViewInternal(
   const hasPendingInteraction =
     getLatestPendingInteraction(pendingInteractions) !== null;
   const unreadDividerState = useThreadUnreadDividerState({
+    isOpening:
+      !didThreadDetailBootstrapRefreshAfterMount(threadDetailBootstrapQuery) &&
+      !isFetchedAfterMount &&
+      !isLoadingError,
     routeThreadId: threadId,
     thread,
   });
@@ -3072,9 +3080,11 @@ function ThreadDetailViewInternal(
               canSpawnChild: thread.canSpawnChild,
               contextBoundarySeq,
               hasOlderTimelineRows,
-              hasUnseenTimelineEvents:
-                hasUnseenTimelineEvents ||
-                unreadDividerState.hasUnseenUpdatesOnOpen,
+              hasUnseenTimelineEvents: shouldOpenThreadAtLatest({
+                hasUnseenTimelineEvents,
+                hasUnseenUpdatesOnOpen:
+                  unreadDividerState.hasUnseenUpdatesOnOpen,
+              }),
               hostConnectionNotice,
               isCatchingUpTimeline,
               isLoadingOlderTimelineRows,

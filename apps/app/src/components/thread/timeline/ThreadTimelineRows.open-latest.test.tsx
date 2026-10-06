@@ -5,13 +5,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getDefaultStore } from "jotai";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EmbeddedThreadChat } from "@/components/thread/embedded-chat";
 import { threadTimelineScrollAnchorAtomFamily } from "@/lib/thread-timeline-scroll-anchor";
 import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
-import { useThreadUnreadDividerState } from "@/views/thread-detail/useThreadUnreadDividerState";
+import {
+  shouldOpenThreadAtLatest,
+  useThreadUnreadDividerState,
+} from "@/views/thread-detail/useThreadUnreadDividerState";
+import { ThreadTimelinePane } from "@/views/thread-detail/ThreadTimelinePane";
 import { ThreadProviderContext } from "../thread-provider-context";
 
 const THREAD_ID = "thr_main";
+vi.mock("@/components/thread/toc/ThreadTableOfContents", () => ({
+  ThreadTableOfContents: () => null,
+}));
 const rows = [100, 200, 300].map((seq) =>
   conversationRow({
     id: `answer-${seq}`,
@@ -91,40 +97,57 @@ function OpenThread({
   lastReadAt,
   hasUnseenTimelineEvents,
   latestAttentionAt = 300,
+  isOpening = false,
 }: {
   lastReadAt: number;
   hasUnseenTimelineEvents: boolean;
   latestAttentionAt?: number;
+  isOpening?: boolean;
 }) {
   const { placement, hasUnseenUpdatesOnOpen } = useThreadUnreadDividerState({
     routeThreadId: THREAD_ID,
+    isOpening,
     thread: { id: THREAD_ID, lastReadAt, latestAttentionAt },
   });
   return (
-    <EmbeddedThreadChat
-      variant="hosted-footer"
+    <ThreadTimelinePane
       footer={<div>Composer</div>}
-      surface={{
-        activeThinking: null,
-        contextBoundarySeq: null,
-        hasUnseenTimelineEvents:
-          hasUnseenTimelineEvents || hasUnseenUpdatesOnOpen,
-        isThreadTimelinePending: false,
-        timelineError: false,
-        showOngoingIndicator: false,
-        threadId: THREAD_ID,
-        threadRuntimeDisplayStatus: "idle",
-        workspaceRootPath: undefined,
-        timelineRows: rows,
-        unreadDividerPlacement: placement,
-      }}
+      canSpawnChild={false}
+      hasOlderTimelineRows={false}
+      isLoadingOlderTimelineRows={false}
+      isStopping={false}
+      onLoadOlderRows={() => undefined}
+      resolveMentionLink={() => null}
+      stoppingAnchorAt={0}
+      activeThinking={null}
+      contextBoundarySeq={null}
+      hasUnseenTimelineEvents={shouldOpenThreadAtLatest({
+        hasUnseenTimelineEvents,
+        hasUnseenUpdatesOnOpen,
+      })}
+      isThreadTimelinePending={false}
+      timelineError={false}
+      showOngoingIndicator={false}
+      threadId={THREAD_ID}
+      threadRuntimeDisplayStatus="idle"
+      workspaceRootPath={undefined}
+      timelineRows={rows}
+      unreadDividerPlacement={placement}
     />
   );
 }
 
-function renderThread(lastReadAt = 150, hasUnseenTimelineEvents = false) {
+function renderThread(
+  lastReadAt = 150,
+  hasUnseenTimelineEvents = false,
+  isOpening = false,
+) {
   const queryClient = new QueryClient();
-  const element = (unseen: boolean, latestAttentionAt = 300) => (
+  const element = (
+    unseen: boolean,
+    latestAttentionAt = 300,
+    opening = isOpening,
+  ) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <ThreadProviderContext.Provider
@@ -134,6 +157,7 @@ function renderThread(lastReadAt = 150, hasUnseenTimelineEvents = false) {
             lastReadAt={lastReadAt}
             hasUnseenTimelineEvents={unseen}
             latestAttentionAt={latestAttentionAt}
+            isOpening={opening}
           />
         </ThreadProviderContext.Provider>
       </MemoryRouter>
@@ -156,6 +180,7 @@ function renderThread(lastReadAt = 150, hasUnseenTimelineEvents = false) {
     area,
     catchUp: () => rerender(element(true)),
     receiveAttention: () => rerender(element(false, 400)),
+    finishOpeningWithAttention: () => rerender(element(false, 400, false)),
   };
 }
 
@@ -186,7 +211,7 @@ describe("opening an unseen timeline", () => {
     expect(area.scrollTop).toBe(3300);
   });
 
-  it.each(["wheel", "touch", "keyboard"])(
+  it.each(["wheel", "touch", "keyboard", "pointer"])(
     "leaves deliberate upward %s scrolling alone while unseen rows settle",
     (input) => {
       const { area } = renderThread();
@@ -194,8 +219,10 @@ describe("opening an unseen timeline", () => {
       if (input === "wheel") fireEvent.wheel(area, { deltaY: -500 });
       if (input === "touch") fireEvent.touchMove(area);
       if (input === "keyboard") fireEvent.keyDown(area, { key: "ArrowUp" });
+      if (input === "pointer") fireEvent.pointerDown(area);
       area.scrollTop = 200;
       fireEvent.scroll(area);
+      if (input === "pointer") fireEvent.pointerUp(window);
       act(() => vi.advanceTimersByTime(1));
       height += 600;
       resize();
@@ -263,6 +290,25 @@ describe("opening an unseen timeline", () => {
     resize();
     flushFrames();
     expect(area.scrollTop).toBe(200);
+  });
+
+  it("catches unseen attention from fresh metadata after a cached seen placeholder", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, finishOpeningWithAttention } = renderThread(350, false, true);
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    finishOpeningWithAttention();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
   });
 
   it.each([false, true])(
