@@ -99,8 +99,11 @@ the same Claude or Codex login as `add --login`, and the matching
 keeping its ID, label, priority, enabled state, and conversation choices. bb
 refuses the sign-in, and leaves the account unchanged, when it belongs to a
 different Claude account (account UUID, else email) or ChatGPT account, or when
-neither login carries an identity it can compare. It does not compare Claude
-organizations, which the pool does not store. API key
+neither login carries an identity it can compare. It also refuses a Claude
+sign-in from a different organization when both organizations are known. bb
+learns a Claude subscription's organization from its profile when it signs in
+and when usage refreshes, and account JSON reports it as `organizationUuid`
+(`null` until known). API key
 accounts cannot sign in again. The RPCs are `login.start` and
 `codexLogin.start` with `{accountId}` instead of `null`.
 `bb pool account local` (RPC `local.logins`) lists the bb server host's own
@@ -170,8 +173,12 @@ sign-in expired shows Sign in again instead of the switch. Its menu holds Usage
 details, Refresh usage, Set priority, Sign in again, and Remove, which asks for
 confirmation first. Below the pool, On this Mac lists `account local`.
 Records that share a login fold into one subscription: Claude records with the
-same email and plan, and Codex records with the same email and ChatGPT
-account. The healthiest record represents the subscription in settings, in
+same email (or account UUID when no email is stored) and organization, and
+Codex records with the same email and ChatGPT account. A plan change never
+splits a subscription. A Claude record whose organization is not known yet,
+such as one whose sign-in expired, joins its login's subscription; when that
+login has several known organizations, it joins the one with its plan. The
+healthiest record represents the subscription in settings, in
 the provider usage sources, and in the Subscription selector. The selector
 still shows a folded record while a conversation is set to it. The other records
 stay in the pool unchanged and still appear in `account list`, `status`, and

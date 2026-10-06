@@ -36,6 +36,7 @@ export interface ClaudeOAuthAccount {
   label: string;
   email: string | null;
   accountUuid: string | null;
+  organizationUuid: string | null;
   subscriptionType: string | null;
   rateLimitTier: string | null;
   accessToken: string;
@@ -220,6 +221,7 @@ export class ClaudeOAuthLogin {
         "Claude account",
       email,
       accountUuid: profile.account.uuid ?? null,
+      organizationUuid: profile.organization?.uuid ?? null,
       subscriptionType: plan.subscriptionType,
       rateLimitTier: plan.rateLimitTier,
       accessToken: tokens.access_token,

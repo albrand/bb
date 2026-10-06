@@ -81,8 +81,7 @@ import {
 import { blockingResetAt } from "./src/quota.js";
 import {
   foldSubscriptions,
-  subscriptionKey,
-  subscriptionRepresentatives,
+  subscriptionRepresentative,
 } from "./src/subscriptions.js";
 import { SubscriptionPicker } from "./subscription-picker.js";
 import {
@@ -321,7 +320,7 @@ function secondaryEmail(account: AccountSummary): string | null {
 
 function SettingsBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="shrink-0 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground">
+    <span className="shrink-0 whitespace-nowrap rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground">
       {children}
     </span>
   );
@@ -449,6 +448,7 @@ function SubscriptionRow({
               type="button"
               size="sm"
               className="h-7 pointer-coarse:h-10"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={commit}
             >
               Save
@@ -458,6 +458,7 @@ function SubscriptionRow({
               size="sm"
               variant="ghost"
               className="h-7 pointer-coarse:h-10"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={cancel}
             >
               Cancel
@@ -488,7 +489,7 @@ function SubscriptionRow({
               />
             </button>
             {plan === null ? null : (
-              <span className="mt-0.5">
+              <span className="mt-0.5 shrink-0">
                 <SettingsBadge>{plan}</SettingsBadge>
               </span>
             )}
@@ -523,6 +524,7 @@ function SubscriptionRow({
           size="sm"
           variant="outline"
           disabled={pending}
+          aria-label={`Sign in again to ${account.label}`}
           className="col-start-2 row-start-3 mt-1.5 justify-self-start pointer-coarse:h-9 @[40rem]:col-start-4 @[40rem]:row-span-full @[40rem]:row-start-1 @[40rem]:mt-0 @[40rem]:justify-self-end"
           onClick={() => onAction("sign-in")}
         >
@@ -642,7 +644,7 @@ function LocalLoginRow({
           {login.displayName}
         </span>
         {login.planLabel === null ? null : (
-          <span className="mt-0.5">
+          <span className="mt-0.5 shrink-0">
             <SettingsBadge>{login.planLabel}</SettingsBadge>
           </span>
         )}
@@ -1140,12 +1142,10 @@ function AccountPoolSettings() {
     };
   }, [accountLabel, codexStep, loginDone, refresh, rpc]);
   const accounts = status?.accounts ?? [];
-  const nextRecord = accounts.find((account) => account.id === nextAccountId);
   const nextSubscriptionId =
-    nextRecord === undefined
+    nextAccountId === null
       ? null
-      : (subscriptionRepresentatives(accounts).get(subscriptionKey(nextRecord))
-          ?.id ?? null);
+      : (subscriptionRepresentative(accounts, nextAccountId)?.id ?? null);
   const selectedAccount =
     dialog === null || dialog.kind === "api-key" || dialog.accountId === null
       ? null

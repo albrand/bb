@@ -315,6 +315,7 @@ export const accountSummarySchema = accountSchema.extend({
   inFlight: z.number().int().nonnegative(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
   signInExpired: z.boolean(),
+  organizationUuid: z.string().uuid().nullable(),
 });
 
 export type AccountSummary = z.infer<typeof accountSummarySchema>;

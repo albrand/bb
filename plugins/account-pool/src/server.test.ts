@@ -8766,6 +8766,49 @@ describe("Account Pool subscription sign-in repair", () => {
     ]);
   });
 
+  it("keeps two organizations of one login apart and refuses a sign-in again from the other organization", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const team = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const profile = {
+      current: {
+        ...SHARED_LOGIN,
+        organization: { uuid: personal, name: "Personal" },
+      } as object,
+    };
+    const pool = await claudeLoginHost(profile);
+    const first = await pool.signIn(null, "Personal seat");
+    profile.current = {
+      ...SHARED_LOGIN,
+      organization: { uuid: team, name: "Team" },
+    };
+    const second = await pool.signIn(null, "Team seat");
+    expect(
+      (await pool.list()).map(({ id, organizationUuid }) => ({
+        id,
+        organizationUuid,
+      })),
+    ).toEqual([
+      { id: first.id, organizationUuid: personal },
+      { id: second.id, organizationUuid: team },
+    ]);
+    expect(
+      usageResourceListSchema
+        .parse(await pool.host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual([first.id, second.id]);
+    pool.expire(first.id);
+    const before = await pool.secretOf(first.id);
+    await expect(pool.signIn({ accountId: first.id })).rejects.toThrow(
+      "That code belongs to a different Claude organization. Sign in to the organization behind Personal seat; it was not changed.",
+    );
+    expect(await pool.secretOf(first.id)).toEqual(before);
+    expect((await pool.list())[0]).toMatchObject({
+      id: first.id,
+      organizationUuid: personal,
+      signInExpired: true,
+    });
+  });
+
   it("signs in again to an expired Claude subscription in place", async () => {
     const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
     const before = await pool.secretOf(pool.previous.id);

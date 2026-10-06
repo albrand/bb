@@ -190,6 +190,9 @@ export function createClaudeAdapter(options: {
       } else if (accountUuid !== account.accountUuid) {
         return;
       }
+      const organizationUuid = parsed.data.organization?.uuid ?? null;
+      if (organizationUuid !== null)
+        await context.accounts.setOrganization(account.id, organizationUuid);
       const reported = claudePlanFromProfile(parsed.data);
       const plan = {
         subscriptionType: reported.subscriptionType ?? account.subscriptionType,

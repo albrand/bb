@@ -453,6 +453,7 @@ export class AccountPoolHub {
     const accounts = (await this.options.accounts.list()).sort(
       (left, right) => left.priority - right.priority,
     );
+    const organizations = await this.options.accounts.organizations();
     return {
       route: ROUTE,
       enabledAccountCount: accounts.filter((account) => account.enabled).length,
@@ -474,6 +475,7 @@ export class AccountPoolHub {
           inFlight: this.inFlightByAccount.get(account.id) ?? 0,
           status: accountStatus(account, quota, settings.switchThreshold, now),
           signInExpired: isSignInRejection(quota.error),
+          organizationUuid: organizations.get(account.id) ?? null,
         };
       }),
     };

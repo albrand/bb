@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { foldSubscriptions, subscriptionKey } from "./subscriptions.js";
+import {
+  foldSubscriptions,
+  subscriptionRepresentative,
+} from "./subscriptions.js";
 
 type Record = Parameters<typeof foldSubscriptions>[0][number];
+
+const PERSONAL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const TEAM = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function record(overrides: Partial<Record> & Pick<Record, "id">): Record {
   return {
     provider: "claude",
     email: "person@example.com",
+    accountUuid: "11111111-1111-4111-8111-111111111111",
+    organizationUuid: null,
     subscriptionType: "max",
     rateLimitTier: "default_claude_max_20x",
     signInExpired: false,
@@ -15,6 +23,10 @@ function record(overrides: Partial<Record> & Pick<Record, "id">): Record {
     active: false,
     ...overrides,
   };
+}
+
+function ids(accounts: Record[]): string[] {
+  return foldSubscriptions(accounts).map(({ id }) => id);
 }
 
 describe("subscription folding", () => {
@@ -27,62 +39,104 @@ describe("subscription folding", () => {
       status: "disabled",
     });
     const healthy = record({ id: "healthy", status: "exhausted" });
-    const other = record({ id: "other", email: "other@example.com" });
+    const other = record({
+      id: "other",
+      email: "other@example.com",
+      accountUuid: "22222222-2222-4222-8222-222222222222",
+    });
+    expect(ids([expired, healthy, other])).toEqual(["healthy", "other"]);
     expect(
-      foldSubscriptions([expired, healthy, other]).map(({ id }) => id),
-    ).toEqual(["healthy", "other"]);
+      subscriptionRepresentative([expired, healthy, other], "expired")?.id,
+    ).toBe("healthy");
   });
 
   it("prefers the active record when both are equally healthy", () => {
     expect(
-      foldSubscriptions([
-        record({ id: "first" }),
-        record({ id: "second", active: true }),
-      ]).map(({ id }) => id),
+      ids([record({ id: "first" }), record({ id: "second", active: true })]),
     ).toEqual(["second"]);
-    expect(
-      foldSubscriptions([
-        record({ id: "first" }),
-        record({ id: "second" }),
-      ]).map(({ id }) => id),
-    ).toEqual(["first"]);
+    expect(ids([record({ id: "first" }), record({ id: "second" })])).toEqual([
+      "first",
+    ]);
   });
 
-  it("never folds records without an email, across providers, plans, or ChatGPT workspaces", () => {
+  it("keeps one login folded after its plan changes or goes unreported on one record", () => {
+    const stale = record({
+      id: "stale",
+      rateLimitTier: "default_claude_max_5x",
+      signInExpired: true,
+      enabled: false,
+      status: "disabled",
+    });
+    const refreshed = record({ id: "refreshed", organizationUuid: PERSONAL });
+    const unreported = record({
+      id: "unreported",
+      rateLimitTier: null,
+      subscriptionType: null,
+    });
+    expect(ids([stale, refreshed, unreported])).toEqual(["refreshed"]);
+  });
+
+  it("separates two organizations on one email and folds plan changes inside one organization", () => {
     expect(
-      foldSubscriptions([
-        record({ id: "key-one", email: null }),
-        record({ id: "key-two", email: null }),
-        record({ id: "five-x", rateLimitTier: "default_claude_max_5x" }),
-        record({ id: "codex", provider: "codex", codexAccountId: "team" }),
+      ids([
+        record({ id: "personal", organizationUuid: PERSONAL }),
+        record({ id: "team", organizationUuid: TEAM }),
         record({
-          id: "codex-personal",
-          provider: "codex",
-          codexAccountId: "personal",
+          id: "personal-upgraded",
+          organizationUuid: PERSONAL,
+          rateLimitTier: "default_claude_max_5x",
+          status: "exhausted",
         }),
-        record({ id: "claude" }),
-      ]).map(({ id }) => id),
-    ).toEqual([
-      "key-one",
-      "key-two",
-      "five-x",
-      "codex",
-      "codex-personal",
-      "claude",
-    ]);
+      ]),
+    ).toEqual(["personal", "team"]);
+  });
+
+  it("files a record without an organization under the organization with its plan", () => {
+    const personal = record({
+      id: "personal",
+      organizationUuid: PERSONAL,
+      rateLimitTier: "default_claude_max_5x",
+    });
+    const team = record({ id: "team", organizationUuid: TEAM });
+    const legacy = record({
+      id: "legacy",
+      rateLimitTier: "default_claude_max_5x",
+      active: true,
+    });
+    expect(ids([personal, team, legacy])).toEqual(["team", "legacy"]);
     expect(
-      subscriptionKey(
-        record({ id: "codex", provider: "codex", codexAccountId: "team" }),
-      ),
-    ).toBe(
-      subscriptionKey(
+      subscriptionRepresentative([personal, team, legacy], "personal")?.id,
+    ).toBe("legacy");
+  });
+
+  it("folds by account UUID without an email and never folds records with neither", () => {
+    expect(
+      ids([
+        record({ id: "uuid-one", email: null }),
+        record({ id: "uuid-two", email: null }),
+        record({ id: "key-one", email: null, accountUuid: null }),
+        record({ id: "key-two", email: null, accountUuid: null }),
+      ]),
+    ).toEqual(["uuid-one", "key-one", "key-two"]);
+  });
+
+  it("folds Codex records by email and ChatGPT workspace only", () => {
+    expect(
+      ids([
+        record({ id: "team", provider: "codex", codexAccountId: "team" }),
         record({
-          id: "codex-again",
+          id: "team-again",
           provider: "codex",
           email: "PERSON@example.com",
           codexAccountId: "team",
         }),
-      ),
-    );
+        record({
+          id: "personal",
+          provider: "codex",
+          codexAccountId: "personal",
+        }),
+        record({ id: "claude" }),
+      ]),
+    ).toEqual(["team", "personal", "claude"]);
   });
 });

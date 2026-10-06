@@ -105,6 +105,7 @@ function account(overrides: Partial<AccountSummary> = {}): AccountSummary {
     inFlight: 0,
     status: "ready",
     signInExpired: false,
+    organizationUuid: null,
     ...overrides,
   };
 }
@@ -165,11 +166,13 @@ describe("Subscription picker", () => {
       label: "Max 20x",
       rateLimitTier: "default_claude_max_20x",
       sevenDayUtilization: 0.98,
+      organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     }),
     account({
       id: "22222222-2222-4222-8222-222222222222",
       label: "Max 5x",
       sevenDayUtilization: 0.05,
+      organizationUuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     }),
     account({
       id: "33333333-3333-4333-8333-333333333333",
@@ -178,7 +181,7 @@ describe("Subscription picker", () => {
     }),
   ];
 
-  it("shows separate statistics for two plans on one email and folds a second record of the same plan", async () => {
+  it("shows separate statistics for two organizations on one email and folds a second record of the same login", async () => {
     const slot = renderSlot(
       { component: Component },
       { providerId: "claude-code" },
@@ -635,8 +638,8 @@ describe("Account Pool settings", () => {
       account({
         id: PREVIOUS_ID,
         label: "Claude Max 20x (previous token, disabled)",
-        email: "gmail@example.com",
-        rateLimitTier: "default_claude_max_20x",
+        email: "Gmail@Example.com",
+        rateLimitTier: "default_claude_max_5x",
         enabled: false,
         status: "disabled",
         signInExpired: true,
@@ -648,6 +651,7 @@ describe("Account Pool settings", () => {
         label: "Claude Max 20x (principal)",
         email: "gmail@example.com",
         rateLimitTier: "default_claude_max_20x",
+        organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         priority: 2,
       }),
       account({
@@ -675,8 +679,14 @@ describe("Account Pool settings", () => {
       slot.queryByText("Claude Max 20x (previous token, disabled)"),
     ).toBeNull();
     expect(slot.queryByText("Sign-in expired")).toBeNull();
-    expect(slot.queryByRole("button", { name: "Sign in again" })).toBeNull();
+    expect(
+      slot.queryByRole("button", { name: /^Sign in again to / }),
+    ).toBeNull();
     expect(slot.getAllByText("Max 20x")).toHaveLength(2);
+    for (const badge of slot.getAllByText("Max 20x")) {
+      expect(badge.className).toContain("whitespace-nowrap");
+      expect(badge.parentElement?.className).toContain("shrink-0");
+    }
   });
 
   it("keeps the folded record in place when reordering the visible subscriptions", async () => {
@@ -904,6 +914,24 @@ describe("Account Pool settings", () => {
     fireEvent.click(
       slot.getByRole("button", { name: "Rename person@example.com" }),
     );
+    fireEvent.change(
+      await slot.findByRole("textbox", { name: "Subscription name" }),
+      { target: { value: "Also ignored" } },
+    );
+    expect(
+      fireEvent.mouseDown(slot.getByRole("button", { name: "Save" })),
+    ).toBe(false);
+    const cancel = slot.getByRole("button", { name: "Cancel" });
+    expect(fireEvent.mouseDown(cancel)).toBe(false);
+    fireEvent.click(cancel);
+    expect(slot.queryByRole("textbox", { name: "Subscription name" })).toBe(
+      null,
+    );
+    expect(renames()).toEqual([]);
+
+    fireEvent.click(
+      slot.getByRole("button", { name: "Rename person@example.com" }),
+    );
     const again = await slot.findByRole("textbox", {
       name: "Subscription name",
     });
@@ -957,7 +985,11 @@ describe("Account Pool settings", () => {
     expect(
       slot.queryByRole("switch", { name: "Use Claude Max 20x (gmail)" }),
     ).toBeNull();
-    fireEvent.click(slot.getByRole("button", { name: "Sign in again" }));
+    fireEvent.click(
+      slot.getByRole("button", {
+        name: "Sign in again to Claude Max 20x (gmail)",
+      }),
+    );
     const dialog = await slot.findByRole("dialog", { name: "Sign in again" });
     expect(slot.rpcCalls).toContainEqual({
       method: "login.start",
@@ -1021,7 +1053,9 @@ describe("Account Pool settings", () => {
         );
       },
     });
-    fireEvent.click(await slot.findByRole("button", { name: "Sign in again" }));
+    fireEvent.click(
+      await slot.findByRole("button", { name: /^Sign in again to / }),
+    );
     const dialog = await slot.findByRole("dialog", { name: "Sign in again" });
     fireEvent.change(
       await within(dialog).findByLabelText("Claude authorization code"),
@@ -1068,7 +1102,7 @@ describe("Account Pool settings", () => {
         input: { id: expired.id },
       }),
     );
-    fireEvent.click(slot.getByRole("button", { name: "Sign in again" }));
+    fireEvent.click(slot.getByRole("button", { name: /^Sign in again to / }));
     const dialog = await slot.findByRole("dialog", { name: "Sign in again" });
     expect(slot.rpcCalls).toContainEqual({
       method: "codexLogin.start",

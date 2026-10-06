@@ -26,8 +26,10 @@ import {
 } from "./contracts.js";
 
 const ACCOUNTS_KEY = "accounts:v1";
+const ORGANIZATIONS_KEY = "organizations:v1";
 const ACCOUNT_LAST_USED_PERSIST_MS = 60 * 1_000;
 const accountsSchema = z.array(accountSchema);
+const organizationsSchema = z.record(z.string(), z.string().uuid());
 const HUB_TOKEN_PREFIX = "hub-token-";
 const HUB_TOKEN_GRACE_MS = 10 * 60 * 1_000;
 const HUB_TOKEN_LAST_USED_PERSIST_MS = 60 * 1_000;
@@ -115,7 +117,28 @@ export class AccountStore {
       if (next.length === accounts.length) return false;
       await this.kv.set(ACCOUNTS_KEY, next);
       await fs.rm(this.accountSecretPath(id), { force: true });
+      const organizations = await this.organizations();
+      if (organizations.delete(id))
+        await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
       return true;
+    });
+  }
+
+  async organizations(): Promise<Map<string, string>> {
+    const value = await this.kv.get(ORGANIZATIONS_KEY);
+    return new Map(
+      Object.entries(
+        value === undefined ? {} : organizationsSchema.parse(value),
+      ),
+    );
+  }
+
+  async setOrganization(id: string, organizationUuid: string): Promise<void> {
+    return this.serialized(async () => {
+      const organizations = await this.organizations();
+      if (organizations.get(id) === organizationUuid) return;
+      organizations.set(id, organizationUuid);
+      await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
     });
   }
 

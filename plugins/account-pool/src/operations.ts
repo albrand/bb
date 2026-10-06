@@ -191,6 +191,11 @@ export class PoolOperations {
         expiresAt: authenticated.expiresAt,
       },
     );
+    if (authenticated.organizationUuid !== null)
+      await this.accounts.setOrganization(
+        account.id,
+        authenticated.organizationUuid,
+      );
     this.onAccountsChanged();
     await this.onAccountEnabled(account.id);
     return account;
@@ -253,6 +258,16 @@ export class PoolOperations {
     label?: string,
   ): Promise<Account> {
     const account = await this.requireReauthorizable(id, "claude");
+    const organizationUuid =
+      (await this.accounts.organizations()).get(account.id) ?? null;
+    if (
+      organizationUuid !== null &&
+      authenticated.organizationUuid !== null &&
+      organizationUuid !== authenticated.organizationUuid
+    )
+      throw new Error(
+        `That code belongs to a different Claude organization. Sign in to the organization behind ${account.label}; it was not changed.`,
+      );
     requireSameLogin(
       account,
       { id: account.accountUuid, email: account.email },
@@ -275,6 +290,7 @@ export class PoolOperations {
         refreshToken: authenticated.refreshToken,
         expiresAt: authenticated.expiresAt,
       },
+      authenticated.organizationUuid,
     );
   }
 
@@ -302,6 +318,7 @@ export class PoolOperations {
         idToken: authenticated.idToken,
         expiresAt: authenticated.expiresAt,
       },
+      null,
     );
     const summary = (await this.list()).find((item) => item.id === updated.id);
     if (summary === undefined)
@@ -323,6 +340,7 @@ export class PoolOperations {
       >
     >,
     secret: AccountSecret,
+    organizationUuid: string | null,
   ): Promise<Account> {
     const updated = await this.accounts.replaceCredentials(
       account.id,
@@ -331,6 +349,8 @@ export class PoolOperations {
     );
     if (updated === null)
       throw new Error("This subscription no longer exists.");
+    if (organizationUuid !== null)
+      await this.accounts.setOrganization(updated.id, organizationUuid);
     this.quotas.put({
       ...this.quotas.get(updated.id),
       error: null,

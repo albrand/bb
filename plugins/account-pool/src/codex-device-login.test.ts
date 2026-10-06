@@ -109,6 +109,7 @@ function summary(account: CodexDeviceAccount): AccountSummary {
     inFlight: 0,
     status: "ready",
     signInExpired: false,
+    organizationUuid: null,
   };
 }
 
