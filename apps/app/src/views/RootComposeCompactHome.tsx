@@ -136,12 +136,12 @@ export function RootComposeCompactHome({
       <div
         ref={composerRef}
         data-testid="root-compose-compact-composer"
-        className="absolute inset-x-0 bottom-0 z-10 max-h-[calc(100%-3.5rem)] overflow-y-auto"
+        className="absolute inset-x-0 bottom-0 z-10 flex max-h-[calc(100%-3.5rem)] flex-col"
       >
         <div ref={composerFadeRef} data-testid="root-compose-compact-fade">
           <OverflowFade placement="above" tone="background" size="lg" />
         </div>
-        <div className="bg-background pb-4">
+        <div className="min-h-0 overflow-y-auto bg-background pb-4">
           <div className={COMPACT_HOME_COLUMN_CLASS}>{composer}</div>
         </div>
       </div>

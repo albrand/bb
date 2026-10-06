@@ -1,7 +1,9 @@
 import { useEffect, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { usePortalScopeProps } from "@bb/shared-ui/lib/portal-scope";
 
 interface ComposerPopupHostProps {
   open: boolean;
@@ -20,6 +22,7 @@ export function ComposerPopupHost(props: ComposerPopupHostProps) {
   const { open, label, interactive, popupRef, composerRef, onClose } = props;
   const compact = useIsCompactViewport();
   const drawer = interactive && compact;
+  const scopeProps = usePortalScopeProps();
 
   useEffect(() => {
     if (!open || drawer) return;
@@ -51,6 +54,11 @@ export function ComposerPopupHost(props: ComposerPopupHostProps) {
       </ResponsiveDrawerShell>
     );
   }
+  if (!interactive) {
+    return open
+      ? createPortal(<div {...scopeProps}>{content}</div>, document.body)
+      : null;
+  }
   return open ? content : null;
 }
 
@@ -63,8 +71,59 @@ function ComposerPopupContent({
   interactive,
   popupKey,
   popupRef,
+  composerRef,
   children,
 }: ComposerPopupHostProps & { drawer: boolean }) {
+  const compact = useIsCompactViewport();
+
+  useEffect(() => {
+    if (interactive || !open) return;
+    const menu = popupRef.current;
+    const composer = composerRef.current;
+    if (!menu || !composer) return;
+    const viewport = window.visualViewport;
+    const position = () => {
+      const anchor = composer.getBoundingClientRect();
+      const left = viewport?.offsetLeft ?? 0;
+      const top = (viewport?.offsetTop ?? 0) + (compact ? 56 : 0) + 8;
+      const right = left + (viewport?.width ?? window.innerWidth) - 8;
+      const bottom =
+        (viewport?.offsetTop ?? 0) +
+        (viewport?.height ?? window.innerHeight) -
+        8;
+      menu.style.left = `${Math.max(left + 8, anchor.left)}px`;
+      menu.style.width = `${Math.max(0, Math.min(anchor.width, right - anchor.left))}px`;
+      menu.style.setProperty(
+        "--promptbox-typeahead-max-height",
+        `${Math.max(0, bottom - top)}px`,
+      );
+      const preferredTop =
+        placement === "top"
+          ? anchor.top - menu.offsetHeight - 8
+          : anchor.bottom + 8;
+      menu.style.top = `${Math.max(top, Math.min(preferredTop, bottom - menu.offsetHeight))}px`;
+      menu.style.visibility = "visible";
+    };
+    position();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(position);
+    observer?.observe(composer);
+    observer?.observe(menu);
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+    };
+  }, [compact, composerRef, interactive, open, placement, popupRef]);
+
   useEffect(() => {
     if (!open || !interactive) return;
     const frame = window.requestAnimationFrame(() => {
@@ -84,10 +143,12 @@ function ComposerPopupContent({
       className={
         drawer
           ? undefined
-          : cn(
-              "absolute -left-px -right-px z-20",
-              placement === "top" ? "bottom-full mb-2" : "top-full mt-2",
-            )
+          : !interactive
+            ? "invisible fixed z-50"
+            : cn(
+                "absolute -left-px -right-px z-20",
+                placement === "top" ? "bottom-full mb-2" : "top-full mt-2",
+              )
       }
     >
       {children}
