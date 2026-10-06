@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { events, listSpendRollupRows, type SpendRollupRow } from "@bb/db";
 import {
   encodeClientTurnRequestIdNumber,
+  summarizeTokenWeather,
   threadScope,
   turnScope,
 } from "@bb/domain";
@@ -135,6 +136,175 @@ describe("daemon event spend rollup", () => {
       expect(totalTokens()).toBe(340);
 
       expect(rollup().map((row) => row.providerId)).toEqual(["codex"]);
+    });
+  });
+
+  it("serves native spend totals after usage events have been pruned", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-pruned-spend",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "codex",
+        status: "active",
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 121,
+        type: "thread/contextWindowUsage/updated",
+        scope: threadScope(),
+        providerThreadId: PROVIDER_THREAD_ID,
+        data: {
+          contextWindowUsage: {
+            usedTokens: 1,
+            modelContextWindow: 2,
+            estimated: false,
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 122,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: {
+          direction: "outbound",
+          requestId: encodeClientTurnRequestIdNumber({ value: 122 }),
+          input: [{ type: "text", text: "seed" }],
+          target: { kind: "new-turn" },
+          execution: {
+            model: "gpt-5-codex",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            serviceTier: "default",
+            source: "client/turn/requested",
+          },
+          initiator: "user",
+          senderThreadId: null,
+          request: { method: "turn/start", params: {} },
+          source: "tell",
+        },
+      });
+      const response = await harness.app.request("/internal/session/events", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          eventGroups: groupHostDaemonEvents([
+            {
+              threadId: thread.id,
+              event: {
+                type: "turn/started",
+                threadId: thread.id,
+                providerThreadId: PROVIDER_THREAD_ID,
+                scope: turnScope(TURN_ID),
+              },
+            },
+            {
+              threadId: thread.id,
+              event: {
+                type: "thread/tokenUsage/updated",
+                threadId: thread.id,
+                providerThreadId: PROVIDER_THREAD_ID,
+                scope: turnScope(TURN_ID),
+                tokenUsage: {
+                  total: breakdown(2_105_922, {}),
+                  last: breakdown(2_105_922, {
+                    cached: 2_100_000,
+                    output: 5_900,
+                  }),
+                  modelContextWindow: 258_400,
+                },
+              },
+            },
+          ]),
+        }),
+      });
+      expect(response.status).toBe(200);
+      harness.db.run(
+        sql`DELETE FROM events WHERE thread_id = ${thread.id}
+            AND type = 'thread/tokenUsage/updated'`,
+      );
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 124,
+        type: "turn/completed",
+        scope: turnScope("pruned-turn"),
+        providerThreadId: PROVIDER_THREAD_ID,
+        data: { status: "completed" },
+      });
+      harness.db.run(
+        sql`UPDATE fork_thread_turn_spend SET model = NULL
+            WHERE thread_id = ${thread.id}`,
+      );
+
+      const summaryResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/spend-summary`,
+      );
+      expect(summaryResponse.status).toBe(200);
+      const summary = (await summaryResponse.json()) as {
+        historyComplete: boolean;
+        providerId: string;
+        total: {
+          inputTokens: number | null;
+          cachedInputTokens: number | null;
+          outputTokens: number | null;
+          reasoningOutputTokens: number | null;
+          totalTokens: number | null;
+        };
+        turns: Array<{
+          turnId: string;
+          model: string | null;
+          inputTokens: number | null;
+          cachedInputTokens: number | null;
+          outputTokens: number | null;
+          reasoningOutputTokens: number | null;
+          totalTokens: number | null;
+        }>;
+      };
+      expect(summary.historyComplete).toBe(false);
+      expect(summary.total).toEqual({
+        inputTokens: 22,
+        cachedInputTokens: 2_100_000,
+        outputTokens: 5_900,
+        reasoningOutputTokens: 0,
+        totalTokens: 2_105_922,
+      });
+      const weather = summarizeTokenWeather({
+        totals: summary.total,
+        turns: summary.turns.map((turn) => ({
+          ...turn,
+          providerId: summary.providerId,
+        })),
+      });
+      expect(weather.totals).toEqual(summary.total);
+      expect(weather.cacheReuseShare).toBeGreaterThan(0.99);
+      expect(weather.weather).toBe("clear");
+      expect(summary.turns).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ turnId: TURN_ID, model: null }),
+          expect.objectContaining({
+            turnId: "pruned-turn",
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          }),
+        ]),
+      );
     });
   });
 
@@ -383,9 +553,9 @@ describe("daemon event spend rollup", () => {
 
       const second = backfillSpend(harness.db);
       expect(second.contributionsApplied).toBe(0);
-      expect(
-        listSpendRollupRows(harness.db, { threadId: thread.id }),
-      ).toEqual<SpendRollupRow[]>(backfilled);
+      expect(listSpendRollupRows(harness.db, { threadId: thread.id })).toEqual<
+        SpendRollupRow[]
+      >(backfilled);
     });
   });
 

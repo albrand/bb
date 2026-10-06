@@ -218,6 +218,28 @@ describe("bb thread show command output", () => {
     stubThreadApi({
       "v1.threads.:id.$get": vi.fn(async () => thread),
       "v1.threads.:id.timeline.$get": timelineGet,
+      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
+        historyComplete: false,
+        providerId: "codex",
+        total: {
+          inputTokens: 22,
+          cachedInputTokens: 2_100_000,
+          outputTokens: 5_900,
+          reasoningOutputTokens: 0,
+          totalTokens: 2_105_922,
+        },
+        turns: [
+          {
+            turnId: "pruned-turn",
+            model: null,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          },
+        ],
+      })),
     });
 
     await runCommand(["thread", "show", thread.id, "--usage"], register);
@@ -237,7 +259,10 @@ describe("bb thread show command output", () => {
       "  History: partial",
     );
     expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
-      "  Rules: stormy at ≥85% context fill",
+      "  Weather: clear · cache reuse 100% · context fill unavailable",
+    );
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
+      "  Rules: overall weather follows durable thread cache reuse",
     );
   });
 
