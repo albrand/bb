@@ -694,7 +694,6 @@ function ThreadDetailViewInternal(
   });
   const {
     checkThreadStorageFileExists,
-    isThreadStorageFilesLoading,
     threadStorageFiles,
     threadStorageFilesError,
   } = useThreadStorageViewer({
