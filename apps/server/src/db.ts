@@ -18,6 +18,7 @@ type InitDbLogger = MigrationWarningLogger &
 interface InitDbOptions {
   dataDir?: string;
   slowQueryThresholdMs?: number | (() => number);
+  slowQueryDiagnosticsEnabled?: () => boolean;
   logger?: InitDbLogger;
 }
 
@@ -30,6 +31,7 @@ export function initDb(
     slowQueryLogger: options.logger,
     slowQueryThresholdMs: options.slowQueryThresholdMs,
     slowQueryWorkLabel: getCurrentEventLoopWorkLabel,
+    slowQueryDiagnosticsEnabled: options.slowQueryDiagnosticsEnabled,
   });
   try {
     if (options.dataDir !== undefined && options.logger !== undefined) {

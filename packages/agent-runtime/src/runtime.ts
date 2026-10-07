@@ -2192,6 +2192,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               proc,
               message: plan,
               resultSchema: threadIdentityResultSchema,
+              timeoutMs: threadCreationRequestTimeoutMs,
               recovery: {
                 providerId,
                 providerThreadId: adapterCommand.providerThreadId,

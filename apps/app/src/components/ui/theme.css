@@ -348,8 +348,7 @@
     }
   }
 
-  @media (max-width: 767px) and (pointer: coarse) {
-    /* The overlay is hidden on coarse phones, so no room is reserved. */
+  @media (hover: none) {
     .bb-sidebar-hover-actions-row:is(:hover, :has(:focus-visible))
       .bb-sidebar-hover-actions-inset,
     .bb-sidebar-hover-actions-row:has(
