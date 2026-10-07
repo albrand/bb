@@ -166,6 +166,7 @@ function resourceProvider(
         }
       : {}),
     id: `${pluginId}:${resource.id}`,
+    accountKey: resource.accountKey ?? null,
     accountLabel: resource.scope.kind === "shared" ? resource.label : null,
     accountPool: resource.accountPool ?? null,
   };

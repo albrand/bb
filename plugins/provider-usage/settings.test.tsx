@@ -1,15 +1,24 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { providerUsageRpcContract } from "./server.js";
 import type { UsageMachine, UsageProvider } from "./usage-schema.js";
 
 afterEach(cleanup);
 
-function account(id: string, providerId = "codex"): UsageProvider {
+const usageInput = (input: unknown) =>
+  providerUsageRpcContract.getUsage.input.parse(input);
+
+function account(
+  id: string,
+  providerId = "codex",
+  accountKey: string | null = null,
+): UsageProvider {
   return {
     id,
     providerId,
+    accountKey,
     accountLabel: `${id}@example.com`,
     displayName: providerId === "codex" ? "Codex" : "Claude Code",
     logoUrl: null,
@@ -32,9 +41,13 @@ function account(id: string, providerId = "codex"): UsageProvider {
     },
   };
 }
-const machine = (id: string, providers: UsageProvider[]): UsageMachine => ({
+const machine = (
+  id: string,
+  providers: UsageProvider[],
+  displayName = id === "source:pool" ? "Account Pooler" : "My machine",
+): UsageMachine => ({
   id,
-  displayName: id === "source:pool" ? "Account Pooler" : "My machine",
+  displayName,
   status: "connected",
   error: null,
   providers,
@@ -60,32 +73,354 @@ it("fetches all providers only in the selected source and keeps grouped accounts
   await waitFor(() =>
     expect(slot.getByLabelText("Reload usage data")).toBeTruthy(),
   );
+  expect(
+    slot.getByRole("button", { name: "Usage source" }).textContent,
+  ).toContain("Combined");
+  expect(slot.getByText("local@example.com")).toBeTruthy();
+  expect(slot.getByText("third@example.com")).toBeTruthy();
+  expect(slot.queryByText("first@example.com")).toBeNull();
+  fireEvent.pointerDown(slot.getByRole("button", { name: "Usage source" }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: /Account Pooler/ }),
+  );
+  await slot.findByText("first@example.com");
   expect(slot.getAllByRole("heading", { name: "Codex" })).toHaveLength(2);
   expect(slot.getByText("first@example.com")).toBeTruthy();
   expect(slot.getByText("second@example.com")).toBeTruthy();
   expect(slot.queryByText("local@example.com")).toBeNull();
   expect(slot.getAllByText(/Resets in/)).toHaveLength(3);
-  expect(slot.rpcCalls.map((call) => call.input)).toEqual([
-    { force: false, machineIds: null, providerId: null, maxAgeMs: 60_000 },
-    {
-      force: false,
-      machineIds: ["source:pool"],
-      providerId: "codex",
-      maxAgeMs: 60_000,
-    },
-    {
-      force: false,
-      machineIds: ["source:pool"],
-      providerId: "claude-code",
-      maxAgeMs: 60_000,
-    },
-  ]);
+  expect(slot.rpcCalls[0]?.input).toEqual({
+    force: false,
+    machineIds: null,
+    providerId: null,
+    maxAgeMs: 60_000,
+  });
   fireEvent.click(slot.getByLabelText("Reload usage data"));
-  await waitFor(() => expect(slot.rpcCalls).toHaveLength(6));
-  expect(slot.rpcCalls[4]?.input).toMatchObject({
+  await waitFor(() =>
+    expect(slot.rpcCalls.some((call) => usageInput(call.input).force)).toBe(
+      true,
+    ),
+  );
+  expect(
+    slot.rpcCalls.some((call) => {
+      const input = usageInput(call.input);
+      return input.force && input.machineIds?.includes("source:pool");
+    }),
+  ).toBe(true);
+  expect(
+    slot.rpcCalls.some((call) => {
+      const input = usageInput(call.input);
+      return input.force && input.machineIds?.includes("host");
+    }),
+  ).toBe(false);
+  expect(slot.rpcCalls.at(-1)?.input).toMatchObject({
     force: true,
     machineIds: ["source:pool"],
   });
+});
+
+it("shows pooled Claude accounts and host Codex in the default combined view", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const hostClaude = claudeAccount(
+    "host-claude",
+    "anthropic:account:alexandre",
+  );
+  hostClaude.accountLabel = "alexandre@example.com";
+  if (hostClaude.usage?.status === "ok")
+    hostClaude.usage.accountEmail = "alexandre@example.com";
+  const principal = claudeAccount("principal", "anthropic:account:principal");
+  principal.accountLabel = "principal@example.com";
+  if (principal.usage?.status === "ok")
+    principal.usage.accountEmail = "principal@example.com";
+  const alexandre = claudeAccount("alexandre", "anthropic:account:alexandre");
+  alexandre.accountLabel = "alexandre@example.com";
+  if (alexandre.usage?.status === "ok")
+    alexandre.usage.accountEmail = "alexandre@example.com";
+  const result = {
+    machines: [
+      machine("host", [hostClaude, account("codex-account")]),
+      machine("source:pool", [principal, alexandre], "Renamed subscriptions"),
+    ],
+  };
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    { rpc: { getUsage: () => result } },
+  );
+
+  await slot.findByText("principal@example.com");
+  expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
+  expect(slot.getByText("codex-account@example.com")).toBeTruthy();
+  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+  expect(slot.getAllByText("Five-hour limit")).toHaveLength(2);
+  expect(slot.getAllByText("Weekly limit")).toHaveLength(3);
+  expect(slot.getAllByText(/^Resets/)).toHaveLength(5);
+  const sourceButton = slot.getByRole("button", { name: "Usage source" });
+  expect(sourceButton.textContent).toContain("Combined");
+  expect(sourceButton.className).toContain("pointer-coarse:min-h-11");
+  expect(slot.getByLabelText("Reload usage data").className).toContain(
+    "pointer-coarse:min-w-11",
+  );
+  expect(
+    sourceButton.closest("section")?.firstElementChild?.className,
+  ).toContain("min-w-0");
+
+  fireEvent.click(slot.getByLabelText("Reload usage data"));
+  await waitFor(() =>
+    expect(
+      slot.rpcCalls.some((call) => {
+        const input = usageInput(call.input);
+        return (
+          input.machineIds?.includes("host") &&
+          input.providerId === "codex" &&
+          input.force
+        );
+      }),
+    ).toBe(true),
+  );
+  expect(
+    slot.rpcCalls.some((call) => {
+      const input = usageInput(call.input);
+      return (
+        input.machineIds?.includes("source:pool") &&
+        input.providerId === "claude-code" &&
+        input.force
+      );
+    }),
+  ).toBe(true);
+});
+
+it("refreshes a distinct host Claude account and keeps pooled accounts", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const matchingHost = claudeAccount(
+    "matching-host",
+    "anthropic:account:alexandre",
+  );
+  matchingHost.accountLabel = "alexandre@example.com";
+  if (matchingHost.usage?.status === "ok")
+    matchingHost.usage.accountEmail = "alexandre@example.com";
+  const distinctHost = claudeAccount(
+    "distinct-host",
+    "anthropic:account:other",
+  );
+  distinctHost.accountLabel = "other@example.com";
+  if (distinctHost.usage?.status === "ok")
+    distinctHost.usage.accountEmail = "other@example.com";
+  const pooled = claudeAccount(
+    "pooled-alexandre",
+    "anthropic:account:alexandre",
+  );
+  pooled.accountLabel = "alexandre@example.com";
+  if (pooled.usage?.status === "ok")
+    pooled.usage.accountEmail = "alexandre@example.com";
+  const refreshedHost = claudeAccount(
+    "distinct-host",
+    "anthropic:account:other",
+  );
+  refreshedHost.accountLabel = "other@example.com";
+  if (refreshedHost.usage?.status === "ok") {
+    refreshedHost.usage.accountEmail = "other@example.com";
+    refreshedHost.usage.windows[0]!.usedPercent = 79;
+  }
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    {
+      rpc: {
+        getUsage: (unknownInput) => {
+          const input = usageInput(unknownInput);
+          if (input.machineIds?.includes("host") && input.force) {
+            return {
+              machines: [machine("host", [refreshedHost])],
+            };
+          }
+          return {
+            machines: [
+              machine("host", [matchingHost, distinctHost]),
+              machine("source:pool", [pooled]),
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  await slot.findByText("other@example.com");
+  expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
+  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+
+  fireEvent.click(slot.getByLabelText("Reload usage data"));
+  await waitFor(() => expect(slot.getByText("79% used")).toBeTruthy());
+  expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
+  expect(slot.getByText("other@example.com")).toBeTruthy();
+  expect(
+    slot.rpcCalls.some((call) => {
+      const input = usageInput(call.input);
+      return (
+        input.force &&
+        input.machineIds?.includes("host") &&
+        input.providerId === "claude-code"
+      );
+    }),
+  ).toBe(true);
+});
+
+it.each([
+  {
+    name: "host identity matches pooled identity",
+    hostIdentity: "anthropic:account:alexandre",
+    pooledIdentity: "anthropic:account:alexandre",
+  },
+  {
+    name: "host identity is unknown",
+    hostIdentity: null,
+    pooledIdentity: "anthropic:account:alexandre",
+  },
+  {
+    name: "pooled identity is unknown",
+    hostIdentity: "anthropic:account:alexandre",
+    pooledIdentity: null,
+  },
+])(
+  "conservatively suppresses host Claude when $name",
+  async ({ hostIdentity, pooledIdentity }) => {
+    const app = await loadPluginApp(() => import("./app"));
+    const host = claudeAccount("host-claude", hostIdentity);
+    const pooled = claudeAccount("pooled-alexandre", pooledIdentity);
+    pooled.accountLabel = "principal@example.com";
+    if (pooled.usage?.status === "ok")
+      pooled.usage.accountEmail = "principal@example.com";
+    const slot = renderSlot(
+      app.settingsSections[0]!,
+      {},
+      {
+        rpc: {
+          getUsage: () => ({
+            machines: [
+              machine("host", [host]),
+              machine("source:pool", [pooled]),
+            ],
+          }),
+        },
+      },
+    );
+
+    await slot.findByText("principal@example.com");
+    expect(slot.queryByText("host-claude@example.com")).toBeNull();
+    fireEvent.click(slot.getByLabelText("Reload usage data"));
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.some((call) => {
+          const input = usageInput(call.input);
+          return (
+            input.force &&
+            input.machineIds?.includes("source:pool") &&
+            input.providerId === "claude-code"
+          );
+        }),
+      ).toBe(true),
+    );
+    expect(
+      slot.rpcCalls.some((call) => {
+        const input = usageInput(call.input);
+        return (
+          input.force &&
+          input.machineIds?.includes("host") &&
+          input.providerId === "claude-code"
+        );
+      }),
+    ).toBe(false);
+  },
+);
+
+function claudeAccount(
+  id: string,
+  accountKey: string | null = null,
+): UsageProvider {
+  const provider = account(id, "claude-code", accountKey);
+  if (provider.usage?.status === "ok") {
+    provider.usage.windows = [
+      {
+        label: "Five-hour limit",
+        usedPercent: 12,
+        resetsAt: new Date(Date.now() + 3600_000).toISOString(),
+        cost: null,
+      },
+      {
+        label: "Weekly limit",
+        usedPercent: 35,
+        resetsAt: new Date(Date.now() + 86_400_000).toISOString(),
+        cost: null,
+      },
+    ];
+  }
+  return provider;
+}
+
+it("falls back to the host providers when the pool has no accounts", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    {
+      rpc: {
+        getUsage: () => ({
+          machines: [
+            machine("host", [
+              account("host-claude", "claude-code"),
+              account("codex-account"),
+            ]),
+            machine("source:pool", []),
+          ],
+        }),
+      },
+    },
+  );
+
+  await slot.findByText("host-claude@example.com");
+  expect(slot.getByText("codex-account@example.com")).toBeTruthy();
+  expect(slot.queryByText("principal@example.com")).toBeNull();
+});
+
+it("keeps pool usage visible when a host source refresh fails", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const hostCodex = account("codex-account");
+  hostCodex.usage = null;
+  const principal = account("principal", "claude-code");
+  principal.usage = null;
+  const result = {
+    machines: [
+      machine("host", [hostCodex]),
+      machine("source:pool", [principal]),
+    ],
+  };
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    {
+      rpc: {
+        getUsage: (unknownInput) => {
+          const input = usageInput(unknownInput);
+          if (input.machineIds === null) return result;
+          if (input.machineIds?.includes("host"))
+            throw new Error("host source unavailable");
+          return {
+            machines: [
+              result.machines[0]!,
+              machine("source:pool", [account("principal", "claude-code")]),
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  await slot.findByText(
+    "Some usage sources could not be refreshed. Showing available results.",
+  );
+  expect(slot.getByText("principal@example.com")).toBeTruthy();
+  expect(slot.getByText("42% used")).toBeTruthy();
+  expect(slot.getByText("codex-account@example.com")).toBeTruthy();
 });
 
 it("uses machine usage when the pool is disabled", async () => {
@@ -107,7 +442,7 @@ it("uses machine usage when the pool is disabled", async () => {
   });
 });
 
-it("keeps an enabled empty pool selected without fetching machine quotas", async () => {
+it("falls back to host usage when the enabled pool has no accounts", async () => {
   const app = await loadPluginApp(() => import("./app"));
   const slot = renderSlot(
     app.settingsSections[0]!,
@@ -123,9 +458,9 @@ it("keeps an enabled empty pool selected without fetching machine quotas", async
       },
     },
   );
-  await slot.findByText(/No accounts report usage yet/);
-  expect(slot.rpcCalls).toHaveLength(1);
-  expect(slot.queryByText("local@example.com")).toBeNull();
+  await slot.findByText("local@example.com");
+  await waitFor(() => expect(slot.rpcCalls).toHaveLength(2));
+  expect(slot.rpcCalls[1]?.input).toMatchObject({ machineIds: ["host"] });
 });
 
 it("renders loading and a friendly transport error without exposing raw errors", async () => {
@@ -158,7 +493,11 @@ it("retains measured accounts when reloading fails", async () => {
       rpc: {
         getUsage: () => {
           if (failed) throw new Error("private transport detail");
-          return { machines: [machine("source:pool", [account("first")])] };
+          return {
+            machines: [
+              machine("source:pool", [account("first", "claude-code")]),
+            ],
+          };
         },
       },
     },
@@ -170,12 +509,12 @@ it("retains measured accounts when reloading fails", async () => {
   fireEvent.click(slot.getByLabelText("Reload usage data"));
   await slot.findByText(/Showing last update/);
   expect(slot.getByText("first@example.com")).toBeTruthy();
-  expect(slot.getByText("42% used")).toBeTruthy();
+  expect(slot.getAllByText("42% used").length).toBeGreaterThan(0);
 });
 
 it("shows one account refresh error beside that account while keeping others current", async () => {
   const app = await loadPluginApp(() => import("./app"));
-  const failed = account("failed");
+  const failed = account("failed", "claude-code");
   failed.usage = {
     status: "error",
     message: "Usage could not be refreshed for this account.",
@@ -186,7 +525,9 @@ it("shows one account refresh error beside that account while keeping others cur
     {
       rpc: {
         getUsage: () => ({
-          machines: [machine("source:pool", [failed, account("current")])],
+          machines: [
+            machine("source:pool", [failed, account("current", "claude-code")]),
+          ],
         }),
       },
     },
@@ -199,7 +540,7 @@ it("shows one account refresh error beside that account while keeping others cur
 
 it("shows pending measurements without inventing usage, then reports an unavailable account gracefully", async () => {
   const app = await loadPluginApp(() => import("./app"));
-  const resource = { ...account("pending"), usage: null };
+  const resource = { ...account("pending", "claude-code"), usage: null };
   let finish!: () => void;
   let calls = 0;
   const slot = renderSlot(
@@ -235,11 +576,11 @@ it("shows pending measurements without inventing usage, then reports an unavaila
 
 it("keeps authentication and plans without limits distinct from loading and errors", async () => {
   const app = await loadPluginApp(() => import("./app"));
-  const first = account("signed-out");
+  const first = account("signed-out", "claude-code");
   first.usage = { status: "unauthenticated" };
-  const second = account("expired");
+  const second = account("expired", "claude-code");
   second.usage = { status: "expired" };
-  const third = account("unlimited");
+  const third = account("unlimited", "claude-code");
   third.usage = {
     status: "ok",
     accountEmail: "unlimited@example.com",

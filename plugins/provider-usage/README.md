@@ -15,9 +15,14 @@ Failed refreshes retain the last available measurements with a retry notice.
 Account authentication failures and plans without reported limits have separate
 states; unavailable usage is never represented as zero consumption.
 
-Settings → Installed plugins → Provider usage contains the usage page, using its
-full-size provider groups with email-labeled accounts and fetching only resources in the selected pool or machine. Both surfaces share the plugin’s aggregation and cache. Neither display is required for source
-plugins to publish their usage.
+Settings → Installed plugins → Provider usage defaults to a combined view of
+Claude subscriptions published by Account Pooler and non-Claude providers
+published by the primary host. Its Usage source picker keeps each source view
+available. If Account Pooler is missing or has no Claude accounts, the combined
+view falls back to all providers published by the host. The compact sidebar card
+remains scoped to one selected source or machine, so its tabs and quota badges
+continue to describe that location. Both surfaces share the plugin’s aggregation
+and cache. Neither display is required for source plugins to publish their usage.
 
 Use `bb plugin rpc list --method provider-usage.v1.listResources --json` to find sources
 and `bb plugin rpc inspect <plugin-id> provider-usage.v1.listResources --json`
