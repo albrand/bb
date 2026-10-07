@@ -82,7 +82,7 @@ export class ThreadTokenStore {
   private readonly corruptArchiveMarkers = new Set<string>();
   private readonly archiveDurabilityFailures = new Set<string>();
   private archiveMarkersLoaded = false;
-  private readonly unconfirmedThreads = new Set<string>();
+  private readonly lookupFailures = new Map<string, number>();
   private readonly archiveVersions = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
 
@@ -348,12 +348,12 @@ export class ThreadTokenStore {
     for (const record of this.routes.values()) threadIds.add(record.threadId);
     for (const record of this.nestedRoutes.values())
       threadIds.add(record.threadId);
-    for (const threadId of this.unconfirmedThreads)
-      if (!threadIds.has(threadId)) this.unconfirmedThreads.delete(threadId);
+    for (const threadId of this.lookupFailures.keys())
+      if (!threadIds.has(threadId)) this.lookupFailures.delete(threadId);
     const ordered = [...threadIds].sort(
       (left, right) =>
-        Number(this.unconfirmedThreads.has(left)) -
-        Number(this.unconfirmedThreads.has(right)),
+        (this.lookupFailures.get(left) ?? 0) -
+        (this.lookupFailures.get(right) ?? 0),
     );
     const result: ThreadSweepResult = {
       checked: ordered.length,
@@ -379,12 +379,15 @@ export class ThreadTokenStore {
           lookup(threadId, lookupSignal),
           lookupSignal,
         );
-        this.unconfirmedThreads.delete(threadId);
+        this.lookupFailures.delete(threadId);
         if (status === "live") continue;
         if (await this.removeThreadIfVersion(threadId, version))
           result.revoked += 1;
       } catch {
-        this.unconfirmedThreads.add(threadId);
+        this.lookupFailures.set(
+          threadId,
+          (this.lookupFailures.get(threadId) ?? 0) + 1,
+        );
         result.failed += 1;
       }
     }

@@ -1063,3 +1063,34 @@ it("checks later threads when an earlier lookup times out on its own", async () 
   expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
   expect(await threads.authenticate(tokenOf(hang).provider)).not.toBeNull();
 });
+
+it("revokes a later archived thread even when every thread failed a prior sweep and the earlier ones keep hanging", async () => {
+  const names = ["thr_one", "thr_two", "thr_three"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hangA, hangB, archived] = await loadOrder(directory, names);
+  if (hangA === undefined || hangB === undefined || archived === undefined)
+    throw new Error("missing thread");
+  let archivedRecovered = false;
+  const lookup: ThreadLookup = (threadId) =>
+    threadId === archived && archivedRecovered
+      ? Promise.resolve("gone")
+      : new Promise<never>(() => undefined);
+  const allFailed = await threads.sweepThreads(lookup, {
+    signal: AbortSignal.timeout(5_000),
+    lookupTimeoutMs: 20,
+  });
+  expect(allFailed).toEqual({ checked: 3, revoked: 0, failed: 3 });
+  archivedRecovered = true;
+  let revoked = 0;
+  for (let sweeps = 0; revoked === 0 && sweeps < 4; sweeps += 1)
+    revoked += (
+      await threads.sweepThreads(lookup, {
+        signal: AbortSignal.timeout(40),
+        lookupTimeoutMs: 30,
+      })
+    ).revoked;
+  expect(revoked).toBe(1);
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hangA).provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf(hangB).provider)).not.toBeNull();
+});
