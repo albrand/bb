@@ -29,6 +29,7 @@ describe("app.css compact prompt controls", () => {
     )?.[1];
     expect(block).toBeDefined();
     expect(block).toMatch(/visibility:\s*hidden;/);
+    expect(block).not.toMatch(/transition-delay\s*:/);
   });
 });
 
