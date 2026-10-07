@@ -236,6 +236,12 @@ export function BottomAnchoredScrollBody({
   const tabFocusTransitionPendingRef = useRef(false);
   const tabFocusTransitionTimeoutRef = useRef<number | null>(null);
   const pointerScrollIntentRef = useRef(false);
+  const pointerScrollStartRef = useRef<{
+    scrollTop: number;
+    clientX: number;
+    clientY: number;
+    pointerId: number;
+  } | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
   const restoreFramesRemainingRef = useRef(0);
   const restoreTailLiveReadRef = useRef(false);
@@ -248,6 +254,7 @@ export function BottomAnchoredScrollBody({
     anchor: ScrollAnchor;
     attemptsRemaining: number;
     lastAppliedScrollTop: number | null;
+    windowed: boolean;
   } | null>(null);
   const restoredAnchorRef = useRef<{
     threadId: string;
@@ -755,16 +762,51 @@ export function BottomAnchoredScrollBody({
     markUserScrollIntent();
   }, [markUserScrollIntent]);
 
-  const startPointerScrollIntent = useCallback(() => {
-    userScrollIntentObservedRef.current = true;
-    cancelPrependPositionHold();
-    scrollToTopInProgressRef.current = false;
-    pointerScrollIntentRef.current = true;
-  }, [cancelPrependPositionHold]);
+  const startPointerScrollIntent = useCallback(
+    (event: PointerEvent) => {
+      userScrollIntentObservedRef.current = true;
+      cancelPrependPositionHold();
+      scrollToTopInProgressRef.current = false;
+      const scrollArea = scrollAreaRef.current;
+      pointerScrollStartRef.current = scrollArea
+        ? {
+            scrollTop: scrollArea.scrollTop,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            pointerId: event.pointerId,
+          }
+        : null;
+      pointerScrollIntentRef.current =
+        pendingScrollRestoreRef.current?.windowed !== true;
+    },
+    [cancelPrependPositionHold],
+  );
+
+  const movePointerScrollIntent = useCallback((event: PointerEvent) => {
+    const start = pointerScrollStartRef.current;
+    if (
+      start !== null &&
+      event.pointerId === start.pointerId &&
+      (event.clientX !== start.clientX || event.clientY !== start.clientY)
+    ) {
+      pointerScrollIntentRef.current = true;
+    }
+  }, []);
 
   const endPointerScrollIntent = useCallback(() => {
+    const start = pointerScrollStartRef.current;
+    const scrollArea = scrollAreaRef.current;
+    if (
+      pointerScrollIntentRef.current &&
+      start !== null &&
+      scrollArea !== null &&
+      scrollArea.scrollTop !== start.scrollTop
+    ) {
+      markUserScrollIntent();
+    }
+    pointerScrollStartRef.current = null;
     pointerScrollIntentRef.current = false;
-  }, []);
+  }, [markUserScrollIntent]);
 
   const markKeyboardScrollIntent = useCallback(
     (event: KeyboardEvent) => {
@@ -889,9 +931,19 @@ export function BottomAnchoredScrollBody({
     (scrollMovedTowardBottom: boolean) => {
       restorePrependPosition();
       syncBottomStateFromScroll(scrollMovedTowardBottom);
+      const pendingRestore = pendingScrollRestoreRef.current;
+      if (
+        pendingRestore &&
+        pendingRestore.windowed &&
+        !pointerScrollIntentRef.current
+      ) {
+        applyScrollRestore(pendingRestore.anchor);
+        return;
+      }
       captureScrollAnchorThrottled();
     },
     [
+      applyScrollRestore,
       restorePrependPosition,
       syncBottomStateFromScroll,
       captureScrollAnchorThrottled,
@@ -904,7 +956,14 @@ export function BottomAnchoredScrollBody({
     pending.attemptsRemaining -= 1;
     const appliedScrollTop = applyScrollRestore(pending.anchor);
     if (appliedScrollTop !== null) {
-      if (pending.lastAppliedScrollTop === appliedScrollTop) {
+      const scrollArea = scrollAreaRef.current;
+      pending.windowed =
+        pending.windowed ||
+        (scrollArea !== null && getScrollAnchorRows(scrollArea).windowed);
+      if (
+        pending.lastAppliedScrollTop === appliedScrollTop &&
+        !pending.windowed
+      ) {
         pendingScrollRestoreRef.current = null;
         return true;
       }
@@ -1011,10 +1070,12 @@ export function BottomAnchoredScrollBody({
     if (!anchor || anchor.atBottom) return;
     shouldStickToBottomRef.current = false;
     setIsAtBottom(false);
+    const scrollArea = scrollAreaRef.current;
     pendingScrollRestoreRef.current = {
       anchor,
       attemptsRemaining: SCROLL_ANCHOR_RESTORE_MAX_ATTEMPTS,
       lastAppliedScrollTop: null,
+      windowed: scrollArea !== null && getScrollAnchorRows(scrollArea).windowed,
     };
     advancePendingScrollRestore();
   }, [
@@ -1122,6 +1183,9 @@ export function BottomAnchoredScrollBody({
       passive: true,
     });
     window.addEventListener("pointerup", endPointerScrollIntent);
+    window.addEventListener("pointermove", movePointerScrollIntent, {
+      passive: true,
+    });
     window.addEventListener("pointercancel", endPointerScrollIntent);
     window.addEventListener("keydown", trackTabFocusTransition);
     window.addEventListener("keydown", markKeyboardScrollIntent);
@@ -1140,6 +1204,7 @@ export function BottomAnchoredScrollBody({
       scrollArea.removeEventListener("touchcancel", endPointerScrollIntent);
       scrollArea.removeEventListener("pointerdown", startPointerScrollIntent);
       window.removeEventListener("pointerup", endPointerScrollIntent);
+      window.removeEventListener("pointermove", movePointerScrollIntent);
       window.removeEventListener("pointercancel", endPointerScrollIntent);
       window.removeEventListener("keydown", trackTabFocusTransition);
       window.removeEventListener("keydown", markKeyboardScrollIntent);
@@ -1164,6 +1229,7 @@ export function BottomAnchoredScrollBody({
     markTouchMoveScrollIntent,
     markTouchStartScrollIntent,
     markWheelScrollIntent,
+    movePointerScrollIntent,
     queueBottomRestore,
     startPointerScrollIntent,
     trackTabFocusTransition,
