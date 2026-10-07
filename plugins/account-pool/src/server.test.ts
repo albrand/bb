@@ -10218,7 +10218,7 @@ describe("Account Pool credential scoping", () => {
     await downgradeToLegacyFiles(fixture, "thread-live");
     const host = await fixture.host.harness.lifecycle.reload(
       createAccountPoolPlugin({
-        threadSweepStartupTimeoutMs: 50,
+        threadSweepTimeoutMs: 50,
         threadSweepRetryMs: 50,
         usageUrl: EMPTY_USAGE_URL,
         codexUsageUrl: EMPTY_USAGE_URL,
@@ -10265,6 +10265,75 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, stale, "/v1/messages")).toBe(200);
     expect(await statusOf(host, live, "/v1/messages")).toBe(200);
     recovered = true;
+    await vi.waitFor(async () => {
+      expect(await statusOf(host, stale, "/v1/messages")).toBe(401);
+    });
+    expect(await statusOf(host, live, "/v1/messages")).toBe(200);
+  });
+
+  it("bounds a periodic sweep whose lookup hangs and revokes the stale credential once the lookup recovers", async () => {
+    const fixture = await scopedFixture();
+    const stale = await claudeToken(fixture.host, "thread-stale");
+    const live = await claudeToken(fixture.host, "thread-live");
+    await downgradeToLegacyFiles(fixture, "thread-stale");
+    await downgradeToLegacyFiles(fixture, "thread-live");
+    let mode: "live" | "hang" | "archived" = "live";
+    let hangs = 0;
+    const host = await fixture.host.harness.lifecycle.reload(
+      createAccountPoolPlugin({
+        threadSweepTimeoutMs: 50,
+        threadSweepIntervalMs: 50,
+        threadSweepRetryMs: 50,
+        usageUrl: EMPTY_USAGE_URL,
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          planType: null,
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      }),
+    );
+    host.harness.sdk.stub(
+      "threads.get",
+      ({ threadId, signal }: { threadId: string; signal?: AbortSignal }) => {
+        if (mode === "hang") {
+          hangs += 1;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        }
+        return Promise.resolve(
+          makeThreadResponse({
+            id: threadId,
+            archivedAt:
+              mode === "archived" && threadId === "thread-stale" ? 1_000 : null,
+          }),
+        );
+      },
+    );
+    const service = host.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      service.controller.abort();
+      await service.done;
+      await host.harness.lifecycle.dispose();
+    });
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    expect(await statusOf(host, stale, "/v1/messages")).toBe(200);
+    mode = "hang";
+    await vi.waitFor(() => expect(hangs).toBeGreaterThan(1));
+    expect(await statusOf(host, stale, "/v1/messages")).toBe(200);
+    mode = "archived";
     await vi.waitFor(async () => {
       expect(await statusOf(host, stale, "/v1/messages")).toBe(401);
     });

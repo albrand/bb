@@ -64,7 +64,8 @@ export interface AccountPoolPluginOptions {
   codexUsageUrl?: string;
   usageUrl?: string;
   drainTimeoutMs?: number;
-  threadSweepStartupTimeoutMs?: number;
+  threadSweepTimeoutMs?: number;
+  threadSweepIntervalMs?: number;
   threadSweepRetryMs?: number;
   maxAffinityBindings?: number;
   disposeTimeoutMs?: number;
@@ -79,7 +80,7 @@ export interface AccountPoolPluginOptions {
 const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
-const THREAD_SWEEP_STARTUP_TIMEOUT_MS = 15_000;
+const THREAD_SWEEP_TIMEOUT_MS = 15_000;
 const THREAD_SWEEP_RETRY_MS = 60_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
@@ -378,12 +379,17 @@ export function createAccountPoolPlugin(
       }
     };
     const sweepThreadCredentialsOnce = async (
-      signal: AbortSignal,
+      serviceSignal: AbortSignal,
     ): Promise<boolean> => {
       try {
         const { checked, revoked, failed } = await threadTokens.sweepThreads(
           lookupThread,
-          signal,
+          AbortSignal.any([
+            serviceSignal,
+            AbortSignal.timeout(
+              options.threadSweepTimeoutMs ?? THREAD_SWEEP_TIMEOUT_MS,
+            ),
+          ]),
         );
         if (revoked > 0 || failed > 0) {
           bb.log.warn(
@@ -404,7 +410,7 @@ export function createAccountPoolPlugin(
       while (!signal.aborted) {
         await waitForDelay(
           complete
-            ? THREAD_SWEEP_INTERVAL_MS
+            ? (options.threadSweepIntervalMs ?? THREAD_SWEEP_INTERVAL_MS)
             : (options.threadSweepRetryMs ?? THREAD_SWEEP_RETRY_MS),
           signal,
         );
@@ -602,15 +608,7 @@ export function createAccountPoolPlugin(
     });
     bb.background.service("hub", {
       start: async (signal) => {
-        const startupComplete = await sweepThreadCredentialsOnce(
-          AbortSignal.any([
-            signal,
-            AbortSignal.timeout(
-              options.threadSweepStartupTimeoutMs ??
-                THREAD_SWEEP_STARTUP_TIMEOUT_MS,
-            ),
-          ]),
-        );
+        const startupComplete = await sweepThreadCredentialsOnce(signal);
         await Promise.all([
           hub.start(signal),
           sweepThreadCredentialsPeriodically(signal, startupComplete),
