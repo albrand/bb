@@ -599,7 +599,7 @@ it("gives subscription and routing switches a 44px coarse-pointer hit area", asy
   for (const name of switchNames) {
     const control = await slot.findByRole("switch", { name });
     expect(control.className).toContain("h-4 w-7");
-    expect(control.getAttribute("data-switch-hit-area")).toBe("");
+    expect(control.getAttribute("data-switch-hit-area")).toBe("true");
     expect(control.className).toContain("pointer-coarse:size-11");
     expect(control.querySelector("[data-switch-track]")).toBeTruthy();
   }
