@@ -689,7 +689,13 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   );
 
   if (layout === null || currentContent === null) return null;
-  if (!splitWorkspaceActive) {
+  const firstPane = panes[0];
+  if (
+    !splitWorkspaceActive &&
+    (currentContent.kind !== "thread" ||
+      panes.length !== 1 ||
+      firstPane?.content.kind !== "thread")
+  ) {
     return (
       <StandalonePaneContent
         content={currentContent}
@@ -719,7 +725,6 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     />
   );
 
-  const firstPane = panes[0];
   if (panes.length === 1 && firstPane !== undefined) {
     return (
       <>

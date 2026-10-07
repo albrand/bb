@@ -15,6 +15,7 @@ import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
 import type { BbDesktopInfo } from "@bb/desktop-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -36,13 +37,14 @@ import { usePromptDraftStorage } from "@/hooks/usePromptDraftStorage";
 import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
 import { resourceRouteLabelAtom } from "@/components/layout/resourceRouteLabelAtom";
 import {
-  resetPluginSlotStoreForTest,
-  setPluginSlotRegistrations,
-} from "@/lib/plugin-slots";
-import {
+  PluginComposerHostProvider,
   usePluginComposerHost,
   type PluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
+import {
+  resetPluginSlotStoreForTest,
+  setPluginSlotRegistrations,
+} from "@/lib/plugin-slots";
 import {
   PaneContext,
   usePaneSecondaryPanelRegistration,
@@ -52,12 +54,17 @@ import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { SplitThreadArea } from "./SplitThreadArea";
 import { applyThreadOpenToLayout } from "./splitThreadNavigation";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
+import {
+  INERT_TYPEAHEAD_COMMAND_CONFIG,
+  PromptBoxInternal,
+} from "@/components/promptbox/PromptBoxInternal";
 
 const threadStore = vi.hoisted(
   () =>
     new Map<string, { archivedAt: number | null; deletedAt: number | null }>(),
 );
 const viewportState = vi.hoisted(() => ({ compact: false }));
+const pointerState = vi.hoisted(() => ({ coarse: false }));
 const sidebarState = vi.hoisted(() => ({ showing: true }));
 const panelFullScreenState = vi.hoisted(() => ({
   isMainCollapsed: false,
@@ -71,6 +78,7 @@ const timelineProbe = vi.hoisted(() => ({
   active: false,
   calls: new Map<string, number>(),
 }));
+const responsiveComposerProbe = vi.hoisted(() => ({ enabled: false }));
 
 function HostedComposerScopeProbe({ threadId }: { threadId: string }) {
   const composerHost = usePluginComposerHost();
@@ -113,6 +121,10 @@ vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => viewportState.compact,
 }));
 
+vi.mock("@bb/shared-ui/hooks/use-pointer-coarse", () => ({
+  usePointerCoarse: () => pointerState.coarse,
+}));
+
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThread: (id: string) => {
     const entry = threadStore.get(id);
@@ -134,6 +146,7 @@ vi.mock("@/components/commands/AppCommandProvider", () => ({
     commandHandlers.set(command, handler);
   },
   useAppCommandShortcut: () => null,
+  useAppCommandKeyDispatch: () => () => false,
   useIsAppCommandModifierHeld: () => false,
   useIndexedAppCommandHandlers: (
     commands: readonly string[],
@@ -337,13 +350,34 @@ vi.mock("./LazyThreadDetailView", () => ({
           onPointerDown={(event) => pane?.beginPaneDrag?.(event, threadId)}
         />
         <div data-promptbox="">
-          <textarea
-            data-testid={`draft-${threadId}`}
-            value={draft.text}
-            onChange={(event) =>
-              draft.setTextAndMentions(event.target.value, [])
-            }
-          />
+          {responsiveComposerProbe.enabled ? (
+            <PluginComposerHostProvider value={composerHost}>
+              <PromptBoxInternal
+                value={draft.text}
+                mentionRanges={[]}
+                onChange={(value) => draft.setTextAndMentions(value, [])}
+                onSubmit={() => undefined}
+                mentionMenuPlacement="bottom"
+                typeahead={{
+                  mention: {
+                    results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
+                    isLoading: false,
+                    isError: false,
+                    onQueryChange: () => undefined,
+                  },
+                  command: INERT_TYPEAHEAD_COMMAND_CONFIG,
+                }}
+              />
+            </PluginComposerHostProvider>
+          ) : (
+            <textarea
+              data-testid={`draft-${threadId}`}
+              value={draft.text}
+              onChange={(event) =>
+                draft.setTextAndMentions(event.target.value, [])
+              }
+            />
+          )}
         </div>
         <div
           data-testid={`scroll-${threadId}`}
@@ -743,6 +777,7 @@ function renderSplitArea(options: {
 
 beforeEach(() => {
   viewportState.compact = false;
+  pointerState.coarse = false;
   sidebarState.showing = true;
   panelFullScreenState.isMainCollapsed = false;
   panelGroupLayoutState.layout = [100, 0];
@@ -750,6 +785,7 @@ beforeEach(() => {
   paneContextRenders.clear();
   timelineProbe.active = false;
   timelineProbe.calls.clear();
+  responsiveComposerProbe.enabled = false;
   threadStore.set("thr-a", { archivedAt: null, deletedAt: null });
   threadStore.set("thr-b", { archivedAt: null, deletedAt: null });
 });
@@ -766,6 +802,104 @@ afterEach(() => {
 });
 
 describe("SplitThreadArea", () => {
+  it.each([
+    { fromCompact: false, toCompact: true, label: "desktop to phone" },
+    { fromCompact: true, toCompact: false, label: "phone to landscape" },
+  ])(
+    "preserves focused editor and external control identity through $label layout replacement",
+    async ({ fromCompact, toCompact }) => {
+      viewportState.compact = fromCompact;
+      pointerState.coarse = fromCompact;
+      responsiveComposerProbe.enabled = true;
+      const store = createStore();
+      const renderTree = () => (
+        <TooltipProvider delayDuration={0}>
+          <JotaiProvider store={store}>
+            <QueryClientProvider client={queryClient}>
+              <MemoryRouter initialEntries={[threadPath("thr-a")]}>
+                <RouteNavigationProvider>
+                  <SplitThreadArea routeContent={threadContent("thr-a")} />
+                  <button type="button" data-testid="external-focus-control">
+                    Thread actions
+                  </button>
+                </RouteNavigationProvider>
+              </MemoryRouter>
+            </QueryClientProvider>
+          </JotaiProvider>
+        </TooltipProvider>
+      );
+      const view = render(renderTree());
+      const editor = await screen.findByRole("textbox", { name: /ask/i });
+      editor.focus();
+      expect(document.activeElement).toBe(editor);
+
+      const externalControl = screen.getByTestId("external-focus-control");
+      viewportState.compact = toCompact;
+      view.rerender(renderTree());
+      await waitFor(() =>
+        expect(screen.getByRole("textbox", { name: /ask/i })).toBe(editor),
+      );
+      expect(document.activeElement).toBe(editor);
+
+      externalControl.focus();
+      expect(document.activeElement).toBe(externalControl);
+      viewportState.compact = fromCompact;
+      view.rerender(renderTree());
+      await waitFor(() =>
+        expect(screen.getByTestId("external-focus-control")).toBe(
+          externalControl,
+        ),
+      );
+      expect(document.activeElement).toBe(externalControl);
+    },
+  );
+
+  it("does not let responsive composer remount autofocus steal an external control", async () => {
+    responsiveComposerProbe.enabled = true;
+    pointerState.coarse = false;
+    const store = createStore();
+    const renderTree = () => (
+      <TooltipProvider delayDuration={0}>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={queryClient}>
+            <MemoryRouter initialEntries={[threadPath("thr-a")]}>
+              <RouteNavigationProvider>
+                <SplitThreadArea routeContent={threadContent("thr-a")} />
+                <button type="button" data-testid="external-focus-control">
+                  Thread actions
+                </button>
+              </RouteNavigationProvider>
+            </MemoryRouter>
+          </QueryClientProvider>
+        </JotaiProvider>
+      </TooltipProvider>
+    );
+    const view = render(renderTree());
+    await screen.findByRole("textbox", { name: /ask/i });
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        }),
+    );
+    const externalControl = screen.getByTestId("external-focus-control");
+    externalControl.focus();
+    expect(document.activeElement).toBe(externalControl);
+
+    viewportState.compact = true;
+    view.rerender(renderTree());
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        }),
+    );
+    pointerState.coarse = true;
+    view.rerender(renderTree());
+
+    expect(document.activeElement).toBe(externalControl);
+  });
+
   it("hosts Browser-tab navigation on compact plugin-panel routes", async () => {
     viewportState.compact = true;
 
