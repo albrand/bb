@@ -55,7 +55,10 @@ type NestedRouteRecord = z.infer<typeof nestedRouteSchema>;
 export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
 export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
-export type ThreadLookup = (threadId: string) => Promise<"live" | "gone">;
+export type ThreadLookup = (
+  threadId: string,
+  signal?: AbortSignal,
+) => Promise<"live" | "gone">;
 export type ThreadSweepResult = {
   checked: number;
   revoked: number;
@@ -332,7 +335,10 @@ export class ThreadTokenStore {
     });
   }
 
-  async sweepThreads(lookup: ThreadLookup): Promise<ThreadSweepResult> {
+  async sweepThreads(
+    lookup: ThreadLookup,
+    signal?: AbortSignal,
+  ): Promise<ThreadSweepResult> {
     const threadIds = new Set<string>();
     for (const record of this.routes.values()) threadIds.add(record.threadId);
     for (const record of this.nestedRoutes.values())
@@ -343,9 +349,13 @@ export class ThreadTokenStore {
       failed: 0,
     };
     for (const threadId of threadIds) {
+      if (signal?.aborted === true) {
+        result.failed += 1;
+        continue;
+      }
       const version = this.archiveVersion(threadId);
       try {
-        if ((await lookup(threadId)) === "live") continue;
+        if ((await lookup(threadId, signal)) === "live") continue;
         if (await this.removeThreadIfVersion(threadId, version))
           result.revoked += 1;
       } catch {

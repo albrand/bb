@@ -64,6 +64,7 @@ export interface AccountPoolPluginOptions {
   codexUsageUrl?: string;
   usageUrl?: string;
   drainTimeoutMs?: number;
+  threadSweepStartupTimeoutMs?: number;
   maxAffinityBindings?: number;
   disposeTimeoutMs?: number;
   importCredentials?: () => Promise<ImportedClaudeCredentials>;
@@ -77,6 +78,7 @@ export interface AccountPoolPluginOptions {
 const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
+const THREAD_SWEEP_STARTUP_TIMEOUT_MS = 15_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
 const PROVIDER_ROUTING_ENV: Record<PoolProvider, readonly string[]> = {
@@ -362,9 +364,9 @@ export function createAccountPoolPlugin(
       }
       return threadTokens.removeThreadIfVersion(threadId, archiveVersion);
     };
-    const lookupThread: ThreadLookup = async (threadId) => {
+    const lookupThread: ThreadLookup = async (threadId, signal) => {
       try {
-        const thread = await bb.sdk.threads.get({ threadId });
+        const thread = await bb.sdk.threads.get({ threadId, signal });
         return thread.archivedAt === null && thread.deletedAt === null
           ? "live"
           : "gone";
@@ -373,22 +375,29 @@ export function createAccountPoolPlugin(
         throw error;
       }
     };
-    const sweepThreadCredentials = async (
+    const sweepThreadCredentialsOnce = async (
+      signal: AbortSignal,
+    ): Promise<void> => {
+      try {
+        const { checked, revoked, failed } = await threadTokens.sweepThreads(
+          lookupThread,
+          signal,
+        );
+        if (revoked > 0 || failed > 0) {
+          bb.log.warn(
+            `Account Pooler thread credential sweep checked ${checked} threads, revoked ${revoked}, and could not look up ${failed}.`,
+          );
+        }
+      } catch {
+        bb.log.warn("Account Pooler thread credential sweep failed.");
+      }
+    };
+    const sweepThreadCredentialsPeriodically = async (
       signal: AbortSignal,
     ): Promise<void> => {
       while (!signal.aborted) {
-        try {
-          const { checked, revoked, failed } =
-            await threadTokens.sweepThreads(lookupThread);
-          if (revoked > 0 || failed > 0) {
-            bb.log.warn(
-              `Account Pooler thread credential sweep checked ${checked} threads, revoked ${revoked}, and could not look up ${failed}.`,
-            );
-          }
-        } catch {
-          bb.log.warn("Account Pooler thread credential sweep failed.");
-        }
         await waitForDelay(THREAD_SWEEP_INTERVAL_MS, signal);
+        if (!signal.aborted) await sweepThreadCredentialsOnce(signal);
       }
     };
     const checkArchived = async (
@@ -582,9 +591,18 @@ export function createAccountPoolPlugin(
     });
     bb.background.service("hub", {
       start: async (signal) => {
+        await sweepThreadCredentialsOnce(
+          AbortSignal.any([
+            signal,
+            AbortSignal.timeout(
+              options.threadSweepStartupTimeoutMs ??
+                THREAD_SWEEP_STARTUP_TIMEOUT_MS,
+            ),
+          ]),
+        );
         await Promise.all([
           hub.start(signal),
-          sweepThreadCredentials(signal),
+          sweepThreadCredentialsPeriodically(signal),
         ]);
       },
     });

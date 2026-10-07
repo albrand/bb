@@ -10109,9 +10109,7 @@ describe("Account Pool credential scoping", () => {
         });
       }),
     );
-    await vi.waitFor(async () => {
-      expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
-    });
+    expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
     expect(await statusOf(host, missedNested, "/availability")).toBe(401);
     expect(await statusOf(host, active, "/v1/messages")).toBe(200);
     expect(await statusOf(host, activeNested, "/availability")).toBe(200);
@@ -10149,11 +10147,111 @@ describe("Account Pool credential scoping", () => {
         throw new Error("lookup failed");
       }),
     );
-    await vi.waitFor(async () => {
-      expect(await statusOf(host, gone, "/v1/messages")).toBe(401);
-    });
+    expect(await statusOf(host, gone, "/v1/messages")).toBe(401);
     expect(await statusOf(host, failing, "/v1/messages")).toBe(200);
     expect(await statusOf(host, proxy, "/v1/messages")).toBe(200);
+  });
+
+  it("reports acceptance only after the startup sweep revoked a stale legacy credential", async () => {
+    const fixture = await scopedFixture();
+    const stale = await claudeToken(fixture.host, "thread-stale");
+    const live = await claudeToken(fixture.host, "thread-live");
+    await downgradeToLegacyFiles(fixture, "thread-stale");
+    await downgradeToLegacyFiles(fixture, "thread-live");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = 0;
+    const host = await fixture.host.harness.lifecycle.reload(
+      createAccountPoolPlugin({
+        usageUrl: EMPTY_USAGE_URL,
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          planType: null,
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      }),
+    );
+    host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      entered += 1;
+      await gate;
+      return makeThreadResponse({
+        id: threadId,
+        archivedAt: threadId === "thread-stale" ? 1_000 : null,
+      });
+    });
+    const service = host.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      release();
+      service.controller.abort();
+      await service.done;
+      await host.harness.lifecycle.dispose();
+    });
+    await vi.waitFor(() => expect(entered).toBeGreaterThan(0));
+    const before = statusSchema.parse(
+      await host.harness.behavior.callRpc("status.get", null),
+    );
+    expect(before.accepting).toBe(false);
+    expect(await statusOf(host, stale, "/v1/messages")).not.toBe(200);
+    release();
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    expect(await statusOf(host, stale, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, live, "/v1/messages")).toBe(200);
+  });
+
+  it("starts accepting after the startup timeout when the thread lookup hangs, keeping every credential", async () => {
+    const fixture = await scopedFixture();
+    const held = await claudeToken(fixture.host, "thread-held");
+    await downgradeToLegacyFiles(fixture, "thread-held");
+    const host = await fixture.host.harness.lifecycle.reload(
+      createAccountPoolPlugin({
+        threadSweepStartupTimeoutMs: 50,
+        usageUrl: EMPTY_USAGE_URL,
+        codexUsageUrl: EMPTY_USAGE_URL,
+        importCodexCredentials: async () => ({
+          accessToken: "codex-access",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "codex-account",
+          planType: null,
+          email: null,
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      }),
+    );
+    host.harness.sdk.stub(
+      "threads.get",
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    const service = host.harness.behavior.runService("hub");
+    cleanups.push(async () => {
+      service.controller.abort();
+      await service.done;
+      await host.harness.lifecycle.dispose();
+    });
+    await vi.waitFor(async () => {
+      const status = statusSchema.parse(
+        await host.harness.behavior.callRpc("status.get", null),
+      );
+      expect(status.accepting).toBe(true);
+    });
+    expect(await statusOf(host, held, "/v1/messages")).toBe(200);
   });
 
   it("exports nothing for an archived thread and revokes any token it already held", async () => {
