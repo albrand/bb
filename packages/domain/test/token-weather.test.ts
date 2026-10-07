@@ -197,6 +197,49 @@ describe("token weather", () => {
     ]);
   });
 
+  it("keeps unknown-model compaction savings inside each compaction window", () => {
+    const turn = (turnId: string, tokens: number) => ({
+      cachedInputTokens: 0,
+      inputTokens: tokens,
+      model: null,
+      outputTokens: 0,
+      providerId: "provider-a",
+      reasoningOutputTokens: null,
+      totalTokens: tokens,
+      turnId,
+    });
+    const result = estimateCompactionSavings({
+      compactionTurnIds: ["compact-first", "compact-second"],
+      turns: [
+        turn("before-first", 1000),
+        turn("compact-first", 100),
+        turn("after-first", 500),
+        turn("before-second", 450),
+        turn("compact-second", 100),
+        turn("after-second", 50),
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        afterTokens: 500,
+        beforeTokens: 1000,
+        compactionCostTokens: 100,
+        likelyPaidForItself: true,
+        observedSavingsTokens: 1050,
+        turnId: "compact-first",
+      },
+      {
+        afterTokens: 50,
+        beforeTokens: 475,
+        compactionCostTokens: 100,
+        likelyPaidForItself: true,
+        observedSavingsTokens: 425,
+        turnId: "compact-second",
+      },
+    ]);
+  });
+
   it("includes cached input when estimating compaction context and savings", () => {
     const result = estimateCompactionSavings({
       compactionTurnIds: ["compact"],

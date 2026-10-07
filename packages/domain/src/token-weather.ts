@@ -193,10 +193,17 @@ export function estimateCompactionSavings(args: {
   const turns = [...args.turns];
   const compactionTurnIds = new Set(args.compactionTurnIds);
   const lookaheadTurns = args.lookaheadTurns ?? 3;
+  const compactionIndexes = turns.flatMap((turn, index) =>
+    compactionTurnIds.has(turn.turnId) ? [index] : [],
+  );
   return turns.flatMap((turn, index) => {
     if (!compactionTurnIds.has(turn.turnId)) return [];
+    const previousCompactionIndex =
+      compactionIndexes.filter((candidate) => candidate < index).at(-1) ?? -1;
+    const nextCompactionIndex =
+      compactionIndexes.find((candidate) => candidate > index) ?? turns.length;
     const earlier = turns
-      .slice(0, index)
+      .slice(previousCompactionIndex + 1, index)
       .filter(
         (candidate) =>
           candidate.model === turn.model &&
@@ -206,7 +213,7 @@ export function estimateCompactionSavings(args: {
       .map((candidate) => estimatedContextTokens(candidate)!);
     const beforeTokens = median(earlier.slice(-3));
     const later = turns
-      .slice(index + 1)
+      .slice(index + 1, nextCompactionIndex)
       .filter(
         (candidate) =>
           candidate.model === turn.model &&
