@@ -1422,8 +1422,13 @@ describe("PromptBoxInternal controlled value sync", () => {
   it("preserves external focus when a coarse pointer becomes fine", async () => {
     const pointer = mockMutablePointerCoarse(true);
     const outsideTarget = document.createElement("button");
+    const initialLayoutChange = vi.fn();
+    const nextLayoutChange = vi.fn();
     try {
-      render(<PromptBoxInternal {...createPromptBoxProps()} />);
+      const props = createPromptBoxProps({
+        onComposerLayoutChange: initialLayoutChange,
+      });
+      const view = render(<PromptBoxInternal {...props} compact={undefined} />);
 
       await waitFor(() =>
         expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
@@ -1431,7 +1436,16 @@ describe("PromptBoxInternal controlled value sync", () => {
       document.body.append(outsideTarget);
       outsideTarget.focus();
 
-      act(() => pointer.setMatches(false));
+      act(() => {
+        pointer.setMatches(false);
+        view.rerender(
+          <PromptBoxInternal
+            {...props}
+            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+            onComposerLayoutChange={nextLayoutChange}
+          />,
+        );
+      });
       await act(
         () =>
           new Promise<void>((resolve) =>
@@ -1439,6 +1453,8 @@ describe("PromptBoxInternal controlled value sync", () => {
           ),
       );
 
+      expect(initialLayoutChange).toHaveBeenCalledWith("expanded");
+      expect(nextLayoutChange).toHaveBeenCalledWith("compact");
       expect(document.activeElement).toBe(outsideTarget);
     } finally {
       outsideTarget.remove();
@@ -1449,14 +1465,36 @@ describe("PromptBoxInternal controlled value sync", () => {
   it("preserves external focus when a fine pointer becomes coarse", async () => {
     const pointer = mockMutablePointerCoarse(false);
     const outsideTarget = document.createElement("button");
+    const initialLayoutChange = vi.fn();
+    const nextLayoutChange = vi.fn();
     try {
-      render(<PromptBoxInternal {...createPromptBoxProps()} />);
+      const props = createPromptBoxProps({
+        onComposerLayoutChange: initialLayoutChange,
+      });
+      const view = render(<PromptBoxInternal {...props} compact={undefined} />);
       await waitForPromptFocus();
 
       document.body.append(outsideTarget);
       outsideTarget.focus();
-      act(() => pointer.setMatches(true));
+      act(() => {
+        pointer.setMatches(true);
+        view.rerender(
+          <PromptBoxInternal
+            {...props}
+            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+            onComposerLayoutChange={nextLayoutChange}
+          />,
+        );
+      });
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
 
+      expect(initialLayoutChange).toHaveBeenCalledWith("expanded");
+      expect(nextLayoutChange).toHaveBeenCalledWith("compact");
       expect(document.activeElement).toBe(outsideTarget);
     } finally {
       outsideTarget.remove();
