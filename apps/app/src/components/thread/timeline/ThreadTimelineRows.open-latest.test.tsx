@@ -54,6 +54,7 @@ let frames: Map<number, FrameRequestCallback>;
 
 beforeEach(() => {
   height = 3500;
+  vi.setSystemTime(1_000);
   frames = new Map();
   let nextHandle = 0;
   vi.useFakeTimers();
@@ -199,14 +200,19 @@ function renderThread(
   return {
     area,
     catchUp: () => rerender(element(true)),
-    receiveAttention: () => rerender(element(false, 400)),
-    finishOpeningWithAttention: () => rerender(element(false, 400, false)),
+    receiveAttention: () => rerender(element(false, Date.now() + 1)),
+    receiveNewTimelineEvent: (createdAt: number) =>
+      rerender(element(true, createdAt)),
+    finishOpeningWithAttention: (latestAttentionAt = Date.now() + 1) =>
+      rerender(element(false, latestAttentionAt, false)),
     changeOpening: (opening: boolean) => rerender(element(false, 300, opening)),
-    receiveOpeningAttention: () => rerender(element(false, 400, true)),
+    receiveOpeningAttention: () =>
+      rerender(element(false, Date.now() + 1, true)),
     receiveUnseenAttentionWhileHidden: () =>
-      rerender(element(false, 400, false, false, false)),
+      rerender(element(false, Date.now() + 1, false, false, false)),
     blurThread: () => rerender(element(false, 300, false, false, false)),
-    focusThread: () => rerender(element(false, 400, false, false, true)),
+    focusThread: () =>
+      rerender(element(false, Date.now() + 1, false, false, true)),
     failOpening: () => rerender(element(false, 300, true, true)),
   };
 }
@@ -380,7 +386,7 @@ describe("opening an unseen timeline", () => {
     flushFrames();
     resize();
     expect(area.scrollTop).toBe(200);
-    finishOpeningWithAttention();
+    finishOpeningWithAttention(400);
     height += 600;
     resize();
     flushFrames();
@@ -460,7 +466,7 @@ describe("opening an unseen timeline", () => {
   });
 
   it.each([false, true])(
-    "preserves a restored reading position for late unseen data after 23 seconds with user input=%s",
+    "handles late unseen data while respecting user input=%s",
     (userScrolled) => {
       getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
         rowId: "answer-100",
@@ -478,12 +484,55 @@ describe("opening an unseen timeline", () => {
         area.scrollTop = 100;
         fireEvent.scroll(area);
       }
-      act(() => vi.advanceTimersByTime(23_200));
       catchUp();
       height += 600;
       resize();
       flushFrames();
-      expect(area.scrollTop).toBe(userScrolled ? 100 : 200);
+      expect(area.scrollTop).toBe(userScrolled ? 100 : 3300);
     },
   );
+
+  it("keeps a restored read position when a new event arrives immediately", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const openedAt = Date.now();
+    const { area, receiveNewTimelineEvent } = renderThread(350);
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    receiveNewTimelineEvent(openedAt + 1);
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+  });
+
+  it("opens at newest when unseen-at-open catch-up arrives after the opening window", () => {
+    const { area, catchUp } = renderThread(150, false, true);
+    resize();
+    act(() => vi.advanceTimersByTime(25_000));
+    catchUp();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
+
+  it("follows a new event when already at the bottom", () => {
+    const openedAt = Date.now();
+    const { area, receiveNewTimelineEvent } = renderThread(350);
+    resize();
+    area.scrollTop = 2700;
+    fireEvent.scroll(area);
+    receiveNewTimelineEvent(openedAt + 1);
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ThreadTimelineUnreadDividerPlacement } from "@/components/thread/timeline";
 import { didThreadDetailBootstrapRefreshAfterMount } from "@/hooks/queries/thread-queries";
 
@@ -11,7 +11,6 @@ interface ThreadUnreadDividerThreadState {
 interface ThreadUnreadDividerSnapshot {
   attentionAt: number;
   hasUnseenUpdatesOnOpen: boolean;
-  hasUnseenTimelineEventsOnOpen: boolean;
   isFocused: boolean;
   isOpening: boolean;
   placement: ThreadTimelineUnreadDividerPlacement | null;
@@ -110,6 +109,13 @@ export function useThreadUnreadDividerState({
   const threadId = thread?.id;
   const threadLastReadAt = thread?.lastReadAt;
   const threadLatestAttentionAt = thread?.latestAttentionAt;
+  const openMoment = useRef({ threadId: routeThreadId, openedAt: Date.now() });
+  if (openMoment.current.threadId !== routeThreadId) {
+    openMoment.current = { threadId: routeThreadId, openedAt: Date.now() };
+  }
+  const hasPreOpenAttention =
+    threadLatestAttentionAt !== undefined &&
+    threadLatestAttentionAt <= openMoment.current.openedAt;
 
   useEffect(() => {
     if (
@@ -147,8 +153,6 @@ export function useThreadUnreadDividerState({
             attentionAt: threadLatestAttentionAt,
             hasUnseenUpdatesOnOpen:
               currentSnapshot.hasUnseenUpdatesOnOpen || becameFocused,
-            hasUnseenTimelineEventsOnOpen:
-              currentSnapshot.hasUnseenTimelineEventsOnOpen,
             isFocused,
             isOpening: nextIsOpening,
             placement: { kind: "before-first" },
@@ -178,13 +182,9 @@ export function useThreadUnreadDividerState({
         hasUnseenUpdatesOnOpen:
           currentSnapshot?.threadId === threadId
             ? currentSnapshot.hasUnseenUpdatesOnOpen ||
-              ((currentSnapshot.isOpening || becameFocused) &&
+              ((hasPreOpenAttention || becameFocused) &&
                 placement !== null)
-            : placement !== null,
-        hasUnseenTimelineEventsOnOpen:
-          currentSnapshot?.threadId === threadId
-            ? currentSnapshot.hasUnseenTimelineEventsOnOpen
-            : hasUnseenTimelineEvents,
+            : hasPreOpenAttention && placement !== null,
         isFocused,
         isOpening: nextIsOpening,
         placement,
@@ -198,16 +198,11 @@ export function useThreadUnreadDividerState({
     threadId,
     threadLastReadAt,
     threadLatestAttentionAt,
-    hasUnseenTimelineEvents,
+    hasPreOpenAttention,
   ]);
 
-  const snapshotForThread =
-    snapshot?.threadId === threadId ? snapshot : null;
   const hasUnseenTimelineEventsToOpenLatest =
-    snapshotForThread === null
-      ? hasUnseenTimelineEvents
-      : snapshotForThread.hasUnseenTimelineEventsOnOpen ||
-        (isOpening && hasUnseenTimelineEvents);
+    hasUnseenTimelineEvents && hasPreOpenAttention;
   const shouldOpenForUnseenTimelineEvents =
     isFocused && hasUnseenTimelineEventsToOpenLatest;
 
@@ -233,12 +228,13 @@ export function useThreadUnreadDividerState({
   const hasUnseenUpdatesOnOpen =
     snapshot !== null && snapshot.threadId === threadId
       ? snapshot.hasUnseenUpdatesOnOpen ||
-        ((snapshot.isOpening || (!snapshot.isFocused && isFocused)) &&
+        ((hasPreOpenAttention || (!snapshot.isFocused && isFocused)) &&
           isThreadUnread({
             lastReadAt: threadLastReadAt,
             latestAttentionAt: threadLatestAttentionAt,
           }))
-      : isThreadUnread({
+      : hasPreOpenAttention &&
+        isThreadUnread({
           lastReadAt: threadLastReadAt,
           latestAttentionAt: threadLatestAttentionAt,
         });
