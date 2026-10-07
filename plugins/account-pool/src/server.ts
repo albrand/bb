@@ -340,9 +340,17 @@ export function createAccountPoolPlugin(
         reason:
           "Account Pooler is isolated from the parent bb server's pool on this instance",
       }));
+    const revokeIfArchived = async (threadId: string): Promise<boolean> => {
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (thread.archivedAt === null) return false;
+      await threadTokens.removeThread(threadId);
+      return true;
+    };
     const contributeFor =
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
+        const unrouted = () =>
+          hasConfiguredParentPool ? neutralized(provider) : [];
         const bypassed = await routing.isBypassed(context.threadId);
         const selectedAccountId = await routing.selectedAccount(
           context.threadId,
@@ -355,6 +363,7 @@ export function createAccountPoolPlugin(
             ? await canServe(provider)
             : await operations.isRoutingEnabled(provider));
         if (canRoute) {
+          if (await revokeIfArchived(context.threadId)) return unrouted();
           const hostToken = await hubTokens.forHost(context.hostId);
           const token = await threadTokens.forThread(
             {
@@ -369,19 +378,13 @@ export function createAccountPoolPlugin(
             { threadId: context.threadId, hostId: context.hostId },
             hostToken,
           );
-          const thread = await bb.sdk.threads.get({
-            threadId: context.threadId,
-          });
-          if (thread.archivedAt !== null) {
-            await threadTokens.removeThread(context.threadId);
-            return hasConfiguredParentPool ? neutralized(provider) : [];
-          }
+          if (await revokeIfArchived(context.threadId)) return unrouted();
           if (provider === "claude") {
             await routing.recordRouted(context.threadId, context.hostId);
           }
           return [...serving(token), ...markerEntries(nestedToken)];
         }
-        return hasConfiguredParentPool ? neutralized(provider) : [];
+        return unrouted();
       };
     const proxiedHealth = async (provider: PoolProvider) =>
       (await canServe(provider))

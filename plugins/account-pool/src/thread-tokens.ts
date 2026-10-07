@@ -199,13 +199,15 @@ export class ThreadTokenStore {
       record.hostTokenDigest !== minted.hostTokenDigest;
     for (const [key, record] of this.routes) {
       if (!stale(record) || (await this.isGenerationLive(record))) continue;
-      await fs.rm(this.file(record), { force: true });
+      await fs.rm(this.file(record), { force: true }).catch(() => undefined);
       this.routes.delete(key);
       this.tokenIndex.delete(digest(record.token));
     }
     for (const [key, record] of this.nestedRoutes) {
       if (!stale(record) || (await this.isGenerationLive(record))) continue;
-      await fs.rm(this.nestedFile(record), { force: true });
+      await fs
+        .rm(this.nestedFile(record), { force: true })
+        .catch(() => undefined);
       this.nestedRoutes.delete(key);
       this.nestedTokenIndex.delete(digest(record.token));
     }
@@ -285,10 +287,9 @@ async function readRecord<T>(
   file: string,
   schema: z.ZodType<T>,
 ): Promise<T | null> {
+  const text = await fs.readFile(file, "utf8");
   try {
-    const parsed = schema.safeParse(
-      JSON.parse(await fs.readFile(file, "utf8")),
-    );
+    const parsed = schema.safeParse(JSON.parse(text));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

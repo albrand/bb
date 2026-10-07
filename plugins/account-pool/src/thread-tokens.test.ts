@@ -255,6 +255,50 @@ it("starts even when a credential entry cannot be read or removed", async () => 
   expect(await reloaded.authenticateNested(nested)).toEqual(nestedRoute);
 });
 
+it.skipIf(process.getuid?.() === 0)(
+  "keeps a credential file it could not read instead of deleting it",
+  async () => {
+    const { directory, hosts, threads, route, hostToken } = await fixture();
+    const provider = await threads.forThread(route, hostToken);
+    const [name] = (await fs.readdir(directory)).filter((entry) =>
+      entry.startsWith("thread-route-"),
+    );
+    const file = path.join(directory, name ?? "");
+    await fs.chmod(file, 0o000);
+    const blocked = new ThreadTokenStore(directory, hosts);
+    await expect(blocked.initialize([route.hostId])).resolves.toBeUndefined();
+    expect(await blocked.authenticate(provider)).toBeNull();
+    await fs.chmod(file, 0o600);
+    const reloaded = new ThreadTokenStore(directory, hosts);
+    await reloaded.initialize([route.hostId]);
+    expect(await reloaded.authenticate(provider)).toEqual(route);
+  },
+);
+
+it("mints even when an expired-generation record cannot be removed", async () => {
+  const { directory, hosts, threads, route, hostToken, advance } =
+    await fixture();
+  await threads.forThread(route, hostToken);
+  await threads.forNested(
+    { hostId: route.hostId, threadId: route.threadId },
+    hostToken,
+  );
+  const stale = (await fs.readdir(directory)).filter(
+    (entry) =>
+      entry.startsWith("thread-route-") || entry.startsWith("nested-route-"),
+  );
+  expect(stale).toHaveLength(2);
+  await hosts.rotate(route.hostId);
+  const nextHostToken = await hosts.forHost(route.hostId);
+  advance(10 * 60_000 + 1);
+  for (const entry of stale) {
+    await fs.rm(path.join(directory, entry));
+    await fs.mkdir(path.join(directory, entry));
+  }
+  const current = await threads.forThread(route, nextHostToken);
+  expect(await threads.authenticate(current)).toEqual(route);
+});
+
 it("keeps routes apart when identifiers contain the separator", async () => {
   const { directory, hosts, threads } = await fixture();
   const first = { hostId: "host-a", threadId: "b-c" };

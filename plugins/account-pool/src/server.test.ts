@@ -8902,6 +8902,80 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, restored, "/v1/messages")).toBe(200);
   });
 
+  it("mints nothing when the thread lookup fails", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    host.harness.sdk.stub("threads.get", async () => {
+      throw new Error("lookup failed");
+    });
+    await expect(
+      host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-lookup",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+    ).resolves.toEqual([]);
+    expect(
+      (await fs.readdir(path.join(fixture.dataDir, ...POOL_SECRETS))).filter(
+        (name) => name.includes("thread-lookup"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("revokes what it minted when the thread is archived while its environment resolves", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    let lookups = 0;
+    host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      lookups += 1;
+      return makeThreadResponse({
+        id: threadId,
+        archivedAt: lookups === 1 ? null : 1_000,
+      });
+    });
+    const entries = await host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      {
+        threadId: "thread-racing",
+        projectId: "project-one",
+        hostId: "host-one",
+      },
+    );
+    expect(lookups).toBe(2);
+    expect(entries).toEqual([]);
+    expect(
+      (await fs.readdir(path.join(fixture.dataDir, ...POOL_SECRETS))).filter(
+        (name) => name.includes("thread-racing"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("blanks the inherited routing for an archived thread on a nested server", async () => {
+    const parent = await scopedFixture();
+    const child = await startNestedChild(
+      parent,
+      await nestedToken(parent.host),
+    );
+    const live = await claudeToken(child, "thread-nested");
+    expect(await statusOf(child, live, "/v1/messages")).toBe(200);
+    child.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({ id: threadId, archivedAt: 1_000 }),
+    );
+    const entries = await child.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      {
+        threadId: "thread-nested",
+        projectId: "project-one",
+        hostId: "host-one",
+      },
+    );
+    expect(entries.map((entry) => [entry.name, entry.value])).toEqual([
+      ["ANTHROPIC_BASE_URL", ""],
+      ["ANTHROPIC_AUTH_TOKEN", ""],
+    ]);
+    expect(await statusOf(child, live, "/v1/messages")).toBe(401);
+  });
+
   it("keeps one thread's token from acting as another thread", async () => {
     const fixture = await scopedFixture();
     const { host } = fixture;
@@ -8932,9 +9006,10 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, nested, "/v1/messages")).toBe(200);
   });
 
-  it("lets a nested server proxy through its parent with the scoped token until the thread is archived", async () => {
-    const parent = await scopedFixture();
-    const scoped = await nestedToken(parent.host);
+  async function startNestedChild(
+    parent: Fixture,
+    scoped: string,
+  ): Promise<Fixture["host"]> {
     const parentBase = "http://parent.test/api/v1/plugins/account-pool/http";
     const viaParent: typeof fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -8980,6 +9055,13 @@ describe("Account Pool credential scoping", () => {
       );
       expect(status.accepting).toBe(true);
     });
+    return child;
+  }
+
+  it("lets a nested server proxy through its parent with the scoped token until the thread is archived", async () => {
+    const parent = await scopedFixture();
+    const scoped = await nestedToken(parent.host);
+    const child = await startNestedChild(parent, scoped);
     const childToken = await claudeToken(child, "thread-nested");
     expect(await statusOf(child, childToken, "/v1/messages")).toBe(200);
     expect(await statusOf(parent.host, scoped, "/availability")).toBe(200);
