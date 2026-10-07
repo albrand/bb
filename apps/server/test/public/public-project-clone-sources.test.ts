@@ -208,6 +208,10 @@ describe("project clone sources", () => {
 
   it("propagates structured clone failures and creates no source row", async () => {
     await withTestHarness(async (harness) => {
+      setAppSettings(harness.db, {
+        ...getAppSettings(harness.db),
+        machineGitCredentialsEnabled: false,
+      });
       const primary = seedHostSession(harness.deps, {
         id: "host-clone-primary",
       });
