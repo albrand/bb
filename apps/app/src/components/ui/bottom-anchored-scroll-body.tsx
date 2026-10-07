@@ -236,6 +236,7 @@ export function BottomAnchoredScrollBody({
   const tabFocusTransitionPendingRef = useRef(false);
   const tabFocusTransitionTimeoutRef = useRef<number | null>(null);
   const pointerScrollIntentRef = useRef(false);
+  const pointerScrollStartTopRef = useRef<number | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
   const restoreFramesRemainingRef = useRef(0);
   const restoreTailLiveReadRef = useRef(false);
@@ -757,13 +758,26 @@ export function BottomAnchoredScrollBody({
   }, [markUserScrollIntent]);
 
   const startPointerScrollIntent = useCallback(() => {
-    markUserScrollIntent();
+    userScrollIntentObservedRef.current = true;
+    cancelPrependPositionHold();
+    scrollToTopInProgressRef.current = false;
+    pointerScrollStartTopRef.current = scrollAreaRef.current?.scrollTop ?? null;
     pointerScrollIntentRef.current = true;
-  }, [markUserScrollIntent]);
+  }, [cancelPrependPositionHold]);
 
   const endPointerScrollIntent = useCallback(() => {
+    const startScrollTop = pointerScrollStartTopRef.current;
+    const scrollArea = scrollAreaRef.current;
+    if (
+      startScrollTop !== null &&
+      scrollArea !== null &&
+      scrollArea.scrollTop !== startScrollTop
+    ) {
+      markUserScrollIntent();
+    }
+    pointerScrollStartTopRef.current = null;
     pointerScrollIntentRef.current = false;
-  }, []);
+  }, [markUserScrollIntent]);
 
   const markKeyboardScrollIntent = useCallback(
     (event: KeyboardEvent) => {

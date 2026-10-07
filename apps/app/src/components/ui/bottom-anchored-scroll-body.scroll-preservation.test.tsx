@@ -992,6 +992,38 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
     },
   );
 
+  it("does not mistake a released pointer press without movement for a manual scroll", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily("thread-a"), {
+      rowId: "row-b",
+      offsetWithinRow: -197,
+      atBottom: false,
+    });
+    const { scrollArea, getRow } = renderTimeline({
+      threadId: "thread-a",
+      rowIds: ["row-a", "row-b", "row-c"],
+      virtualized: true,
+    });
+    mockScrollAreaRect(scrollArea, 796);
+    vi.spyOn(getRow("row-b"), "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, 5_598 - scrollArea.scrollTop, 100, 100),
+    );
+    setScrollMetrics(scrollArea, {
+      scrollHeight: 14_222,
+      clientHeight: 796,
+      scrollTop: 0,
+    });
+    act(() => getLatestResizeObserver().trigger());
+
+    fireEvent.pointerDown(scrollArea);
+    fireEvent.pointerUp(window);
+    scrollArea.scrollTop = 5_252;
+    fireEvent.scroll(scrollArea);
+    act(() => getLatestResizeObserver().trigger());
+
+    expect(scrollArea.scrollTop).toBe(5_401);
+    expect(getRow("row-b").getBoundingClientRect().top).toBe(197);
+  });
+
   it.each([
     { edge: "top", offsetWithinRow: -20, rowTop: 5, expectedScrollTop: 0 },
     {
