@@ -236,6 +236,61 @@ describe("thread usage summary", () => {
     expect(within(panel).getByText("Unavailable, estimated")).toBeTruthy();
   });
 
+  it("keeps the full provider and unknown model label readable on narrow screens", async () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: false,
+        providerId: "claude-code",
+        total: {
+          inputTokens: 22,
+          cachedInputTokens: 2_100_000,
+          outputTokens: 5_900,
+          reasoningOutputTokens: 0,
+          totalTokens: 2_105_922,
+        },
+        turns: [
+          {
+            turnId: "unknown-model-turn",
+            model: null,
+            inputTokens: 22,
+            cachedInputTokens: 2_100_000,
+            outputTokens: 5_900,
+            reasoningOutputTokens: null,
+            totalTokens: 2_105_922,
+          },
+        ],
+      },
+    });
+    useThreadTimeline.mockReturnValue({
+      data: {
+        rows: [],
+        timelinePage: { olderCursor: null },
+        contextWindowUsage: null,
+      },
+    });
+    const queryClient = new QueryClient();
+    render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary
+            threadId="unknown-model-thread"
+            turnId="unknown-model-turn"
+          />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByText(/in 22/));
+
+    const panel = await screen.findByRole("dialog", {
+      name: "Token weather and compaction savings",
+    });
+    const label = await within(panel).findByText("claude-code / Unknown model");
+
+    expect(label.textContent).toBe("claude-code / Unknown model");
+    expect(label.getAttribute("title")).toBe("claude-code / Unknown model");
+  });
+
   it("renders compact per-turn tokens and an expandable child agent summary", async () => {
     const queryClient = new QueryClient();
     const { container } = render(
