@@ -169,7 +169,6 @@ export function createClaudeAdapter(options: {
         context.now() - checkedAt < PROFILE_REFRESH_INTERVAL_MS
       )
         return;
-      profileCheckedAt.set(account.id, context.now());
       const profile = await context
         .fetch(options.profileUrl, {
           headers: {
@@ -209,6 +208,7 @@ export function createClaudeAdapter(options: {
         plan.rateLimitTier !== account.rateLimitTier
       )
         await context.accounts.setPlan(account.id, plan);
+      profileCheckedAt.set(account.id, context.now());
     },
     errorResponse(status, message, headers) {
       const type =

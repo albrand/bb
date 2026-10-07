@@ -6211,7 +6211,16 @@ describe("Account Pool plugin", () => {
     },
   );
 
-  async function claudePlanFixture(profile: Record<string, unknown>) {
+  async function claudePlanFixture(
+    profile: Record<string, unknown>,
+    firstProfileFailure:
+      | "network"
+      | "http"
+      | "json"
+      | "payload"
+      | "identity"
+      | null = null,
+  ) {
     const profileCalls: string[] = [];
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
@@ -6230,6 +6239,21 @@ describe("Account Pool plugin", () => {
             profileCalls.push(
               new Headers(init?.headers).get("authorization") ?? "",
             );
+            if (profileCalls.length === 1) {
+              if (firstProfileFailure === "network")
+                throw new Error("Profile request failed");
+              if (firstProfileFailure === "http")
+                return Response.json({ error: "Unavailable" }, { status: 503 });
+              if (firstProfileFailure === "json")
+                return new Response("Unreadable profile");
+              if (firstProfileFailure === "payload")
+                return Response.json({ account: { uuid: "invalid" } });
+              if (firstProfileFailure === "identity")
+                return Response.json({
+                  ...profile,
+                  account: { uuid: "99999999-9999-4999-8999-999999999999" },
+                });
+            }
             return Response.json(profile);
           }
           if (url.pathname === "/usage")
@@ -6293,6 +6317,46 @@ describe("Account Pool plugin", () => {
 
     expect(profileCalls).toHaveLength(1);
   });
+
+  it.each(["network", "http", "json", "payload", "identity"] as const)(
+    "retries a failed Claude profile lookup on the next usage refresh after %s failure",
+    async (failure) => {
+      const organizationUuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const { fixture, listed, profileCalls } = await claudePlanFixture(
+        {
+          account: {
+            uuid: "11111111-1111-4111-8111-111111111111",
+            has_claude_max: true,
+          },
+          organization: {
+            uuid: organizationUuid,
+            rate_limit_tier: "default_claude_max_20x",
+          },
+        },
+        failure,
+      );
+      const refresh = () =>
+        fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+          accountId: fixture.account.id,
+        });
+
+      expect(profileCalls.length).toBe(1);
+      expect(await listed()).toMatchObject({
+        organizationUuid: null,
+        rateLimitTier: "default_claude_max_5x",
+      });
+
+      await refresh();
+      expect(profileCalls.length).toBe(2);
+      expect(await listed()).toMatchObject({
+        organizationUuid,
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_20x",
+      });
+      await refresh();
+      expect(profileCalls.length).toBe(2);
+    },
+  );
 
   it.each([
     [
