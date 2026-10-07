@@ -1537,6 +1537,39 @@ describe("FollowUpPromptBox", () => {
     );
   });
 
+  it("sets footer-visible for an expanded composer at a non-compact viewport", async () => {
+    mocks.isCompactViewport = false;
+    render(
+      <>
+        <FollowUpPromptBox
+          {...createFollowUpPromptBoxProps({ kind: "ready" })}
+        />
+        <button type="button">Outside composer</button>
+      </>,
+    );
+    const composer = document.querySelector("[data-follow-up-composer]");
+    const input = screen.getByRole("textbox", { name: "Follow-up prompt" });
+
+    expect(
+      composer?.hasAttribute("data-follow-up-composer-footer-visible"),
+    ).toBe(false);
+
+    act(() => input.focus());
+    expect(
+      composer?.hasAttribute("data-follow-up-composer-footer-visible"),
+    ).toBe(true);
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Outside composer" }),
+    );
+    act(() => screen.getByRole("button", { name: "Outside composer" }).focus());
+    await waitFor(() =>
+      expect(
+        composer?.hasAttribute("data-follow-up-composer-footer-visible"),
+      ).toBe(false),
+    );
+  });
+
   it("keeps the composer mounted across compact breakpoint changes", () => {
     const props = createFollowUpPromptBoxProps({ kind: "ready" });
     const { rerender } = render(<FollowUpPromptBox {...props} />);
