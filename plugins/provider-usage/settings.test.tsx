@@ -190,7 +190,7 @@ it("shows pooled Claude accounts and host Codex in the default combined view", a
   ).toBe(true);
 });
 
-it("drops only the matching host Claude identity and keeps a distinct account", async () => {
+it("refreshes a distinct host Claude account and keeps pooled accounts", async () => {
   const app = await loadPluginApp(() => import("./app"));
   const matchingHost = claudeAccount(
     "matching-host",
@@ -213,17 +213,34 @@ it("drops only the matching host Claude identity and keeps a distinct account", 
   pooled.accountLabel = "alexandre@example.com";
   if (pooled.usage?.status === "ok")
     pooled.usage.accountEmail = "alexandre@example.com";
+  const refreshedHost = claudeAccount(
+    "distinct-host",
+    "anthropic:account:other",
+  );
+  refreshedHost.accountLabel = "other@example.com";
+  if (refreshedHost.usage?.status === "ok") {
+    refreshedHost.usage.accountEmail = "other@example.com";
+    refreshedHost.usage.windows[0]!.usedPercent = 79;
+  }
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
     {
       rpc: {
-        getUsage: () => ({
-          machines: [
-            machine("host", [matchingHost, distinctHost]),
-            machine("source:pool", [pooled]),
-          ],
-        }),
+        getUsage: (unknownInput) => {
+          const input = usageInput(unknownInput);
+          if (input.machineIds?.includes("host") && input.force) {
+            return {
+              machines: [machine("host", [refreshedHost])],
+            };
+          }
+          return {
+            machines: [
+              machine("host", [matchingHost, distinctHost]),
+              machine("source:pool", [pooled]),
+            ],
+          };
+        },
       },
     },
   );
@@ -231,9 +248,29 @@ it("drops only the matching host Claude identity and keeps a distinct account", 
   await slot.findByText("other@example.com");
   expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
   expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+
+  fireEvent.click(slot.getByLabelText("Reload usage data"));
+  await waitFor(() => expect(slot.getByText("79% used")).toBeTruthy());
+  expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
+  expect(slot.getByText("other@example.com")).toBeTruthy();
+  expect(
+    slot.rpcCalls.some((call) => {
+      const input = usageInput(call.input);
+      return (
+        input.force &&
+        input.machineIds?.includes("host") &&
+        input.providerId === "claude-code"
+      );
+    }),
+  ).toBe(true);
 });
 
 it.each([
+  {
+    name: "host identity matches pooled identity",
+    hostIdentity: "anthropic:account:alexandre",
+    pooledIdentity: "anthropic:account:alexandre",
+  },
   {
     name: "host identity is unknown",
     hostIdentity: null,
@@ -270,6 +307,29 @@ it.each([
 
     await slot.findByText("principal@example.com");
     expect(slot.queryByText("host-claude@example.com")).toBeNull();
+    fireEvent.click(slot.getByLabelText("Reload usage data"));
+    await waitFor(() =>
+      expect(
+        slot.rpcCalls.some((call) => {
+          const input = usageInput(call.input);
+          return (
+            input.force &&
+            input.machineIds?.includes("source:pool") &&
+            input.providerId === "claude-code"
+          );
+        }),
+      ).toBe(true),
+    );
+    expect(
+      slot.rpcCalls.some((call) => {
+        const input = usageInput(call.input);
+        return (
+          input.force &&
+          input.machineIds?.includes("host") &&
+          input.providerId === "claude-code"
+        );
+      }),
+    ).toBe(false);
   },
 );
 

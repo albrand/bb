@@ -154,27 +154,6 @@ function isSource(machine: UsageMachine): boolean {
   return machine.id.startsWith("source:");
 }
 
-function sourceClaudeProviders(machines: UsageMachine[]): UsageProvider[] {
-  return machines
-    .filter(isSource)
-    .flatMap((machine) =>
-      machine.providers.filter(
-        (provider) => provider.providerId === "claude-code",
-      ),
-    );
-}
-
-function distinctPooledProviders(providers: UsageProvider[]): UsageProvider[] {
-  const seen = new Set<string>();
-  return providers.filter((provider) => {
-    if (provider.accountKey == null) return true;
-    const identity = JSON.stringify([provider.providerId, provider.accountKey]);
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  });
-}
-
 function shouldKeepHostClaude(
   provider: UsageProvider,
   pooledClaude: UsageProvider[],
@@ -189,33 +168,86 @@ function shouldKeepHostClaude(
   );
 }
 
-function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
-  const sourceClaude = distinctPooledProviders(sourceClaudeProviders(machines));
+interface UsageRefreshTarget {
+  machine: UsageMachine;
+  providerIds: string[];
+}
+
+function combinedUsageSelection(machines: UsageMachine[]): {
+  providers: UsageProvider[];
+  refreshTargets: UsageRefreshTarget[];
+} {
+  const sourceClaude = machines
+    .filter(isSource)
+    .flatMap((machine) =>
+      machine.providers
+        .filter((provider) => provider.providerId === "claude-code")
+        .map((provider) => ({ machine, provider })),
+    );
+  const seenPooled = new Set<string>();
+  const pooledClaude = sourceClaude.filter(({ provider }) => {
+    if (provider.accountKey == null) return true;
+    const identity = JSON.stringify([provider.providerId, provider.accountKey]);
+    if (seenPooled.has(identity)) return false;
+    seenPooled.add(identity);
+    return true;
+  });
   const host = machines.find((machine) => !isSource(machine));
-  const hasPooledClaude = sourceClaude.length > 0;
-  const pooledClaude = sourceClaude;
-  const providers = hasPooledClaude
+  const hasPooledClaude = pooledClaude.length > 0;
+  const hostProviders = host?.providers.filter(
+    (provider) =>
+      provider.providerId !== "claude-code" ||
+      !hasPooledClaude ||
+      shouldKeepHostClaude(
+        provider,
+        pooledClaude.map(({ provider: pooled }) => pooled),
+      ),
+  ) ?? [];
+  const selectedProviders = hasPooledClaude
     ? [
-        ...pooledClaude,
-        ...(host?.providers.filter(
-          (provider) =>
-            provider.providerId !== "claude-code" ||
-            shouldKeepHostClaude(provider, pooledClaude),
-        ) ?? []),
+        ...pooledClaude.map(({ provider }) => provider),
+        ...hostProviders,
       ]
-    : (host?.providers ?? []);
-  const sources = machines.filter(
+    : hostProviders;
+  const targetsByMachine = new Map<UsageMachine, Set<string>>();
+  const addTarget = (machine: UsageMachine, providerId: string) => {
+    const providerIds = targetsByMachine.get(machine) ?? new Set<string>();
+    providerIds.add(providerId);
+    targetsByMachine.set(machine, providerIds);
+  };
+  if (hasPooledClaude) {
+    for (const { machine } of pooledClaude) addTarget(machine, "claude-code");
+    for (const provider of hostProviders) {
+      if (host !== undefined) addTarget(host, provider.providerId);
+    }
+  } else if (host !== undefined) {
+    for (const provider of hostProviders) addTarget(host, provider.providerId);
+  }
+  return {
+    providers: selectedProviders,
+    refreshTargets: [...targetsByMachine].map(([machine, providerIds]) => ({
+      machine,
+      providerIds: [...providerIds],
+    })),
+  };
+}
+
+function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
+  const { providers } = combinedUsageSelection(machines);
+  const sourceClaude = machines.filter(
     (machine) =>
       isSource(machine) &&
       machine.providers.some(
         (provider) => provider.providerId === "claude-code",
       ),
   );
-  const sourceError = [...sources, host].some(
+  const host = machines.find((machine) => !isSource(machine));
+  const hasPooledClaude = sourceClaude.length > 0;
+  const sourceError = [...sourceClaude, host].some(
     (machine) => machine !== undefined && machine.error !== null,
   );
 
-  if (host === undefined && sources.length === 0) return null;
+  if (host === undefined && sourceClaude.length === 0) return null;
   return {
     id: combinedLocationId,
     displayName: "Combined",
@@ -226,11 +258,6 @@ function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
         ? "Usage could not be refreshed."
         : null,
   };
-}
-
-interface UsageRefreshTarget {
-  machine: UsageMachine;
-  providerIds: string[];
 }
 
 function usageTargetsToRefresh(
@@ -253,41 +280,7 @@ function usageTargetsToRefresh(
         ];
   }
 
-  const sourceMachines = machines.filter(
-    (machine) =>
-      isSource(machine) &&
-      machine.providers.some(
-        (provider) => provider.providerId === "claude-code",
-      ),
-  );
-  const host = machines.find((machine) => !isSource(machine));
-  if (sourceMachines.length === 0)
-    return host === undefined
-      ? []
-      : [
-          {
-            machine: host,
-            providerIds: [
-              ...new Set(host.providers.map((provider) => provider.providerId)),
-            ],
-          },
-        ];
-  const targets = sourceMachines.map((machine) => ({
-    machine,
-    providerIds: ["claude-code"],
-  }));
-  if (host !== undefined)
-    targets.push({
-      machine: host,
-      providerIds: [
-        ...new Set(
-          host.providers
-            .filter((provider) => provider.providerId !== "claude-code")
-            .map((provider) => provider.providerId),
-        ),
-      ],
-    });
-  return targets;
+  return combinedUsageSelection(machines).refreshTargets;
 }
 
 function mergeUsageMachines(
