@@ -271,12 +271,10 @@ export function createAccountPoolPlugin(
       await threadTokens.removeThread(thread.id);
     });
     bb.events.on("thread.unarchived", async ({ thread }) => {
+      const archiveVersion = threadTokens.archiveVersion(thread.id);
       const current = await bb.sdk.threads.get({ threadId: thread.id });
       if (current.archivedAt === null) {
-        await threadTokens.restoreThread(
-          thread.id,
-          threadTokens.archiveVersion(thread.id),
-        );
+        await threadTokens.restoreThread(thread.id, archiveVersion);
       }
     });
     bb.events.on("thread.deleted", async ({ thread }) => {

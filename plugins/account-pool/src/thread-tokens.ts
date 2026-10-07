@@ -15,6 +15,8 @@ const LEGACY_THREAD_ROUTE_PREFIX = "thread-route-";
 const NESTED_ROUTE_PREFIX = "scoped-nested-route-";
 const LEGACY_NESTED_ROUTE_PREFIX = "nested-route-";
 const ARCHIVED_THREAD_PREFIX = "archived-thread-";
+const ARCHIVE_FALLBACK_PREFIX = "archive-revocation-";
+const REVOKED_ROUTE_PREFIX = "revoked-route-";
 
 const identifierSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u);
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
@@ -80,7 +82,11 @@ export class ThreadTokenStore {
     const enrolled = new Set(hostIds);
     const names = await fs.readdir(this.directory);
     for (const name of names) {
-      if (name.startsWith(ARCHIVED_THREAD_PREFIX) && name.endsWith(".json"))
+      if (
+        (name.startsWith(ARCHIVED_THREAD_PREFIX) ||
+          name.startsWith(ARCHIVE_FALLBACK_PREFIX)) &&
+        name.endsWith(".json")
+      )
         await this.loadArchiveMarker(name);
     }
     this.archiveMarkersLoaded = true;
@@ -107,15 +113,26 @@ export class ThreadTokenStore {
   ): Promise<void> {
     if (!name.endsWith(".json")) return;
     const file = path.join(this.directory, name);
+    if (name.startsWith(REVOKED_ROUTE_PREFIX)) {
+      await fs.rm(file, { force: true }).catch(() => undefined);
+      return;
+    }
     if (name.startsWith(ARCHIVED_THREAD_PREFIX)) return;
     if (
       name.startsWith(THREAD_ROUTE_PREFIX) ||
       name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
     ) {
       const record = await readRecord(file, routeSchema);
+      const archived =
+        record === null ? false : await this.isArchived(record.threadId);
       if (
         record !== null &&
-        !(await this.isArchived(record.threadId)) &&
+        archived &&
+        this.hasTransientArchiveReadFailure(record.threadId)
+      ) return;
+      if (
+        record !== null &&
+        !archived &&
         this.fileEpoch(name) === this.archiveEpoch(record.threadId) &&
         (await this.isLive(record, enrolled))
       ) {
@@ -127,9 +144,16 @@ export class ThreadTokenStore {
       name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
     ) {
       const record = await readRecord(file, nestedRouteSchema);
+      const archived =
+        record === null ? false : await this.isArchived(record.threadId);
       if (
         record !== null &&
-        !(await this.isArchived(record.threadId)) &&
+        archived &&
+        this.hasTransientArchiveReadFailure(record.threadId)
+      ) return;
+      if (
+        record !== null &&
+        !archived &&
         this.fileEpoch(name) === this.archiveEpoch(record.threadId) &&
         (await this.isLive(record, enrolled))
       ) {
@@ -236,11 +260,14 @@ export class ThreadTokenStore {
       const epoch = this.archiveEpoch(threadId);
       const nextEpoch = advanceEpoch ? epoch + 1 : epoch;
       this.archiveEpochs.set(threadId, nextEpoch);
+      const names = await fs.readdir(this.directory);
       const shouldPersist =
-        this.seenArchiveMarkers.has(this.archivedName(threadId)) ||
+        this.archiveMarkerNames(threadId).some((name) =>
+          this.seenArchiveMarkers.has(name),
+        ) ||
         [...this.routes.values()].some((record) => record.threadId === threadId) ||
         [...this.nestedRoutes.values()].some((record) => record.threadId === threadId) ||
-        (await this.hasCredentialFile(threadId));
+        this.hasCredentialFile(threadId, names);
       let markerError: unknown;
       if (shouldPersist) {
         try {
@@ -250,12 +277,22 @@ export class ThreadTokenStore {
             archived: true,
           });
           this.seenArchiveMarkers.add(this.archivedName(threadId));
-          this.transientArchiveReadFailures.delete(this.archivedName(threadId));
-          this.corruptArchiveMarkers.delete(this.archivedName(threadId));
+          this.clearMarkerFailures(threadId);
           this.archiveDurabilityFailures.delete(threadId);
         } catch (error) {
-          markerError = error;
-          this.archiveDurabilityFailures.add(threadId);
+          try {
+            await this.persist(this.archiveFallbackFile(threadId), {
+              threadId,
+              epoch: nextEpoch,
+              archived: true,
+            });
+            this.seenArchiveMarkers.add(this.archiveFallbackName(threadId));
+            this.clearMarkerFailures(threadId);
+            this.archiveDurabilityFailures.delete(threadId);
+          } catch {
+            markerError = error;
+            this.archiveDurabilityFailures.add(threadId);
+          }
         }
       }
       for (const [key, record] of this.routes) {
@@ -276,7 +313,7 @@ export class ThreadTokenStore {
           Math.max(0, nextEpoch - 1),
         ).catch(() => undefined);
       }
-      await this.quarantineUnreadableLegacyFiles(threadId).catch(() => undefined);
+      await this.quarantineUnreadableLegacyFiles(threadId, names).catch(() => undefined);
       if (markerError !== undefined) throw markerError;
     });
   }
@@ -299,25 +336,32 @@ export class ThreadTokenStore {
     await this.serialize(async () => {
       if (this.archiveVersion(threadId) !== expectedVersion) return;
       if (this.activeArchiveMarkers.has(threadId)) return;
-      const epoch = (await this.maxFileEpoch(threadId)) + 1;
       if (
-        epoch === 1 &&
+        this.archiveEpoch(threadId) === 0 &&
         !this.archivedThreads.has(threadId) &&
-        !this.corruptArchiveMarkers.has(this.archivedName(threadId)) &&
-        !this.transientArchiveReadFailures.has(this.archivedName(threadId)) &&
+        !this.hasMarkerFailure(threadId) &&
         !this.archiveDurabilityFailures.has(threadId)
       ) return;
+      const epoch = (await this.maxFileEpoch(threadId)) + 1;
       await this.persist(this.archivedFile(threadId), {
         threadId,
         epoch,
         archived: false,
       });
+      if (this.seenArchiveMarkers.has(this.archiveFallbackName(threadId))) {
+        await this.persist(this.archiveFallbackFile(threadId), {
+          threadId,
+          epoch,
+          archived: false,
+        });
+      }
       this.archivedThreads.delete(threadId);
       this.activeArchiveMarkers.add(threadId);
       this.archiveEpochs.set(threadId, epoch);
       this.seenArchiveMarkers.add(this.archivedName(threadId));
-      this.transientArchiveReadFailures.delete(this.archivedName(threadId));
-      this.corruptArchiveMarkers.delete(this.archivedName(threadId));
+      if (this.seenArchiveMarkers.has(this.archiveFallbackName(threadId)))
+        this.seenArchiveMarkers.add(this.archiveFallbackName(threadId));
+      this.clearMarkerFailures(threadId);
       this.archiveDurabilityFailures.delete(threadId);
     });
   }
@@ -389,26 +433,30 @@ export class ThreadTokenStore {
     const parsed = archiveStateSchema.safeParse(value);
     if (
       !parsed.success ||
-      name !== `${ARCHIVED_THREAD_PREFIX}${digest(parsed.data.threadId)}.json`
+      !this.archiveMarkerNames(parsed.data.threadId).includes(name)
     ) {
       this.corruptArchiveMarkers.add(name);
       return true;
     }
     this.corruptArchiveMarkers.delete(name);
     this.transientArchiveReadFailures.delete(name);
-    this.archiveEpochs.set(parsed.data.threadId, parsed.data.epoch);
+    const threadId = parsed.data.threadId;
+    const currentEpoch = this.archiveEpoch(threadId);
+    const currentArchived = this.archivedThreads.has(threadId);
+    if (parsed.data.epoch < currentEpoch) return currentArchived;
+    if (parsed.data.epoch === currentEpoch && currentArchived) return true;
+    this.archiveEpochs.set(threadId, parsed.data.epoch);
     if (parsed.data.archived) {
-      this.archivedThreads.add(parsed.data.threadId);
-      this.activeArchiveMarkers.delete(parsed.data.threadId);
+      this.archivedThreads.add(threadId);
+      this.activeArchiveMarkers.delete(threadId);
     } else {
-      this.archivedThreads.delete(parsed.data.threadId);
-      this.activeArchiveMarkers.add(parsed.data.threadId);
+      this.archivedThreads.delete(threadId);
+      this.activeArchiveMarkers.add(threadId);
     }
     return parsed.data.archived;
   }
 
-  private async hasCredentialFile(threadId: string): Promise<boolean> {
-    const names = await fs.readdir(this.directory);
+  private hasCredentialFile(threadId: string, names: readonly string[]): boolean {
     for (const name of names) {
       if (
         !name.startsWith(THREAD_ROUTE_PREFIX) &&
@@ -416,11 +464,6 @@ export class ThreadTokenStore {
         !name.startsWith(NESTED_ROUTE_PREFIX) &&
         !name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
       ) continue;
-      const schema = name.startsWith(THREAD_ROUTE_PREFIX) || name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
-        ? routeSchema
-        : nestedRouteSchema;
-      const record = await readRecord(path.join(this.directory, name), schema).catch(() => null);
-      if (record?.threadId === threadId) return true;
       if (name.includes(threadId)) return true;
     }
     return false;
@@ -436,11 +479,7 @@ export class ThreadTokenStore {
         !name.startsWith(NESTED_ROUTE_PREFIX) &&
         !name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
       ) continue;
-      const schema = name.startsWith(THREAD_ROUTE_PREFIX) || name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
-        ? routeSchema
-        : nestedRouteSchema;
-      const record = await readRecord(path.join(this.directory, name), schema).catch(() => null);
-      if (record?.threadId === threadId || name.includes(threadId))
+      if (name.includes(threadId))
         epoch = Math.max(epoch, this.fileEpoch(name));
     }
     return epoch;
@@ -504,9 +543,9 @@ export class ThreadTokenStore {
 
   private async quarantineUnreadableLegacyFiles(
     threadId: string,
+    names: readonly string[],
   ): Promise<void> {
     const hostIds = (await this.hosts.list()).map((host) => host.hostId);
-    const names = await fs.readdir(this.directory);
     for (const name of names) {
       if (
         !name.startsWith(LEGACY_THREAD_ROUTE_PREFIX) &&
@@ -514,17 +553,7 @@ export class ThreadTokenStore {
       ) continue;
       const file = path.join(this.directory, name);
       for (const hostId of hostIds) {
-        if (name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)) {
-          const nestedPrefix = `${LEGACY_NESTED_ROUTE_PREFIX}${hostId}-${threadId}-`;
-          if (
-            name.startsWith(nestedPrefix) &&
-            /^[a-f0-9]{64}\.json$/u.test(name.slice(nestedPrefix.length))
-          ) {
-            await this.quarantineFile(file);
-            break;
-          }
-          continue;
-        }
+        if (name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)) continue;
         for (const provider of ["claude", "codex"] as const) {
           const prefix = `${LEGACY_THREAD_ROUTE_PREFIX}${hostId}-${provider}-`;
           if (!name.startsWith(prefix)) continue;
@@ -534,10 +563,32 @@ export class ThreadTokenStore {
           );
           if (suffix === null || routeKey.slice(0, suffix.index) !== threadId)
             continue;
-          await this.quarantineFile(file);
+          const candidateCount = hostIds.filter((candidateHostId) => {
+            const candidatePrefix = `${LEGACY_THREAD_ROUTE_PREFIX}${candidateHostId}-${provider}-`;
+            if (!name.startsWith(candidatePrefix)) return false;
+            const candidateKey = name.slice(candidatePrefix.length);
+            const candidateSuffix = /-(?:automatic|[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})-[a-f0-9]{64}\.json$/u.exec(
+              candidateKey,
+            );
+            return candidateSuffix !== null;
+          }).length;
+          if (candidateCount === 1) await this.quarantineFile(file);
           break;
         }
       }
+      const nestedMatches = hostIds.filter((candidateHostId) => {
+        const prefix = `${LEGACY_NESTED_ROUTE_PREFIX}${candidateHostId}-`;
+        if (!name.startsWith(prefix)) return false;
+        const candidateThread = /^(.+)-[a-f0-9]{64}\.json$/u.exec(
+          name.slice(prefix.length),
+        );
+        return candidateThread !== null;
+      });
+      if (
+        name.startsWith(LEGACY_NESTED_ROUTE_PREFIX) &&
+        nestedMatches.length === 1 &&
+        name.startsWith(`${LEGACY_NESTED_ROUTE_PREFIX}${nestedMatches[0]}-${threadId}-`)
+      ) await this.quarantineFile(file);
     }
   }
 
@@ -583,8 +634,41 @@ export class ThreadTokenStore {
     return path.join(this.directory, this.archivedName(threadId));
   }
 
+  private archiveFallbackFile(threadId: string): string {
+    return path.join(this.directory, this.archiveFallbackName(threadId));
+  }
+
   private archivedName(threadId: string): string {
     return `${ARCHIVED_THREAD_PREFIX}${digest(threadId)}.json`;
+  }
+
+  private archiveFallbackName(threadId: string): string {
+    return `${ARCHIVE_FALLBACK_PREFIX}${digest(threadId)}.json`;
+  }
+
+  private archiveMarkerNames(threadId: string): string[] {
+    return [this.archivedName(threadId), this.archiveFallbackName(threadId)];
+  }
+
+  private hasMarkerFailure(threadId: string): boolean {
+    return this.archiveMarkerNames(threadId).some(
+      (name) =>
+        this.corruptArchiveMarkers.has(name) ||
+        this.transientArchiveReadFailures.has(name),
+    );
+  }
+
+  private hasTransientArchiveReadFailure(threadId: string): boolean {
+    return this.archiveMarkerNames(threadId).some((name) =>
+      this.transientArchiveReadFailures.has(name),
+    );
+  }
+
+  private clearMarkerFailures(threadId: string): void {
+    for (const name of this.archiveMarkerNames(threadId)) {
+      this.transientArchiveReadFailures.delete(name);
+      this.corruptArchiveMarkers.delete(name);
+    }
   }
 
   private archiveEpoch(threadId: string): number {
@@ -597,21 +681,33 @@ export class ThreadTokenStore {
   }
 
   private async isArchived(threadId: string): Promise<boolean> {
+    const names = this.archiveMarkerNames(threadId);
+    if (names.some((name) => this.corruptArchiveMarkers.has(name))) return true;
+    if (names.some((name) => this.transientArchiveReadFailures.has(name))) {
+      for (const name of names) {
+        if (!this.transientArchiveReadFailures.has(name)) continue;
+        try {
+          const text = await fs.readFile(path.join(this.directory, name), "utf8");
+          this.seenArchiveMarkers.add(name);
+          this.applyArchiveState(name, text);
+        } catch (error) {
+          if (isNodeError(error) && error.code === "ENOENT") {
+            this.transientArchiveReadFailures.delete(name);
+            continue;
+          }
+          this.transientArchiveReadFailures.add(name);
+          return true;
+        }
+      }
+    }
     if (this.archivedThreads.has(threadId)) return true;
     if (this.activeArchiveMarkers.has(threadId)) return false;
-    const name = this.archivedName(threadId);
-    if (this.corruptArchiveMarkers.has(name)) return true;
-    if (this.archiveMarkersLoaded && !this.seenArchiveMarkers.has(name)) return false;
-    if (this.archiveMarkersLoaded && !this.transientArchiveReadFailures.has(name)) return false;
-    try {
-      const text = await fs.readFile(this.archivedFile(threadId), "utf8");
-      this.seenArchiveMarkers.add(name);
-      return this.applyArchiveState(name, text);
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") return false;
-      this.transientArchiveReadFailures.add(name);
-      return true;
-    }
+    if (
+      this.archiveMarkersLoaded &&
+      !names.some((name) => this.seenArchiveMarkers.has(name))
+    ) return false;
+    if (this.archiveMarkersLoaded && !this.hasMarkerFailure(threadId)) return false;
+    return this.hasMarkerFailure(threadId);
   }
 }
 

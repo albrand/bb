@@ -9002,6 +9002,42 @@ describe("Account Pool credential scoping", () => {
     );
   });
 
+  it("does not restore when archive arrives during the unarchive lookup", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const token = await claudeToken(host, "thread-unarchive-race");
+    const lookupStarted = deferred();
+    const releaseLookup = deferred();
+    host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      lookupStarted.resolve();
+      await releaseLookup.promise;
+      return makeThreadResponse({ id: threadId });
+    });
+    const restoring = host.harness.behavior.emitThreadEvent(
+      "thread.unarchived",
+      { thread: makeThreadResponse({ id: "thread-unarchive-race" }) },
+    );
+    await lookupStarted.promise;
+    await host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({
+        id: "thread-unarchive-race",
+        archivedAt: 1_000,
+      }),
+    });
+    releaseLookup.resolve();
+    await restoring;
+    const directory = path.join(fixture.dataDir, ...POOL_SECRETS);
+    const markerName = (await fs.readdir(directory)).find((name) =>
+      name.startsWith("archived-thread-"),
+    );
+    expect(markerName).toBeDefined();
+    const marker = JSON.parse(
+      await fs.readFile(path.join(directory, markerName ?? ""), "utf8"),
+    ) as { archived: boolean };
+    expect(marker.archived).toBe(true);
+    expect(await statusOf(host, token, "/v1/messages")).toBe(401);
+  });
+
   it("does not apply a stale archived lookup after archive and unarchive events", async () => {
     const fixture = await scopedFixture();
     const { host } = fixture;
