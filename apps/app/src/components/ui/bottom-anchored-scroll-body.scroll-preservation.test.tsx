@@ -1402,6 +1402,93 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
     expect(scrollArea.scrollTop).toBe(900);
   });
 
+  it.each(["scroll-before-resize", "resize-before-scroll"] as const)(
+    "does not reattach after passive shrink clamps a wheel-detached viewport to the bottom (%s)",
+    (eventOrder) => {
+      const { scrollArea, getRow, rerenderRows } = renderTimeline({
+        threadId: "thread-a",
+        rowIds: ["row-a", "row-b", "row-c"],
+      });
+      mockScrollAreaRect(scrollArea);
+      mockRowRect(getRow("row-b"), { top: -20, bottom: 80 });
+      setScrollMetrics(scrollArea, {
+        scrollHeight: 400,
+        clientHeight: 100,
+        scrollTop: 300,
+      });
+      getLatestResizeObserver().trigger();
+
+      scrollArea.scrollTop = 150;
+      fireEvent.wheel(scrollArea, { deltaY: -150 });
+      fireEvent.scroll(scrollArea);
+      expect(readAnchor("thread-a")?.atBottom).toBe(false);
+
+      setScrollMetrics(scrollArea, {
+        scrollHeight: 200,
+        clientHeight: 100,
+        scrollTop: 100,
+      });
+      rerenderRows(["row-a", "row-b"]);
+      if (eventOrder === "scroll-before-resize") {
+        fireEvent.scroll(scrollArea);
+        act(() => getLatestResizeObserver().trigger());
+      } else {
+        act(() => getLatestResizeObserver().trigger());
+        fireEvent.scroll(scrollArea);
+      }
+
+      expect(scrollArea.scrollTop).toBe(100);
+      expect(readAnchor("thread-a")?.atBottom).toBe(false);
+
+      setScrollMetrics(scrollArea, {
+        scrollHeight: 300,
+        clientHeight: 100,
+        scrollTop: 100,
+      });
+      rerenderRows(["row-a", "row-b", "new-event"]);
+      act(() => getLatestResizeObserver().trigger());
+
+      expect(scrollArea.scrollTop).toBe(100);
+      expect(readAnchor("thread-a")?.atBottom).toBe(false);
+    },
+  );
+
+  it("follows momentum that reaches the bottom after touch ends", () => {
+    const bottomAnchorState: {
+      current: BottomAnchorContextValue | null;
+    } = { current: null };
+    const { scrollArea } = renderTimeline({
+      threadId: "thread-a",
+      rowIds: ["row-a", "row-b", "row-c"],
+      onBottomAnchor: (anchor) => {
+        bottomAnchorState.current = anchor;
+      },
+    });
+    setScrollMetrics(scrollArea, {
+      scrollHeight: 400,
+      clientHeight: 100,
+      scrollTop: 300,
+    });
+    getLatestResizeObserver().trigger();
+
+    fireEvent.touchStart(scrollArea);
+    scrollArea.scrollTop = 150;
+    fireEvent.scroll(scrollArea);
+
+    fireEvent.touchEnd(scrollArea);
+    scrollArea.scrollTop = 300;
+    fireEvent.scroll(scrollArea);
+    expect(bottomAnchorState.current?.isAtBottom).toBe(true);
+
+    setScrollMetrics(scrollArea, {
+      scrollHeight: 450,
+      clientHeight: 100,
+      scrollTop: 300,
+    });
+    act(() => getLatestResizeObserver().trigger());
+    expect(scrollArea.scrollTop).toBe(350);
+  });
+
   it("re-attaches a detached viewport that a content shrink clamps onto the bottom", () => {
     const { scrollArea, rowElements } = renderTimeline({
       threadId: "thread-a",
