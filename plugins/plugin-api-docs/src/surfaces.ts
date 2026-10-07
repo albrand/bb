@@ -1257,7 +1257,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Create threads, send messages, manage projects and machines, and attribute threads to the plugin.",
           "Read thread, context, prompt history, host, and environment state through the SDK.",
           "Clean up unused provider environments and control plugin safe mode with explicit SDK calls.",
-          "Use the same operations as the bb app and CLI, with ownership and lifecycle controls.",
+          "Use app and CLI operations with ownership controls; start updates and track progress or rollback.",
         ],
         apiSymbols: [
           "BbPluginApi",
@@ -1273,6 +1273,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBbSdk.environments.experimental_cleanup",
           "PluginBbSdk.plugins.experimental_getSafeMode",
           "PluginBbSdk.plugins.experimental_setSafeMode",
+          "PluginBbSdk.plugins.experimental_pruneCache",
+          "PluginBbSdk.plugins.experimental_startUpdate",
+          "PluginBbSdk.plugins.experimental_updateJobs",
         ],
         firstParty: [
           "Account Pooler [Experimental]",

@@ -980,7 +980,7 @@ async function fetchThreadTimeline({
   const timeline = await mergeThreadTimelineDelta(previous, response, () =>
     sdk.threads.timeline({ threadId, signal, ...pageArgs }),
   );
-  clearThreadTimelineUnseenEvents(queryClient, threadId);
+  clearThreadTimelineUnseenEvents(queryClient, threadId, timeline.maxSeq);
   return timeline;
 }
 

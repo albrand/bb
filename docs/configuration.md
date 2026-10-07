@@ -158,12 +158,13 @@ signal it, so a stale file left by a crash cannot stop an unrelated process.
 
 ## In-App Updates
 
-In-app updates are off unless you start bb with `--in-app-updates`:
-`npx bb-app start --in-app-updates` (or a global `bb-app`), or
-`pnpm start --in-app-updates` from a source checkout. bb then runs under a small
+In-app updates are on when you start bb with `npx bb-app start` (or a global
+`bb-app`) or with `pnpm start` from a source checkout. bb runs under a small
 update shim, so Settings → Updates and `bb updates app apply` can update bb
-without a terminal. Without the flag, bb starts as before and Settings → Updates
-shows the npm upgrade command for release installs. Source checkouts show their
+without a terminal. Pass `--no-in-app-updates` to turn them off: bb then starts
+without the shim and Settings → Updates shows the npm upgrade command for
+release installs. `--in-app-updates`, which earlier releases needed, is still
+accepted and changes nothing. Source checkouts show their
 Git revision, or a labeled build version when unavailable, and are never compared
 with npm releases. Without the update shim, no freshness indicator is shown.
 Failed checks report “Latest unknown”; release checks can be retried in the UI,
@@ -273,9 +274,9 @@ another voice service.
 bb accepts voice recordings up to 25 MB. A service may set a lower limit;
 Codex transcribes recordings up to 20 MB and bb cloud up to 10 MB.
 
-Open microphone preferences by right-clicking the composer microphone or pressing
-Shift+F10 while it is focused. A warning opens preferences when the microphone
-is clicked. Desktop uses an anchored popover; mobile uses a drawer. Opening
+Open microphone preferences by right-clicking the composer microphone, pressing
+Shift+F10 while it is focused, or clicking the Microphone control in Settings →
+Voice Input. A warning opens preferences when the microphone is clicked. Desktop uses an anchored popover; mobile uses a drawer. Opening
 preferences starts a local microphone preview with the recording waveform and
 a list of inputs. Closing preferences releases the preview. The recording controls
 contain only cancel, stop, and send; microphone preferences are available while idle.
@@ -296,7 +297,7 @@ stop recording or switch microphones automatically. While idle, a warning opens
 preferences on click. Audio preview runs only while microphone preferences are
 open; it is not saved or transcribed.
 
-The microphone picker in Settings → Voice Input is client-local. It stores the
+The microphone preference is client-local. It stores the
 selected browser `MediaDevices` device id in localStorage as
 `bb.voiceInput.audioInputDeviceId`. Recording prefers that microphone and falls
 back to the system default and other available inputs when it is disconnected,

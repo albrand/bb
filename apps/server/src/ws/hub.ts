@@ -61,6 +61,7 @@ export type ServerChangedMessage =
 type ChangedMessageListener = (message: ServerChangedMessage) => void;
 
 interface PendingThreadListEventsAppended {
+  timelineSequence: number | undefined;
   eventTypes: Set<ThreadEventType>;
   merged: boolean;
   timeout: ReturnType<typeof setTimeout>;
@@ -1080,6 +1081,12 @@ export class NotificationHub implements DbNotifier {
       for (const eventType of eventTypes) {
         pending.eventTypes.add(eventType);
       }
+      if (message.metadata?.timelineSequence !== undefined) {
+        pending.timelineSequence = Math.max(
+          pending.timelineSequence ?? 0,
+          message.metadata.timelineSequence,
+        );
+      }
       pending.merged = true;
       return;
     }
@@ -1091,6 +1098,7 @@ export class NotificationHub implements DbNotifier {
     timeout.unref?.();
     this.pendingThreadListEventsAppendedByThread.set(threadId, {
       eventTypes: new Set(eventTypes),
+      timelineSequence: message.metadata?.timelineSequence,
       merged: false,
       timeout,
     });
@@ -1109,8 +1117,17 @@ export class NotificationHub implements DbNotifier {
       type: "changed",
       entity: "thread",
       id: threadId,
-      ...(pending.eventTypes.size > 0
-        ? { metadata: { eventTypes: [...pending.eventTypes] } }
+      ...(pending.eventTypes.size > 0 || pending.timelineSequence !== undefined
+        ? {
+            metadata: {
+              ...(pending.eventTypes.size > 0
+                ? { eventTypes: [...pending.eventTypes] }
+                : {}),
+              ...(pending.timelineSequence !== undefined
+                ? { timelineSequence: pending.timelineSequence }
+                : {}),
+            },
+          }
         : {}),
       changes: ["events-appended"],
     };

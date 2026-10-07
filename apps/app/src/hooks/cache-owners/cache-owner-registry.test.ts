@@ -124,8 +124,10 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
   "hooks/cache-owners/plugin-cache-owner.ts": [
     "allPluginCatalogSearchQueryKeyPrefix",
     "allPluginListQueryKeyPrefix",
+    "pluginInstallJobsQueryKey",
     "pluginListQueryKey",
     "pluginMarketplacesQueryKey",
+    "pluginUpdateJobsQueryKey",
     "pluginSafeModeQueryKey",
     "pluginSettingsViewQueryKey",
   ],
@@ -135,6 +137,8 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "allPluginCatalogSearchQueryKeyPrefix",
     "allPluginContributionsQueryKeyPrefix",
     "allPluginListQueryKeyPrefix",
+    "pluginInstallJobsQueryKey",
+    "pluginUpdateJobsQueryKey",
     "allPluginSettingsQueryKeyPrefix",
     "allPluginSettingsViewQueryKeyPrefix",
     "allPluginSourceQueryKeyPrefix",
@@ -253,6 +257,9 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "threadTimelineQueryKeyPrefix",
   ],
   "hooks/cache-owners/thread-tabs-cache-owner.ts": ["threadTabsQueryKey"],
+  "hooks/cache-owners/thread-timeline-unseen-events.ts": [
+    "threadTimelineQueryKey",
+  ],
   "hooks/cache-owners/ui-preferences-cache-owner.ts": ["uiPreferencesQueryKey"],
   "hooks/cache-owners/thread-runtime-cache-owner.ts": [
     "environmentQueryKey",

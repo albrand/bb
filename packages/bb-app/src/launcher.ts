@@ -349,12 +349,12 @@ interface LauncherCliOptions {
   dataDir?: string;
   enrollKey?: string;
   help: boolean;
-  inAppUpdates?: boolean;
   performanceDiagnostics?: boolean;
   hostDaemonPort?: string;
   hostId?: string;
   joinCode?: string;
   json?: boolean;
+  noInAppUpdates?: boolean;
   serverBindHost?: string;
   serverPort?: string;
   serverUrl?: string;
@@ -830,6 +830,7 @@ export function parseLauncherArgs(args: string[]): ParsedLauncherArgs {
       "enroll-key": { type: "string" },
       "host-daemon-port": { type: "string" },
       "in-app-updates": { type: "boolean" },
+      "no-in-app-updates": { type: "boolean" },
       "perf-diagnostics": { type: "boolean" },
       "host-id": { type: "string" },
       "join-code": { type: "string" },
@@ -855,8 +856,13 @@ export function parseLauncherArgs(args: string[]): ParsedLauncherArgs {
   if (readBooleanOption(parsed.values.bundled)) {
     options.bundled = true;
   }
-  if (readBooleanOption(parsed.values["in-app-updates"])) {
-    options.inAppUpdates = true;
+  if (readBooleanOption(parsed.values["no-in-app-updates"])) {
+    if (readBooleanOption(parsed.values["in-app-updates"])) {
+      throw new Error(
+        "--in-app-updates and --no-in-app-updates cannot be used together",
+      );
+    }
+    options.noInAppUpdates = true;
   }
   if (readBooleanOption(parsed.values["perf-diagnostics"])) {
     options.performanceDiagnostics = true;
@@ -3031,13 +3037,14 @@ function printBbAppHelp(): void {
   process.stdout.write(`bb-app
 
 Usage:
-  bb-app [--data-dir <path>] [--server-bind-host <host>] [--server-port <port>] [--host-daemon-port <port>] [--in-app-updates] [--bundled]
+  bb-app [--data-dir <path>] [--server-bind-host <host>] [--server-port <port>] [--host-daemon-port <port>] [--no-in-app-updates] [--bundled]
   bb-app start
 
   --perf-diagnostics permits CPU profiles and detailed logs when the performanceDiagnostics experiment is also on.
-  --in-app-updates lets Settings → Updates and bb updates app update and
-  restart bb. bb-app then runs the newest of this package and any version
-  installed by an in-app update; --bundled runs this package regardless.
+  Settings → Updates and bb updates app can update and restart bb. bb-app
+  runs the newest of this package and any version installed by an in-app
+  update; --bundled runs this package regardless. --no-in-app-updates turns
+  in-app updates off and runs this package.
 
   bb-app stop
   bb-app config set <key> <value>
@@ -3818,13 +3825,13 @@ function isRunningUnderAppUpdateShim(env: NodeJS.ProcessEnv): boolean {
 }
 
 function shouldRunNpmAppUpdateShim(args: {
+  enabled: boolean;
   options: RunBbAppOptions;
-  requested: boolean;
   runtime: BbAppRuntimeState;
   underShim: boolean;
 }): boolean {
   return (
-    args.requested &&
+    args.enabled &&
     !args.underShim &&
     args.options.worktreePolicy === null &&
     !runsFromSourceCheckout(import.meta.url) &&
@@ -3867,7 +3874,7 @@ const shimOutput: ShimOutput = {
 export function shouldRunSourceAppUpdateShim(cliArgs: string[]): boolean {
   const parsed = parseLauncherArgs(cliArgs);
   return (
-    parsed.options.inAppUpdates === true &&
+    parsed.options.noInAppUpdates !== true &&
     !parsed.options.help &&
     resolveBbAppCommand(parsed.positionals).kind === "start"
   );
@@ -4057,7 +4064,7 @@ export async function runBbApp(
   if (
     shouldRunNpmAppUpdateShim({
       options,
-      requested: parsedArgs.options.inAppUpdates === true,
+      enabled: parsedArgs.options.noInAppUpdates !== true,
       runtime,
       underShim: underAppUpdateShim,
     })

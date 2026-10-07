@@ -4592,6 +4592,7 @@ describe("events", () => {
       ["events-appended"],
       {
         eventTypes: ["system/error", "client/turn/requested"],
+        timelineSequence: 2,
       },
     );
     expect(spy.notifyThread).toHaveBeenCalledWith(
@@ -4599,6 +4600,7 @@ describe("events", () => {
       ["events-appended"],
       {
         eventTypes: ["system/error"],
+        timelineSequence: 1,
       },
     );
     expect(spy.notifyThread).toHaveBeenCalledTimes(2);
