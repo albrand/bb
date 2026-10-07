@@ -791,6 +791,103 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
     expect(scrollArea.scrollTop).toBe(220);
   });
 
+  it.each([
+    { context: "the first row", rowIds: ["row-b", "row-c"] },
+    {
+      context: "a later row after an earlier row",
+      rowIds: ["row-a", "row-b", "row-c"],
+    },
+  ])(
+    "preserves the gap above $context across capture, unmount, and remount",
+    ({ rowIds }) => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "performance"],
+      });
+      const first = renderTimeline({ threadId: "thread-a", rowIds });
+      mockScrollAreaRect(first.scrollArea);
+      if (rowIds.includes("row-a")) {
+        mockRowRect(first.getRow("row-a"), { top: -120, bottom: -20 });
+      }
+      mockRowRect(first.getRow("row-b"), { top: 20, bottom: 120 });
+      setScrollMetrics(first.scrollArea, {
+        scrollHeight: 700,
+        clientHeight: 100,
+        scrollTop: 200,
+      });
+      act(() => getLatestResizeObserver().trigger());
+
+      first.scrollArea.scrollTop = 180;
+      fireEvent.wheel(first.scrollArea);
+      fireEvent.scroll(first.scrollArea);
+      act(() => vi.advanceTimersByTime(300));
+      first.unmount();
+
+      expect(readAnchor("thread-a")).toMatchObject({
+        rowId: "row-b",
+        atBottom: false,
+      });
+
+      const restored = renderTimeline({ threadId: "thread-a", rowIds });
+      mockScrollAreaRect(restored.scrollArea);
+      if (rowIds.includes("row-a")) {
+        mockRowRect(restored.getRow("row-a"), { top: -120, bottom: -20 });
+      }
+      vi.spyOn(
+        restored.getRow("row-b"),
+        "getBoundingClientRect",
+      ).mockImplementation(
+        () => new DOMRect(0, 20 - restored.scrollArea.scrollTop, 100, 100),
+      );
+      setScrollMetrics(restored.scrollArea, {
+        scrollHeight: 700,
+        clientHeight: 100,
+        scrollTop: 0,
+      });
+      act(() => getLatestResizeObserver().trigger());
+
+      expect(restored.scrollArea.scrollTop).toBe(0);
+      expect(restored.getRow("row-b").getBoundingClientRect().top).toBe(20);
+    },
+  );
+
+  it.each([
+    { edge: "top", offsetWithinRow: -20, rowTop: 5, expectedScrollTop: 0 },
+    {
+      edge: "bottom",
+      offsetWithinRow: 20,
+      rowTop: 400,
+      expectedScrollTop: 300,
+    },
+  ])(
+    "keeps a restored row within the $edge scroll boundary after layout changes",
+    ({ offsetWithinRow, rowTop, expectedScrollTop }) => {
+      getDefaultStore().set(threadTimelineScrollAnchorAtomFamily("thread-a"), {
+        rowId: "row-b",
+        offsetWithinRow,
+        atBottom: false,
+      });
+
+      const { scrollArea, getRow } = renderTimeline({
+        threadId: "thread-a",
+        rowIds: ["row-a", "row-b", "row-c"],
+      });
+      mockScrollAreaRect(scrollArea);
+      mockRowRect(getRow("row-b"), {
+        top: rowTop,
+        bottom: rowTop + 100,
+      });
+      setScrollMetrics(scrollArea, {
+        scrollHeight: 400,
+        clientHeight: 100,
+        scrollTop: 0,
+      });
+
+      act(() => getLatestResizeObserver().trigger());
+
+      expect(scrollArea.scrollTop).toBe(expectedScrollTop);
+    },
+  );
+
   it("keeps a read anchor when live row regrouping shrinks the timeline", () => {
     getDefaultStore().set(threadTimelineScrollAnchorAtomFamily("thread-a"), {
       rowId: "row-b",
