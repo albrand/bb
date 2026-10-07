@@ -346,12 +346,28 @@ export function createAccountPoolPlugin(
       await threadTokens.removeThread(threadId);
       return true;
     };
+    const checkArchived = async (
+      threadId: string,
+    ): Promise<
+      | { status: "archived" }
+      | { status: "active" }
+      | { status: "unknown"; error: unknown }
+    > => {
+      try {
+        return (await revokeIfArchived(threadId))
+          ? { status: "archived" }
+          : { status: "active" };
+      } catch (error) {
+        return { status: "unknown", error };
+      }
+    };
     const contributeFor =
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
         const unrouted = () =>
           hasConfiguredParentPool ? neutralized(provider) : [];
-        if (await revokeIfArchived(context.threadId)) return unrouted();
+        const archive = await checkArchived(context.threadId);
+        if (archive.status === "archived") return unrouted();
         const bypassed = await routing.isBypassed(context.threadId);
         const selectedAccountId = await routing.selectedAccount(
           context.threadId,
@@ -364,6 +380,7 @@ export function createAccountPoolPlugin(
             ? await canServe(provider)
             : await operations.isRoutingEnabled(provider));
         if (canRoute) {
+          if (archive.status === "unknown") throw archive.error;
           const hostToken = await hubTokens.forHost(context.hostId);
           const token = await threadTokens.forThread(
             {

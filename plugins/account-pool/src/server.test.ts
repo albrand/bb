@@ -8922,6 +8922,29 @@ describe("Account Pool credential scoping", () => {
     ).toEqual([]);
   });
 
+  it("mints nothing and skips the contribution when the thread lookup fails on a nested server", async () => {
+    const parent = await scopedFixture();
+    const { host: child, dataDir } = await startNestedChild(
+      parent,
+      await nestedToken(parent.host),
+    );
+    child.harness.sdk.stub("threads.get", async () => {
+      throw new Error("lookup failed");
+    });
+    await expect(
+      child.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-lookup",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+    ).resolves.toEqual([]);
+    expect(
+      (
+        await fs.readdir(path.join(dataDir, ...POOL_SECRETS)).catch(() => [])
+      ).filter((name) => name.includes("thread-lookup")),
+    ).toEqual([]);
+  });
+
   it("revokes what it minted when the thread is archived while its environment resolves", async () => {
     const fixture = await scopedFixture();
     const { host } = fixture;
@@ -8977,7 +9000,7 @@ describe("Account Pool credential scoping", () => {
   });
 
   describe.each(["routing disabled", "bypassed"] as const)(
-    "a missed archive event for a thread with %s",
+    "a thread with %s",
     (change) => {
       const turnOff = async (host: Fixture["host"], threadId: string) => {
         if (change === "routing disabled") {
@@ -9001,7 +9024,7 @@ describe("Account Pool credential scoping", () => {
           name.includes(threadId),
         );
 
-      it("revokes its tokens the next time its environment resolves", async () => {
+      it("revokes its tokens after a missed archive event the next time its environment resolves", async () => {
         const fixture = await scopedFixture();
         const { host } = fixture;
         const held = await claudeToken(host, "thread-missed");
@@ -9037,7 +9060,7 @@ describe("Account Pool credential scoping", () => {
         expect(await statusOf(host, other, "/v1/messages")).not.toBe(401);
       });
 
-      it("revokes its tokens on a nested server and blanks the inherited routing", async () => {
+      it("revokes its tokens after a missed archive event on a nested server and blanks the inherited routing", async () => {
         const parent = await scopedFixture();
         const { host: child, dataDir } = await startNestedChild(
           parent,
@@ -9065,6 +9088,33 @@ describe("Account Pool credential scoping", () => {
         expect(await statusOf(child, held, "/v1/messages")).toBe(401);
         expect(await statusOf(child, heldNested, "/availability")).toBe(401);
         expect(await credentialFiles(dataDir, "thread-missed")).toEqual([]);
+      });
+
+      it("stays unrouted without minting when its thread lookup fails on a nested server", async () => {
+        const parent = await scopedFixture();
+        const { host: child, dataDir } = await startNestedChild(
+          parent,
+          await nestedToken(parent.host),
+        );
+        await turnOff(child, "thread-lookup");
+        child.harness.sdk.stub("threads.get", async () => {
+          throw new Error("lookup failed");
+        });
+        const entries = await child.harness.behavior.resolveProviderEnv(
+          "claude-code",
+          {
+            threadId: "thread-lookup",
+            projectId: "project-one",
+            hostId: "host-one",
+          },
+        );
+        expect(entries.map((entry) => [entry.name, entry.value])).toEqual([
+          ["ANTHROPIC_BASE_URL", ""],
+          ["ANTHROPIC_AUTH_TOKEN", ""],
+        ]);
+        expect(
+          await credentialFiles(dataDir, "thread-lookup").catch(() => []),
+        ).toEqual([]);
       });
     },
   );
