@@ -566,7 +566,11 @@ export function BottomAnchoredScrollBody({
       const recentUserIntent = hasRecentUserScrollIntent();
       const anchorAtom =
         threadTimelineScrollAnchorAtomFamily(scrollAnchorThreadId);
-      if (atBottomByGeometry && !scrollToTopInProgressRef.current) {
+      if (
+        atBottomByGeometry &&
+        shouldStickToBottomRef.current &&
+        !scrollToTopInProgressRef.current
+      ) {
         userDetachedFromBottomRef.current = false;
         store.set(anchorAtom, {
           rowId: "",
@@ -842,7 +846,14 @@ export function BottomAnchoredScrollBody({
     }
 
     if (nearBottom) {
-      attachToBottom();
+      if (
+        shouldStickToBottomRef.current ||
+        hasDirectUserScrollInput ||
+        hasRecentUserScrollIntent() ||
+        pointerScrollIntentRef.current
+      ) {
+        attachToBottom();
+      }
       return;
     }
 
@@ -904,7 +915,7 @@ export function BottomAnchoredScrollBody({
     (entries: ResizeObserverEntry[]) => {
       const scrollArea = scrollAreaRef.current;
       scrollAnchorRowsRef.current = null;
-      let shrankOntoBottomWhileDetached = false;
+      let shrankOntoBottomAfterRecentInput = false;
       if (scrollArea) {
         const previousMaxScrollOffset = maxScrollOffsetRef.current;
         const cacheWasAuthoritative = resizeObserverHasDeliveredRef.current;
@@ -933,16 +944,17 @@ export function BottomAnchoredScrollBody({
           maxScrollOffset = refreshMaxScrollOffset(scrollArea);
         }
         resizeObserverHasDeliveredRef.current = true;
-        shrankOntoBottomWhileDetached =
+        shrankOntoBottomAfterRecentInput =
           cacheWasAuthoritative &&
           !shouldStickToBottomRef.current &&
+          (hasRecentUserScrollIntent() || pointerScrollIntentRef.current) &&
           maxScrollOffset < previousMaxScrollOffset &&
           isScrolledNearBottom(maxScrollOffset, scrollArea.scrollTop);
       }
       restorePrependPosition();
       if (settleContentPositionHold()) return;
       if (advancePendingScrollRestore()) return;
-      if (shrankOntoBottomWhileDetached && scrollArea) {
+      if (shrankOntoBottomAfterRecentInput && scrollArea) {
         attachToBottom();
         writeScrollAnchor(scrollArea);
       }
@@ -954,6 +966,7 @@ export function BottomAnchoredScrollBody({
       queueBottomRestore,
       refreshMaxScrollOffset,
       settleContentPositionHold,
+      hasRecentUserScrollIntent,
       restorePrependPosition,
       writeScrollAnchor,
     ],
