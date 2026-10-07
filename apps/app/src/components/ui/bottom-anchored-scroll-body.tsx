@@ -903,7 +903,6 @@ export function BottomAnchoredScrollBody({
     },
     [
       applyScrollRestore,
-      scrollAreaRef,
       restorePrependPosition,
       syncBottomStateFromScroll,
       captureScrollAnchorThrottled,
