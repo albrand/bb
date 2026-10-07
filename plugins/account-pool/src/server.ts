@@ -270,6 +270,12 @@ export function createAccountPoolPlugin(
     bb.events.on("thread.archived", async ({ thread }) => {
       await threadTokens.removeThread(thread.id);
     });
+    bb.events.on("thread.unarchived", async ({ thread }) => {
+      await threadTokens.restoreThread(
+        thread.id,
+        threadTokens.archiveVersion(thread.id),
+      );
+    });
     bb.events.on("thread.deleted", async ({ thread }) => {
       await Promise.all([
         threadTokens.removeThread(thread.id),
@@ -341,8 +347,12 @@ export function createAccountPoolPlugin(
           "Account Pooler is isolated from the parent bb server's pool on this instance",
       }));
     const revokeIfArchived = async (threadId: string): Promise<boolean> => {
+      const archiveVersion = threadTokens.archiveVersion(threadId);
       const thread = await bb.sdk.threads.get({ threadId });
-      if (thread.archivedAt === null) return false;
+      if (thread.archivedAt === null) {
+        await threadTokens.restoreThread(threadId, archiveVersion);
+        return false;
+      }
       await threadTokens.removeThread(threadId);
       return true;
     };
