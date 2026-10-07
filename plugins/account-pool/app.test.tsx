@@ -1647,6 +1647,38 @@ describe("Account Pool settings", () => {
     );
   });
 
+  it.each(["claude", "codex"] as const)(
+    "retains focus on the Route %s switch while its update is pending",
+    async (provider) => {
+      const update = deferred<object | null>();
+      const slot = render([account()], {
+        "routing.set": () => update.promise,
+      });
+      if (provider === "codex") {
+        fireEvent.click(slot.getByRole("button", { name: "Advanced" }));
+      }
+      const control = await slot.findByRole("switch", {
+        name: `Route ${provider === "claude" ? "Claude" : "Codex"} threads`,
+      });
+      control.focus();
+      fireEvent.click(control);
+      await waitFor(() =>
+        expect(slot.rpcCalls).toContainEqual({
+          method: "routing.set",
+          input: { provider, enabled: false },
+        }),
+      );
+      expect(control.hasAttribute("disabled")).toBe(false);
+      expect(control.getAttribute("aria-disabled")).toBe("true");
+      expect(document.activeElement).toBe(control);
+      update.resolve({ provider, enabled: false });
+      await waitFor(() =>
+        expect(control.getAttribute("aria-disabled")).toBeNull(),
+      );
+      expect(document.activeElement).toBe(control);
+    },
+  );
+
   it("edits Advanced config fields and shows URL validation inline", async () => {
     const nextConfig = config({
       anthropicUpstreamBaseUrl: "https://proxy.example.com",
