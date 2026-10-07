@@ -26,8 +26,10 @@ import {
 } from "./contracts.js";
 
 const ACCOUNTS_KEY = "accounts:v1";
+const ORGANIZATIONS_KEY = "organizations:v1";
 const ACCOUNT_LAST_USED_PERSIST_MS = 60 * 1_000;
 const accountsSchema = z.array(accountSchema);
+const organizationsSchema = z.record(z.string(), z.string().uuid());
 const HUB_TOKEN_PREFIX = "hub-token-";
 const HUB_TOKEN_GRACE_MS = 10 * 60 * 1_000;
 const HUB_TOKEN_LAST_USED_PERSIST_MS = 60 * 1_000;
@@ -115,12 +117,56 @@ export class AccountStore {
       if (next.length === accounts.length) return false;
       await this.kv.set(ACCOUNTS_KEY, next);
       await fs.rm(this.accountSecretPath(id), { force: true });
+      const organizations = await this.organizations();
+      if (organizations.delete(id))
+        await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
       return true;
+    });
+  }
+
+  async organizations(): Promise<Map<string, string>> {
+    const value = await this.kv.get(ORGANIZATIONS_KEY);
+    return new Map(
+      Object.entries(
+        value === undefined ? {} : organizationsSchema.parse(value),
+      ),
+    );
+  }
+
+  async setOrganization(id: string, organizationUuid: string): Promise<void> {
+    return this.serialized(async () => {
+      const organizations = await this.organizations();
+      if (organizations.get(id) === organizationUuid) return;
+      organizations.set(id, organizationUuid);
+      await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
     });
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, enabled }));
+  }
+
+  async disableWhere(
+    select: (
+      accounts: readonly Account[],
+      organizations: ReadonlyMap<string, string>,
+    ) => readonly string[] | null,
+  ): Promise<Account[] | null> {
+    return this.serialized(async () => {
+      const current = await this.list();
+      const ids = select(current, await this.organizations());
+      if (ids === null) return null;
+      const targets = new Set(ids);
+      const disabled: Account[] = [];
+      const accounts = current.map((account) => {
+        if (!targets.has(account.id) || !account.enabled) return account;
+        const updated = { ...account, enabled: false };
+        disabled.push(updated);
+        return updated;
+      });
+      if (disabled.length > 0) await this.kv.set(ACCOUNTS_KEY, accounts);
+      return disabled;
+    });
   }
 
   async setPriority(id: string, priority: number): Promise<Account | null> {
@@ -136,6 +182,13 @@ export class AccountStore {
     subscriptionType: string,
   ): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, subscriptionType }));
+  }
+
+  async setPlan(
+    id: string,
+    plan: { subscriptionType: string | null; rateLimitTier: string | null },
+  ): Promise<Account | null> {
+    return this.update(id, (account) => ({ ...account, ...plan }));
   }
 
   async reorder(provider: PoolProvider, accountIds: string[]): Promise<void> {
@@ -198,6 +251,34 @@ export class AccountStore {
     accountUuid: string,
   ): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, accountUuid }));
+  }
+
+  async replaceCredentials(
+    id: string,
+    identity: Partial<
+      Pick<
+        Account,
+        | "label"
+        | "email"
+        | "accountUuid"
+        | "codexAccountId"
+        | "subscriptionType"
+        | "rateLimitTier"
+      >
+    >,
+    secret: AccountSecret,
+  ): Promise<Account | null> {
+    return this.serialized(async () => {
+      const accounts = await this.list();
+      const index = accounts.findIndex((account) => account.id === id);
+      const current = accounts[index];
+      if (index < 0 || current === undefined) return null;
+      const updated = accountSchema.parse({ ...current, ...identity });
+      await this.writeSecret(id, secret);
+      accounts[index] = updated;
+      await this.kv.set(ACCOUNTS_KEY, accounts);
+      return updated;
+    });
   }
 
   private async update(

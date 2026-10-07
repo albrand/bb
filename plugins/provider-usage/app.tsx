@@ -254,7 +254,7 @@ function UsageNotice({
       {notice.retry ? (
         <button
           type="button"
-          className="shrink-0 rounded-sm text-sidebar-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          className="shrink-0 rounded-sm text-sidebar-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring pointer-coarse:min-h-11 pointer-coarse:min-w-11"
           onClick={onRetry}
         >
           Retry
@@ -286,7 +286,7 @@ function UsageWindow({ window }: { window: UsageWindowValue }) {
       aria-expanded={showReset}
       onClick={() => setShowReset((shown) => !shown)}
     >
-      <span className="col-span-full grid h-5 grid-cols-subgrid items-center text-2xs">
+      <span className="col-span-full grid h-5 grid-cols-subgrid items-center text-2xs pointer-coarse:h-11">
         <span className="max-w-20 truncate text-subtle-foreground">
           {shortWindowLabel(window.label)}
         </span>
@@ -483,7 +483,7 @@ function MachineSelector({
             OPTION_BASE_CLASS_NAME,
             OPTION_INTERACTIVE_CLASS_NAME,
             LIST_HOVER_TRANSITION,
-            "h-6 shrink overflow-hidden px-1.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            "h-6 shrink overflow-hidden px-1.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground pointer-coarse:min-h-11 pointer-coarse:min-w-11",
           )}
         >
           <span className="block min-w-0 flex-1 truncate">
@@ -754,10 +754,10 @@ export function ProviderUsageStatusContent({
   };
 
   return (
-    <div className="flex max-h-80 flex-col">
+    <div className="flex max-h-[min(20rem,40dvh)] flex-col pointer-coarse:min-h-28">
       <div
         data-provider-usage-header=""
-        className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-sidebar-border px-1.5"
+        className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-sidebar-border px-1.5 pointer-coarse:h-12"
       >
         {providers.length < 2 ? (
           <span className="px-1.5 text-2xs font-medium text-sidebar-foreground">
@@ -779,7 +779,7 @@ export function ProviderUsageStatusContent({
                 aria-controls={panelId}
                 tabIndex={isAllTab ? 0 : -1}
                 className={cn(
-                  "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring px-2",
+                  "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring px-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11",
                   isAllTab
                     ? "bg-sidebar-accent text-sidebar-foreground"
                     : "text-muted-foreground hover:text-sidebar-foreground",
@@ -816,7 +816,7 @@ export function ProviderUsageStatusContent({
                   aria-controls={panelId}
                   tabIndex={isActive ? 0 : -1}
                   className={cn(
-                    "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring w-7",
+                    "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring w-7 pointer-coarse:min-h-11 pointer-coarse:min-w-11",
                     isActive
                       ? "bg-sidebar-accent text-sidebar-foreground"
                       : "group/tab text-muted-foreground hover:text-sidebar-foreground",
@@ -852,7 +852,7 @@ export function ProviderUsageStatusContent({
             })}
           </div>
         )}
-        <div className="flex min-w-0 flex-1 justify-end">
+        <div className="flex min-w-0 flex-1 justify-end pointer-coarse:min-w-11">
           {machines.length === 0 ? null : (
             <MachineSelector
               machines={machines}
@@ -865,7 +865,7 @@ export function ProviderUsageStatusContent({
           type="button"
           aria-label="Reload provider usage"
           disabled={snapshot.isRefreshing}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50"
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
           onClick={reload}
         >
           <Icon
@@ -879,7 +879,7 @@ export function ProviderUsageStatusContent({
         <button
           type="button"
           aria-label="Collapse provider usage"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring pointer-coarse:min-h-11 pointer-coarse:min-w-11"
           onClick={dismiss}
         >
           <Icon name="ChevronDown" aria-hidden="true" className="size-4" />

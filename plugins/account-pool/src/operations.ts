@@ -1,7 +1,9 @@
 import type {
   Account,
+  AccountSecret,
   AccountSummary,
   HubTokenSummary,
+  LocalLogin,
   PoolProvider,
   PoolStatus,
   RoutedThreadStatus,
@@ -16,6 +18,7 @@ import type {
 } from "./store.js";
 import type { ClaudeOAuthAccount } from "./oauth-login.js";
 import type { CodexDeviceAccount } from "./codex-device-login.js";
+import { subscriptionMembers } from "./subscriptions.js";
 
 interface PoolHost {
   id: string;
@@ -24,11 +27,61 @@ interface PoolHost {
 
 interface PoolProviderState {
   providerId: string;
+  displayName: string;
   status: string;
+  accountEmail: string | null;
   planLabel: string | null;
 }
 
 const ROUTED_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
+function poolProviderFor(providerId: string): PoolProvider | null {
+  if (providerId === "claude-code") return "claude";
+  if (providerId === "codex") return "codex";
+  return null;
+}
+
+function sameEmail(left: string | null, right: string | null): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.trim().toLowerCase() === right.trim().toLowerCase()
+  );
+}
+
+interface LoginIdentity {
+  id: string | null;
+  email: string | null;
+}
+
+function compareLogins(
+  stored: LoginIdentity,
+  presented: LoginIdentity,
+): "same" | "different" | "unverified" {
+  if (stored.id !== null && presented.id !== null)
+    return stored.id === presented.id ? "same" : "different";
+  if (stored.email !== null && presented.email !== null)
+    return sameEmail(stored.email, presented.email) ? "same" : "different";
+  return "unverified";
+}
+
+function requireSameLogin(
+  account: Account,
+  stored: LoginIdentity,
+  presented: LoginIdentity,
+  different: string,
+): void {
+  const match = compareLogins(stored, presented);
+  if (match === "different") throw new Error(different);
+  if (match === "unverified")
+    throw new Error(
+      `bb couldn't confirm that this sign-in is the account behind ${account.label}; it was not changed. Try again, or remove it and add the login again.`,
+    );
+}
+
+function providerName(provider: PoolProvider): string {
+  return provider === "claude" ? "Claude" : "Codex";
+}
 
 export class PoolOperations {
   constructor(
@@ -39,7 +92,7 @@ export class PoolOperations {
     private readonly routing: RoutingStore,
     private readonly listHosts: () => Promise<PoolHost[]>,
     private readonly providerStates: (
-      hostId: string,
+      hostId: string | null,
     ) => Promise<PoolProviderState[]>,
     private readonly now: () => number = Date.now,
     private readonly onAccountsChanged: () => void = () => {},
@@ -114,6 +167,11 @@ export class PoolOperations {
       },
       imported.secret,
     );
+    if (imported.organizationUuid !== undefined)
+      await this.accounts.setOrganization(
+        account.id,
+        imported.organizationUuid,
+      );
     this.onAccountsChanged();
     await this.onAccountEnabled(account.id);
     return account;
@@ -139,6 +197,11 @@ export class PoolOperations {
         expiresAt: authenticated.expiresAt,
       },
     );
+    if (authenticated.organizationUuid !== null)
+      await this.accounts.setOrganization(
+        account.id,
+        authenticated.organizationUuid,
+      );
     this.onAccountsChanged();
     await this.onAccountEnabled(account.id);
     return account;
@@ -177,6 +240,178 @@ export class PoolOperations {
     return summary;
   }
 
+  async requireReauthorizable(
+    id: string,
+    provider: PoolProvider | null,
+  ): Promise<Account> {
+    const account = await this.accounts.get(id);
+    if (account === null)
+      throw new Error("This subscription no longer exists.");
+    if (provider !== null && account.provider !== provider)
+      throw new Error(
+        `This subscription belongs to ${providerName(account.provider)}.`,
+      );
+    if (account.kind !== "oauth")
+      throw new Error(
+        "An API key can't sign in again. Remove it and add a new key.",
+      );
+    return account;
+  }
+
+  async reauthorizeClaude(
+    id: string,
+    authenticated: ClaudeOAuthAccount,
+    label?: string,
+  ): Promise<Account> {
+    const account = await this.requireReauthorizable(id, "claude");
+    const organizationUuid =
+      (await this.accounts.organizations()).get(account.id) ?? null;
+    if (
+      organizationUuid !== null &&
+      authenticated.organizationUuid !== null &&
+      organizationUuid !== authenticated.organizationUuid
+    )
+      throw new Error(
+        `That code belongs to a different Claude organization. Sign in to the organization behind ${account.label}; it was not changed.`,
+      );
+    requireSameLogin(
+      account,
+      { id: account.accountUuid, email: account.email },
+      { id: authenticated.accountUuid, email: authenticated.email },
+      `That code belongs to a different Claude account. Sign in as the account behind ${account.label}; it was not changed.`,
+    );
+    return this.reauthorize(
+      account,
+      {
+        ...(label === undefined ? {} : { label }),
+        email: authenticated.email ?? account.email,
+        accountUuid: authenticated.accountUuid ?? account.accountUuid,
+        subscriptionType:
+          authenticated.subscriptionType ?? account.subscriptionType,
+        rateLimitTier: authenticated.rateLimitTier ?? account.rateLimitTier,
+      },
+      {
+        kind: "oauth",
+        accessToken: authenticated.accessToken,
+        refreshToken: authenticated.refreshToken,
+        expiresAt: authenticated.expiresAt,
+      },
+      authenticated.organizationUuid,
+    );
+  }
+
+  async reauthorizeCodex(
+    id: string,
+    authenticated: CodexDeviceAccount,
+  ): Promise<AccountSummary> {
+    const account = await this.requireReauthorizable(id, "codex");
+    requireSameLogin(
+      account,
+      { id: account.codexAccountId ?? null, email: account.email },
+      { id: authenticated.accountId, email: authenticated.email },
+      `Codex sign-in belongs to a different ChatGPT account. Sign in as the account behind ${account.label}; it was not changed.`,
+    );
+    const updated = await this.reauthorize(
+      account,
+      {
+        email: authenticated.email ?? account.email,
+        codexAccountId: authenticated.accountId,
+      },
+      {
+        kind: "oauth",
+        accessToken: authenticated.accessToken,
+        refreshToken: authenticated.refreshToken,
+        idToken: authenticated.idToken,
+        expiresAt: authenticated.expiresAt,
+      },
+      null,
+    );
+    const summary = (await this.list()).find((item) => item.id === updated.id);
+    if (summary === undefined)
+      throw new Error("Codex subscription could not be read back.");
+    return summary;
+  }
+
+  private async reauthorize(
+    account: Account,
+    identity: Partial<
+      Pick<
+        Account,
+        | "label"
+        | "email"
+        | "accountUuid"
+        | "codexAccountId"
+        | "subscriptionType"
+        | "rateLimitTier"
+      >
+    >,
+    secret: AccountSecret,
+    organizationUuid: string | null,
+  ): Promise<Account> {
+    const updated = await this.accounts.replaceCredentials(
+      account.id,
+      identity,
+      secret,
+    );
+    if (updated === null)
+      throw new Error("This subscription no longer exists.");
+    if (organizationUuid !== null)
+      await this.accounts.setOrganization(updated.id, organizationUuid);
+    this.quotas.put({
+      ...this.quotas.get(updated.id),
+      error: null,
+      heldUntil: null,
+    });
+    this.onAccountsChanged();
+    if (updated.enabled) await this.onAccountEnabled(updated.id);
+    return updated;
+  }
+
+  async localLogins(): Promise<LocalLogin[]> {
+    const [states, accounts] = await Promise.all([
+      this.providerStates(null),
+      this.accounts.list(),
+    ]);
+    const codexLogin = states.some(
+      (state) =>
+        poolProviderFor(state.providerId) === "codex" &&
+        state.planLabel === null,
+    )
+      ? await this.hub.localLogin("codex").catch(() => null)
+      : null;
+    return states.flatMap((state): LocalLogin[] => {
+      if (state.status !== "ready" && state.status !== "expired") return [];
+      if (state.planLabel === "Proxied") return [];
+      if (state.accountEmail === null && state.planLabel === null) return [];
+      const poolProvider = poolProviderFor(state.providerId);
+      if (
+        poolProvider !== null &&
+        accounts.some(
+          (account) =>
+            account.provider === poolProvider &&
+            sameEmail(account.email, state.accountEmail),
+        )
+      )
+        return [];
+      return [
+        {
+          providerId: state.providerId,
+          displayName: state.displayName,
+          email: state.accountEmail,
+          planLabel:
+            state.planLabel ??
+            (poolProvider === "codex" &&
+            codexLogin !== null &&
+            sameEmail(codexLogin.email, state.accountEmail)
+              ? codexLogin.planLabel
+              : null),
+          status: state.status,
+          poolProvider,
+        },
+      ];
+    });
+  }
+
   async list(): Promise<AccountSummary[]> {
     return (await this.status()).accounts;
   }
@@ -204,6 +439,39 @@ export class PoolOperations {
     const account = await this.accounts.setEnabled(id, false);
     if (account !== null) this.onAccountsChanged();
     return account;
+  }
+
+  async disableSubscription(
+    id: string,
+    expectedIds?: readonly string[],
+  ): Promise<Account[] | null> {
+    const disabled = await this.accounts.disableWhere(
+      (accounts, organizations) => {
+        if (!accounts.some((account) => account.id === id)) return null;
+        const targets = subscriptionMembers(
+          accounts.map((account) => ({
+            ...account,
+            organizationUuid: organizations.get(account.id) ?? null,
+          })),
+          id,
+        )
+          .filter((account) => account.enabled)
+          .map((account) => account.id);
+        const expected = new Set(expectedIds);
+        if (
+          expectedIds !== undefined &&
+          (expected.size !== targets.length ||
+            targets.some((target) => !expected.has(target)))
+        ) {
+          throw new Error(
+            "The records of this subscription changed. Review the updated list; nothing was turned off.",
+          );
+        }
+        return targets;
+      },
+    );
+    if (disabled !== null && disabled.length > 0) this.onAccountsChanged();
+    return disabled;
   }
 
   async setPriority(id: string, priority: number): Promise<Account | null> {
@@ -260,7 +528,8 @@ export class PoolOperations {
   }
 
   async nextAccountPreview(provider: PoolProvider) {
-    const { nextAccountId, reason } = await this.hub.nextAccountPreview(provider);
+    const { nextAccountId, reason } =
+      await this.hub.nextAccountPreview(provider);
     return { nextAccountId, reason };
   }
 

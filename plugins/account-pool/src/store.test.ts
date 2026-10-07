@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import Database from "better-sqlite3";
 import type { PluginKvStorage } from "@get-bb/plugin-sdk";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Account } from "./contracts.js";
 import { AccountStore, QUOTA_MIGRATIONS, QuotaStore } from "./store.js";
 
@@ -97,6 +97,203 @@ describe("AccountStore", () => {
     expect((await store.list()).map((entry) => entry.id).sort()).toEqual(
       [first.id, second.id].sort(),
     );
+  });
+
+  it("forgets a removed account's organization and keeps the others", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
+    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    const store = new AccountStore(
+      host.bb.storage.kv,
+      path.join(dataDir, "secrets"),
+    );
+    await store.initialize();
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const add = (label: string) =>
+      store.add(
+        {
+          provider: "claude",
+          kind: "oauth",
+          label,
+          email: `${label}@example.com`,
+          accountUuid: null,
+          subscriptionType: null,
+          rateLimitTier: null,
+          enabled: true,
+          priority: 1,
+        },
+        {
+          kind: "oauth",
+          accessToken: `${label}-access`,
+          refreshToken: `${label}-refresh`,
+          expiresAt: null,
+        },
+      );
+    const removed = await add("removed");
+    const kept = await add("kept");
+    await store.setOrganization(
+      removed.id,
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    await store.setOrganization(
+      kept.id,
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+
+    expect(await store.remove(removed.id)).toBe(true);
+
+    expect(await host.bb.storage.kv.get("organizations:v1")).toEqual({
+      [kept.id]: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+  });
+
+  it("checks a turn-off selector against a write that held the store when it was called, and a refusal writes nothing", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
+    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const kv = host.bb.storage.kv;
+    const writes: string[] = [];
+    let holdNextAccountsWrite = false;
+    let held = () => {};
+    let release = () => {};
+    const writeHeld = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = new AccountStore(
+      {
+        get: (key) => kv.get(key),
+        async set(key, value) {
+          writes.push(`set ${key}`);
+          if (key === "accounts:v1" && holdNextAccountsWrite) {
+            holdNextAccountsWrite = false;
+            held();
+            await barrier;
+          }
+          await kv.set(key, value);
+        },
+        async delete(key) {
+          writes.push(`delete ${key}`);
+          await kv.delete(key);
+        },
+        list: (prefix) => kv.list(prefix),
+      },
+      path.join(dataDir, "secrets"),
+    );
+    await store.initialize();
+    const add = (label: string) =>
+      store.add(
+        {
+          provider: "claude",
+          kind: "oauth",
+          label,
+          email: "shared@example.com",
+          accountUuid: null,
+          subscriptionType: null,
+          rateLimitTier: null,
+          enabled: true,
+          priority: 1,
+        },
+        {
+          kind: "oauth",
+          accessToken: `${label}-access`,
+          refreshToken: `${label}-refresh`,
+          expiresAt: null,
+        },
+      );
+    const principal = await add("principal");
+    const twin = await add("twin");
+    writes.length = 0;
+    type Locked = {
+      mutationLock: Promise<void> | null;
+      serialized(action: () => Promise<unknown>): Promise<unknown>;
+    };
+    const lock = AccountStore.prototype as unknown as Locked;
+    const serialized = lock.serialized;
+    let holding: Promise<void> | null = null;
+    const queue = vi.spyOn(lock, "serialized").mockImplementation(function (
+      this: Locked,
+      action: () => Promise<unknown>,
+    ) {
+      const before = this.mutationLock;
+      const pending = serialized.call(this, action);
+      const registered =
+        this.mutationLock !== null && this.mutationLock !== before;
+      writes.push(
+        !registered
+          ? "lock not registered"
+          : before === null
+            ? "lock taken"
+            : before === holding
+              ? "queued behind held write"
+              : "queued behind another call",
+      );
+      return pending;
+    });
+    cleanups.push(async () => queue.mockRestore());
+
+    holdNextAccountsWrite = true;
+    const concurrent = store.setEnabled(twin.id, false);
+    await writeHeld;
+    expect(writes).toEqual(["lock taken", "set accounts:v1"]);
+    holding = (store as unknown as Locked).mutationLock;
+    expect(holding).not.toBeNull();
+    const seen: Array<Array<{ id: string; enabled: boolean }>> = [];
+    const turnOff = store
+      .disableWhere((accounts) => {
+        seen.push(accounts.map(({ id, enabled }) => ({ id, enabled })));
+        if (accounts.some(({ enabled }) => !enabled)) {
+          throw new Error("changed");
+        }
+        return [principal.id, twin.id];
+      })
+      .then(
+        () => "turned off",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+    let turnOffSettled = false;
+    void turnOff.then(() => {
+      turnOffSettled = true;
+    });
+    for (let turn = 0; turn < 5; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(seen).toEqual([]);
+    expect(turnOffSettled).toBe(false);
+    expect(writes).toEqual([
+      "lock taken",
+      "set accounts:v1",
+      "queued behind held write",
+    ]);
+
+    release();
+    await concurrent;
+    expect(await turnOff).toBe("changed");
+    expect(seen).toEqual([
+      [
+        { id: principal.id, enabled: true },
+        { id: twin.id, enabled: false },
+      ],
+    ]);
+    expect(writes).toEqual([
+      "lock taken",
+      "set accounts:v1",
+      "queued behind held write",
+    ]);
+    expect(
+      (await store.list()).map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([
+      { id: principal.id, enabled: true },
+      { id: twin.id, enabled: false },
+    ]);
   });
 });
 

@@ -22,6 +22,8 @@ import {
   accountPoolConfigSetInputSchema,
   codexLoginPollSchema,
   codexLoginStartSchema,
+  localLoginSchema,
+  loginStartSchema,
   routedThreadStatusListSchema,
   statusReportSchema,
   statusSchema,
@@ -401,6 +403,7 @@ function importedCredentials(
     rateLimitTier: "max_5x",
     email: "pool@example.com",
     accountUuid: "11111111-1111-4111-8111-111111111111",
+    organizationUuid: null,
     ...overrides,
   };
 }
@@ -432,9 +435,20 @@ async function createFixture(args: {
     anthropicUpstreamBaseUrl: args.upstreamUrl,
     codexUpstreamBaseUrl: args.upstreamUrl,
   });
+  const options = args.options ?? {};
+  const upstreamFetch = options.fetch;
   const plugin = createAccountPoolPlugin({
     usageUrl: "data:application/json,{}",
-    ...args.options,
+    ...options,
+    oauthProfileUrl: options.oauthProfileUrl ?? UNUSED_PROFILE_URL,
+    ...(upstreamFetch === undefined
+      ? {}
+      : {
+          fetch: (input, init) =>
+            String(input) === UNUSED_PROFILE_URL
+              ? Promise.resolve(Response.json(null))
+              : upstreamFetch(input, init),
+        }),
   });
   args.beforePlugin?.(host);
   await plugin(host.bb);
@@ -505,6 +519,7 @@ async function createOAuthRequestFixture(
         refreshToken: "oauth-refresh",
         idToken: null,
         accountId: "chatgpt-account",
+        planType: null,
         email: "codex@example.com",
         expiresAt: now() + 60 * 60 * 1_000,
       }),
@@ -582,6 +597,7 @@ async function movePoolToOtherAccount(
 }
 
 const EMPTY_USAGE_URL = "data:application/json,{}";
+const UNUSED_PROFILE_URL = "data:application/json,null";
 const CODEX_USAGE_STUB_URL = "https://usage.example/wham/usage";
 
 describe("Account Pool config schema", () => {
@@ -937,6 +953,7 @@ describe("Account Pool plugin", () => {
           refreshToken: `refresh-${imported}`,
           idToken: "id-token",
           accountId: `chatgpt-account-${imported}`,
+          planType: null,
           email: `codex-${imported}@example.com`,
           expiresAt: Date.now() - 1,
         };
@@ -1239,6 +1256,7 @@ describe("Account Pool plugin", () => {
         refreshToken: "refresh",
         idToken: null,
         accountId: "account",
+        planType: null,
         email: null,
         expiresAt: null,
       }),
@@ -4039,6 +4057,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "refresh",
             idToken: null,
             accountId: `codex-account-${imported}`,
+            planType: null,
             email: null,
             expiresAt: now() + 24 * 60 * 60 * 1_000,
           }),
@@ -4172,13 +4191,7 @@ describe("Account Pool plugin", () => {
                 "sk-first",
                 "sk-second",
               ]
-            : [
-                "sk-first",
-                "sk-first",
-                "sk-second",
-                "sk-first",
-                "sk-second",
-              ],
+            : ["sk-first", "sk-first", "sk-second", "sk-first", "sk-second"],
         );
       },
     );
@@ -5805,6 +5818,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "old-refresh",
             idToken: null,
             accountId: "chatgpt-account",
+            planType: null,
             email: "codex@example.com",
             expiresAt,
           }),
@@ -5989,6 +6003,7 @@ describe("Account Pool plugin", () => {
           refreshToken: "codex-refresh",
           idToken: "codex-id",
           accountId: "chatgpt-account",
+          planType: null,
           email: "codex@example.com",
           expiresAt: Date.now() + 60_000,
         }),
@@ -6120,6 +6135,7 @@ describe("Account Pool plugin", () => {
             refreshToken: "oauth-refresh",
             idToken: null,
             accountId: "chatgpt-account",
+            planType: null,
             email: "codex@example.test",
             expiresAt: Date.now() + 3_600_000,
           }),
@@ -6192,6 +6208,186 @@ describe("Account Pool plugin", () => {
         error: null,
       });
       expect(quota(await accountState())).toBe(0.3);
+    },
+  );
+
+  async function claudePlanFixture(
+    profile: Record<string, unknown>,
+    firstProfileFailure:
+      | "network"
+      | "http"
+      | "json"
+      | "payload"
+      | "identity"
+      | null = null,
+  ) {
+    const profileCalls: string[] = [];
+    const fixture = await createFixture({
+      upstreamUrl: "https://upstream.example",
+      source: "import",
+      options: {
+        usageUrl: "https://upstream.example/usage",
+        oauthProfileUrl: "https://upstream.example/profile",
+        importCredentials: async () =>
+          importedCredentials({
+            subscriptionType: "max",
+            rateLimitTier: "default_claude_max_5x",
+          }),
+        fetch: async (input, init) => {
+          const url = new URL(String(input));
+          if (url.pathname === "/profile") {
+            profileCalls.push(
+              new Headers(init?.headers).get("authorization") ?? "",
+            );
+            if (profileCalls.length === 1) {
+              if (firstProfileFailure === "network")
+                throw new Error("Profile request failed");
+              if (firstProfileFailure === "http")
+                return Response.json({ error: "Unavailable" }, { status: 503 });
+              if (firstProfileFailure === "json")
+                return new Response("Unreadable profile");
+              if (firstProfileFailure === "payload")
+                return Response.json({ account: { uuid: "invalid" } });
+              if (firstProfileFailure === "identity")
+                return Response.json({
+                  ...profile,
+                  account: { uuid: "99999999-9999-4999-8999-999999999999" },
+                });
+            }
+            return Response.json(profile);
+          }
+          if (url.pathname === "/usage")
+            return Response.json({ seven_day: { utilization: 13 } });
+          return Response.json({ ok: true });
+        },
+      },
+    });
+    const listed = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(
+          await fixture.host.harness.behavior.callRpc("account.list", null),
+        )
+        .find((account) => account.id === fixture.account.id);
+    return { fixture, listed, profileCalls };
+  }
+
+  it("refreshes a Claude account's plan when Anthropic reports a new tier", async () => {
+    const { fixture, listed, profileCalls } = await claudePlanFixture({
+      account: {
+        uuid: "11111111-1111-4111-8111-111111111111",
+        has_claude_max: true,
+      },
+      organization: {
+        organization_type: "claude_max",
+        rate_limit_tier: "default_claude_max_20x",
+      },
+    });
+    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      accountId: fixture.account.id,
+    });
+
+    expect(await listed()).toMatchObject({
+      subscriptionType: "max",
+      rateLimitTier: "default_claude_max_20x",
+    });
+    const fetched = usageMeasurementSchema.parse(
+      await fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+        resourceId: fixture.account.id,
+        refresh: false,
+      }),
+    );
+    expect(fetched.usage).toMatchObject({ planLabel: "Max (20x)" });
+    expect(profileCalls.length).toBeGreaterThan(0);
+    expect(profileCalls.every((value) => value === "Bearer oauth-access")).toBe(
+      true,
+    );
+  });
+
+  it("checks a Claude account's plan at most once per refresh interval", async () => {
+    const { fixture, profileCalls } = await claudePlanFixture({
+      account: { uuid: "11111111-1111-4111-8111-111111111111" },
+      organization: { rate_limit_tier: "default_claude_max_20x" },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: fixture.account.id,
+      });
+    }
+
+    expect(profileCalls).toHaveLength(1);
+  });
+
+  it.each(["network", "http", "json", "payload", "identity"] as const)(
+    "retries a failed Claude profile lookup on the next usage refresh after %s failure",
+    async (failure) => {
+      const organizationUuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const { fixture, listed, profileCalls } = await claudePlanFixture(
+        {
+          account: {
+            uuid: "11111111-1111-4111-8111-111111111111",
+            has_claude_max: true,
+          },
+          organization: {
+            uuid: organizationUuid,
+            rate_limit_tier: "default_claude_max_20x",
+          },
+        },
+        failure,
+      );
+      const refresh = () =>
+        fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+          accountId: fixture.account.id,
+        });
+
+      expect(profileCalls.length).toBe(1);
+      expect(await listed()).toMatchObject({
+        organizationUuid: null,
+        rateLimitTier: "default_claude_max_5x",
+      });
+
+      await refresh();
+      expect(profileCalls.length).toBe(2);
+      expect(await listed()).toMatchObject({
+        organizationUuid,
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_20x",
+      });
+      await refresh();
+      expect(profileCalls.length).toBe(2);
+    },
+  );
+
+  it.each([
+    [
+      "omits the tier",
+      { account: { uuid: "11111111-1111-4111-8111-111111111111" } },
+    ],
+    [
+      "describes another Claude account",
+      {
+        account: {
+          uuid: "99999999-9999-4999-8999-999999999999",
+          has_claude_max: true,
+        },
+        organization: { rate_limit_tier: "default_claude_max_20x" },
+      },
+    ],
+  ])(
+    "keeps a Claude account's stored plan when the profile %s",
+    async (_case, profile) => {
+      const { fixture, listed, profileCalls } =
+        await claudePlanFixture(profile);
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: fixture.account.id,
+      });
+
+      expect(await listed()).toMatchObject({
+        accountUuid: "11111111-1111-4111-8111-111111111111",
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_5x",
+      });
+      expect(profileCalls.length).toBeGreaterThan(0);
     },
   );
 
@@ -6766,11 +6962,14 @@ describe("Account Pool plugin", () => {
         "threads.queuedMessages.list",
         async () => [],
       );
-      await pool.fixture.host.harness.behavior.callRpc("routing.selection.set", {
-        threadId: "thr_longholdpin",
-        provider: "claude",
-        accountId: pool.fixture.account.id,
-      });
+      await pool.fixture.host.harness.behavior.callRpc(
+        "routing.selection.set",
+        {
+          threadId: "thr_longholdpin",
+          provider: "claude",
+          accountId: pool.fixture.account.id,
+        },
+      );
       setQuota(pool.fixture, pool.fixture.account.id, {
         sevenDayUtilization: 0.2,
         sevenDayResetAt: now + 7 * 24 * 60 * 60 * 1_000,
@@ -7132,6 +7331,7 @@ describe("sequential pool recovery", () => {
           refreshToken: "refresh",
           idToken: null,
           accountId: `review-codex-account-${imported}`,
+          planType: null,
           email: null,
           expiresAt: Date.now() + 24 * 60 * 60 * 1_000,
         }),
@@ -7223,6 +7423,7 @@ describe("sequential pool recovery", () => {
             expiresAt: Date.now() + 3600000,
             idToken: null,
             accountId: "codex-qa",
+            planType: null,
             email: null,
           }),
           fetch: async (input) => {
@@ -7274,6 +7475,7 @@ describe("sequential pool recovery", () => {
         expiresAt: now + 3600000,
         idToken: null,
         accountId: `codex-qa-${imports}`,
+        planType: null,
         email: null,
       }),
       fetch: async (input, init) => {
@@ -8530,6 +8732,973 @@ describe("Account Pool nested proxy", () => {
   });
 });
 
+describe("Account Pool subscription sign-in repair", () => {
+  const SHARED_LOGIN = {
+    account: {
+      uuid: "33333333-3333-4333-8333-333333333333",
+      email: "shared@example.com",
+      display_name: "Shared login",
+      has_claude_max: true,
+      rate_limit_tier: "default_claude_max_20x",
+    },
+  };
+  const OTHER_LOGIN = {
+    account: {
+      uuid: "44444444-4444-4444-8444-444444444444",
+      email: "other@example.com",
+      display_name: "Other login",
+      has_claude_max: true,
+      rate_limit_tier: "default_claude_max_20x",
+    },
+  };
+
+  async function claudeLoginHost(
+    profile: { current: object },
+    codexLogin: ImportedCodexCredentials | null = null,
+  ) {
+    let issued = 0;
+    const oauth = await startUpstream(async (request, response) => {
+      await readRequestBody(request);
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/token") {
+        issued += 1;
+        response.end(
+          JSON.stringify({
+            access_token: `access-${issued}`,
+            refresh_token: `refresh-${issued}`,
+            expires_in: 3600,
+          }),
+        );
+        return;
+      }
+      if (request.url === "/profile") {
+        response.end(JSON.stringify(profile.current));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("{}");
+    });
+    cleanups.push(oauth.close);
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-reauth-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      oauthAuthorizeUrl: `${oauth.url}/authorize`,
+      oauthTokenUrl: `${oauth.url}/token`,
+      oauthProfileUrl: `${oauth.url}/profile`,
+      usageUrl: "data:application/json,{}",
+      importCodexCredentials: async () => {
+        if (codexLogin === null)
+          throw new Error("No Codex login on this test host.");
+        return codexLogin;
+      },
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const signIn = async (
+      target: { accountId: string } | null,
+      label?: string,
+    ) => {
+      const started = loginStartSchema.parse(
+        await host.harness.behavior.callRpc("login.start", target),
+      );
+      const state = new URL(started.authorizeUrl).searchParams.get("state");
+      return accountSchema.parse(
+        await host.harness.behavior.callRpc("login.complete", {
+          sessionId: started.sessionId,
+          pasted: `code#${state}`,
+          ...(label === undefined ? {} : { label }),
+        }),
+      );
+    };
+    const secretOf = async (id: string) =>
+      accountSecretSchema.parse(
+        JSON.parse(
+          await fs.readFile(
+            path.join(
+              dataDir,
+              "plugins",
+              "account-pool",
+              "secrets",
+              "accounts",
+              `account-${id}.json`,
+            ),
+            "utf8",
+          ),
+        ),
+      );
+    const list = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null));
+    const expire = (
+      id: string,
+      error = "OAuth refresh failed with HTTP 400.",
+    ) => {
+      const quotas = new QuotaStore(host.bb.storage.database());
+      quotas.put({ ...quotas.get(id), error });
+    };
+    return { host, signIn, secretOf, list, expire };
+  }
+
+  async function parallelSubscriptions(profile: { current: object }) {
+    const pool = await claudeLoginHost(profile);
+    const principal = await pool.signIn(null, "Claude Max 20x (principal)");
+    const previous = await pool.signIn(
+      null,
+      "Claude Max 20x (previous token, disabled)",
+    );
+    await pool.host.harness.behavior.callRpc("account.disable", {
+      id: previous.id,
+    });
+    pool.expire(previous.id);
+    return { ...pool, principal, previous };
+  }
+
+  it("lists both records of one login in account list and flags only the rejected one", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    pool.expire(
+      pool.principal.id,
+      "OAuth refresh failed due to a network error or timeout.",
+    );
+    expect(
+      (await pool.list()).map((account) => ({
+        id: account.id,
+        email: account.email,
+        enabled: account.enabled,
+        signInExpired: account.signInExpired,
+      })),
+    ).toEqual([
+      {
+        id: pool.principal.id,
+        email: "shared@example.com",
+        enabled: true,
+        signInExpired: false,
+      },
+      {
+        id: pool.previous.id,
+        email: "shared@example.com",
+        enabled: false,
+        signInExpired: true,
+      },
+    ]);
+    const listed = await pool.host.harness.behavior.runCli(["account", "list"]);
+    const header = listed.stdout.split("\n")[0]?.split("\t") ?? [];
+    const signInColumn = header.indexOf("Sign-in");
+    expect(signInColumn).toBeGreaterThan(0);
+    expect(
+      listed.stdout
+        .split("\n")
+        .slice(1)
+        .filter((row) => row.length > 0)
+        .map((row) => row.split("\t")[signInColumn]),
+    ).toEqual(["ok", "expired"]);
+  });
+
+  it("reports one usage subscription per login, represented by its healthy record", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    profile.current = OTHER_LOGIN;
+    const other = await pool.signIn(null, "Claude Max 20x (other login)");
+    await pool.host.harness.behavior.callRpc("account.reorder", {
+      provider: "claude",
+      accountIds: [pool.previous.id, pool.principal.id, other.id],
+    });
+    expect(
+      usageResourceListSchema
+        .parse(await pool.host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual([pool.principal.id, other.id]);
+    expect((await pool.list()).map((account) => account.id)).toEqual([
+      pool.previous.id,
+      pool.principal.id,
+      other.id,
+    ]);
+  });
+
+  it("keeps two organizations of one login apart and refuses a sign-in again from the other organization", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const team = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const profile = {
+      current: {
+        ...SHARED_LOGIN,
+        organization: { uuid: personal, name: "Personal" },
+      } as object,
+    };
+    const pool = await claudeLoginHost(profile);
+    const first = await pool.signIn(null, "Personal seat");
+    profile.current = {
+      ...SHARED_LOGIN,
+      organization: { uuid: team, name: "Team" },
+    };
+    const second = await pool.signIn(null, "Team seat");
+    expect(
+      (await pool.list()).map(({ id, organizationUuid }) => ({
+        id,
+        organizationUuid,
+      })),
+    ).toEqual([
+      { id: first.id, organizationUuid: personal },
+      { id: second.id, organizationUuid: team },
+    ]);
+    expect(
+      usageResourceListSchema
+        .parse(await pool.host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual([first.id, second.id]);
+    pool.expire(first.id);
+    const before = await pool.secretOf(first.id);
+    await expect(pool.signIn({ accountId: first.id })).rejects.toThrow(
+      "That code belongs to a different Claude organization. Sign in to the organization behind Personal seat; it was not changed.",
+    );
+    expect(await pool.secretOf(first.id)).toEqual(before);
+    expect((await pool.list())[0]).toMatchObject({
+      id: first.id,
+      organizationUuid: personal,
+      signInExpired: true,
+    });
+  });
+
+  it("learns each record's organization on a usage refresh and splits one login into its organizations", async () => {
+    const organizations = new Map([
+      ["Bearer personal-access", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+      ["Bearer team-access", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+    ]);
+    const imports = ["personal-access", "team-access"];
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-profile-org-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      usageUrl: "https://upstream.example/usage",
+      oauthProfileUrl: "https://upstream.example/profile",
+      importCredentials: async () =>
+        importedCredentials({
+          accessToken: imports.shift() ?? "unexpected-access",
+          email: "shared@example.com",
+          accountUuid: null,
+        }),
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/profile") {
+          const uuid = organizations.get(
+            new Headers(init?.headers).get("authorization") ?? "",
+          );
+          return Response.json({
+            ...SHARED_LOGIN,
+            ...(uuid === undefined ? {} : { organization: { uuid } }),
+          });
+        }
+        if (url.pathname === "/usage")
+          return Response.json({ seven_day: { utilization: 13 } });
+        return Response.json({ ok: true });
+      },
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    for (const label of ["Personal seat", "Team seat"])
+      await host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "import" },
+        label,
+        priority: 100,
+      });
+    const list = async () =>
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null));
+    for (const { id } of await list())
+      await host.harness.behavior.callRpc("account.refreshUsage", {
+        accountId: id,
+      });
+    const accounts = await list();
+    expect(
+      accounts.map(({ label, accountUuid, organizationUuid }) => ({
+        label,
+        accountUuid,
+        organizationUuid,
+      })),
+    ).toEqual([
+      {
+        label: "Personal seat",
+        accountUuid: SHARED_LOGIN.account.uuid,
+        organizationUuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+      {
+        label: "Team seat",
+        accountUuid: SHARED_LOGIN.account.uuid,
+        organizationUuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    ]);
+    expect(
+      usageResourceListSchema
+        .parse(await host.harness.behavior.callRpc(usageListMethod, {}))
+        .resources.map(({ id }) => id),
+    ).toEqual(accounts.map(({ id }) => id));
+  });
+
+  it("turns a subscription off in one write and leaves its disabled record untouched", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    profile.current = OTHER_LOGIN;
+    const other = await pool.signIn(null, "Claude Max 20x (other login)");
+    const protectedBefore = (await pool.list()).find(
+      ({ id }) => id === pool.previous.id,
+    );
+    const protectedSecret = await pool.secretOf(pool.previous.id);
+    expect(protectedBefore).toMatchObject({
+      enabled: false,
+      signInExpired: true,
+    });
+
+    const result = z
+      .object({ accounts: z.array(accountSchema).nullable() })
+      .parse(
+        await pool.host.harness.behavior.callRpc(
+          "account.disableSubscription",
+          { id: pool.principal.id },
+        ),
+      );
+
+    expect(result.accounts?.map(({ id }) => id)).toEqual([
+      pool.principal.id,
+      twin.id,
+    ]);
+    const after = await pool.list();
+    expect(after.find(({ id }) => id === pool.previous.id)).toEqual(
+      protectedBefore,
+    );
+    expect(await pool.secretOf(pool.previous.id)).toEqual(protectedSecret);
+    expect(after.map(({ id, enabled }) => ({ id, enabled }))).toEqual([
+      { id: pool.principal.id, enabled: false },
+      { id: pool.previous.id, enabled: false },
+      { id: twin.id, enabled: false },
+      { id: other.id, enabled: true },
+    ]);
+    expect(
+      await pool.host.harness.behavior.callRpc("account.disableSubscription", {
+        id: "99999999-9999-4999-8999-999999999999",
+      }),
+    ).toEqual({ accounts: null });
+
+    const byCli = await pool.host.harness.behavior.runCli([
+      "account",
+      "disable",
+      other.id,
+      "--subscription",
+      "--json",
+    ]);
+    expect(byCli.exitCode).toBe(0);
+    expect(
+      z
+        .object({ accounts: z.array(accountSchema) })
+        .parse(JSON.parse(byCli.stdout))
+        .accounts.map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([{ id: other.id, enabled: false }]);
+    const again = await pool.host.harness.behavior.runCli([
+      "account",
+      "disable",
+      other.id,
+      "--subscription",
+    ]);
+    expect(again.stdout).toBe(
+      `No record of the subscription of ${other.id} was enabled.\n`,
+    );
+    expect(
+      (await pool.list()).find(({ id }) => id === pool.previous.id),
+    ).toEqual(protectedBefore);
+  });
+
+  it("refuses a stale subscription turn off that would disable a record it never named", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    const named = [pool.principal.id, twin.id];
+    await pool.host.harness.behavior.callRpc("account.enable", {
+      id: pool.previous.id,
+    });
+    const enabled = async () =>
+      (await pool.list()).map(({ id, enabled }) => ({ id, enabled }));
+    const before = await enabled();
+    expect(before).toEqual([
+      { id: pool.principal.id, enabled: true },
+      { id: pool.previous.id, enabled: true },
+      { id: twin.id, enabled: true },
+    ]);
+
+    await expect(
+      pool.host.harness.behavior.callRpc("account.disableSubscription", {
+        id: pool.principal.id,
+        expectedIds: named,
+      }),
+    ).rejects.toThrow(
+      "The records of this subscription changed. Review the updated list; nothing was turned off.",
+    );
+    expect(await enabled()).toEqual(before);
+
+    const confirmed = z
+      .object({ accounts: z.array(accountSchema).nullable() })
+      .parse(
+        await pool.host.harness.behavior.callRpc(
+          "account.disableSubscription",
+          {
+            id: pool.principal.id,
+            expectedIds: [twin.id, pool.previous.id, pool.principal.id],
+          },
+        ),
+      );
+    expect(confirmed.accounts?.map(({ id }) => id)).toEqual([
+      pool.principal.id,
+      pool.previous.id,
+      twin.id,
+    ]);
+  });
+
+  it("refuses a subscription turn off whose records change while it waits for the store, with no storage write", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const twin = await pool.signIn(null, "Claude Max 20x (twin)");
+    const named = [pool.principal.id, twin.id];
+    const kv = pool.host.bb.storage.kv;
+    const get = kv.get.bind(kv);
+    const set = kv.set.bind(kv);
+    const remove = kv.delete.bind(kv);
+    const log: string[] = [];
+    let holdNextAccountsWrite = false;
+    let held = () => {};
+    let release = () => {};
+    const writeHeld = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    kv.get = <T>(key: string): Promise<T | undefined> => {
+      log.push(`get ${key}`);
+      return get<T>(key);
+    };
+    kv.set = async (key, value) => {
+      log.push(`set ${key}`);
+      if (key === "accounts:v1" && holdNextAccountsWrite) {
+        holdNextAccountsWrite = false;
+        held();
+        await barrier;
+        await set(key, value);
+        log.push(`committed ${key}`);
+        return;
+      }
+      await set(key, value);
+    };
+    kv.delete = async (key) => {
+      log.push(`delete ${key}`);
+      await remove(key);
+    };
+    type Locked = {
+      mutationLock: Promise<void> | null;
+      serialized(action: () => Promise<unknown>): Promise<unknown>;
+    };
+    const store = AccountStore.prototype as unknown as Locked;
+    const serialized = store.serialized;
+    let instance: Locked | null = null;
+    let holding: Promise<void> | null = null;
+    const queue = vi.spyOn(store, "serialized").mockImplementation(function (
+      this: Locked,
+      action: () => Promise<unknown>,
+    ) {
+      instance = this;
+      const before = this.mutationLock;
+      const pending = serialized.call(this, action);
+      const registered =
+        this.mutationLock !== null && this.mutationLock !== before;
+      log.push(
+        !registered
+          ? "lock not registered"
+          : before === null
+            ? "lock taken"
+            : before === holding
+              ? "queued behind held write"
+              : "queued behind another call",
+      );
+      return pending;
+    });
+    cleanups.push(async () => queue.mockRestore());
+
+    holdNextAccountsWrite = true;
+    const enabling = pool.host.harness.behavior.callRpc("account.enable", {
+      id: pool.previous.id,
+    });
+    await writeHeld;
+    expect(log.at(-1)).toBe("set accounts:v1");
+    expect(log).toContain("lock taken");
+    holding = (instance as Locked | null)?.mutationLock ?? null;
+    expect(holding).not.toBeNull();
+    const contestedFrom = log.length;
+    let settledAt = -1;
+    const turningOff = pool.host.harness.behavior
+      .callRpc("account.disableSubscription", {
+        id: pool.principal.id,
+        expectedIds: named,
+      })
+      .then(
+        () => {
+          settledAt = log.length;
+          return "turned off";
+        },
+        (error: unknown) => {
+          settledAt = log.length;
+          return error instanceof Error ? error.message : String(error);
+        },
+      );
+    for (let turn = 0; turn < 100 && log.length === contestedFrom; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(log.slice(contestedFrom)).toEqual(["queued behind held write"]);
+    for (let turn = 0; turn < 5; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(settledAt).toBe(-1);
+    expect(log.slice(contestedFrom)).toEqual(["queued behind held write"]);
+
+    release();
+    await enabling;
+    expect(await turningOff).toBe(
+      "The records of this subscription changed. Review the updated list; nothing was turned off.",
+    );
+    const committed = log.indexOf("committed accounts:v1");
+    expect(committed).toBeGreaterThan(contestedFrom);
+    const checked = log.slice(committed, settledAt);
+    expect(checked).toContain("get accounts:v1");
+    expect(
+      checked.filter(
+        (entry) => entry.startsWith("set ") || entry.startsWith("delete "),
+      ),
+    ).toEqual([]);
+    expect(log.filter((entry) => entry === "set accounts:v1")).toHaveLength(1);
+    expect(
+      (await pool.list()).map(({ id, enabled }) => ({ id, enabled })),
+    ).toEqual([
+      { id: pool.principal.id, enabled: true },
+      { id: pool.previous.id, enabled: true },
+      { id: twin.id, enabled: true },
+    ]);
+  });
+
+  it("stores the organization of an imported Claude login", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-import-org-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      usageUrl: "data:application/json,{}",
+      importCredentials: async () =>
+        importedCredentials({ organizationUuid: personal }),
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    await host.harness.behavior.callRpc("account.add", {
+      provider: "claude",
+      source: { kind: "import" },
+      label: null,
+      priority: 100,
+    });
+    expect(
+      z
+        .array(accountSummarySchema)
+        .parse(await host.harness.behavior.callRpc("account.list", null))
+        .map(({ organizationUuid }) => organizationUuid),
+    ).toEqual([personal]);
+  });
+
+  it("stores the organization of a sign-in again on a record that had none", async () => {
+    const personal = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    profile.current = {
+      ...SHARED_LOGIN,
+      organization: { uuid: personal },
+    };
+    await pool.signIn({ accountId: pool.previous.id });
+    expect(
+      (await pool.list()).map(({ id, organizationUuid }) => ({
+        id,
+        organizationUuid,
+      })),
+    ).toEqual([
+      { id: pool.principal.id, organizationUuid: null },
+      { id: pool.previous.id, organizationUuid: personal },
+    ]);
+  });
+
+  it("signs in again to an expired Claude subscription in place", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const before = await pool.secretOf(pool.previous.id);
+    const repaired = await pool.signIn({ accountId: pool.previous.id });
+    expect(repaired).toMatchObject({
+      id: pool.previous.id,
+      label: "Claude Max 20x (previous token, disabled)",
+      priority: pool.previous.priority,
+      enabled: false,
+      rateLimitTier: "default_claude_max_20x",
+    });
+    const after = await pool.secretOf(pool.previous.id);
+    expect(after.kind === "oauth" && after.refreshToken).not.toBe(
+      before.kind === "oauth" && before.refreshToken,
+    );
+    const listed = await pool.list();
+    expect(listed.map((account) => account.id)).toEqual([
+      pool.principal.id,
+      pool.previous.id,
+    ]);
+    expect(listed[1]).toMatchObject({ signInExpired: false, error: null });
+    expect(pool.host.harness.inspection.realtimeSignals).toContainEqual({
+      channel: "accounts-changed",
+      payload: {},
+    });
+  });
+
+  it("refuses a sign-in again from a different Claude account and leaves the subscription unchanged", async () => {
+    const profile = { current: SHARED_LOGIN as object };
+    const pool = await parallelSubscriptions(profile);
+    const before = await pool.secretOf(pool.previous.id);
+    profile.current = OTHER_LOGIN;
+    await expect(pool.signIn({ accountId: pool.previous.id })).rejects.toThrow(
+      "That code belongs to a different Claude account. Sign in as the account behind Claude Max 20x (previous token, disabled); it was not changed.",
+    );
+    expect(await pool.secretOf(pool.previous.id)).toEqual(before);
+    const listed = await pool.list();
+    expect(listed).toHaveLength(2);
+    expect(listed[1]).toMatchObject({
+      id: pool.previous.id,
+      email: "shared@example.com",
+      signInExpired: true,
+    });
+  });
+
+  it("refuses a sign-in again whose Claude account can't be identified and leaves the subscription unchanged", async () => {
+    const anonymous = {
+      account: {
+        display_name: "No identity",
+        has_claude_max: true,
+        rate_limit_tier: "default_claude_max_20x",
+      },
+    };
+    const profile = { current: anonymous as object };
+    const pool = await claudeLoginHost(profile);
+    const unknown = await pool.signIn(null, "Claude Max 20x (no identity)");
+    expect(unknown).toMatchObject({ email: null, accountUuid: null });
+    pool.expire(unknown.id);
+    const unknownBefore = await pool.secretOf(unknown.id);
+    await expect(pool.signIn({ accountId: unknown.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (no identity); it was not changed. Try again, or remove it and add the login again.",
+    );
+    expect(await pool.secretOf(unknown.id)).toEqual(unknownBefore);
+    profile.current = SHARED_LOGIN;
+    await expect(pool.signIn({ accountId: unknown.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (no identity); it was not changed.",
+    );
+    const known = await pool.signIn(null, "Claude Max 20x (shared)");
+    pool.expire(known.id);
+    const knownBefore = await pool.secretOf(known.id);
+    profile.current = anonymous;
+    await expect(pool.signIn({ accountId: known.id })).rejects.toThrow(
+      "bb couldn't confirm that this sign-in is the account behind Claude Max 20x (shared); it was not changed.",
+    );
+    expect(await pool.secretOf(unknown.id)).toEqual(unknownBefore);
+    expect(await pool.secretOf(known.id)).toEqual(knownBefore);
+    expect(await pool.list()).toMatchObject([
+      { id: unknown.id, email: null, signInExpired: true },
+      { id: known.id, email: "shared@example.com", signInExpired: true },
+    ]);
+  });
+
+  it("refuses to start a sign-in again for a missing, API key, or other-provider subscription", async () => {
+    const pool = await claudeLoginHost({ current: SHARED_LOGIN });
+    const key = accountSchema.parse(
+      await pool.host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-test" },
+        label: "Metered",
+      }),
+    );
+    const subscription = await pool.signIn(null);
+    await expect(
+      pool.host.harness.behavior.callRpc("login.start", {
+        accountId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(/no longer exists/u);
+    await expect(
+      pool.host.harness.behavior.callRpc("login.start", { accountId: key.id }),
+    ).rejects.toThrow(/API key/u);
+    await expect(
+      pool.host.harness.behavior.callRpc("codexLogin.start", {
+        accountId: subscription.id,
+      }),
+    ).rejects.toThrow(/belongs to Claude/u);
+  });
+
+  it("signs in again from the CLI and says so", async () => {
+    const pool = await parallelSubscriptions({ current: SHARED_LOGIN });
+    const started = await pool.host.harness.behavior.runCli([
+      "account",
+      "sign-in-again",
+      pool.previous.id,
+    ]);
+    expect(started.exitCode).toBe(0);
+    expect(started.stdout).toContain(
+      "Open this URL to sign in to Claude as the account behind Claude Max 20x (previous token, disabled):",
+    );
+    const sessionId = started.stdout.match(/Session ID: ([0-9a-f-]+)/u)?.[1];
+    const authorizeUrl = started.stdout.match(/\n(http[^\n]+)\n/u)?.[1];
+    if (sessionId === undefined || authorizeUrl === undefined)
+      throw new Error("Sign in again did not print its session and URL.");
+    const state = new URL(authorizeUrl).searchParams.get("state");
+    const completed = await pool.host.harness.behavior.runCli(
+      ["account", "login-complete", "--session", sessionId, "--code-stdin"],
+      { experimental_stdinInputs: { code: `code#${state}` } },
+    );
+    expect(completed).toMatchObject({
+      exitCode: 0,
+      stdout: `Signed in again to Claude Max 20x (previous token, disabled) (${pool.previous.id}).\n`,
+    });
+    expect((await pool.list()).map((account) => account.signInExpired)).toEqual(
+      [false, false],
+    );
+  });
+
+  it("signs in again to an expired Codex subscription only as the same ChatGPT account", async () => {
+    const identity = { accountId: "chatgpt-account-1" };
+    let now = 1_800_000_000_000;
+    const auth = await startUpstream(async (request, response) => {
+      await readRequestBody(request);
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/api/accounts/deviceauth/usercode") {
+        response.end(
+          JSON.stringify({
+            device_auth_id: "device",
+            user_code: "ABCD-1234",
+            interval: "1",
+            expires_in: 600,
+          }),
+        );
+        return;
+      }
+      if (request.url === "/api/accounts/deviceauth/token") {
+        response.end(
+          JSON.stringify({
+            authorization_code: "authorization",
+            code_challenge: "challenge",
+            code_verifier: "verifier",
+          }),
+        );
+        return;
+      }
+      if (request.url === "/oauth/token") {
+        response.end(
+          JSON.stringify({
+            access_token: testJwt({ exp: 2_000_000_000 }),
+            refresh_token: `refresh-${identity.accountId}`,
+            id_token: testJwt({
+              email: "codex@example.com",
+              "https://api.openai.com/auth": {
+                chatgpt_account_id: identity.accountId,
+              },
+            }),
+          }),
+        );
+        return;
+      }
+      response.statusCode = 404;
+      response.end("{}");
+    });
+    cleanups.push(auth.close);
+    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-codex-reauth-"));
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    await createAccountPoolPlugin({
+      now: () => now,
+      codexAuthBaseUrl: auth.url,
+      codexUsageUrl: EMPTY_USAGE_URL,
+      usageUrl: "data:application/json,{}",
+    })(host.bb);
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    const signIn = async (target: { accountId: string } | null) => {
+      const started = codexLoginStartSchema.parse(
+        await host.harness.behavior.callRpc("codexLogin.start", target),
+      );
+      expect(
+        await host.harness.behavior.callRpc("codexLogin.poll", {
+          sessionId: started.sessionId,
+        }),
+      ).toEqual({ status: "pending" });
+      now += started.intervalMs;
+      return codexLoginPollSchema.parse(
+        await host.harness.behavior.callRpc("codexLogin.poll", {
+          sessionId: started.sessionId,
+        }),
+      );
+    };
+    const added = await signIn(null);
+    if (added.status !== "complete") throw new Error("Codex login failed.");
+    const quotas = new QuotaStore(host.bb.storage.database());
+    quotas.put({
+      ...quotas.get(added.account.id),
+      error: "OAuth refresh failed with HTTP 401.",
+    });
+    identity.accountId = "chatgpt-account-2";
+    expect(await signIn({ accountId: added.account.id })).toEqual({
+      status: "error",
+      message: `Codex sign-in belongs to a different ChatGPT account. Sign in as the account behind ${added.account.label}; it was not changed. Start again.`,
+    });
+    identity.accountId = "chatgpt-account-1";
+    expect(await signIn({ accountId: added.account.id })).toMatchObject({
+      status: "complete",
+      account: {
+        id: added.account.id,
+        codexAccountId: "chatgpt-account-1",
+        signInExpired: false,
+        error: null,
+      },
+    });
+    const listed = z
+      .array(accountSummarySchema)
+      .parse(await host.harness.behavior.callRpc("account.list", null));
+    expect(listed.map((account) => account.id)).toEqual([added.account.id]);
+  });
+
+  it("lists this Mac's own logins that are not in the pool", async () => {
+    const pool = await claudeLoginHost(
+      { current: SHARED_LOGIN },
+      {
+        accessToken: "codex-access",
+        refreshToken: "codex-refresh",
+        idToken: null,
+        accountId: "chatgpt-account",
+        email: "codex@example.com",
+        expiresAt: null,
+        planType: "pro",
+      },
+    );
+    await pool.signIn(null);
+    pool.host.harness.sdk.stub("system.providerStates", async (input) => {
+      expect(input).toEqual({});
+      return {
+        providers: [
+          {
+            providerId: "claude-code",
+            displayName: "Claude Code",
+            status: "ready",
+            accountEmail: "Shared@Example.com",
+            planLabel: "Max (20x)",
+          },
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            status: "ready",
+            accountEmail: "codex@example.com",
+            planLabel: null,
+          },
+          {
+            providerId: "acp-cursor",
+            displayName: "Cursor",
+            status: "expired",
+            accountEmail: "cursor@example.com",
+            planLabel: "Pro",
+          },
+          {
+            providerId: "pi",
+            displayName: "Pi",
+            status: "ready",
+            accountEmail: null,
+            planLabel: null,
+          },
+          {
+            providerId: "acp-gemini",
+            displayName: "Gemini",
+            status: "unauthenticated",
+            accountEmail: "gemini@example.com",
+            planLabel: null,
+          },
+        ],
+      };
+    });
+    const logins = z
+      .array(localLoginSchema)
+      .parse(await pool.host.harness.behavior.callRpc("local.logins", null));
+    expect(logins).toEqual([
+      {
+        providerId: "codex",
+        displayName: "Codex",
+        email: "codex@example.com",
+        planLabel: "ChatGPT Pro",
+        status: "ready",
+        poolProvider: "codex",
+      },
+      {
+        providerId: "acp-cursor",
+        displayName: "Cursor",
+        email: "cursor@example.com",
+        planLabel: "Pro",
+        status: "expired",
+        poolProvider: null,
+      },
+    ]);
+    const cli = await pool.host.harness.behavior.runCli(["account", "local"]);
+    expect(cli.exitCode).toBe(0);
+    expect(cli.stdout).toContain("pool account add --provider codex --import");
+    expect(cli.stdout).toContain(
+      "Codex\tChatGPT Pro\tready\tcodex@example.com",
+    );
+    expect(cli.stdout).toContain(
+      "Cursor\tPro\texpired\tcursor@example.com\tcan't be pooled",
+    );
+    pool.host.harness.sdk.stub("system.providerStates", async () => ({
+      providers: [
+        {
+          providerId: "codex",
+          displayName: "Codex",
+          status: "ready",
+          accountEmail: "other.codex@example.com",
+          planLabel: null,
+        },
+      ],
+    }));
+    expect(
+      z
+        .array(localLoginSchema)
+        .parse(await pool.host.harness.behavior.callRpc("local.logins", null)),
+    ).toEqual([
+      {
+        providerId: "codex",
+        displayName: "Codex",
+        email: "other.codex@example.com",
+        planLabel: null,
+        status: "ready",
+        poolProvider: "codex",
+      },
+    ]);
+  });
+});
+
 describe("Account Pool credential scoping", () => {
   const POOL_SECRETS = ["plugins", "account-pool", "secrets", "accounts"];
   const HUB_ROUTES = [
@@ -8561,6 +9730,7 @@ describe("Account Pool credential scoping", () => {
           refreshToken: "codex-refresh",
           idToken: null,
           accountId: "codex-account",
+          planType: null,
           email: null,
           expiresAt: Date.now() + 60 * 60 * 1_000,
         }),
@@ -8846,6 +10016,7 @@ describe("Account Pool credential scoping", () => {
           refreshToken: "codex-refresh",
           idToken: null,
           accountId: "codex-account",
+          planType: null,
           email: null,
           expiresAt: Date.now() + 60 * 60 * 1_000,
         }),
@@ -8884,6 +10055,7 @@ describe("Account Pool credential scoping", () => {
           refreshToken: "codex-refresh",
           idToken: null,
           accountId: "codex-account",
+          planType: null,
           email: null,
           expiresAt: Date.now() + 60 * 60 * 1_000,
         }),

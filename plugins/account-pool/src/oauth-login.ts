@@ -1,5 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
+import {
+  claudePlanFromProfile,
+  claudeProfileSchema,
+} from "./claude-profile.js";
 import type { Account } from "./contracts.js";
 
 const OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
@@ -20,41 +24,19 @@ const tokenResponseSchema = z
   })
   .passthrough();
 
-const profileResponseSchema = z
-  .object({
-    account: z
-      .object({
-        uuid: z.string().uuid().nullish(),
-        email: z.string().email().nullish(),
-        display_name: z.string().trim().min(1).nullish(),
-        has_claude_max: z.boolean().nullish(),
-        has_claude_pro: z.boolean().nullish(),
-        subscription_type: z.string().trim().min(1).nullish(),
-        rate_limit_tier: z.string().trim().min(1).nullish(),
-      })
-      .passthrough(),
-    organization: z
-      .object({
-        name: z.string().trim().min(1).nullish(),
-        organization_type: z.string().trim().min(1).nullish(),
-        rate_limit_tier: z.string().trim().min(1).nullish(),
-      })
-      .passthrough()
-      .nullish(),
-  })
-  .passthrough();
-
 interface LoginSession {
   sessionId: string;
   codeVerifier: string;
   state: string;
   createdAt: number;
+  accountId: string | null;
 }
 
 export interface ClaudeOAuthAccount {
   label: string;
   email: string | null;
   accountUuid: string | null;
+  organizationUuid: string | null;
   subscriptionType: string | null;
   rateLimitTier: string | null;
   accessToken: string;
@@ -69,6 +51,11 @@ export interface ClaudeOAuthLoginOptions {
   tokenUrl?: string;
   profileUrl?: string;
   addAccount: (authenticated: ClaudeOAuthAccount) => Promise<Account>;
+  reauthorizeAccount: (
+    accountId: string,
+    authenticated: ClaudeOAuthAccount,
+    label: string | undefined,
+  ) => Promise<Account>;
 }
 
 export interface OAuthLoginStart {
@@ -135,7 +122,7 @@ export class ClaudeOAuthLogin {
     this.profileUrl = options.profileUrl ?? OAUTH_PROFILE_URL;
   }
 
-  start(): OAuthLoginStart {
+  start(target: { accountId: string } | null = null): OAuthLoginStart {
     const codeVerifier = randomBytes(32).toString("base64url");
     const codeChallenge = createHash("sha256")
       .update(codeVerifier)
@@ -147,6 +134,7 @@ export class ClaudeOAuthLogin {
       codeVerifier,
       state,
       createdAt: this.now(),
+      accountId: target?.accountId ?? null,
     };
     const authorizeUrl = new URL(this.authorizeUrl);
     authorizeUrl.searchParams.set("code", "true");
@@ -158,6 +146,12 @@ export class ClaudeOAuthLogin {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
     authorizeUrl.searchParams.set("state", state);
     return { sessionId, authorizeUrl: authorizeUrl.toString() };
+  }
+
+  targetOf(sessionId: string): string | null {
+    return this.session?.sessionId === sessionId
+      ? this.session.accountId
+      : null;
   }
 
   async complete(input: OAuthLoginComplete): Promise<Account> {
@@ -209,7 +203,7 @@ export class ClaudeOAuthLogin {
       );
     }
     const profilePayload = await profileResponse.json().catch(() => null);
-    const parsedProfile = profileResponseSchema.safeParse(profilePayload);
+    const parsedProfile = claudeProfileSchema.safeParse(profilePayload);
     if (!parsedProfile.success) {
       throw new Error(
         "Claude profile lookup returned an invalid response. Start again.",
@@ -217,14 +211,8 @@ export class ClaudeOAuthLogin {
     }
     const profile = parsedProfile.data;
     const email = profile.account.email ?? null;
-    const subscriptionType = profile.account.has_claude_max
-      ? "max"
-      : profile.account.has_claude_pro
-        ? "pro"
-        : (profile.account.subscription_type ??
-          profile.organization?.organization_type ??
-          null);
-    return this.options.addAccount({
+    const plan = claudePlanFromProfile(profile);
+    const authenticated: ClaudeOAuthAccount = {
       label:
         input.label ??
         profile.account.display_name ??
@@ -233,14 +221,19 @@ export class ClaudeOAuthLogin {
         "Claude account",
       email,
       accountUuid: profile.account.uuid ?? null,
-      subscriptionType,
-      rateLimitTier:
-        profile.account.rate_limit_tier ??
-        profile.organization?.rate_limit_tier ??
-        null,
+      organizationUuid: profile.organization?.uuid ?? null,
+      subscriptionType: plan.subscriptionType,
+      rateLimitTier: plan.rateLimitTier,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: this.now() + tokens.expires_in * 1_000,
-    });
+    };
+    return session.accountId === null
+      ? this.options.addAccount(authenticated)
+      : this.options.reauthorizeAccount(
+          session.accountId,
+          authenticated,
+          input.label,
+        );
   }
 }

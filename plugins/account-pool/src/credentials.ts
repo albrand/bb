@@ -27,6 +27,7 @@ const accountFileSchema = z.object({
     .object({
       emailAddress: z.string().email().nullish(),
       accountUuid: z.string().uuid().nullish(),
+      organizationUuid: z.string().uuid().nullish().catch(null),
     })
     .nullish(),
 });
@@ -58,6 +59,7 @@ export interface ImportedClaudeCredentials {
   rateLimitTier: string | null;
   email: string | null;
   accountUuid: string | null;
+  organizationUuid: string | null;
 }
 
 export interface ImportedCodexCredentials {
@@ -67,6 +69,7 @@ export interface ImportedCodexCredentials {
   accountId: string;
   email: string | null;
   expiresAt: number | null;
+  planType: string | null;
 }
 
 function jwtPayload(token: string | null): JwtPayload | null {
@@ -129,6 +132,9 @@ export function parseCodexCredentials(raw: string): ImportedCodexCredentials {
     accountId,
     email,
     expiresAt,
+    planType:
+      nestedString(idPayload, CHATGPT_AUTH_CLAIM, "chatgpt_plan_type") ??
+      nestedString(accessPayload, CHATGPT_AUTH_CLAIM, "chatgpt_plan_type"),
   };
 }
 
@@ -148,7 +154,10 @@ export async function importCodexCredentials(): Promise<ImportedCodexCredentials
 
 function parseCredentials(
   raw: string,
-): Omit<ImportedClaudeCredentials, "email" | "accountUuid"> | null {
+): Omit<
+  ImportedClaudeCredentials,
+  "email" | "accountUuid" | "organizationUuid"
+> | null {
   const trimmed = raw.trim();
   const candidates = [trimmed];
   if (/^(?:[0-9a-f]{2})+$/iu.test(trimmed)) {
@@ -186,23 +195,39 @@ async function readKeychainCredentials(): Promise<string | null> {
   return null;
 }
 
-async function readAccountIdentity(): Promise<{
-  email: string | null;
-  accountUuid: string | null;
-}> {
+type ClaudeAccountIdentity = Pick<
+  ImportedClaudeCredentials,
+  "email" | "accountUuid" | "organizationUuid"
+>;
+
+const UNKNOWN_IDENTITY: ClaudeAccountIdentity = {
+  email: null,
+  accountUuid: null,
+  organizationUuid: null,
+};
+
+export function parseClaudeAccountIdentity(
+  value: unknown,
+): ClaudeAccountIdentity {
+  const parsed = accountFileSchema.safeParse(value);
+  return parsed.success
+    ? {
+        email: parsed.data.oauthAccount?.emailAddress ?? null,
+        accountUuid: parsed.data.oauthAccount?.accountUuid ?? null,
+        organizationUuid: parsed.data.oauthAccount?.organizationUuid ?? null,
+      }
+    : UNKNOWN_IDENTITY;
+}
+
+async function readAccountIdentity(): Promise<ClaudeAccountIdentity> {
   try {
-    const value = JSON.parse(
-      await fs.readFile(path.join(os.homedir(), ".claude.json"), "utf8"),
+    return parseClaudeAccountIdentity(
+      JSON.parse(
+        await fs.readFile(path.join(os.homedir(), ".claude.json"), "utf8"),
+      ),
     );
-    const parsed = accountFileSchema.safeParse(value);
-    return parsed.success
-      ? {
-          email: parsed.data.oauthAccount?.emailAddress ?? null,
-          accountUuid: parsed.data.oauthAccount?.accountUuid ?? null,
-        }
-      : { email: null, accountUuid: null };
   } catch {
-    return { email: null, accountUuid: null };
+    return UNKNOWN_IDENTITY;
   }
 }
 

@@ -228,7 +228,8 @@ export function createAccountPoolPlugin(
       routing,
       () => bb.sdk.hosts.list(),
       async (hostId) =>
-        (await bb.sdk.system.providerStates({ hostId })).providers,
+        (await bb.sdk.system.providerStates(hostId === null ? {} : { hostId }))
+          .providers,
       now,
       () => bb.realtime.publish(ACCOUNT_POOL_ACCOUNTS_CHANGED, {}),
       async (accountId) => {
@@ -290,12 +291,16 @@ export function createAccountPoolPlugin(
       tokenUrl: options.oauthTokenUrl,
       profileUrl: options.oauthProfileUrl,
       addAccount: (authenticated) => operations.addOAuth(authenticated),
+      reauthorizeAccount: (accountId, authenticated, label) =>
+        operations.reauthorizeClaude(accountId, authenticated, label),
     });
     const codexLogin = new CodexDeviceLogin({
       fetch: upstreamFetch,
       now,
       authBaseUrl: options.codexAuthBaseUrl,
       addAccount: (authenticated) => operations.addCodexOAuth(authenticated),
+      reauthorizeAccount: (accountId, authenticated) =>
+        operations.reauthorizeCodex(accountId, authenticated),
     });
     if ((await accounts.list()).every((account) => !account.enabled)) {
       bb.status.needsConfiguration(

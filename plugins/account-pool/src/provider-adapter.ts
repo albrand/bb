@@ -42,6 +42,12 @@ const oauthErrorSchema = z.object({
 
 export class OAuthRefreshError extends Error {}
 
+const SIGN_IN_REJECTION = /^OAuth refresh failed with HTTP 40[01]\./u;
+
+export function isSignInRejection(error: string | null): boolean {
+  return error !== null && SIGN_IN_REJECTION.test(error);
+}
+
 export class TransientOAuthRefreshError extends OAuthRefreshError {
   constructor(
     message: string,
@@ -74,6 +80,7 @@ export interface ImportedProviderAccount {
   label: string;
   email: string | null;
   accountUuid?: string;
+  organizationUuid?: string;
   codexAccountId?: string;
   subscriptionType: string | null;
   rateLimitTier: string | null;
@@ -84,6 +91,10 @@ export interface ProviderAdapter {
   provider: PoolProvider;
   upstreamName: string;
   importAccount(): Promise<ImportedProviderAccount>;
+  localLogin(): Promise<{
+    email: string | null;
+    planLabel: string | null;
+  } | null>;
   parseRequest(
     body: Uint8Array,
     headers: Headers,

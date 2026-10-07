@@ -1,7 +1,10 @@
 import { useEffect, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { usePortalScopeProps } from "@bb/shared-ui/lib/portal-scope";
+import { readWindowFindTopOffset } from "@/lib/bb-desktop";
 
 interface ComposerPopupHostProps {
   open: boolean;
@@ -20,6 +23,7 @@ export function ComposerPopupHost(props: ComposerPopupHostProps) {
   const { open, label, interactive, popupRef, composerRef, onClose } = props;
   const compact = useIsCompactViewport();
   const drawer = interactive && compact;
+  const scopeProps = usePortalScopeProps();
 
   useEffect(() => {
     if (!open || drawer) return;
@@ -51,6 +55,11 @@ export function ComposerPopupHost(props: ComposerPopupHostProps) {
       </ResponsiveDrawerShell>
     );
   }
+  if (!interactive) {
+    return open
+      ? createPortal(<div {...scopeProps}>{content}</div>, document.body)
+      : null;
+  }
   return open ? content : null;
 }
 
@@ -63,8 +72,119 @@ function ComposerPopupContent({
   interactive,
   popupKey,
   popupRef,
+  composerRef,
   children,
 }: ComposerPopupHostProps & { drawer: boolean }) {
+  const compact = useIsCompactViewport();
+
+  useEffect(() => {
+    if (interactive || !open) return;
+    const menu = popupRef.current;
+    const composer = composerRef.current;
+    if (!menu || !composer) return;
+    const viewport = window.visualViewport;
+    const surface =
+      composer.closest<HTMLElement>("[data-promptbox-shell]") ?? composer;
+    const siblings = Array.from(surface.children).flatMap((child) =>
+      child instanceof HTMLElement &&
+      child !== composer &&
+      !child.contains(composer)
+        ? [{ element: child, display: child.style.display }]
+        : [],
+    );
+    const originalMaxHeight = composer.style.maxHeight;
+    const originalOverflowY = composer.style.overflowY;
+    const restoreComposer = () => {
+      composer.style.maxHeight = originalMaxHeight;
+      composer.style.overflowY = originalOverflowY;
+      for (const sibling of siblings)
+        sibling.element.style.display = sibling.display;
+    };
+    const position = () => {
+      restoreComposer();
+      let anchor = surface.getBoundingClientRect();
+      const left = viewport?.offsetLeft ?? 0;
+      const top =
+        (viewport?.offsetTop ?? 0) +
+        Math.max(compact ? 56 : 0, readWindowFindTopOffset()) +
+        8;
+      const right = left + (viewport?.width ?? window.innerWidth) - 8;
+      const bottom =
+        (viewport?.offsetTop ?? 0) +
+        (viewport?.height ?? window.innerHeight) -
+        8;
+      const spaceAbove = () =>
+        Math.max(0, Math.min(anchor.top - 8, bottom) - top);
+      const spaceBelow = () =>
+        Math.max(0, bottom - Math.max(anchor.bottom + 8, top));
+      if (Math.max(spaceAbove(), spaceBelow()) < 48) {
+        for (const sibling of siblings) sibling.element.style.display = "none";
+        composer.style.maxHeight = `${Math.max(44, Math.floor((bottom - top - 16) / 2))}px`;
+        composer.style.overflowY = "auto";
+        anchor = surface.getBoundingClientRect();
+      }
+      const above = spaceAbove();
+      const below = spaceBelow();
+      const useAbove =
+        placement === "top"
+          ? above >= 48 || above >= below
+          : below < 48 && above > below;
+      const availableHeight = useAbove ? above : below;
+      menu.toggleAttribute(
+        "data-promptbox-typeahead-constrained",
+        availableHeight < 96,
+      );
+      menu.style.left = `${Math.max(left + 8, anchor.left)}px`;
+      menu.style.width = `${Math.max(0, Math.min(anchor.width, right - anchor.left))}px`;
+      menu.style.setProperty(
+        "--promptbox-typeahead-max-height",
+        `${availableHeight}px`,
+      );
+      const preferredTop = useAbove
+        ? anchor.top - menu.offsetHeight - 8
+        : anchor.bottom + 8;
+      menu.style.top = `${Math.max(top, Math.min(preferredTop, bottom - menu.offsetHeight))}px`;
+      menu.style.visibility = "visible";
+      const selection = window.getSelection();
+      if (selection?.isCollapsed && selection.rangeCount > 0) {
+        const caret = selection.getRangeAt(0);
+        if (composer.contains(caret.commonAncestorContainer)) {
+          const caretBounds = caret.getBoundingClientRect();
+          const composerBounds = composer.getBoundingClientRect();
+          if (caretBounds.bottom > composerBounds.bottom - 8)
+            composer.scrollTop +=
+              caretBounds.bottom - composerBounds.bottom + 8;
+          else if (caretBounds.top < composerBounds.top + 8)
+            composer.scrollTop -= composerBounds.top + 8 - caretBounds.top;
+        }
+      }
+    };
+    position();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(position);
+    observer?.observe(composer);
+    if (surface !== composer) observer?.observe(surface);
+    observer?.observe(menu);
+    const positionOnScroll = (event: Event) => {
+      if (event.target instanceof Node && menu.contains(event.target)) return;
+      position();
+    };
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", positionOnScroll, true);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", positionOnScroll, true);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+      restoreComposer();
+    };
+  }, [compact, composerRef, interactive, open, placement, popupRef]);
+
   useEffect(() => {
     if (!open || !interactive) return;
     const frame = window.requestAnimationFrame(() => {
@@ -84,10 +204,12 @@ function ComposerPopupContent({
       className={
         drawer
           ? undefined
-          : cn(
-              "absolute -left-px -right-px z-20",
-              placement === "top" ? "bottom-full mb-2" : "top-full mt-2",
-            )
+          : !interactive
+            ? "invisible fixed z-50"
+            : cn(
+                "absolute -left-px -right-px z-20",
+                placement === "top" ? "bottom-full mb-2" : "top-full mt-2",
+              )
       }
     >
       {children}

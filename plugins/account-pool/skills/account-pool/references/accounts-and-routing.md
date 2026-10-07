@@ -28,10 +28,12 @@ bb pool account add --provider claude --import
 bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account list [--json]
+bb pool account local [--json]
+bb pool account sign-in-again <id> [--json]
 bb pool account rename <id> <label>
 bb pool account remove <id>
 bb pool account enable <id>
-bb pool account disable <id>
+bb pool account disable <id> [--subscription]
 bb pool account priority <id> <n>
 bb pool account reorder <claude|codex> <id>...
 bb pool account refresh <id>
@@ -88,7 +90,28 @@ For an OAuth account in error, `refresh` also forces a new token with the stored
 refresh token and clears the error when that succeeds, so a spurious error does
 not require logging in again.
 An account enters error only when its OAuth refresh token is rejected (HTTP 400
-or 401 from the token endpoint) or an API key is rejected. A 401 or 403 on a
+or 401 from the token endpoint) or an API key is rejected. A rejected refresh
+token sets `signInExpired` in account JSON and `expired` in the `account list`
+Sign-in column, even while the account is disabled. Repair it with
+`bb pool account sign-in-again <id>` (aliases `reauth`, `reauthorize`): it starts
+the same Claude or Codex login as `add --login`, and the matching
+`login-complete` or `login-poll` replaces that account's credential in place,
+keeping its ID, label, priority, enabled state, and conversation choices. bb
+refuses the sign-in, and leaves the account unchanged, when it belongs to a
+different Claude account (account UUID, else email) or ChatGPT account, or when
+neither login carries an identity it can compare. It also refuses a Claude
+sign-in from a different organization when both organizations are known. bb
+learns a Claude subscription's organization from its profile when it signs in
+and when usage refreshes, and from `~/.claude.json` when `add --import` pools
+this Mac's login. Account JSON reports it as `organizationUuid` (`null` until
+known). API key
+accounts cannot sign in again. The RPCs are `login.start` and
+`codexLogin.start` with `{accountId}` instead of `null`.
+`bb pool account local` (RPC `local.logins`) lists the bb server host's own
+provider logins that are not in the pool, and which ones `add --import` can
+pool. A Codex login's plan (such as ChatGPT Pro) comes from the
+`chatgpt_plan_type` claim of the host's Codex tokens when their email matches
+that login. A 401 or 403 on a
 freshly refreshed OAuth token is treated as an upstream failure instead: the
 request gets HTTP 503, and that token is held out of routing for one minute.
 Account tables add columns for observed model-family buckets; JSON status
@@ -145,6 +168,40 @@ Space, arrow keys, and Space again), or
 one provider. Include disabled accounts too. For Claude, priority breaks ties
 after headroom and reset recovery; for Codex, the order controls sequential
 failover. Reordering does not move an existing conversation.
+
+Account Pooler settings show one Subscriptions card. Each row has an on/off
+switch (`enable`/`disable`), a name you rename in place (Enter saves, Escape
+cancels), a plan badge from the stored tier, and a state word. A row whose
+sign-in expired shows Sign in again instead of the switch. Its menu holds Usage
+details, Refresh usage, Set priority, Sign in again, and Remove, which asks for
+confirmation first. Below the pool, On this Mac lists `account local`.
+A provider with no record in the pool has no section; its Route threads switch
+(`bb pool routing <claude|codex> [--off]`) moves under Advanced.
+Records that share a login fold into one subscription: Claude records with the
+same email and organization (a record without an email joins the login with its
+account UUID), and Codex records with the same email and ChatGPT account. A plan change never
+splits a subscription. A Claude record whose organization is not known yet,
+such as one whose sign-in expired, joins its login's subscription; when that
+login has several known organizations, it joins the one with its plan. The
+healthiest record (then the active one, then the most recently used) represents the subscription in settings, in
+the provider usage sources, and in the Subscription selector. The selector
+still shows a folded record while a conversation is set to it. The other records
+stay in the pool and still appear in `account list`, `status`, and
+`account reorder`. Dragging a row keeps folded records in their places.
+A subscription's switch turns its representative on or off. When another record
+of that subscription is still on and can send (its sign-in has not expired),
+switching it off first asks, naming every enabled record,
+and Turn off all disables every enabled record in one write so none of them
+routes; Cancel changes nothing. Records already off are never touched, and
+turning a subscription on enables only its representative.
+`bb pool account disable <id> --subscription` (RPC
+`account.disableSubscription`) does the same from the CLI and SDK; without
+`--subscription`, `account disable` and `account enable` act on one record.
+The RPC's optional `expectedIds` names the records the caller confirmed. The
+check and the write happen in one step against the stored records, so when the
+subscription's enabled records differ by then, it refuses and turns nothing off.
+Which records share a subscription does not depend on list order or priority. Settings pass the names shown in the dialog, then show the
+refusal and the updated list.
 `bb pool account priority <id> <n>`
 sets an individual priority; the same operations are available through the
 `account.reorder` and `account.setPriority` plugin RPCs.

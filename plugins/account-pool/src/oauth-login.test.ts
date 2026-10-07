@@ -52,6 +52,10 @@ async function requestBody(request: IncomingMessage): Promise<object> {
   return parsed;
 }
 
+async function unexpectedReauthorization(): Promise<Account> {
+  throw new Error("This login was not started for an existing account.");
+}
+
 function savedAccount(authenticated: ClaudeOAuthAccount): Account {
   return {
     id: "11111111-1111-4111-8111-111111111111",
@@ -119,6 +123,7 @@ describe("Claude OAuth login", () => {
       tokenUrl: `${serverUrl}/token`,
       profileUrl: `${serverUrl}/profile`,
       now: () => 10_000,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (authenticated) => {
         saved.push(authenticated);
         return savedAccount(authenticated);
@@ -188,6 +193,7 @@ describe("Claude OAuth login", () => {
     });
     const login = new ClaudeOAuthLogin({
       tokenUrl: serverUrl,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (authenticated) => savedAccount(authenticated),
     });
     const started = login.start();
@@ -204,6 +210,7 @@ describe("Claude OAuth login", () => {
     let now = 1_000;
     const login = new ClaudeOAuthLogin({
       now: () => now,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (authenticated) => savedAccount(authenticated),
     });
     const started = login.start();
@@ -226,6 +233,7 @@ describe("Claude OAuth login", () => {
     });
     const login = new ClaudeOAuthLogin({
       tokenUrl: serverUrl,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (authenticated) => savedAccount(authenticated),
     });
     const started = login.start();
@@ -250,6 +258,7 @@ describe("Claude OAuth login", () => {
     });
     const login = new ClaudeOAuthLogin({
       tokenUrl: serverUrl,
+      reauthorizeAccount: unexpectedReauthorization,
       addAccount: async (authenticated) => savedAccount(authenticated),
     });
     const started = login.start();

@@ -70,9 +70,7 @@ function makeWindow(args: {
     resetAt: args.resetAt,
     hoursUntilReset,
     resetRecoveryPerHour:
-      headroom === null ||
-      hoursUntilReset === null ||
-      hoursUntilReset <= 0
+      headroom === null || hoursUntilReset === null || hoursUntilReset <= 0
         ? null
         : Math.max(0, (1 - headroom) / hoursUntilReset),
   };
@@ -209,7 +207,8 @@ export function chooseBalancedCandidate(
     }))
     .sort(compareCandidates);
   const best = ranked[0];
-  if (best === undefined) return { candidate: null, reason: "no eligible account" };
+  if (best === undefined)
+    return { candidate: null, reason: "no eligible account" };
   const incumbent = ranked.find(
     ({ account }) => account.id === activeAccountId,
   );

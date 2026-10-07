@@ -8,6 +8,23 @@ const themeImport = vi.hoisted(() => ({
   } | null,
 }));
 
+vi.mock("../retryable-chunk-import", async (importOriginal) => {
+  const retryable =
+    await importOriginal<typeof import("../retryable-chunk-import")>();
+  return {
+    ...retryable,
+    createRetryableChunkImport: <T>(load: () => Promise<T>) =>
+      retryable.createRetryableChunkImport(() =>
+        load().catch((error: unknown) => {
+          if (error instanceof Error && error.cause instanceof Error) {
+            throw error.cause;
+          }
+          throw error;
+        }),
+      ),
+  };
+});
+
 vi.mock("./conductor", async (importOriginal) => {
   const original = await importOriginal<typeof import("./conductor")>();
   const active = themeImport.active;
@@ -43,7 +60,6 @@ const conductorThemes = [
 
 afterEach(() => {
   themeImport.active = null;
-  vi.doUnmock("../retryable-chunk-import");
   vi.resetModules();
 });
 
@@ -53,23 +69,6 @@ describe("Conductor theme loading", () => {
     async ({ themeId, css }) => {
       const attempt = { themeId, css, attempts: 0 };
       themeImport.active = attempt;
-      vi.doMock("../retryable-chunk-import", async (importOriginal) => {
-        const retryable =
-          await importOriginal<typeof import("../retryable-chunk-import")>();
-        return {
-          ...retryable,
-          createRetryableChunkImport: <T>(load: () => Promise<T>) =>
-            retryable.createRetryableChunkImport(() =>
-              load().catch((error: unknown) => {
-                if (error instanceof Error && error.cause instanceof Error) {
-                  throw error.cause;
-                }
-                throw error;
-              }),
-            ),
-        };
-      });
-
       const { resolveAppThemeCss } = await import("./index");
       const resolvedCss = await resolveAppThemeCss({
         themeId,

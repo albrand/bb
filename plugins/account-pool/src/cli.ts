@@ -29,6 +29,7 @@ import {
   type AccountSummary,
   type FamilyQuota,
   type LimitWindow,
+  type LocalLogin,
   type ModelFamily,
   type PoolStatus,
   type PoolStatusReport,
@@ -124,6 +125,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
       "Provider",
       "Kind",
       "Enabled",
+      "Sign-in",
       "Active",
       "Priority",
       "5h",
@@ -147,6 +149,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
         account.provider,
         account.kind,
         String(account.enabled),
+        account.signInExpired ? "expired" : "ok",
         String(account.active),
         String(account.priority),
         formatUtilization(account.fiveHourUtilization),
@@ -165,6 +168,25 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
           formatFamilyQuota(account.familyWeekly[family]),
         ),
         account.status,
+      ].join("\t"),
+    ),
+  ].join("\n");
+}
+
+function formatLocalLogins(logins: readonly LocalLogin[]): string {
+  if (logins.length === 0)
+    return "Every provider login on this bb server host is already in the pool.";
+  return [
+    ["Provider", "Plan", "Status", "Email", "Pool"].join("\t"),
+    ...logins.map((login) =>
+      [
+        login.displayName,
+        login.planLabel ?? "-",
+        login.status,
+        login.email ?? "-",
+        login.poolProvider === null
+          ? "can't be pooled"
+          : `{{BB_CLI}} pool account add --provider ${login.poolProvider} --import`,
       ].join("\t"),
     ),
   ].join("\n");
@@ -395,6 +417,72 @@ export function registerPoolCli(
               };
             }),
         }),
+        "account sign-in-again": cliCommand({
+          summary:
+            "Sign in again to a subscription whose sign-in expired, keeping its name and place",
+          description:
+            "Prints the browser (Claude) or device-code (Codex) step and exits; finish it with `{{BB_CLI}} pool account login-complete` (Claude) or `{{BB_CLI}} pool account login-poll` (Codex).\nThe new sign-in replaces this subscription's saved credentials. bb refuses a sign-in that belongs to a different account and leaves the subscription unchanged.",
+          aliases: ["account reauth", "account reauthorize"],
+          positionals: [ACCOUNT_ID_POSITIONAL],
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const { id } = accountIdInputSchema.parse({
+                id: input.positionals.id,
+              });
+              const account = await operations.requireReauthorizable(id, null);
+              if (account.provider === "codex") {
+                const started = await codexLogin.start({ accountId: id });
+                return {
+                  exitCode: 0,
+                  stdout: input.options.json
+                    ? json({ ok: true, accountId: id, login: started })
+                    : `${[
+                        `Open this URL to sign in to Codex as the account behind ${account.label}:`,
+                        started.verificationUri,
+                        "",
+                        `Enter this code: ${started.userCode}`,
+                        `Session ID: ${started.sessionId}`,
+                        "",
+                        "After authorizing, wait for the sign-in to finish with:",
+                        `{{BB_CLI}} pool account login-poll --session ${started.sessionId}`,
+                      ].join("\n")}\n`,
+                };
+              }
+              const started = login.start({ accountId: id });
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ ok: true, accountId: id, login: started })
+                  : `${[
+                      `Open this URL to sign in to Claude as the account behind ${account.label}:`,
+                      started.authorizeUrl,
+                      "",
+                      `Session ID: ${started.sessionId}`,
+                      "",
+                      "After signing in, pipe the code shown on the final page into:",
+                      `printf '%s\\n' \"$CLAUDE_AUTH_CODE\" | {{BB_CLI}} pool account login-complete --session ${started.sessionId} --code-stdin`,
+                    ].join("\n")}\n`,
+              };
+            }),
+        }),
+        "account local": cliCommand({
+          summary:
+            "List this bb server host's own provider logins that are not in the pool",
+          description:
+            "Add a Claude or Codex login to the pool with `{{BB_CLI}} pool account add --provider <claude|codex> --import`. Other providers can't be pooled.",
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              const logins = await operations.localLogins();
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? json({ logins })
+                  : `${formatLocalLogins(logins)}\n`,
+              };
+            }),
+        }),
         "account login-poll": cliCommand({
           summary: "Wait for a Codex device-code login to complete",
           description:
@@ -416,6 +504,7 @@ export function registerPoolCli(
                   ? {}
                   : { label: input.options.label }),
               });
+              const target = codexLogin.targetOf(parsed.sessionId);
               const signal = ctx.signal;
               const cancel = () => codexLogin.cancel(parsed);
               signal?.addEventListener("abort", cancel, { once: true });
@@ -443,7 +532,7 @@ export function registerPoolCli(
                       exitCode: 0,
                       stdout: input.options.json
                         ? json({ ok: true, account: result.account })
-                        : `Added ${result.account.label} (${result.account.id}).\n`,
+                        : `${target === null ? "Added" : "Signed in again to"} ${result.account.label} (${result.account.id}).\n`,
                     };
                   }
                   if (result.status === "error") {
@@ -491,12 +580,13 @@ export function registerPoolCli(
                   ? {}
                   : { label: input.options.label }),
               });
+              const target = login.targetOf(parsed.sessionId);
               const account = await login.complete(parsed);
               return {
                 exitCode: 0,
                 stdout: input.options.json
                   ? json({ ok: true, account })
-                  : `Added ${account.label} (${account.id}).\n`,
+                  : `${target === null ? "Added" : "Signed in again to"} ${account.label} (${account.id}).\n`,
               };
             }),
         }),
@@ -565,12 +655,35 @@ export function registerPoolCli(
         "account disable": cliCommand({
           summary: "Disable an account",
           positionals: [ACCOUNT_ID_POSITIONAL],
-          options: { json: JSON_OPTION },
+          options: {
+            json: JSON_OPTION,
+            subscription: {
+              type: "boolean",
+              description:
+                "Disable every enabled record of the subscription this account belongs to",
+            },
+          },
           run: (input) =>
             attempt(async () => {
               const { id } = accountIdInputSchema.parse({
                 id: input.positionals.id,
               });
+              if (input.options.subscription) {
+                const accounts = await operations.disableSubscription(id);
+                if (accounts === null) {
+                  throw new PluginCliError(`Account ${id} does not exist.`, {
+                    code: "account_not_found",
+                  });
+                }
+                return {
+                  exitCode: 0,
+                  stdout: input.options.json
+                    ? json({ ok: true, accounts })
+                    : accounts.length === 0
+                      ? `No record of the subscription of ${id} was enabled.\n`
+                      : `Disabled ${accounts.map((account) => account.id).join(", ")}.\n`,
+                };
+              }
               const account = await operations.disable(id);
               if (account === null) {
                 throw new PluginCliError(`Account ${id} does not exist.`, {

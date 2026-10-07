@@ -314,6 +314,8 @@ export const accountSummarySchema = accountSchema.extend({
   ...quotaFieldsShape,
   inFlight: z.number().int().nonnegative(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
+  signInExpired: z.boolean(),
+  organizationUuid: z.string().uuid().nullable(),
 });
 
 export type AccountSummary = z.infer<typeof accountSummarySchema>;
@@ -387,12 +389,32 @@ export const accountAddInputSchema = z
 
 export type AccountAddInput = z.infer<typeof accountAddInputSchema>;
 
+export const loginStartInputSchema = z
+  .object({ accountId: z.string().uuid() })
+  .strict()
+  .nullable();
+
+export type LoginStartInput = z.infer<typeof loginStartInputSchema>;
+
 export const loginStartSchema = z
   .object({
     sessionId: z.string().uuid(),
     authorizeUrl: z.string().url(),
   })
   .strict();
+
+export const localLoginSchema = z
+  .object({
+    providerId: z.string().min(1),
+    displayName: z.string().min(1),
+    email: z.string().nullable(),
+    planLabel: z.string().min(1).nullable(),
+    status: z.enum(["ready", "expired"]),
+    poolProvider: providerSchema.nullable(),
+  })
+  .strict();
+
+export type LocalLogin = z.infer<typeof localLoginSchema>;
 
 export const loginCompleteInputSchema = z
   .object({
@@ -433,6 +455,13 @@ export const codexLoginPollSchema = z.discriminatedUnion("status", [
 
 export const accountIdInputSchema = z
   .object({ id: z.string().uuid() })
+  .strict();
+
+export const accountDisableSubscriptionInputSchema = z
+  .object({
+    id: z.string().uuid(),
+    expectedIds: z.array(z.string().uuid()).optional(),
+  })
   .strict();
 
 export const accountRenameInputSchema = z

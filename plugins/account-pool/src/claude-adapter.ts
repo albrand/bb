@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  claudePlanFromProfile,
+  claudeProfileSchema,
+} from "./claude-profile.js";
 import type { AccountSecret } from "./contracts.js";
 import {
   importClaudeCredentials,
@@ -23,6 +27,7 @@ import { quotaFromUsage } from "./usage.js";
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const OAUTH_BETA = "oauth-2025-04-20";
 const USAGE_REQUEST_TIMEOUT_MS = 10_000;
+const PROFILE_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 const ALLOWED_REQUEST_HEADERS = new Set([
   "accept",
   "content-type",
@@ -40,24 +45,19 @@ const refreshResponseSchema = z
   })
   .passthrough();
 
-const profileResponseSchema = z
-  .object({
-    account: z
-      .object({ uuid: z.string().uuid().nullish() })
-      .passthrough()
-      .nullish(),
-  })
-  .passthrough();
-
 export function createClaudeAdapter(options: {
   refreshUrl: string;
   usageUrl: string;
   profileUrl: string;
   importCredentials?: () => Promise<ImportedClaudeCredentials>;
 }): ProviderAdapter {
+  const profileCheckedAt = new Map<string, number>();
   return {
     provider: "claude",
     upstreamName: "Anthropic",
+    async localLogin() {
+      return null;
+    },
     async importAccount() {
       const imported = await (
         options.importCredentials ?? importClaudeCredentials
@@ -68,6 +68,9 @@ export function createClaudeAdapter(options: {
         ...(imported.accountUuid === null
           ? {}
           : { accountUuid: imported.accountUuid }),
+        ...(imported.organizationUuid === null
+          ? {}
+          : { organizationUuid: imported.organizationUuid }),
         subscriptionType: imported.subscriptionType,
         rateLimitTier: imported.rateLimitTier,
         secret: {
@@ -158,28 +161,54 @@ export function createClaudeAdapter(options: {
       if (quota === null)
         throw new Error("Usage refresh returned unreadable data.");
       context.quotas.put(quota);
-      if (context.account.accountUuid !== null) return;
-      const profile = await context.fetch(options.profileUrl, {
-        headers: {
-          authorization: `Bearer ${secret.accessToken}`,
-          "anthropic-beta": OAUTH_BETA,
-          accept: "application/json",
-        },
-        signal: AbortSignal.timeout(USAGE_REQUEST_TIMEOUT_MS),
-      });
+      const account = context.account;
+      const checkedAt = profileCheckedAt.get(account.id);
+      if (
+        account.accountUuid !== null &&
+        checkedAt !== undefined &&
+        context.now() - checkedAt < PROFILE_REFRESH_INTERVAL_MS
+      )
+        return;
+      const profile = await context
+        .fetch(options.profileUrl, {
+          headers: {
+            authorization: `Bearer ${secret.accessToken}`,
+            "anthropic-beta": OAUTH_BETA,
+            accept: "application/json",
+          },
+          signal: AbortSignal.timeout(USAGE_REQUEST_TIMEOUT_MS),
+        })
+        .catch(() => null);
+      if (profile === null) return;
       if (!profile.ok) {
         await profile.body?.cancel();
         return;
       }
-      const parsed = profileResponseSchema.safeParse(
+      const parsed = claudeProfileSchema.safeParse(
         await profile.json().catch(() => null),
       );
-      const accountUuid = parsed.success
-        ? (parsed.data.account?.uuid ?? null)
-        : null;
-      if (accountUuid !== null) {
-        await context.accounts.setAccountUuid(context.account.id, accountUuid);
+      if (!parsed.success) return;
+      const accountUuid = parsed.data.account.uuid ?? null;
+      if (account.accountUuid === null) {
+        if (accountUuid === null) return;
+        await context.accounts.setAccountUuid(account.id, accountUuid);
+      } else if (accountUuid !== account.accountUuid) {
+        return;
       }
+      const organizationUuid = parsed.data.organization?.uuid ?? null;
+      if (organizationUuid !== null)
+        await context.accounts.setOrganization(account.id, organizationUuid);
+      const reported = claudePlanFromProfile(parsed.data);
+      const plan = {
+        subscriptionType: reported.subscriptionType ?? account.subscriptionType,
+        rateLimitTier: reported.rateLimitTier ?? account.rateLimitTier,
+      };
+      if (
+        plan.subscriptionType !== account.subscriptionType ||
+        plan.rateLimitTier !== account.rateLimitTier
+      )
+        await context.accounts.setPlan(account.id, plan);
+      profileCheckedAt.set(account.id, context.now());
     },
     errorResponse(status, message, headers) {
       const type =

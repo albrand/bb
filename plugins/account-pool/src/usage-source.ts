@@ -1,6 +1,7 @@
 import { type BbPluginApi } from "@get-bb/plugin-sdk";
 import type { AccountSummary } from "./contracts.js";
 import type { AccountPoolHub } from "./hub.js";
+import { foldSubscriptions } from "./subscriptions.js";
 import {
   usageSourceRpcContract,
   usageListMethod,
@@ -58,10 +59,12 @@ export function registerUsageSource(
             enabled: await isRoutingEnabled(account.provider),
           })),
         );
-        const accounts = routed
-          .filter(({ account, enabled }) => enabled && account.enabled)
-          .map(({ account }) => account)
-          .sort((left, right) => left.priority - right.priority);
+        const accounts = foldSubscriptions(
+          routed
+            .filter(({ account, enabled }) => enabled && account.enabled)
+            .map(({ account }) => account)
+            .sort((left, right) => left.priority - right.priority),
+        );
         return {
           ...(accounts.length > 0 ? { label: "Account Pooler" } : {}),
           resources: accounts.map((account) => ({

@@ -4,6 +4,7 @@ import { composerEditorHeightAtom } from "./composerHeightAtoms";
 import { buildMessageClipboardHtml } from "../../lib/message-clipboard";
 
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { createPortal } from "react-dom";
 import { focusPaneComposer } from "@/lib/pane-composer-focus";
 import { registerComposerMenuPlugins } from "@/test/fixtures/composer-menu";
 import { resolveThreadMentionDropTarget } from "@/lib/thread-mention-drop";
@@ -280,6 +281,28 @@ function PromptBoxHistoryAutoFocusAfterLayoutStealHarness({
     </>
   );
 }
+
+describe("composer portal focus", () => {
+  it("leaves drawer focus alone when its noninteractive content receives a pointer press", () => {
+    renderPromptBox("", {
+      props: {
+        autoFocus: false,
+        header: createPortal(
+          <div role="dialog" tabIndex={-1}>
+            <span>Reasoning in drawer</span>
+          </div>,
+          document.body,
+        ),
+      },
+    });
+    const drawer = screen.getByRole("dialog");
+    drawer.focus();
+    expect(fireEvent.mouseDown(screen.getByText("Reasoning in drawer"))).toBe(
+      true,
+    );
+    expect(document.activeElement).toBe(drawer);
+  });
+});
 
 function renderPromptBox(
   initialValue: string,

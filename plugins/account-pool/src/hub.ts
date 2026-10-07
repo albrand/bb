@@ -19,6 +19,7 @@ import {
 import type { ProviderAdapter } from "./provider-adapter.js";
 import type { ImportedProviderAccount } from "./provider-adapter.js";
 import {
+  isSignInRejection,
   OAuthRefreshError,
   TransientOAuthRefreshError,
 } from "./provider-adapter.js";
@@ -209,6 +210,12 @@ export class AccountPoolHub {
     provider: PoolProvider,
   ): Promise<ImportedProviderAccount> {
     return this.adapter(provider).importAccount();
+  }
+
+  localLogin(
+    provider: PoolProvider,
+  ): Promise<{ email: string | null; planLabel: string | null } | null> {
+    return this.adapter(provider).localLogin();
   }
 
   async handle(
@@ -415,7 +422,10 @@ export class AccountPoolHub {
         fetch: this.options.fetch,
         now: this.options.now,
       })
-      .then(() => true, () => false)
+      .then(
+        () => true,
+        () => false,
+      )
       .finally(() => this.usageRefreshes.delete(account.id));
     this.usageRefreshes.set(account.id, refresh);
     return refresh;
@@ -450,6 +460,7 @@ export class AccountPoolHub {
     const accounts = (await this.options.accounts.list()).sort(
       (left, right) => left.priority - right.priority,
     );
+    const organizations = await this.options.accounts.organizations();
     return {
       route: ROUTE,
       enabledAccountCount: accounts.filter((account) => account.enabled).length,
@@ -470,6 +481,8 @@ export class AccountPoolHub {
           ...quotaFields,
           inFlight: this.inFlightByAccount.get(account.id) ?? 0,
           status: accountStatus(account, quota, settings.switchThreshold, now),
+          signInExpired: isSignInRejection(quota.error),
+          organizationUuid: organizations.get(account.id) ?? null,
         };
       }),
     };

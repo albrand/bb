@@ -2,6 +2,7 @@ import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
   accountAddInputSchema,
+  accountDisableSubscriptionInputSchema,
   accountPoolConfigSchema,
   accountPoolConfigSetInputSchema,
   accountIdInputSchema,
@@ -17,7 +18,9 @@ import {
   codexLoginPollSchema,
   codexLoginStartSchema,
   hubTokenSummarySchema,
+  localLoginSchema,
   loginCompleteInputSchema,
+  loginStartInputSchema,
   loginStartSchema,
   routedThreadStatusListSchema,
   statusSchema,
@@ -65,6 +68,10 @@ export const accountPoolRpcContract = defineRpcContract({
     input: accountIdInputSchema,
     output: z.object({ account: accountSchema.nullable() }).strict(),
   },
+  "account.disableSubscription": {
+    input: accountDisableSubscriptionInputSchema,
+    output: z.object({ accounts: z.array(accountSchema).nullable() }).strict(),
+  },
   "account.setPriority": {
     input: accountPriorityInputSchema,
     output: z.object({ account: accountSchema.nullable() }).strict(),
@@ -96,7 +103,7 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountPoolConfigSchema,
   },
   "login.start": {
-    input: z.null(),
+    input: loginStartInputSchema,
     output: loginStartSchema,
   },
   "login.complete": {
@@ -104,8 +111,12 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountSchema,
   },
   "codexLogin.start": {
-    input: z.null(),
+    input: loginStartInputSchema,
     output: codexLoginStartSchema,
+  },
+  "local.logins": {
+    input: z.null(),
+    output: z.array(localLoginSchema),
   },
   "codexLogin.poll": {
     input: codexLoginPollInputSchema,
@@ -190,6 +201,9 @@ export function createRpcHandlers(
     "account.disable": async ({ id }) => ({
       account: await operations.disable(id),
     }),
+    "account.disableSubscription": async ({ id, expectedIds }) => ({
+      accounts: await operations.disableSubscription(id, expectedIds),
+    }),
     "account.setPriority": async ({ accountId, priority }) => ({
       account: await operations.setPriority(accountId, priority),
     }),
@@ -209,9 +223,18 @@ export function createRpcHandlers(
     },
     "config.get": () => config.get(),
     "config.set": (input) => config.set(input),
-    "login.start": () => login.start(),
+    "login.start": async (input) => {
+      if (input !== null)
+        await operations.requireReauthorizable(input.accountId, "claude");
+      return login.start(input);
+    },
     "login.complete": (input) => login.complete(input),
-    "codexLogin.start": () => codexLogin.start(),
+    "codexLogin.start": async (input) => {
+      if (input !== null)
+        await operations.requireReauthorizable(input.accountId, "codex");
+      return codexLogin.start(input);
+    },
+    "local.logins": () => operations.localLogins(),
     "codexLogin.poll": async ({ sessionId, label }) => {
       const result = await codexLogin.poll({ sessionId });
       if (result.status !== "complete" || label === undefined) return result;
