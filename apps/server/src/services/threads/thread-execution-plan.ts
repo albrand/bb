@@ -1,4 +1,9 @@
-import { getAppSettings, getProjectExecutionDefaults, getThread } from "@bb/db";
+import {
+  getAppSettings,
+  getProjectExecutionDefaults,
+  getThread,
+  getThreadSpawner,
+} from "@bb/db";
 import {
   DEFAULT_SERVICE_TIER,
   providerServiceTierOptions,
@@ -24,6 +29,7 @@ import {
   resolveThreadExecutionPermissionMode,
 } from "./thread-default-policy.js";
 import { getLastExecutionOptions } from "./thread-events.js";
+import { childThreadModel } from "./child-thread-model.js";
 import { getSupportedReasoningLevelsForProvider } from "./thread-reasoning-policy.js";
 
 interface ExecutionPlanFieldInput<TValue> {
@@ -317,6 +323,12 @@ export async function resolveExistingThreadExecutionPlan(
       ? getLastExecutionOptions(deps, parentThread.id)
       : null;
   const model = resolveRequiredField<string>([
+    childThreadModel({
+      parentThreadId:
+        thread.parentThreadId ?? getThreadSpawner(deps.db, thread.id),
+      declaredChildModel: deps.providerRegistry.get(thread.providerId)
+        ?.childThreadModel,
+    }) ?? undefined,
     args.input.model?.value,
     thread.modelOverride ?? undefined,
     lastExecution?.model,
