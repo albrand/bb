@@ -174,7 +174,7 @@ function getTopMostVisibleRow(
   if (!rowId || !visibleRowRect) return null;
   return {
     rowId,
-    offsetWithinRow: Math.max(0, scrollAreaTop - visibleRowRect.top),
+    offsetWithinRow: scrollAreaTop - visibleRowRect.top,
   };
 }
 
@@ -649,9 +649,12 @@ export function BottomAnchoredScrollBody({
         element: rowElement,
         scrollArea,
       });
-      const targetScrollTop = Math.min(
-        refreshMaxScrollOffset(scrollArea),
-        revealOffset + anchor.offsetWithinRow,
+      const targetScrollTop = Math.max(
+        0,
+        Math.min(
+          refreshMaxScrollOffset(scrollArea),
+          revealOffset + anchor.offsetWithinRow,
+        ),
       );
       scrollArea.scrollTop = targetScrollTop;
       return targetScrollTop;
