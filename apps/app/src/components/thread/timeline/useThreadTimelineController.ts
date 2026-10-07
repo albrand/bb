@@ -65,6 +65,11 @@ interface LoadedTimelineTracker {
   loaded: LoadedTimelineState;
 }
 
+interface UnseenTimelineOpenState {
+  hasUnseenTimelineEvents: boolean;
+  threadId: string | null;
+}
+
 function isTimelineSurfaceForBase(
   surfaceKey: string,
   baseSurfaceKey: string,
@@ -123,6 +128,23 @@ export function useThreadTimelineController({
   threadId,
 }: UseThreadTimelineControllerArgs): UseThreadTimelineControllerResult {
   const queryClient = useQueryClient();
+  const openThreadId = enabled ? threadId : null;
+  const [unseenTimelineOpenState, setUnseenTimelineOpenState] =
+    useState<UnseenTimelineOpenState>({
+      hasUnseenTimelineEvents: false,
+      threadId: null,
+    });
+  const isNewTimelineOpen = unseenTimelineOpenState.threadId !== openThreadId;
+  const hadUnseenTimelineEventsOnOpen = isNewTimelineOpen
+    ? openThreadId !== null &&
+      hasThreadTimelineUnseenEvents(queryClient, openThreadId)
+    : unseenTimelineOpenState.hasUnseenTimelineEvents;
+  if (isNewTimelineOpen) {
+    setUnseenTimelineOpenState({
+      hasUnseenTimelineEvents: hadUnseenTimelineEventsOnOpen,
+      threadId: openThreadId,
+    });
+  }
   const notifyOnChangeProps = useCallback((): TimelineQueryResultProp[] => {
     if (hasThreadTimelineUnseenEvents(queryClient, threadId)) {
       return TIMELINE_CONTROLLER_PROPS_WITHOUT_ROWS;
@@ -302,6 +324,9 @@ export function useThreadTimelineController({
     enabled &&
     hasThreadTimelineUnseenEvents(queryClient, threadId) &&
     timelineRows.length > 0;
+  const hasUnseenTimelineEvents =
+    hadUnseenTimelineEventsOnOpen ||
+    hasThreadTimelineUnseenEvents(queryClient, threadId);
   const timelineError =
     timelineLoading || timelineQueryState.status !== "unavailable"
       ? null
@@ -317,7 +342,7 @@ export function useThreadTimelineController({
     goal: latestTimeline?.goal ?? null,
     modelFallback: latestTimeline?.modelFallback ?? null,
     hasOlderTimelineRows,
-    hasUnseenTimelineEvents: hasThreadTimelineUnseenEvents(queryClient, threadId),
+    hasUnseenTimelineEvents,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,
