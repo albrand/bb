@@ -8952,7 +8952,7 @@ describe("Account Pool credential scoping", () => {
 
   it("blanks the inherited routing for an archived thread on a nested server", async () => {
     const parent = await scopedFixture();
-    const child = await startNestedChild(
+    const { host: child } = await startNestedChild(
       parent,
       await nestedToken(parent.host),
     );
@@ -8975,6 +8975,99 @@ describe("Account Pool credential scoping", () => {
     ]);
     expect(await statusOf(child, live, "/v1/messages")).toBe(401);
   });
+
+  describe.each(["routing disabled", "bypassed"] as const)(
+    "a missed archive event for a thread with %s",
+    (change) => {
+      const turnOff = async (host: Fixture["host"], threadId: string) => {
+        if (change === "routing disabled") {
+          await host.harness.behavior.callRpc("routing.set", {
+            provider: "claude",
+            enabled: false,
+          });
+          return;
+        }
+        await host.harness.behavior.callRpc("bypass.set", {
+          threadId,
+          bypassed: true,
+        });
+      };
+      const archiveSilently = (host: Fixture["host"]) =>
+        host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+          makeThreadResponse({ id: threadId, archivedAt: 1_000 }),
+        );
+      const credentialFiles = async (dataDir: string, threadId: string) =>
+        (await fs.readdir(path.join(dataDir, ...POOL_SECRETS))).filter((name) =>
+          name.includes(threadId),
+        );
+
+      it("revokes its tokens the next time its environment resolves", async () => {
+        const fixture = await scopedFixture();
+        const { host } = fixture;
+        const held = await claudeToken(host, "thread-missed");
+        const heldNested = await nestedToken(host, "thread-missed");
+        const other = await claudeToken(host, "thread-other");
+        expect(await statusOf(host, held, "/v1/messages")).toBe(200);
+        expect(await statusOf(host, heldNested, "/availability")).toBe(200);
+        expect(
+          await credentialFiles(fixture.dataDir, "thread-missed"),
+        ).toHaveLength(2);
+        await turnOff(host, "thread-missed");
+        archiveSilently(host);
+        const entries = await host.harness.behavior.resolveProviderEnv(
+          "claude-code",
+          {
+            threadId: "thread-missed",
+            projectId: "project-one",
+            hostId: "host-one",
+          },
+        );
+        expect(entries).toEqual([]);
+        expect(await statusOf(host, held, "/v1/messages")).toBe(401);
+        expect(await statusOf(host, heldNested, "/availability")).toBe(401);
+        expect(await credentialFiles(fixture.dataDir, "thread-missed")).toEqual(
+          [],
+        );
+        expect(
+          await credentialFiles(fixture.dataDir, "thread-other"),
+        ).toHaveLength(2);
+        host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+          makeThreadResponse({ id: threadId }),
+        );
+        expect(await statusOf(host, other, "/v1/messages")).not.toBe(401);
+      });
+
+      it("revokes its tokens on a nested server and blanks the inherited routing", async () => {
+        const parent = await scopedFixture();
+        const { host: child, dataDir } = await startNestedChild(
+          parent,
+          await nestedToken(parent.host),
+        );
+        const held = await claudeToken(child, "thread-missed");
+        const heldNested = await nestedToken(child, "thread-missed");
+        expect(await statusOf(child, held, "/v1/messages")).toBe(200);
+        expect(await statusOf(child, heldNested, "/availability")).toBe(200);
+        expect(await credentialFiles(dataDir, "thread-missed")).toHaveLength(2);
+        await turnOff(child, "thread-missed");
+        archiveSilently(child);
+        const entries = await child.harness.behavior.resolveProviderEnv(
+          "claude-code",
+          {
+            threadId: "thread-missed",
+            projectId: "project-one",
+            hostId: "host-one",
+          },
+        );
+        expect(entries.map((entry) => [entry.name, entry.value])).toEqual([
+          ["ANTHROPIC_BASE_URL", ""],
+          ["ANTHROPIC_AUTH_TOKEN", ""],
+        ]);
+        expect(await statusOf(child, held, "/v1/messages")).toBe(401);
+        expect(await statusOf(child, heldNested, "/availability")).toBe(401);
+        expect(await credentialFiles(dataDir, "thread-missed")).toEqual([]);
+      });
+    },
+  );
 
   it("keeps one thread's token from acting as another thread", async () => {
     const fixture = await scopedFixture();
@@ -9009,7 +9102,7 @@ describe("Account Pool credential scoping", () => {
   async function startNestedChild(
     parent: Fixture,
     scoped: string,
-  ): Promise<Fixture["host"]> {
+  ): Promise<{ host: Fixture["host"]; dataDir: string }> {
     const parentBase = "http://parent.test/api/v1/plugins/account-pool/http";
     const viaParent: typeof fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -9055,13 +9148,13 @@ describe("Account Pool credential scoping", () => {
       );
       expect(status.accepting).toBe(true);
     });
-    return child;
+    return { host: child, dataDir };
   }
 
   it("lets a nested server proxy through its parent with the scoped token until the thread is archived", async () => {
     const parent = await scopedFixture();
     const scoped = await nestedToken(parent.host);
-    const child = await startNestedChild(parent, scoped);
+    const { host: child } = await startNestedChild(parent, scoped);
     const childToken = await claudeToken(child, "thread-nested");
     expect(await statusOf(child, childToken, "/v1/messages")).toBe(200);
     expect(await statusOf(parent.host, scoped, "/availability")).toBe(200);

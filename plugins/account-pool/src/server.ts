@@ -351,6 +351,7 @@ export function createAccountPoolPlugin(
       async (context: { threadId: string; hostId: string }) => {
         const unrouted = () =>
           hasConfiguredParentPool ? neutralized(provider) : [];
+        if (await revokeIfArchived(context.threadId)) return unrouted();
         const bypassed = await routing.isBypassed(context.threadId);
         const selectedAccountId = await routing.selectedAccount(
           context.threadId,
@@ -363,7 +364,6 @@ export function createAccountPoolPlugin(
             ? await canServe(provider)
             : await operations.isRoutingEnabled(provider));
         if (canRoute) {
-          if (await revokeIfArchived(context.threadId)) return unrouted();
           const hostToken = await hubTokens.forHost(context.hostId);
           const token = await threadTokens.forThread(
             {
