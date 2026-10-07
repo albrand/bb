@@ -656,7 +656,11 @@ export class ThreadTokenStore {
   }
 
   private archiveMarkerNames(threadId: string): string[] {
-    return [this.archivedName(threadId), this.archiveFallbackName(threadId)];
+    const threadDigest = digest(threadId);
+    return [
+      `${ARCHIVED_THREAD_PREFIX}${threadDigest}.json`,
+      `${ARCHIVE_FALLBACK_PREFIX}${threadDigest}.json`,
+    ];
   }
 
   private hasMarkerFailure(threadId: string): boolean {

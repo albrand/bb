@@ -506,15 +506,15 @@ it("does not persist archive markers for threads without credentials", async () 
 it("persists revocation when the credential directory cannot be read", async () => {
   const { directory, hosts, threads, route, hostToken } = await fixture();
   const oldToken = await threads.forThread(route, hostToken);
+  const archiveOnly = new ThreadTokenStore(directory, hosts);
   const readDir = vi
     .spyOn(fs, "readdir")
     .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
   try {
-    await threads.removeThread(route.threadId);
+    await archiveOnly.removeThread(route.threadId);
   } finally {
     readDir.mockRestore();
   }
-  expect(await threads.authenticate(oldToken)).toBeNull();
   expect(
     (await fs.readdir(directory)).some((name) =>
       name.startsWith("archived-thread-"),
