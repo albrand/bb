@@ -240,6 +240,57 @@ describe("token weather", () => {
     ]);
   });
 
+  it("uses only matching provider and model turns inside adjacent compaction windows", () => {
+    const turn = (
+      turnId: string,
+      tokens: number,
+      providerId = "provider-a",
+      model = "model-a",
+    ) => ({
+      cachedInputTokens: 0,
+      inputTokens: tokens,
+      model,
+      outputTokens: 0,
+      providerId,
+      reasoningOutputTokens: null,
+      totalTokens: tokens,
+      turnId,
+    });
+    const result = estimateCompactionSavings({
+      compactionTurnIds: ["compact-first", "compact-second"],
+      turns: [
+        turn("before-first", 9000),
+        turn("before-other-model", 80_000, "provider-a", "model-b"),
+        turn("compact-first", 100),
+        turn("after-first", 400),
+        turn("after-other-model", 70_000, "provider-a", "model-b"),
+        turn("after-other-provider", 60_000, "provider-b", "model-a"),
+        turn("after-first-again", 350),
+        turn("compact-second", 50),
+        turn("after-second", 100),
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        afterTokens: 400,
+        beforeTokens: 9000,
+        compactionCostTokens: 100,
+        likelyPaidForItself: true,
+        observedSavingsTokens: 17_250,
+        turnId: "compact-first",
+      },
+      {
+        afterTokens: 100,
+        beforeTokens: 375,
+        compactionCostTokens: 50,
+        likelyPaidForItself: true,
+        observedSavingsTokens: 275,
+        turnId: "compact-second",
+      },
+    ]);
+  });
+
   it("includes cached input when estimating compaction context and savings", () => {
     const result = estimateCompactionSavings({
       compactionTurnIds: ["compact"],
