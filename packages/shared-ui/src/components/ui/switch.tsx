@@ -34,7 +34,7 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
       data-state={checked ? "checked" : "unchecked"}
       data-switch-hit-area
       className={cn(
-        "peer relative inline-flex shrink-0 cursor-pointer items-center justify-start rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
+        "group peer relative inline-flex shrink-0 cursor-pointer items-center justify-start rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50",
         size === "default" && "h-5 w-9 pointer-coarse:size-11",
         size === "sm" && "h-4 w-7 pointer-coarse:size-11",
         className,
@@ -46,12 +46,12 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
         }
       }}
     >
-      <div
+      <span
         aria-hidden
         data-state={checked ? "checked" : "unchecked"}
         data-switch-track
         className={cn(
-          `pointer-events-none absolute inset-0 m-auto box-border rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
+          `pointer-events-none absolute inset-0 m-auto box-border rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
           size === "default" && "h-5 w-9",
           size === "sm" && "h-4 w-7",
         )}
