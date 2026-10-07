@@ -822,6 +822,11 @@ export function BottomAnchoredScrollBody({
       return;
     }
 
+    if (shouldStickToBottomRef.current && !hasRecentUserScrollIntent()) {
+      queueBottomRestore();
+      return;
+    }
+
     if (!hasRecentUserScrollIntent()) return;
 
     userDetachedFromBottomRef.current = true;
@@ -833,6 +838,7 @@ export function BottomAnchoredScrollBody({
     attachToBottom,
     cancelQueuedRestore,
     hasRecentUserScrollIntent,
+    queueBottomRestore,
     readMaxScrollOffset,
     refreshMaxScrollOffset,
   ]);

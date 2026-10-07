@@ -19,12 +19,14 @@ interface MarkThreadReadMutation {
 }
 
 interface UseThreadReadTrackingParams {
+  isFocused?: boolean;
   markThreadRead: MarkThreadReadMutation;
   thread?: ThreadReadTrackingState;
 }
 
 interface ReadTrackingSnapshot {
   isVisible: boolean;
+  isFocused: boolean;
   isRead: boolean | null;
   latestAttentionAt: number | null;
   threadId: string | null;
@@ -72,6 +74,7 @@ function getLatestMutationId(
 }
 
 export function useThreadReadTracking({
+  isFocused = true,
   markThreadRead,
   thread,
 }: UseThreadReadTrackingParams) {
@@ -110,6 +113,7 @@ export function useThreadReadTracking({
     const threadIsRead = thread ? isThreadRead(thread) : null;
     const currentSnapshot: ReadTrackingSnapshot = {
       isVisible,
+      isFocused,
       isRead: threadIsRead,
       latestAttentionAt: thread?.latestAttentionAt ?? null,
       threadId: thread?.id ?? null,
@@ -122,7 +126,7 @@ export function useThreadReadTracking({
       }
     }
 
-    if (!isVisible) {
+    if (!isVisible || !isFocused) {
       return;
     }
     if (!thread) {
@@ -150,6 +154,9 @@ export function useThreadReadTracking({
     const becameVisible =
       previousSnapshot?.threadId === thread.id &&
       previousSnapshot.isVisible === false;
+    const becameFocused =
+      previousSnapshot?.threadId === thread.id &&
+      previousSnapshot.isFocused === false;
     const failedReadRevision = failedReadRevisionsRef.current.get(marker);
     const wasCancelled = cancelledReadKeysRef.current.has(marker);
     const isRetry =
@@ -181,7 +188,13 @@ export function useThreadReadTracking({
       return;
     }
 
-    if (!isOpenedThread && !hasNewAttention && !becameVisible && !isRetry) {
+    if (
+      !isOpenedThread &&
+      !hasNewAttention &&
+      !becameVisible &&
+      !becameFocused &&
+      !isRetry
+    ) {
       return;
     }
     if (pendingReadControllersRef.current.has(marker)) {
@@ -217,6 +230,7 @@ export function useThreadReadTracking({
       });
   }, [
     isVisible,
+    isFocused,
     latestManualUnreadId,
     markThreadRead,
     queryClient,

@@ -97,6 +97,7 @@ function OpenThread({
   isOpening = false,
   bootstrapUpdatedAt = 0,
   isThreadQueryError = false,
+  isFocused = true,
 }: {
   lastReadAt: number;
   hasUnseenTimelineEvents: boolean;
@@ -104,6 +105,7 @@ function OpenThread({
   isOpening?: boolean;
   bootstrapUpdatedAt?: number;
   isThreadQueryError?: boolean;
+  isFocused?: boolean;
 }) {
   const { placement, hasUnseenTimelineEvents: openAtLatest } =
     useThreadUnreadDividerState({
@@ -117,6 +119,7 @@ function OpenThread({
         isFetchedAfterMount: !isOpening,
         isError: isThreadQueryError,
       },
+      isFocused,
       hasUnseenTimelineEvents,
       thread: { id: THREAD_ID, lastReadAt, latestAttentionAt },
     });
@@ -150,6 +153,7 @@ function renderThread(
   hasUnseenTimelineEvents = false,
   isOpening = false,
   bootstrapUpdatedAt = 0,
+  isFocused = true,
 ) {
   const queryClient = new QueryClient();
   const element = (
@@ -157,6 +161,7 @@ function renderThread(
     latestAttentionAt = 300,
     opening = isOpening,
     queryError = false,
+    focused = isFocused,
   ) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -170,12 +175,15 @@ function renderThread(
             isOpening={opening}
             bootstrapUpdatedAt={bootstrapUpdatedAt}
             isThreadQueryError={queryError}
+            isFocused={focused}
           />
         </ThreadProviderContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>
   );
-  const { container, rerender } = render(element(hasUnseenTimelineEvents));
+  const { container, rerender } = render(
+    element(hasUnseenTimelineEvents, 300, isOpening, false, isFocused),
+  );
   const area = container.querySelector<HTMLElement>(
     "[data-page-scroll-viewport]",
   );
@@ -195,6 +203,10 @@ function renderThread(
     finishOpeningWithAttention: () => rerender(element(false, 400, false)),
     changeOpening: (opening: boolean) => rerender(element(false, 300, opening)),
     receiveOpeningAttention: () => rerender(element(false, 400, true)),
+    receiveUnseenAttentionWhileHidden: () =>
+      rerender(element(false, 400, false, false, false)),
+    blurThread: () => rerender(element(false, 300, false, false, false)),
+    focusThread: () => rerender(element(false, 400, false, false, true)),
     failOpening: () => rerender(element(false, 300, true, true)),
   };
 }
@@ -221,6 +233,42 @@ describe("opening an unseen timeline", () => {
     act(() => vi.advanceTimersByTime(1));
     expect(area.scrollTop).toBe(2700);
     height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
+
+  it("repairs a virtualizer scroll correction while an unseen opening is pinned", () => {
+    height = 400_000;
+    const { area } = renderThread();
+    resize();
+    expect(area.scrollTop).toBe(399_200);
+    area.scrollTop = 20_500;
+    fireEvent.scroll(area);
+    act(() => vi.advanceTimersByTime(25_000));
+    expect(area.scrollTop).toBe(399_200);
+  });
+
+  it("opens an existing split at its latest update when it receives focus", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, blurThread, receiveUnseenAttentionWhileHidden, focusThread } =
+      renderThread(350);
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+    blurThread();
+    receiveUnseenAttentionWhileHidden();
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+    focusThread();
     resize();
     flushFrames();
     expect(area.scrollTop).toBe(3300);

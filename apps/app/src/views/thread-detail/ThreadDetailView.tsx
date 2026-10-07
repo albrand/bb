@@ -907,6 +907,7 @@ function ThreadDetailViewInternal(
     bootstrapQuery: threadDetailBootstrapQuery,
     threadQuery: { isFetchedAfterMount, isError: isThreadQueryError },
     hasUnseenTimelineEvents,
+    isFocused,
     routeThreadId: threadId,
     thread,
   });
@@ -2085,6 +2086,7 @@ function ThreadDetailViewInternal(
   );
   const isThreadTimelinePending = timelineLoading && timelineRows.length === 0;
   useThreadReadTracking({
+    isFocused,
     markThreadRead,
     thread,
   });
