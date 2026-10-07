@@ -206,6 +206,7 @@ export function estimateCompactionSavings(args: {
       .slice(previousCompactionIndex + 1, index)
       .filter(
         (candidate) =>
+          turn.model !== null &&
           candidate.model === turn.model &&
           candidate.providerId === turn.providerId &&
           estimatedContextTokens(candidate) !== null,
@@ -216,6 +217,7 @@ export function estimateCompactionSavings(args: {
       .slice(index + 1, nextCompactionIndex)
       .filter(
         (candidate) =>
+          turn.model !== null &&
           candidate.model === turn.model &&
           candidate.providerId === turn.providerId &&
           estimatedContextTokens(candidate) !== null,

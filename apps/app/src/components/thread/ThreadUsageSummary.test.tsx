@@ -160,7 +160,7 @@ describe("thread usage summary", () => {
     expect(within(panel).getByText("clear")).toBeTruthy();
   });
 
-  it("estimates compaction payback from retained per-turn spend", async () => {
+  it("keeps compaction estimates unavailable when retained turns have unknown models", async () => {
     const turn = (
       turnId: string,
       inputTokens: number,
@@ -230,9 +230,10 @@ describe("thread usage summary", () => {
     expect(
       await within(panel).findByText("Context before / after"),
     ).toBeTruthy();
-    expect(within(panel).getByText("1K / 100")).toBeTruthy();
-    expect(within(panel).getByText("2.7K")).toBeTruthy();
-    expect(within(panel).getByText("Likely, estimated")).toBeTruthy();
+    expect(
+      within(panel).getByText(/unavailable\s*\/\s*unavailable/i),
+    ).toBeTruthy();
+    expect(within(panel).getByText("Unavailable, estimated")).toBeTruthy();
   });
 
   it("renders compact per-turn tokens and an expandable child agent summary", async () => {

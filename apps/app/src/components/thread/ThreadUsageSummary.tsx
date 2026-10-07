@@ -626,10 +626,10 @@ function ThreadTokenWeatherPanel({
             <p className="text-xs text-muted-foreground">
               Before is the median fresh input from up to three earlier turns
               with matching provider and model metadata; after is the first
-              later matching input. Unknown models are compared only with other
-              turns whose model is also unknown. Estimated savings compare up to
-              three later inputs against that pre-compaction median and subtract
-              no cache-price assumption.
+              later matching input. Estimates require known matching provider
+              and model metadata. Estimated savings compare up to three later
+              inputs against that pre-compaction median and subtract no
+              cache-price assumption.
             </p>
           </div>
         </div>

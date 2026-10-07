@@ -197,7 +197,7 @@ describe("token weather", () => {
     ]);
   });
 
-  it("keeps unknown-model compaction savings inside each compaction window", () => {
+  it("leaves compaction savings unavailable when the model is unknown", () => {
     const turn = (turnId: string, tokens: number) => ({
       cachedInputTokens: 0,
       inputTokens: tokens,
@@ -222,19 +222,19 @@ describe("token weather", () => {
 
     expect(result).toEqual([
       {
-        afterTokens: 500,
-        beforeTokens: 1000,
+        afterTokens: null,
+        beforeTokens: null,
         compactionCostTokens: 100,
-        likelyPaidForItself: true,
-        observedSavingsTokens: 1050,
+        likelyPaidForItself: null,
+        observedSavingsTokens: null,
         turnId: "compact-first",
       },
       {
-        afterTokens: 50,
-        beforeTokens: 475,
+        afterTokens: null,
+        beforeTokens: null,
         compactionCostTokens: 100,
-        likelyPaidForItself: true,
-        observedSavingsTokens: 425,
+        likelyPaidForItself: null,
+        observedSavingsTokens: null,
         turnId: "compact-second",
       },
     ]);
