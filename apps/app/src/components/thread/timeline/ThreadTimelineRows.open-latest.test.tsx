@@ -97,6 +97,7 @@ function OpenThread({
   isOpening = false,
   bootstrapUpdatedAt = 0,
   isThreadQueryError = false,
+  isThreadPlaceholder = false,
   isFocused = true,
 }: {
   lastReadAt: number;
@@ -105,6 +106,7 @@ function OpenThread({
   isOpening?: boolean;
   bootstrapUpdatedAt?: number;
   isThreadQueryError?: boolean;
+  isThreadPlaceholder?: boolean;
   isFocused?: boolean;
 }) {
   const { placement, hasUnseenTimelineEvents: openAtLatest } =
@@ -118,6 +120,7 @@ function OpenThread({
       threadQuery: {
         isFetchedAfterMount: !isOpening,
         isError: isThreadQueryError,
+        ...(isThreadPlaceholder ? { isPlaceholderData: true } : {}),
       },
       isFocused,
       hasUnseenTimelineEvents,
@@ -154,14 +157,17 @@ function renderThread(
   isOpening = false,
   bootstrapUpdatedAt = 0,
   isFocused = true,
+  isPlaceholderData = false,
 ) {
   const queryClient = new QueryClient();
+  let currentIsPlaceholderData = isPlaceholderData;
   const element = (
     unseen: boolean,
     latestAttentionAt = 300,
     opening = isOpening,
     queryError = false,
     focused = isFocused,
+    placeholderData = currentIsPlaceholderData,
   ) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -175,6 +181,7 @@ function renderThread(
             isOpening={opening}
             bootstrapUpdatedAt={bootstrapUpdatedAt}
             isThreadQueryError={queryError}
+            isThreadPlaceholder={placeholderData}
             isFocused={focused}
           />
         </ThreadProviderContext.Provider>
@@ -210,6 +217,10 @@ function renderThread(
     blurThread: () => rerender(element(false, 300, false, false, false)),
     focusThread: () => rerender(element(false, 400, false, false, true)),
     focusWithoutNewAttention: () => rerender(element(false, 300, false, false, true)),
+    receiveFreshThread: (latestAttentionAt: number) => {
+      currentIsPlaceholderData = false;
+      rerender(element(false, latestAttentionAt));
+    },
     failOpening: () => rerender(element(false, 300, true, true)),
   };
 }
@@ -562,5 +573,31 @@ describe("opening an unseen timeline", () => {
     resize();
     flushFrames();
     expect(area.scrollTop).toBe(200);
+  });
+
+  it("opens at newest when fresh unread data replaces a settled read placeholder", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, receiveFreshThread } = renderThread(
+      350,
+      false,
+      true,
+      Date.now(),
+      true,
+      true,
+    );
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    receiveFreshThread(400);
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
   });
 });
