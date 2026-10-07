@@ -248,6 +248,7 @@ export function BottomAnchoredScrollBody({
     anchor: ScrollAnchor;
     attemptsRemaining: number;
     lastAppliedScrollTop: number | null;
+    windowed: boolean;
   } | null>(null);
   const restoredAnchorRef = useRef<{
     threadId: string;
@@ -889,9 +890,20 @@ export function BottomAnchoredScrollBody({
     (scrollMovedTowardBottom: boolean) => {
       restorePrependPosition();
       syncBottomStateFromScroll(scrollMovedTowardBottom);
+      const pendingRestore = pendingScrollRestoreRef.current;
+      if (
+        pendingRestore &&
+        pendingRestore.windowed &&
+        !pointerScrollIntentRef.current
+      ) {
+        applyScrollRestore(pendingRestore.anchor);
+        return;
+      }
       captureScrollAnchorThrottled();
     },
     [
+      applyScrollRestore,
+      scrollAreaRef,
       restorePrependPosition,
       syncBottomStateFromScroll,
       captureScrollAnchorThrottled,
@@ -904,7 +916,14 @@ export function BottomAnchoredScrollBody({
     pending.attemptsRemaining -= 1;
     const appliedScrollTop = applyScrollRestore(pending.anchor);
     if (appliedScrollTop !== null) {
-      if (pending.lastAppliedScrollTop === appliedScrollTop) {
+      const scrollArea = scrollAreaRef.current;
+      pending.windowed =
+        pending.windowed ||
+        (scrollArea !== null && getScrollAnchorRows(scrollArea).windowed);
+      if (
+        pending.lastAppliedScrollTop === appliedScrollTop &&
+        !pending.windowed
+      ) {
         pendingScrollRestoreRef.current = null;
         return true;
       }
@@ -1011,10 +1030,12 @@ export function BottomAnchoredScrollBody({
     if (!anchor || anchor.atBottom) return;
     shouldStickToBottomRef.current = false;
     setIsAtBottom(false);
+    const scrollArea = scrollAreaRef.current;
     pendingScrollRestoreRef.current = {
       anchor,
       attemptsRemaining: SCROLL_ANCHOR_RESTORE_MAX_ATTEMPTS,
       lastAppliedScrollTop: null,
+      windowed: scrollArea !== null && getScrollAnchorRows(scrollArea).windowed,
     };
     advancePendingScrollRestore();
   }, [
