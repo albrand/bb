@@ -776,7 +776,8 @@ export function BottomAnchoredScrollBody({
             pointerId: event.pointerId,
           }
         : null;
-      pointerScrollIntentRef.current = false;
+      pointerScrollIntentRef.current =
+        pendingScrollRestoreRef.current?.windowed !== true;
     },
     [cancelPrependPositionHold],
   );
