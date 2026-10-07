@@ -1537,7 +1537,7 @@ describe("FollowUpPromptBox", () => {
     );
   });
 
-  it("shows the footer for an expanded composer at a non-compact viewport", async () => {
+  it("sets footer-visible for an expanded composer at a non-compact viewport", async () => {
     mocks.isCompactViewport = false;
     render(
       <>
