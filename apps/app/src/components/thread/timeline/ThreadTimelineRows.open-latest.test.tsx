@@ -120,7 +120,7 @@ function OpenThread({
       threadQuery: {
         isFetchedAfterMount: !isOpening,
         isError: isThreadQueryError,
-        ...(isThreadPlaceholder ? { isPlaceholderData: true } : {}),
+        isPlaceholderData: isThreadPlaceholder,
       },
       isFocused,
       hasUnseenTimelineEvents,

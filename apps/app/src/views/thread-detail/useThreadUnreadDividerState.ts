@@ -41,7 +41,7 @@ interface UseThreadUnreadDividerStateArgs {
   threadQuery: {
     isFetchedAfterMount: boolean;
     isError: boolean;
-    isPlaceholderData?: boolean;
+    isPlaceholderData: boolean;
   };
   hasUnseenTimelineEvents: boolean;
   isFocused?: boolean;
@@ -162,7 +162,7 @@ export function useThreadUnreadDividerState({
               replacedPlaceholder,
             isFocused,
             isOpening: nextIsOpening,
-            isPlaceholderData: threadQuery.isPlaceholderData ?? false,
+            isPlaceholderData: threadQuery.isPlaceholderData,
             placement: { kind: "before-first" },
             threadId,
           };
@@ -180,7 +180,7 @@ export function useThreadUnreadDividerState({
                   placement !== null),
               isFocused,
               isOpening: nextIsOpening,
-              isPlaceholderData: threadQuery.isPlaceholderData ?? false,
+              isPlaceholderData: threadQuery.isPlaceholderData,
               placement: replacedPlaceholder
                 ? placement
                 : currentSnapshot.placement,
@@ -209,7 +209,7 @@ export function useThreadUnreadDividerState({
             : placement !== null,
         isFocused,
         isOpening: nextIsOpening,
-        isPlaceholderData: threadQuery.isPlaceholderData ?? false,
+        isPlaceholderData: threadQuery.isPlaceholderData,
         placement,
         threadId,
       };
