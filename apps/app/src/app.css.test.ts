@@ -22,6 +22,14 @@ describe("app.css compact prompt controls", () => {
       ),
     ).toHaveLength(2);
   });
+
+  it("removes collapsed follow-up footer controls from keyboard focus", () => {
+    const block = css.match(
+      /\[data-follow-up-composer\]:not\(\[data-follow-up-composer-footer-visible\]\)\s+\[data-follow-up-composer-footer\]\s*\{([^}]*)\}/,
+    )?.[1];
+    expect(block).toBeDefined();
+    expect(block).toMatch(/visibility:\s*hidden;/);
+  });
 });
 
 describe("app.css sidebar drag cursor", () => {

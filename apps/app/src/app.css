@@ -525,6 +525,8 @@
     margin-top: 0;
     opacity: 0;
     pointer-events: none;
+    visibility: hidden;
+    transition-delay: 0s, 0s, 0s, 0s, 180ms;
   }
 
   [data-follow-up-composer]:not([data-follow-up-composer-expanded])
