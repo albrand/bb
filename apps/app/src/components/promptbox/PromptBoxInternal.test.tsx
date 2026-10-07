@@ -1464,6 +1464,37 @@ describe("PromptBoxInternal controlled value sync", () => {
     }
   });
 
+  it("honors a focus-scope change when a coarse pointer becomes fine", async () => {
+    const pointer = mockMutablePointerCoarse(true);
+    try {
+      const view = render(
+        <PromptBoxHistoryAutoFocusHarness historyResetKey={0} />,
+      );
+      await waitFor(() =>
+        expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
+      );
+      const outsideTarget = screen.getByRole("button", {
+        name: "Outside focus target",
+      });
+      outsideTarget.focus();
+
+      act(() => {
+        pointer.setMatches(false);
+        view.rerender(<PromptBoxHistoryAutoFocusHarness historyResetKey={1} />);
+      });
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
+
+      expect(document.activeElement).toBe(getPromptEditorElement());
+    } finally {
+      pointer.restore();
+    }
+  });
+
   it("skips passive autofocus on coarse pointers", async () => {
     const restoreMatchMedia = mockPointerCoarse(true);
     try {
