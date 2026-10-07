@@ -566,7 +566,10 @@ function ThreadTokenWeatherPanel({
                     key={turn.turnId}
                     className="grid grid-cols-[1fr_auto] gap-x-3 rounded-md border border-border/70 p-3"
                   >
-                    <span className="truncate">
+                    <span
+                      className="min-w-0 break-words sm:truncate"
+                      title={`${turn.providerId} / ${turn.model ?? "Unknown model"}`}
+                    >
                       {turn.providerId} / {turn.model ?? "Unknown model"}
                     </span>
                     <span className="capitalize">{turn.weather}</span>
