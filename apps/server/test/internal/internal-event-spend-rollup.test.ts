@@ -564,7 +564,7 @@ describe("daemon event spend rollup", () => {
     });
   });
 
-  it("keeps a complete thread complete when it spends again", async () => {
+  it("treats sequence 120 as complete and sequence 121 as partial", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-spend-keeps",
