@@ -1326,7 +1326,7 @@ function AccountPoolSettings() {
     account: AccountSummary,
     action: SubscriptionAction,
   ): Promise<void> {
-    if (pending !== null) return;
+    if (pending !== null && action === "toggle") return;
     if (action === "details") {
       setDialog({ kind: "account", accountId: account.id });
       return;

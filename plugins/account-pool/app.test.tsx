@@ -1647,6 +1647,47 @@ describe("Account Pool settings", () => {
     );
   });
 
+  it("keeps subscription details available while routing is pending and blocks a duplicate toggle", async () => {
+    const update = deferred<object | null>();
+    const slot = render(foldedTwins(true), {
+      "routing.set": () => update.promise,
+    });
+    fireEvent.click(
+      await slot.findByRole("switch", { name: "Route Claude threads" }),
+    );
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "routing.set",
+        input: { provider: "claude", enabled: false },
+      }),
+    );
+
+    await openActions(slot, "Gmail twin");
+    fireEvent.click(await slot.findByText("Usage details"));
+    expect(
+      await slot.findByRole("dialog", { name: "Gmail twin" }),
+    ).toBeTruthy();
+    fireEvent.click(slot.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    expect(
+      slot.queryByRole("dialog", { name: "Turn off Gmail twin?" }),
+    ).toBeNull();
+    expect(
+      slot.rpcCalls.filter((call) => call.method.startsWith("account.")),
+    ).toEqual([]);
+
+    update.resolve({ provider: "claude", enabled: false });
+    await waitFor(() =>
+      expect(
+        slot
+          .getByRole("switch", { name: "Route Claude threads" })
+          .getAttribute("aria-disabled"),
+      ).toBeNull(),
+    );
+  });
+
   it.each(["claude", "codex"] as const)(
     "retains focus on the Route %s switch while its update is pending",
     async (provider) => {
