@@ -65,6 +65,7 @@ export interface AccountPoolPluginOptions {
   usageUrl?: string;
   drainTimeoutMs?: number;
   threadSweepTimeoutMs?: number;
+  threadSweepLookupTimeoutMs?: number;
   threadSweepIntervalMs?: number;
   threadSweepRetryMs?: number;
   maxAffinityBindings?: number;
@@ -81,6 +82,7 @@ const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
 const THREAD_SWEEP_TIMEOUT_MS = 15_000;
+const THREAD_SWEEP_LOOKUP_TIMEOUT_MS = 5_000;
 const THREAD_SWEEP_RETRY_MS = 60_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
@@ -384,12 +386,17 @@ export function createAccountPoolPlugin(
       try {
         const { checked, revoked, failed } = await threadTokens.sweepThreads(
           lookupThread,
-          AbortSignal.any([
-            serviceSignal,
-            AbortSignal.timeout(
-              options.threadSweepTimeoutMs ?? THREAD_SWEEP_TIMEOUT_MS,
-            ),
-          ]),
+          {
+            signal: AbortSignal.any([
+              serviceSignal,
+              AbortSignal.timeout(
+                options.threadSweepTimeoutMs ?? THREAD_SWEEP_TIMEOUT_MS,
+              ),
+            ]),
+            lookupTimeoutMs:
+              options.threadSweepLookupTimeoutMs ??
+              THREAD_SWEEP_LOOKUP_TIMEOUT_MS,
+          },
         );
         if (revoked > 0 || failed > 0) {
           bb.log.warn(

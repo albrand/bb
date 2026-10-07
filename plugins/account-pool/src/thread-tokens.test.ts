@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { HubTokenStore } from "./store.js";
-import { ThreadTokenStore } from "./thread-tokens.js";
+import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -1001,8 +1001,65 @@ it("gives up on a lookup that never settles once the sweep deadline passes and k
   const { threads, tokenOf } = await legacyFixture(["thr_hung"]);
   const result = await threads.sweepThreads(
     () => new Promise<never>(() => undefined),
-    AbortSignal.timeout(30),
+    { signal: AbortSignal.timeout(30) },
   );
   expect(result).toEqual({ checked: 1, revoked: 0, failed: 1 });
   expect(await threads.authenticate(tokenOf("thr_hung").provider)).not.toBeNull();
+});
+
+async function loadOrder(
+  directory: string,
+  threadIds: readonly string[],
+): Promise<string[]> {
+  const order: string[] = [];
+  for (const name of await fs.readdir(directory)) {
+    if (!name.startsWith("thread-route-")) continue;
+    const threadId = threadIds.find((candidate) => name.includes(candidate));
+    if (threadId !== undefined && !order.includes(threadId))
+      order.push(threadId);
+  }
+  return order;
+}
+
+it("does not let threads whose lookups hang starve a later archived thread, and bounds every sweep", async () => {
+  const names = ["thr_one", "thr_two", "thr_three"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hangA, hangB, archived] = await loadOrder(directory, names);
+  if (hangA === undefined || hangB === undefined || archived === undefined)
+    throw new Error("missing thread");
+  const lookup: ThreadLookup = (threadId) =>
+    threadId === archived
+      ? Promise.resolve("gone")
+      : new Promise<never>(() => undefined);
+  const started = Date.now();
+  const sweepOptions = () => ({
+    signal: AbortSignal.timeout(60),
+    lookupTimeoutMs: 50,
+  });
+  const one = await threads.sweepThreads(lookup, sweepOptions());
+  expect(Date.now() - started).toBeLessThan(2_000);
+  expect(one).toEqual({ checked: 3, revoked: 0, failed: 3 });
+  const two = await threads.sweepThreads(lookup, sweepOptions());
+  expect(two).toEqual({ checked: 3, revoked: 1, failed: 2 });
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hangA).provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf(hangB).provider)).not.toBeNull();
+});
+
+it("checks later threads when an earlier lookup times out on its own", async () => {
+  const names = ["thr_one", "thr_two"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hang, archived] = await loadOrder(directory, names);
+  if (hang === undefined || archived === undefined)
+    throw new Error("missing thread");
+  const result = await threads.sweepThreads(
+    (threadId) =>
+      threadId === archived
+        ? Promise.resolve("gone")
+        : new Promise<never>(() => undefined),
+    { signal: AbortSignal.timeout(5_000), lookupTimeoutMs: 30 },
+  );
+  expect(result).toEqual({ checked: 2, revoked: 1, failed: 1 });
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hang).provider)).not.toBeNull();
 });

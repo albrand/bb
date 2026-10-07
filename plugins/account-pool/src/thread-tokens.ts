@@ -59,6 +59,10 @@ export type ThreadLookup = (
   threadId: string,
   signal?: AbortSignal,
 ) => Promise<"live" | "gone">;
+export type ThreadSweepOptions = {
+  signal?: AbortSignal;
+  lookupTimeoutMs?: number;
+};
 export type ThreadSweepResult = {
   checked: number;
   revoked: number;
@@ -78,6 +82,7 @@ export class ThreadTokenStore {
   private readonly corruptArchiveMarkers = new Set<string>();
   private readonly archiveDurabilityFailures = new Set<string>();
   private archiveMarkersLoaded = false;
+  private readonly unconfirmedThreads = new Set<string>();
   private readonly archiveVersions = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
 
@@ -337,29 +342,49 @@ export class ThreadTokenStore {
 
   async sweepThreads(
     lookup: ThreadLookup,
-    signal?: AbortSignal,
+    options: ThreadSweepOptions = {},
   ): Promise<ThreadSweepResult> {
     const threadIds = new Set<string>();
     for (const record of this.routes.values()) threadIds.add(record.threadId);
     for (const record of this.nestedRoutes.values())
       threadIds.add(record.threadId);
+    for (const threadId of this.unconfirmedThreads)
+      if (!threadIds.has(threadId)) this.unconfirmedThreads.delete(threadId);
+    const ordered = [...threadIds].sort(
+      (left, right) =>
+        Number(this.unconfirmedThreads.has(left)) -
+        Number(this.unconfirmedThreads.has(right)),
+    );
     const result: ThreadSweepResult = {
-      checked: threadIds.size,
+      checked: ordered.length,
       revoked: 0,
       failed: 0,
     };
-    for (const threadId of threadIds) {
-      if (signal?.aborted === true) {
+    for (const threadId of ordered) {
+      if (options.signal?.aborted === true) {
         result.failed += 1;
         continue;
       }
+      const lookupSignals = [
+        ...(options.signal === undefined ? [] : [options.signal]),
+        ...(options.lookupTimeoutMs === undefined
+          ? []
+          : [AbortSignal.timeout(options.lookupTimeoutMs)]),
+      ];
+      const lookupSignal =
+        lookupSignals.length === 0 ? undefined : AbortSignal.any(lookupSignals);
       const version = this.archiveVersion(threadId);
       try {
-        if ((await untilAborted(lookup(threadId, signal), signal)) === "live")
-          continue;
+        const status = await untilAborted(
+          lookup(threadId, lookupSignal),
+          lookupSignal,
+        );
+        this.unconfirmedThreads.delete(threadId);
+        if (status === "live") continue;
         if (await this.removeThreadIfVersion(threadId, version))
           result.revoked += 1;
       } catch {
+        this.unconfirmedThreads.add(threadId);
         result.failed += 1;
       }
     }
