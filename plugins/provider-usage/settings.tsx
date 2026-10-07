@@ -148,6 +148,97 @@ interface UsageLocation {
   disabled: boolean;
 }
 
+const combinedLocationId = "combined";
+
+function isSource(machine: UsageMachine): boolean {
+  return machine.id.startsWith("source:");
+}
+
+function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
+  const pool = machines.find(
+    (machine) => isSource(machine) && machine.displayName === "Account Pooler",
+  );
+  const host = machines.find((machine) => !isSource(machine));
+  const pooledClaude =
+    pool?.providers.filter(
+      (provider) => provider.providerId === "claude-code",
+    ) ?? [];
+  const providers =
+    pooledClaude.length > 0
+      ? [
+          ...pooledClaude,
+          ...(host?.providers.filter(
+            (provider) => provider.providerId !== "claude-code",
+          ) ?? []),
+        ]
+      : (host?.providers ?? []);
+  const sourceError = [pool, host].some(
+    (machine) => machine !== undefined && machine.error !== null,
+  );
+
+  if (host === undefined && pool === undefined) return null;
+  return {
+    id: combinedLocationId,
+    displayName: "Combined",
+    status:
+      pooledClaude.length > 0
+        ? "connected"
+        : (host?.status ?? pool?.status ?? "connected"),
+    providers,
+    error:
+      sourceError && !hasReportedUsage(providers)
+        ? "Usage could not be refreshed."
+        : null,
+  };
+}
+
+function usageMachinesToRefresh(
+  machines: UsageMachine[],
+  selectedId: string | null,
+): UsageMachine[] {
+  if (selectedId !== null && selectedId !== combinedLocationId) {
+    const selected = machines.find((machine) => machine.id === selectedId);
+    return selected === undefined ? [] : [selected];
+  }
+
+  const pool = machines.find(
+    (machine) => isSource(machine) && machine.displayName === "Account Pooler",
+  );
+  const host = machines.find((machine) => !isSource(machine));
+  const hasPooledClaude = pool?.providers.some(
+    (provider) => provider.providerId === "claude-code",
+  );
+  if (!hasPooledClaude) return host === undefined ? [] : [host];
+  return [pool, host].filter(
+    (machine): machine is UsageMachine => machine !== undefined,
+  );
+}
+
+function mergeUsageMachines(
+  current: UsageMachine[],
+  updated: UsageMachine[],
+  machineId: string,
+  providerId: string,
+): UsageMachine[] {
+  const byId = new Map(current.map((machine) => [machine.id, machine]));
+  const fresh = updated.find((machine) => machine.id === machineId);
+  if (fresh !== undefined) {
+    const previous = byId.get(machineId);
+    byId.set(machineId, {
+      ...fresh,
+      providers: [
+        ...(previous?.providers.filter(
+          (provider) => provider.providerId !== providerId,
+        ) ?? []),
+        ...fresh.providers.filter(
+          (provider) => provider.providerId === providerId,
+        ),
+      ],
+    });
+  }
+  return [...byId.values()];
+}
+
 function UsageLocationPicker({
   locations,
   selectedLocationId,
@@ -168,7 +259,7 @@ function UsageLocationPicker({
           type="button"
           variant="outline"
           size="sm"
-          className="max-w-48 gap-1.5"
+          className="max-w-48 min-w-0 gap-1.5 pointer-coarse:min-h-11"
           aria-label="Usage source"
         >
           <Icon
@@ -371,6 +462,7 @@ export function UsageSettingsContent({
   selectedId,
   loading,
   error,
+  sourceErrors = false,
   onSelect,
   onRefresh,
 }: {
@@ -378,10 +470,14 @@ export function UsageSettingsContent({
   selectedId: string | null;
   loading: boolean;
   error: boolean;
+  sourceErrors?: boolean;
   onSelect: (machineId: string) => void;
   onRefresh: () => void;
 }) {
-  const selected = selectUsageMachine(machines, selectedId, null);
+  const selected =
+    selectedId === null || selectedId === combinedLocationId
+      ? combinedUsageMachine(machines)
+      : selectUsageMachine(machines, selectedId, null);
   const groups = new Map<string, UsageProvider[]>();
   for (const provider of selected?.providers ?? []) {
     if (provider.usage?.status === "not_installed") continue;
@@ -405,7 +501,7 @@ export function UsageSettingsContent({
             : null;
   return (
     <section className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:gap-4 sm:items-start">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:justify-between sm:gap-4 sm:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             <h2 className="min-w-0 text-sm font-semibold text-foreground">
@@ -416,24 +512,34 @@ export function UsageSettingsContent({
             Your provider subscription usage.
           </p>
         </div>
-        <div className="shrink-0 self-start">
-          <div className="flex items-center gap-1">
-            {machines.length > 1 ? (
+        <div className="min-w-0 self-start sm:shrink-0">
+          <div className="flex min-w-0 items-center gap-1">
+            {machines.length > 0 ? (
               <UsageLocationPicker
-                locations={machines.map((machine) => ({
-                  id: machine.id,
-                  name: machine.displayName,
-                  kind: machine.id.startsWith("source:") ? "source" : "host",
-                  disabled: machine.status !== "connected",
-                }))}
-                selectedLocationId={selected?.id ?? null}
+                locations={[
+                  {
+                    id: combinedLocationId,
+                    name: "Combined",
+                    kind: "source",
+                    disabled: false,
+                  },
+                  ...machines.map((machine) => ({
+                    id: machine.id,
+                    name: machine.displayName,
+                    kind: isSource(machine)
+                      ? ("source" as const)
+                      : ("host" as const),
+                    disabled: machine.status !== "connected",
+                  })),
+                ]}
+                selectedLocationId={selected?.id ?? combinedLocationId}
                 onSelectLocation={onSelect}
               />
             ) : null}
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground"
+              className="size-7 text-muted-foreground hover:text-foreground pointer-coarse:min-h-11 pointer-coarse:min-w-11"
               disabled={loading}
               onClick={onRefresh}
               aria-label={
@@ -448,6 +554,9 @@ export function UsageSettingsContent({
           </div>
         </div>
       </div>
+      {sourceErrors ? (
+        <UsageFeedback message="Some usage sources could not be refreshed. Showing available results." />
+      ) : null}
       <div className="rounded-lg border border-border bg-card px-4 py-3.5">
         {notice ? (
           <UsageFeedback
@@ -487,6 +596,7 @@ export function UsageSettings() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [sourceErrors, setSourceErrors] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const forceGeneration = useRef(0);
   useEffect(() => {
@@ -508,23 +618,52 @@ export function UsageSettings() {
         });
         if (disposed) return;
         setMachines(inventory.machines);
-        const selected = selectUsageMachine(
-          inventory.machines,
-          selectedId,
-          null,
-        );
-        if (selected && selected.status === "connected") {
-          for (const providerId of new Set(
-            selected.providers.map((provider) => provider.providerId),
-          )) {
-            const result = await rpc.call("getUsage", {
+        const targets = usageMachinesToRefresh(inventory.machines, selectedId)
+          .filter((machine) => machine.status === "connected")
+          .flatMap((machine) =>
+            [
+              ...new Set(
+                machine.providers.map((provider) => provider.providerId),
+              ),
+            ]
+              .filter((providerId) =>
+                machine.providers.some(
+                  (provider) =>
+                    provider.providerId === providerId &&
+                    provider.usage?.status !== "not_installed",
+                ),
+              )
+              .map((providerId) => ({ machine, providerId })),
+          );
+        const results = await Promise.allSettled(
+          targets.map(({ machine, providerId }) =>
+            rpc.call("getUsage", {
               force,
-              machineIds: [selected.id],
+              machineIds: [machine.id],
               providerId,
               maxAgeMs: 60_000,
-            });
-            if (disposed) return;
-            setMachines(result.machines);
+            }),
+          ),
+        );
+        if (disposed) return;
+        setSourceErrors(
+          results.some(
+            (result) =>
+              result.status === "rejected" ||
+              result.value.machines.some((machine) => machine.error !== null),
+          ),
+        );
+        for (const [index, result] of results.entries()) {
+          if (result.status === "fulfilled") {
+            const target = targets[index]!;
+            setMachines((current) =>
+              mergeUsageMachines(
+                current,
+                result.value.machines,
+                target.machine.id,
+                target.providerId,
+              ),
+            );
           }
         }
       } catch {
@@ -549,6 +688,7 @@ export function UsageSettings() {
       selectedId={selectedId}
       loading={loading}
       error={error}
+      sourceErrors={sourceErrors}
       onSelect={setSelectedId}
       onRefresh={() => setRefresh((value) => value + 1)}
     />

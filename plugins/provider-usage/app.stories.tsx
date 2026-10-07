@@ -29,6 +29,7 @@ const opencodeLogoUrl = svgDataUrl(
 );
 
 type ScenarioName =
+  | "combined"
   | "healthy"
   | "mixedPool"
   | "live"
@@ -279,10 +280,40 @@ const liveMachines = [
   ]),
 ];
 
+const combinedMachines = [
+  machine("host-studio", "Alexandre’s Mac Studio", [
+    provider(
+      "host-claude",
+      "claude-code",
+      measured("alexandre@example.com", 20, "Max (20x)"),
+    ),
+    provider("host-codex", "codex", measured("work@example.com", 46, "Pro")),
+    liveAccount(
+      "host-cursor",
+      "acp-cursor",
+      null,
+      measured("work@example.com", 12, "Pro"),
+    ),
+  ]),
+  machine("source:account-pool", "Account Pooler", [
+    provider(
+      "principal",
+      "claude-code",
+      measured("principal@example.com", 31, "Max (20x)"),
+    ),
+    provider(
+      "alexandre",
+      "claude-code",
+      measured("alexandre@example.com", 20, "Max (20x)"),
+    ),
+  ]),
+];
+
 const scenarios: Record<
   Exclude<ScenarioName, "loading" | "loadFailed">,
   UsageSnapshot
 > = {
+  combined: { machines: combinedMachines },
   healthy: { machines: [healthyMachine, healthyPool] },
   mixedPool: { machines: [healthyMachine, mixedPool] },
   live: { machines: liveMachines },
@@ -385,6 +416,8 @@ function FooterPreview({ scenario }: { scenario: ScenarioName }) {
 }
 
 const descriptions: Record<ScenarioName, string> = {
+  combined:
+    "Default view combines pooled Claude subscriptions with host providers.",
   healthy: "Multiple pooled accounts with provider grouping and quota badges.",
   live: "Usage captured from a real bb server, with emails anonymized.",
   mixedPool:
@@ -401,6 +434,7 @@ const descriptions: Record<ScenarioName, string> = {
 };
 
 const storyRows: readonly { label: string; scenario: ScenarioName }[] = [
+  { label: "combined default", scenario: "combined" },
   { label: "healthy", scenario: "healthy" },
   { label: "mixed pool", scenario: "mixedPool" },
   { label: "live pool", scenario: "live" },
@@ -446,6 +480,14 @@ export function Settings() {
     <ScenarioRows>
       {(scenario) => <SettingsPreview scenario={scenario} />}
     </ScenarioRows>
+  );
+}
+
+export function CombinedMobile() {
+  return (
+    <div className="w-[390px] max-w-full rounded-lg bg-background p-4">
+      <SettingsPreview scenario="combined" />
+    </div>
   );
 }
 
