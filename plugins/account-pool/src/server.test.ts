@@ -10236,7 +10236,7 @@ describe("Account Pool credential scoping", () => {
     let recovered = false;
     host.harness.sdk.stub(
       "threads.get",
-      ({ threadId, signal }: { threadId: string; signal?: AbortSignal }) =>
+      ({ threadId }: { threadId: string }) =>
         recovered
           ? Promise.resolve(
               makeThreadResponse({
@@ -10244,11 +10244,7 @@ describe("Account Pool credential scoping", () => {
                 archivedAt: threadId === "thread-stale" ? 1_000 : null,
               }),
             )
-          : new Promise((_resolve, reject) => {
-              signal?.addEventListener("abort", () => reject(signal.reason), {
-                once: true,
-              });
-            }),
+          : new Promise(() => undefined),
     );
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
@@ -10299,14 +10295,10 @@ describe("Account Pool credential scoping", () => {
     );
     host.harness.sdk.stub(
       "threads.get",
-      ({ threadId, signal }: { threadId: string; signal?: AbortSignal }) => {
+      ({ threadId }: { threadId: string }) => {
         if (mode === "hang") {
           hangs += 1;
-          return new Promise((_resolve, reject) => {
-            signal?.addEventListener("abort", () => reject(signal.reason), {
-              once: true,
-            });
-          });
+          return new Promise(() => undefined);
         }
         return Promise.resolve(
           makeThreadResponse({

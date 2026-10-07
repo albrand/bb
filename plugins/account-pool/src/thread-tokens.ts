@@ -355,7 +355,8 @@ export class ThreadTokenStore {
       }
       const version = this.archiveVersion(threadId);
       try {
-        if ((await lookup(threadId, signal)) === "live") continue;
+        if ((await untilAborted(lookup(threadId, signal), signal)) === "live")
+          continue;
         if (await this.removeThreadIfVersion(threadId, version))
           result.revoked += 1;
       } catch {
@@ -762,6 +763,21 @@ export class ThreadTokenStore {
     if (this.archiveMarkersLoaded && !this.hasMarkerFailure(threadId)) return false;
     return this.hasMarkerFailure(threadId);
   }
+}
+
+function untilAborted<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (signal === undefined) return operation;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
+  });
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -996,3 +996,13 @@ it("counts a thread archived by its event during the lookup as revoked without a
   expect(result.failed).toBe(0);
   expect(await threads.authenticate(tokenOf("thr_racing").provider)).toBeNull();
 });
+
+it("gives up on a lookup that never settles once the sweep deadline passes and keeps the credential", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_hung"]);
+  const result = await threads.sweepThreads(
+    () => new Promise<never>(() => undefined),
+    AbortSignal.timeout(30),
+  );
+  expect(result).toEqual({ checked: 1, revoked: 0, failed: 1 });
+  expect(await threads.authenticate(tokenOf("thr_hung").provider)).not.toBeNull();
+});
