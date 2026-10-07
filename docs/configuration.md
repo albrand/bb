@@ -224,7 +224,7 @@ child; do not set them yourself.
 | `BB_HOST_DAEMON_PORT`          | `bb-app env`, environment, or `--host-daemon-port` | Startup-only            | Local host-daemon API port. Defaults to `38887`. A full launcher or desktop app restart is required after a persistent set or unset.                                                                                                                                                                                                                                                                           |
 | `BB_LOG_LEVEL`                 | `bb-app config`                                    | Startup-only debugging  | Log level: `trace`, `debug`, `info`, `warn`, `error`, or `fatal`. A full launcher or desktop app restart is required.                                                                                                                                                                                                                                                                                          |
 | `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and defaults to proxying to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key.                                                                                                                                                                      |
-| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent Account Pooler hub. Paired with `BB_ACCOUNT_POOL_PARENT_URL`; both must be well formed or proxying stays off. Not a `bb-app config` key.                                                                                                                                                                                                               |
+| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Token this nested server presents to the parent Account Pooler hub, scoped to the thread that launched it and never the machine token. It stops working when the plugin sees that thread archived or deleted (a missed event is not replayed), or ten minutes after the machine token is rotated. Paired with `BB_ACCOUNT_POOL_PARENT_URL`; both must be well formed or proxying stays off. Not a `bb-app config` key. |
 
 The `bb` CLI records each failed invocation on the machine that ran it, in
 `<data dir>/logs/cli-errors.jsonl`: the time, CLI version, command path, error
@@ -1225,8 +1225,14 @@ by the CLI. Plugin startup and `bb pool status` remove token files for machines
 that are no longer enrolled. Status lists token mint and last-use timestamps
 plus recently routed threads whose machines do not have a usable local Claude
 login. Rotate one machine's token with
-`bb pool token rotate --machine <id-or-name>`; the prior token remains valid
-for ten minutes so in-flight requests can drain. Bypass or restore routing for
+`bb pool token rotate --machine <id-or-name>`; the prior token and the
+per-thread and nested-server tokens derived from it remain valid for ten
+minutes so in-flight requests can drain, then stop working. Archiving or
+deleting a thread revokes its tokens as soon as the plugin receives the event.
+An event missed while the plugin is down is not replayed, so those tokens stay
+valid until bb next resolves that archived thread's environment, which revokes
+them, or until the ten-minute grace after you rotate that machine's token ends.
+Bypass or restore routing for
 one thread with `bb pool bypass <thread-id>` or
 `bb pool bypass <thread-id> --off`. Account listing, enable, disable, removal,
 priority changes, and usage refreshes are available through

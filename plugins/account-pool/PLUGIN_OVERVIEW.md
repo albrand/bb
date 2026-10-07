@@ -11,7 +11,7 @@ Route Claude Code and Codex conversations across subscriptions with a local pool
 
 ## How it works
 
-The hub serves Anthropic Messages and OpenAI Responses endpoints. Routed providers report **Proxied** and receive a conversation-scoped hub token. Accounts in error are skipped. The switch threshold defaults to 98 percent. Claude extra usage and Codex credits are fallbacks: usable subscription accounts take precedence, and conversations return when quota recovers. Exhausted accounts are rechecked before fallback. Codex spending-control and explicit credit-depletion restrictions block routing even below the threshold. The pool does not enable extra usage, purchase credits, or change spending limits. Settings shows “Extra usage available” only for reported allowance, never current billing activity. CLI and RPC status expose the same observations. Secrets stay on the server and tokens refresh in the background.
+The hub serves Anthropic Messages and OpenAI Responses endpoints. Routed providers report **Proxied** and receive a token scoped to their thread. Accounts in error are skipped. The switch threshold defaults to 98 percent. Claude extra usage and Codex credits are fallbacks: usable subscription accounts take precedence, and conversations return when quota recovers. Exhausted accounts are rechecked before fallback. Codex spending-control and explicit credit-depletion restrictions block routing even below the threshold. The pool does not enable extra usage, purchase credits, or change spending limits. Settings shows “Extra usage available” only for reported allowance, never current billing activity. CLI and RPC status expose the same observations. Secrets stay on the server and tokens refresh in the background.
 
 The pool waits once on the same account for short temporary rate limits. Longer holds return Retry-After for pinned conversations while new conversations can advance. A model-family limit detours requests for that family without moving the session’s main pin or the provider cursor. The pool commits a new account after a successful response; a failed attempt across every account retains the previous binding. The current account and session pins survive hub restarts. Session pins expire after 30 idle minutes, with the 4,096 most recently used pins retained.
 
@@ -24,7 +24,7 @@ A bb server started inside another bb server's thread detects the parent's poole
 - **proxy** (default): keep a local hub with its own machine tokens and forward pooled traffic to the parent, so the parent's token never reaches this server's agents. Routing is contributed only for providers the parent can serve.
 - **isolate**: neutralise the inherited routing and use this instance's own accounts, or each provider's own credentials.
 
-Proxied traffic authenticates as the parent machine's token, so the parent attributes it to itself.
+Proxied traffic carries a token scoped to the launching thread; the parent attributes it to the machine.
 
 ## Requirements
 

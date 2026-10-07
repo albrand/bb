@@ -74,7 +74,7 @@ path continues to read the bb server host's `~/.codex/auth.json`.
 The hub starts immediately, even before an account is configured, so newly
 added or enabled accounts are available without a plugin reload. With an
 enabled account whose secret file remains readable and valid, the plugin
-contributes its provider-specific server route and a distinct secret token to
+contributes its provider-specific server route and a secret token scoped to that thread to
 Claude Code or Codex sessions on every host. Claude Code also receives
 `ENABLE_TOOL_SEARCH=true` so tool search stays on through the hub, and
 `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1` so Opus keeps its native 1M
@@ -85,7 +85,12 @@ Codex image generation and editing use the same authenticated pool route.
 Tokens are never printed. `status` prunes tokens for
 unenrolled machines and shows token timestamps plus recently routed threads
 whose machines need a local Claude login before the pool can be disabled
-safely. Rotation keeps the prior token valid for ten minutes. Agents should use
+safely. Rotation keeps the prior token, and the thread-scoped tokens derived from
+it, valid for ten minutes; archiving or deleting a thread revokes its tokens when
+the plugin receives the event, and one missed while the plugin is down is not
+replayed, so they end when bb next resolves that archived thread's environment,
+or when you rotate the machine token and wait out the ten minutes. Agents should
+use
 `--api-key-stdin`, which reads exactly one non-empty key from piped standard
 input. Secret options reject inline values and are accepted only from stdin.
 Prefer `--import` when Claude Code is already signed in. OAuth quota refreshes
