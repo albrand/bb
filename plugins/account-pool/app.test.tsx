@@ -1671,6 +1671,10 @@ describe("Account Pool settings", () => {
       expect(control.hasAttribute("disabled")).toBe(false);
       expect(control.getAttribute("aria-disabled")).toBe("true");
       expect(document.activeElement).toBe(control);
+      fireEvent.click(control);
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "routing.set"),
+      ).toHaveLength(1);
       update.resolve({ provider, enabled: false });
       await waitFor(() =>
         expect(control.getAttribute("aria-disabled")).toBeNull(),
