@@ -80,7 +80,10 @@ function installDescription(
     statusBadge,
     "status unavailable on",
   );
-  const unavailableMachines = namesAfterStatusLabel(statusBadge, "Disconnected:");
+  const unavailableMachines = namesAfterStatusLabel(
+    statusBadge,
+    "Disconnected:",
+  );
   if (
     statusBadge?.startsWith("Installed on ") &&
     (unknownMachines !== undefined || unavailableMachines !== undefined)
@@ -91,7 +94,9 @@ function installDescription(
         : [`status unavailable on ${unknownMachines}`]),
       ...(unavailableMachines === undefined
         ? []
-        : [`status unavailable on disconnected machines: ${unavailableMachines}`]),
+        : [
+            `status unavailable on disconnected machines: ${unavailableMachines}`,
+          ]),
     ];
     return `Install them into ~/.agents/skills and ~/.claude/skills on machines marked Not installed; ${qualifiers.join("; ")}.`;
   }
@@ -119,7 +124,9 @@ export function summarizeMachineStatuses(
     const unavailable = [
       ...(unknown.length === 0
         ? []
-        : [`Status unavailable on ${unknown.map(({ name }) => name).join(", ")}`]),
+        : [
+            `Status unavailable on ${unknown.map(({ name }) => name).join(", ")}`,
+          ]),
       ...(offline.length === 0
         ? []
         : [`Disconnected: ${offline.map(({ name }) => name).join(", ")}`]),
@@ -137,9 +144,9 @@ export function summarizeMachineStatuses(
   }
   const installed = known.filter(({ status }) => status === "installed").length;
   if (installed === known.length) {
-    return `${known.length > 1
-      ? `Installed on ${known.length} machines`
-      : "Installed"}${unknownSummary}${offlineSummary}`;
+    return `${
+      known.length > 1 ? `Installed on ${known.length} machines` : "Installed"
+    }${unknownSummary}${offlineSummary}`;
   }
   if (installed > 0) {
     return `Installed on ${installed} of ${known.length} machines${unknownSummary}${offlineSummary}`;
@@ -221,13 +228,17 @@ export function CliSkillsSettingsSectionContent({
         controlPlacement="trailing"
         label={CLI_SKILLS_SETTING_LABEL}
         {...(statusBadge === null ? {} : { labelBadge: statusBadge })}
-        description={installDescription(hasConnectedMachine, action, statusBadge)}
+        description={installDescription(
+          hasConnectedMachine,
+          action,
+          statusBadge,
+        )}
       >
         <Button
           type="button"
           variant={action === "reinstall" ? "secondary" : "outline"}
           size="sm"
-          className="max-sm:min-h-11"
+          className="max-sm:min-h-11 pointer-coarse:min-h-11"
           disabled={!hasConnectedMachine || pending}
           onClick={onOpenPicker}
           aria-label={`${actionLabel ?? (action === "update" ? "Update" : action === "reinstall" ? "Reinstall" : "Install")} ${CLI_SKILLS_SETTING_LABEL}`}
@@ -238,12 +249,12 @@ export function CliSkillsSettingsSectionContent({
               : action === "reinstall"
                 ? "Reinstalling…"
                 : "Installing…"
-            : actionLabel ??
+            : (actionLabel ??
               (action === "update"
                 ? "Update"
                 : action === "reinstall"
                   ? "Reinstall"
-                  : "Install")}
+                  : "Install"))}
         </Button>
       </SettingsWithControl>
     </SettingsSection>
@@ -289,8 +300,10 @@ export function CliSkillsSettingsSection() {
     statusQuery.isError,
   );
   const hasConnectedMachine = hosts.some((host) => host.status === "connected");
-  const { action, actionLabel, statusBadge } =
-    getCliSkillsPresentation(statusItems, hasConnectedMachine);
+  const { action, actionLabel, statusBadge } = getCliSkillsPresentation(
+    statusItems,
+    hasConnectedMachine,
+  );
 
   return (
     <>
