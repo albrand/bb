@@ -552,11 +552,16 @@ function setQuota(
   quotas.put({ ...quotas.get(accountId), ...update });
 }
 
+function nextClockTick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 async function addApiAccount(
   fixture: Fixture,
   apiKey: string,
   priority = 100,
 ): Promise<AccountSummary> {
+  await nextClockTick();
   const added = accountSchema.parse(
     await fixture.host.harness.behavior.callRpc("account.add", {
       provider: "claude",
@@ -4063,6 +4068,7 @@ describe("Account Pool plugin", () => {
           }),
         },
       });
+      await nextClockTick();
       if (provider === "claude") await addApiAccount(fixture, "sk-second");
       else
         await fixture.host.harness.behavior.callRpc("account.add", {
@@ -4094,6 +4100,7 @@ describe("Account Pool plugin", () => {
             );
           },
         );
+        await nextClockTick();
         if (provider === "claude") await addApiAccount(fixture, "sk-third");
         else
           await fixture.host.harness.behavior.callRpc("account.add", {
