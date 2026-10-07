@@ -1276,6 +1276,10 @@ export function PromptBoxInternal({
     projectId: attachmentProjectId,
   } = attachmentConfig;
   const isPointerCoarse = usePointerCoarse();
+  const isPointerCoarseRef = useRef(isPointerCoarse);
+  useLayoutEffect(() => {
+    isPointerCoarseRef.current = isPointerCoarse;
+  }, [isPointerCoarse]);
   const isIPadOSWebKitDevice = useMemo(isIPadOSWebKit, []);
   const editorEnterKeyHint = isPointerCoarse ? "enter" : "send";
   const formRef = useRef<HTMLFormElement>(null);
@@ -2150,7 +2154,7 @@ export function PromptBoxInternal({
       }
       return;
     }
-    if (isPointerCoarse) return;
+    if (isPointerCoarseRef.current) return;
 
     const focusEditor = () => {
       if (editor.isDestroyed) return;
@@ -2167,13 +2171,7 @@ export function PromptBoxInternal({
 
     const handle = window.requestAnimationFrame(focusEditor);
     return () => window.cancelAnimationFrame(handle);
-  }, [
-    autoFocus,
-    editor,
-    focusScopeKey,
-    scheduleRevealEditorSelection,
-    isPointerCoarse,
-  ]);
+  }, [autoFocus, editor, focusScopeKey, scheduleRevealEditorSelection]);
 
   useEffect(() => {
     mentionRangesRef.current = mentionRanges;

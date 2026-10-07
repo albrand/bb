@@ -529,6 +529,36 @@ function mockPointerCoarse(matches: boolean): () => void {
   };
 }
 
+function mockMutablePointerCoarse(matches: boolean) {
+  const originalMatchMedia = window.matchMedia;
+  const mediaQueryList = new EventTarget() as MediaQueryList;
+  let currentMatches = matches;
+  Object.defineProperties(mediaQueryList, {
+    matches: { get: () => currentMatches },
+    media: { value: "(pointer: coarse)" },
+    onchange: { value: null, writable: true },
+    addListener: {
+      value: (listener: EventListener) =>
+        mediaQueryList.addEventListener("change", listener),
+    },
+    removeListener: {
+      value: (listener: EventListener) =>
+        mediaQueryList.removeEventListener("change", listener),
+    },
+  });
+  window.matchMedia = vi.fn().mockReturnValue(mediaQueryList);
+
+  return {
+    setMatches(nextMatches: boolean) {
+      currentMatches = nextMatches;
+      mediaQueryList.dispatchEvent(new Event("change"));
+    },
+    restore() {
+      window.matchMedia = originalMatchMedia;
+    },
+  };
+}
+
 function mockNavigatorIdentity({
   userAgent,
   vendor,
@@ -1386,6 +1416,51 @@ describe("PromptBoxInternal controlled value sync", () => {
       await waitForPromptFocus();
     } finally {
       restoreMatchMedia();
+    }
+  });
+
+  it("preserves external focus when a coarse pointer becomes fine", async () => {
+    const pointer = mockMutablePointerCoarse(true);
+    const outsideTarget = document.createElement("button");
+    try {
+      render(<PromptBoxInternal {...createPromptBoxProps()} />);
+
+      await waitFor(() =>
+        expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
+      );
+      document.body.append(outsideTarget);
+      outsideTarget.focus();
+
+      act(() => pointer.setMatches(false));
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
+
+      expect(document.activeElement).toBe(outsideTarget);
+    } finally {
+      outsideTarget.remove();
+      pointer.restore();
+    }
+  });
+
+  it("preserves external focus when a fine pointer becomes coarse", async () => {
+    const pointer = mockMutablePointerCoarse(false);
+    const outsideTarget = document.createElement("button");
+    try {
+      render(<PromptBoxInternal {...createPromptBoxProps()} />);
+      await waitForPromptFocus();
+
+      document.body.append(outsideTarget);
+      outsideTarget.focus();
+      act(() => pointer.setMatches(true));
+
+      expect(document.activeElement).toBe(outsideTarget);
+    } finally {
+      outsideTarget.remove();
+      pointer.restore();
     }
   });
 
