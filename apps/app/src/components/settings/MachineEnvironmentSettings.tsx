@@ -479,7 +479,7 @@ export function MachineEnvironmentAutomaticRow({
           }
           readOnly
         />
-        <div className="flex size-8 items-center justify-center">
+        <div className="flex size-8 items-center justify-center pointer-coarse:size-11">
           {projectScope ? (
             <Button
               size="icon"

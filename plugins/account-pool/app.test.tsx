@@ -575,6 +575,47 @@ describe("Account Pool parent banner", () => {
   });
 });
 
+it("gives subscription and routing switches a 44px coarse-pointer hit area", async () => {
+  const slot = render([
+    account(),
+    account({
+      id: "22222222-2222-4222-8222-222222222222",
+      provider: "codex",
+      label: "codex@example.com",
+      email: "codex@example.com",
+      accountUuid: null,
+      codexAccountId: "codex-account",
+      subscriptionType: null,
+      rateLimitTier: null,
+    }),
+  ]);
+  const switchNames = [
+    "Use person@example.com",
+    "Use codex@example.com",
+    "Route Claude threads",
+    "Route Codex threads",
+  ];
+
+  for (const name of switchNames) {
+    const control = await slot.findByRole("switch", { name });
+    expect(control.className).toContain("h-4 w-7");
+    expect(control.getAttribute("data-switch-hit-area")).toBe("true");
+    expect(control.className).toContain("pointer-coarse:size-11");
+    expect(control.querySelector("[data-switch-track]")).toBeTruthy();
+  }
+
+  const subscriptionSwitch = slot.getByRole("switch", {
+    name: "Use person@example.com",
+  });
+  const checkedBeforeActions = subscriptionSwitch.getAttribute("aria-checked");
+  fireEvent.click(
+    slot.getByRole("button", { name: "person@example.com actions" }),
+  );
+  expect(subscriptionSwitch.getAttribute("aria-checked")).toBe(
+    checkedBeforeActions,
+  );
+});
+
 describe("Account Pool settings", () => {
   it("renders cached accounts as refreshing until live status arrives, then caches it", async () => {
     window.localStorage.setItem(
@@ -1605,6 +1646,83 @@ describe("Account Pool settings", () => {
       }),
     );
   });
+
+  it("keeps subscription details available while routing is pending and blocks a duplicate toggle", async () => {
+    const update = deferred<object | null>();
+    const slot = render(foldedTwins(true), {
+      "routing.set": () => update.promise,
+    });
+    fireEvent.click(
+      await slot.findByRole("switch", { name: "Route Claude threads" }),
+    );
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "routing.set",
+        input: { provider: "claude", enabled: false },
+      }),
+    );
+
+    await openActions(slot, "Gmail twin");
+    fireEvent.click(await slot.findByText("Usage details"));
+    expect(
+      await slot.findByRole("dialog", { name: "Gmail twin" }),
+    ).toBeTruthy();
+    fireEvent.click(slot.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(slot.getByRole("switch", { name: "Use Gmail twin" }));
+    expect(
+      slot.queryByRole("dialog", { name: "Turn off Gmail twin?" }),
+    ).toBeNull();
+    expect(
+      slot.rpcCalls.filter((call) => call.method.startsWith("account.")),
+    ).toEqual([]);
+
+    update.resolve({ provider: "claude", enabled: false });
+    await waitFor(() =>
+      expect(
+        slot
+          .getByRole("switch", { name: "Route Claude threads" })
+          .getAttribute("aria-disabled"),
+      ).toBeNull(),
+    );
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "retains focus on the Route %s switch while its update is pending",
+    async (provider) => {
+      const update = deferred<object | null>();
+      const slot = render([account()], {
+        "routing.set": () => update.promise,
+      });
+      if (provider === "codex") {
+        fireEvent.click(slot.getByRole("button", { name: "Advanced" }));
+      }
+      const control = await slot.findByRole("switch", {
+        name: `Route ${provider === "claude" ? "Claude" : "Codex"} threads`,
+      });
+      control.focus();
+      fireEvent.click(control);
+      await waitFor(() =>
+        expect(slot.rpcCalls).toContainEqual({
+          method: "routing.set",
+          input: { provider, enabled: false },
+        }),
+      );
+      expect(control.hasAttribute("disabled")).toBe(false);
+      expect(control.getAttribute("aria-disabled")).toBe("true");
+      expect(document.activeElement).toBe(control);
+      fireEvent.click(control);
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "routing.set"),
+      ).toHaveLength(1);
+      update.resolve({ provider, enabled: false });
+      await waitFor(() =>
+        expect(control.getAttribute("aria-disabled")).toBeNull(),
+      );
+      expect(document.activeElement).toBe(control);
+    },
+  );
 
   it("edits Advanced config fields and shows URL validation inline", async () => {
     const nextConfig = config({

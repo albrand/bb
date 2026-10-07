@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { providerUsageRpcContract } from "./server.js";
 import type { UsageMachine, UsageProvider } from "./usage-schema.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const usageInput = (input: unknown) =>
   providerUsageRpcContract.getUsage.input.parse(input);
@@ -129,11 +133,20 @@ it("shows pooled Claude accounts and host Codex in the default combined view", a
   if (hostClaude.usage?.status === "ok")
     hostClaude.usage.accountEmail = "alexandre@example.com";
   const principal = claudeAccount("principal", "anthropic:account:principal");
-  principal.accountLabel = "principal@example.com";
+  principal.accountLabel = "Claude Max 20x (principal)";
+  principal.accountPool = {
+    active: true,
+    enabled: true,
+    status: "ready",
+    heldUntil: null,
+    error: null,
+    extraUsage: null,
+  };
   if (principal.usage?.status === "ok")
     principal.usage.accountEmail = "principal@example.com";
   const alexandre = claudeAccount("alexandre", "anthropic:account:alexandre");
-  alexandre.accountLabel = "alexandre@example.com";
+  alexandre.accountLabel = "Alexandre";
+  alexandre.accountPool = { ...principal.accountPool };
   if (alexandre.usage?.status === "ok")
     alexandre.usage.accountEmail = "alexandre@example.com";
   const result = {
@@ -148,10 +161,12 @@ it("shows pooled Claude accounts and host Codex in the default combined view", a
     { rpc: { getUsage: () => result } },
   );
 
-  await slot.findByText("principal@example.com");
+  await slot.findByText("Claude Max 20x (principal)");
+  expect(slot.getByText("principal@example.com")).toBeTruthy();
+  expect(slot.getByRole("heading", { name: "Alexandre" })).toBeTruthy();
   expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
   expect(slot.getByText("codex-account@example.com")).toBeTruthy();
-  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+  expect(slot.queryByRole("heading", { name: "Claude Code" })).toBeNull();
   expect(slot.getAllByText("Five-hour limit")).toHaveLength(2);
   expect(slot.getAllByText("Weekly limit")).toHaveLength(3);
   expect(slot.getAllByText(/^Resets/)).toHaveLength(5);
@@ -190,6 +205,33 @@ it("shows pooled Claude accounts and host Codex in the default combined view", a
   ).toBe(true);
 });
 
+it("includes the date when a reset more than a day away is on the same weekday", async () => {
+  const systemTime = new Date(2026, 9, 7, 8, 28);
+  vi.spyOn(Date, "now").mockReturnValue(systemTime.getTime());
+  const target = new Date(
+    systemTime.getTime() + 6 * 24 * 60 * 60_000 + 16 * 60 * 60_000,
+  );
+  const provider = account("codex-account");
+  if (provider.usage?.status === "ok") {
+    provider.usage.windows[0]!.resetsAt = target.toISOString();
+  }
+  const app = await loadPluginApp(() => import("./app"));
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    { rpc: { getUsage: () => ({ machines: [machine("host", [provider])] }) } },
+  );
+
+  const date = target.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  expect(await slot.findByText(`Resets ${date}`)).toBeTruthy();
+});
+
 it("refreshes a distinct host Claude account and keeps pooled accounts", async () => {
   const app = await loadPluginApp(() => import("./app"));
   const matchingHost = claudeAccount(
@@ -203,21 +245,29 @@ it("refreshes a distinct host Claude account and keeps pooled accounts", async (
     "distinct-host",
     "anthropic:account:other",
   );
-  distinctHost.accountLabel = "other@example.com";
+  distinctHost.accountLabel = null;
   if (distinctHost.usage?.status === "ok")
     distinctHost.usage.accountEmail = "other@example.com";
   const pooled = claudeAccount(
     "pooled-alexandre",
     "anthropic:account:alexandre",
   );
-  pooled.accountLabel = "alexandre@example.com";
+  pooled.accountLabel = "Alexandre";
+  pooled.accountPool = {
+    active: true,
+    enabled: true,
+    status: "ready",
+    heldUntil: null,
+    error: null,
+    extraUsage: null,
+  };
   if (pooled.usage?.status === "ok")
     pooled.usage.accountEmail = "alexandre@example.com";
   const refreshedHost = claudeAccount(
     "distinct-host",
     "anthropic:account:other",
   );
-  refreshedHost.accountLabel = "other@example.com";
+  refreshedHost.accountLabel = null;
   if (refreshedHost.usage?.status === "ok") {
     refreshedHost.usage.accountEmail = "other@example.com";
     refreshedHost.usage.windows[0]!.usedPercent = 79;
@@ -247,7 +297,7 @@ it("refreshes a distinct host Claude account and keeps pooled accounts", async (
 
   await slot.findByText("other@example.com");
   expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
-  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(1);
 
   fireEvent.click(slot.getByLabelText("Reload usage data"));
   await waitFor(() => expect(slot.getByText("79% used")).toBeTruthy());

@@ -82,8 +82,8 @@ function formatReset(resetsAt: string | null): string | null {
   const withinWeek = diffMs < 7 * 24 * 60 * 60_000;
   const formatted = reset.toLocaleString(undefined, {
     weekday: withinWeek ? "short" : undefined,
-    month: withinWeek ? undefined : "short",
-    day: withinWeek ? undefined : "numeric",
+    month: "short",
+    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
@@ -134,7 +134,8 @@ function UsageWindowRow({ window }: { window: UsageWindow }) {
 }
 
 interface ProviderUsageBlockProps {
-  accountLabel?: string;
+  accountName?: string;
+  accountEmail?: string;
   config: ProviderConfig;
   usage: ProviderUsage | undefined;
   isLoading: boolean;
@@ -368,15 +369,18 @@ function UsageLocationPicker({
 }
 
 function ProviderUsageBlock({
-  accountLabel,
+  accountName,
+  accountEmail: providedAccountEmail,
   config,
   usage,
   isLoading,
   isError,
 }: ProviderUsageBlockProps) {
   const planLabel = usage?.status === "ok" ? usage.planLabel : null;
+  const name = accountName ?? config.name;
   const accountEmail =
-    accountLabel ?? (usage?.status === "ok" ? usage.accountEmail : null);
+    providedAccountEmail ??
+    (usage?.status === "ok" ? usage.accountEmail : null);
   const headingId = useId();
   const showsUsageWindows =
     !isError && usage?.status === "ok" && usage.windows.length > 0;
@@ -400,9 +404,9 @@ function ProviderUsageBlock({
               id={headingId}
               className="text-sm font-semibold text-foreground"
             >
-              {config.name}
+              {name}
             </h3>
-            {accountEmail && accountEmail !== config.name ? (
+            {accountEmail && accountEmail !== name ? (
               <p className="truncate text-xs text-muted-foreground">
                 {accountEmail}
               </p>
@@ -449,15 +453,24 @@ function UsageResourceGroup({
   return (
     <div className="py-3.5 first:pt-0 last:pb-0">
       {resources.map((resource) => {
-        const email =
-          resource.usage?.status === "ok"
-            ? (resource.usage.accountEmail ?? resource.accountLabel)
-            : resource.accountLabel;
         const usage = resource.usage ?? undefined;
+        const pooledClaude =
+          resource.providerId === "claude-code" &&
+          resource.accountPool != null;
+        const accountEmail =
+          usage?.status === "ok"
+            ? (usage.accountEmail ??
+              (pooledClaude ? null : resource.accountLabel))
+            : pooledClaude
+              ? null
+              : resource.accountLabel;
         return (
           <ProviderUsageBlock
             key={resource.id}
-            accountLabel={email ?? undefined}
+            accountName={
+              pooledClaude ? (resource.accountLabel ?? undefined) : undefined
+            }
+            accountEmail={accountEmail ?? undefined}
             config={config}
             usage={usage}
             isLoading={isLoading}

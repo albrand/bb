@@ -550,8 +550,9 @@ function SubscriptionRow({
         <label className="col-start-3 row-span-full row-start-1 inline-flex items-center justify-center justify-self-end pointer-coarse:size-11 @[40rem]:col-start-4">
           <Switch
             checked={account.enabled}
-            disabled={pending}
+            aria-disabled={pending || undefined}
             aria-label={`Use ${account.label}`}
+            className={pending ? "cursor-not-allowed opacity-50" : undefined}
             onCheckedChange={() => onAction("toggle")}
           />
         </label>
@@ -1325,6 +1326,7 @@ function AccountPoolSettings() {
     account: AccountSummary,
     action: SubscriptionAction,
   ): Promise<void> {
+    if (pending !== null && action === "toggle") return;
     if (action === "details") {
       setDialog({ kind: "account", accountId: account.id });
       return;
@@ -1422,7 +1424,10 @@ function AccountPoolSettings() {
             <label className="inline-flex shrink-0 items-center justify-center pointer-coarse:-my-2.5 pointer-coarse:size-11">
               <Switch
                 checked={proxying}
-                disabled={pending !== null}
+                aria-disabled={pending !== null || undefined}
+                className={
+                  pending !== null ? "cursor-not-allowed opacity-50" : undefined
+                }
                 aria-label="Use the parent Account Pooler"
                 onCheckedChange={(enabled) =>
                   void run("parent-mode", async () => {
@@ -1535,7 +1540,12 @@ function AccountPoolSettings() {
                       Route {provider.title} threads
                       <Switch
                         checked={status?.routing[provider.id] ?? true}
-                        disabled={pending !== null}
+                        aria-disabled={pending !== null || undefined}
+                        className={
+                          pending !== null
+                            ? "cursor-not-allowed opacity-50"
+                            : undefined
+                        }
                         aria-label={`Route ${provider.title} threads`}
                         onCheckedChange={(enabled) =>
                           void run(`routing-${provider.id}`, async () => {
@@ -1647,7 +1657,12 @@ function AccountPoolSettings() {
                       <label className="ml-auto flex w-fit items-center justify-center pointer-coarse:size-11">
                         <Switch
                           checked={status.routing[provider.id]}
-                          disabled={pending !== null}
+                          aria-disabled={pending !== null || undefined}
+                          className={
+                            pending !== null
+                              ? "cursor-not-allowed opacity-50"
+                              : undefined
+                          }
                           aria-label={`Route ${provider.title} threads`}
                           onCheckedChange={(enabled) =>
                             void run(`routing-${provider.id}`, async () => {
