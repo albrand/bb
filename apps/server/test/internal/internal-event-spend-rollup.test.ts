@@ -1,5 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
-import { events, listSpendRollupRows, type SpendRollupRow } from "@bb/db";
+import {
+  events,
+  listSpendRollupRows,
+  SPEND_PRUNE_SAFE_SEQUENCE,
+  type SpendRollupRow,
+} from "@bb/db";
 import {
   encodeClientTurnRequestIdNumber,
   summarizeTokenWeather,
@@ -628,6 +633,42 @@ describe("daemon event spend rollup", () => {
 
       expect((await post([usage({ total: 250, last: 150 })])).status).toBe(200);
       expect(historyComplete()).toBe(1);
+
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: SPEND_PRUNE_SAFE_SEQUENCE,
+        type: "provider/warning",
+        scope: threadScope(),
+        data: {
+          providerThreadId: PROVIDER_THREAD_ID,
+          category: "general",
+          summary: "prune boundary",
+        },
+      });
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      backfillSpend(harness.db);
+      expect(historyComplete()).toBe(1);
+
+      harness.db.run(
+        sql`DELETE FROM events WHERE thread_id = ${thread.id}
+            AND sequence = ${SPEND_PRUNE_SAFE_SEQUENCE}`,
+      );
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: SPEND_PRUNE_SAFE_SEQUENCE + 1,
+        type: "provider/warning",
+        scope: threadScope(),
+        data: {
+          providerThreadId: PROVIDER_THREAD_ID,
+          category: "general",
+          summary: "beyond prune boundary",
+        },
+      });
+      harness.db.run(sql`DELETE FROM fork_thread_spend_cursor`);
+      backfillSpend(harness.db);
+      expect(historyComplete()).toBe(0);
     });
   });
 
