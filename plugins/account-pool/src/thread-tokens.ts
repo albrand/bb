@@ -10,8 +10,10 @@ import { z } from "zod";
 import { providerSchema } from "./contracts.js";
 import type { HubTokenStore } from "./store.js";
 
-const THREAD_ROUTE_PREFIX = "thread-route-";
-const NESTED_ROUTE_PREFIX = "nested-route-";
+const THREAD_ROUTE_PREFIX = "scoped-route-";
+const LEGACY_THREAD_ROUTE_PREFIX = "thread-route-";
+const NESTED_ROUTE_PREFIX = "scoped-nested-route-";
+const LEGACY_NESTED_ROUTE_PREFIX = "nested-route-";
 const ARCHIVED_THREAD_PREFIX = "archived-thread-";
 
 const identifierSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u);
@@ -59,7 +61,11 @@ export class ThreadTokenStore {
   private readonly archivedThreads = new Set<string>();
   private readonly activeArchiveMarkers = new Set<string>();
   private readonly archiveEpochs = new Map<string, number>();
-  private readonly unreadableArchiveMarkers = new Set<string>();
+  private readonly seenArchiveMarkers = new Set<string>();
+  private readonly transientArchiveReadFailures = new Set<string>();
+  private readonly corruptArchiveMarkers = new Set<string>();
+  private readonly archiveDurabilityFailures = new Set<string>();
+  private archiveMarkersLoaded = false;
   private readonly archiveVersions = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
 
@@ -77,29 +83,22 @@ export class ThreadTokenStore {
       if (name.startsWith(ARCHIVED_THREAD_PREFIX) && name.endsWith(".json"))
         await this.loadArchiveMarker(name);
     }
+    this.archiveMarkersLoaded = true;
     for (const name of names) {
       await this.loadFile(name, enrolled).catch(() => undefined);
     }
   }
 
   private async loadArchiveMarker(name: string): Promise<void> {
+    this.seenArchiveMarkers.add(name);
+    let text: string;
     try {
-      const parsed = archiveStateSchema.safeParse(
-        JSON.parse(await fs.readFile(path.join(this.directory, name), "utf8")),
-      );
-      if (
-        !parsed.success ||
-        name !== `${ARCHIVED_THREAD_PREFIX}${digest(parsed.data.threadId)}.json`
-      ) {
-        this.unreadableArchiveMarkers.add(name);
-        return;
-      }
-      this.archiveEpochs.set(parsed.data.threadId, parsed.data.epoch);
-      if (parsed.data.archived) this.archivedThreads.add(parsed.data.threadId);
-      else this.activeArchiveMarkers.add(parsed.data.threadId);
+      text = await fs.readFile(path.join(this.directory, name), "utf8");
     } catch {
-      this.unreadableArchiveMarkers.add(name);
+      this.transientArchiveReadFailures.add(name);
+      return;
     }
+    this.applyArchiveState(name, text);
   }
 
   private async loadFile(
@@ -109,7 +108,10 @@ export class ThreadTokenStore {
     if (!name.endsWith(".json")) return;
     const file = path.join(this.directory, name);
     if (name.startsWith(ARCHIVED_THREAD_PREFIX)) return;
-    if (name.startsWith(THREAD_ROUTE_PREFIX)) {
+    if (
+      name.startsWith(THREAD_ROUTE_PREFIX) ||
+      name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
+    ) {
       const record = await readRecord(file, routeSchema);
       if (
         record !== null &&
@@ -120,7 +122,10 @@ export class ThreadTokenStore {
         this.routes.set(this.key(record, record.hostTokenDigest), record);
         this.tokenIndex.set(digest(record.token), record);
       } else await fs.rm(file, { force: true });
-    } else if (name.startsWith(NESTED_ROUTE_PREFIX)) {
+    } else if (
+      name.startsWith(NESTED_ROUTE_PREFIX) ||
+      name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
+    ) {
       const record = await readRecord(file, nestedRouteSchema);
       if (
         record !== null &&
@@ -231,29 +236,59 @@ export class ThreadTokenStore {
       const epoch = this.archiveEpoch(threadId);
       const nextEpoch = advanceEpoch ? epoch + 1 : epoch;
       this.archiveEpochs.set(threadId, nextEpoch);
-      await this.persist(this.archivedFile(threadId), {
-        threadId,
-        epoch: nextEpoch,
-        archived: true,
-      });
+      const shouldPersist =
+        this.seenArchiveMarkers.has(this.archivedName(threadId)) ||
+        [...this.routes.values()].some((record) => record.threadId === threadId) ||
+        [...this.nestedRoutes.values()].some((record) => record.threadId === threadId) ||
+        (await this.hasCredentialFile(threadId));
+      let markerError: unknown;
+      if (shouldPersist) {
+        try {
+          await this.persist(this.archivedFile(threadId), {
+            threadId,
+            epoch: nextEpoch,
+            archived: true,
+          });
+          this.seenArchiveMarkers.add(this.archivedName(threadId));
+          this.transientArchiveReadFailures.delete(this.archivedName(threadId));
+          this.corruptArchiveMarkers.delete(this.archivedName(threadId));
+          this.archiveDurabilityFailures.delete(threadId);
+        } catch (error) {
+          markerError = error;
+          this.archiveDurabilityFailures.add(threadId);
+        }
+      }
       for (const [key, record] of this.routes) {
         if (record.threadId !== threadId) continue;
-        await fs.rm(this.fileAtEpoch(record, Math.max(0, nextEpoch - 1)), {
-          force: true,
-        });
         this.routes.delete(key);
         this.tokenIndex.delete(digest(record.token));
+        await this.removeProviderFiles(
+          record,
+          Math.max(0, nextEpoch - 1),
+        ).catch(() => undefined);
       }
       for (const [key, record] of this.nestedRoutes) {
         if (record.threadId !== threadId) continue;
-        await fs.rm(
-          this.nestedFileAtEpoch(record, Math.max(0, nextEpoch - 1)),
-          { force: true },
-        );
         this.nestedRoutes.delete(key);
         this.nestedTokenIndex.delete(digest(record.token));
+        await this.removeNestedFiles(
+          record,
+          Math.max(0, nextEpoch - 1),
+        ).catch(() => undefined);
       }
+      await this.quarantineUnreadableLegacyFiles(threadId).catch(() => undefined);
+      if (markerError !== undefined) throw markerError;
     });
+  }
+
+  async removeThreadIfVersion(
+    threadId: string,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    if (this.archiveVersion(threadId) !== expectedVersion)
+      return this.archivedThreads.has(threadId);
+    await this.removeThread(threadId);
+    return true;
   }
 
   archiveVersion(threadId: string): number {
@@ -263,10 +298,15 @@ export class ThreadTokenStore {
   async restoreThread(threadId: string, expectedVersion: number): Promise<void> {
     await this.serialize(async () => {
       if (this.archiveVersion(threadId) !== expectedVersion) return;
-      if (this.unreadableArchiveMarkers.has(this.archivedName(threadId))) return;
       if (this.activeArchiveMarkers.has(threadId)) return;
-      const epoch = this.archiveEpoch(threadId);
-      if (epoch === 0 && !this.archivedThreads.has(threadId)) return;
+      const epoch = (await this.maxFileEpoch(threadId)) + 1;
+      if (
+        epoch === 1 &&
+        !this.archivedThreads.has(threadId) &&
+        !this.corruptArchiveMarkers.has(this.archivedName(threadId)) &&
+        !this.transientArchiveReadFailures.has(this.archivedName(threadId)) &&
+        !this.archiveDurabilityFailures.has(threadId)
+      ) return;
       await this.persist(this.archivedFile(threadId), {
         threadId,
         epoch,
@@ -274,6 +314,11 @@ export class ThreadTokenStore {
       });
       this.archivedThreads.delete(threadId);
       this.activeArchiveMarkers.add(threadId);
+      this.archiveEpochs.set(threadId, epoch);
+      this.seenArchiveMarkers.add(this.archivedName(threadId));
+      this.transientArchiveReadFailures.delete(this.archivedName(threadId));
+      this.corruptArchiveMarkers.delete(this.archivedName(threadId));
+      this.archiveDurabilityFailures.delete(threadId);
     });
   }
 
@@ -292,15 +337,13 @@ export class ThreadTokenStore {
       record.hostTokenDigest !== minted.hostTokenDigest;
     for (const [key, record] of this.routes) {
       if (!stale(record) || (await this.isGenerationLive(record))) continue;
-      await fs.rm(this.file(record), { force: true }).catch(() => undefined);
+      await this.removeProviderFiles(record, this.archiveEpoch(record.threadId)).catch(() => undefined);
       this.routes.delete(key);
       this.tokenIndex.delete(digest(record.token));
     }
     for (const [key, record] of this.nestedRoutes) {
       if (!stale(record) || (await this.isGenerationLive(record))) continue;
-      await fs
-        .rm(this.nestedFile(record), { force: true })
-        .catch(() => undefined);
+      await this.removeNestedFiles(record, this.archiveEpoch(record.threadId)).catch(() => undefined);
       this.nestedRoutes.delete(key);
       this.nestedTokenIndex.delete(digest(record.token));
     }
@@ -335,6 +378,91 @@ export class ThreadTokenStore {
     await fs.rename(temporary, file);
   }
 
+  private applyArchiveState(name: string, text: string): boolean {
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      this.corruptArchiveMarkers.add(name);
+      return true;
+    }
+    const parsed = archiveStateSchema.safeParse(value);
+    if (
+      !parsed.success ||
+      name !== `${ARCHIVED_THREAD_PREFIX}${digest(parsed.data.threadId)}.json`
+    ) {
+      this.corruptArchiveMarkers.add(name);
+      return true;
+    }
+    this.corruptArchiveMarkers.delete(name);
+    this.transientArchiveReadFailures.delete(name);
+    this.archiveEpochs.set(parsed.data.threadId, parsed.data.epoch);
+    if (parsed.data.archived) {
+      this.archivedThreads.add(parsed.data.threadId);
+      this.activeArchiveMarkers.delete(parsed.data.threadId);
+    } else {
+      this.archivedThreads.delete(parsed.data.threadId);
+      this.activeArchiveMarkers.add(parsed.data.threadId);
+    }
+    return parsed.data.archived;
+  }
+
+  private async hasCredentialFile(threadId: string): Promise<boolean> {
+    const names = await fs.readdir(this.directory);
+    for (const name of names) {
+      if (
+        !name.startsWith(THREAD_ROUTE_PREFIX) &&
+        !name.startsWith(LEGACY_THREAD_ROUTE_PREFIX) &&
+        !name.startsWith(NESTED_ROUTE_PREFIX) &&
+        !name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
+      ) continue;
+      const schema = name.startsWith(THREAD_ROUTE_PREFIX) || name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
+        ? routeSchema
+        : nestedRouteSchema;
+      const record = await readRecord(path.join(this.directory, name), schema).catch(() => null);
+      if (record?.threadId === threadId) return true;
+      if (name.includes(threadId)) return true;
+    }
+    return false;
+  }
+
+  private async maxFileEpoch(threadId: string): Promise<number> {
+    let epoch = this.archiveEpoch(threadId);
+    const names = await fs.readdir(this.directory);
+    for (const name of names) {
+      if (
+        !name.startsWith(THREAD_ROUTE_PREFIX) &&
+        !name.startsWith(LEGACY_THREAD_ROUTE_PREFIX) &&
+        !name.startsWith(NESTED_ROUTE_PREFIX) &&
+        !name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
+      ) continue;
+      const schema = name.startsWith(THREAD_ROUTE_PREFIX) || name.startsWith(LEGACY_THREAD_ROUTE_PREFIX)
+        ? routeSchema
+        : nestedRouteSchema;
+      const record = await readRecord(path.join(this.directory, name), schema).catch(() => null);
+      if (record?.threadId === threadId || name.includes(threadId))
+        epoch = Math.max(epoch, this.fileEpoch(name));
+    }
+    return epoch;
+  }
+
+  private async removeNestedFiles(
+    route: NestedRoute & { hostTokenDigest: string },
+    epoch: number,
+  ): Promise<void> {
+    await Promise.all([
+      this.removeCredentialFile(this.nestedFileAtEpoch(route, epoch)),
+      this.removeCredentialFile(this.legacyNestedFile(route)),
+    ]);
+  }
+
+  private legacyNestedFile(route: NestedRoute & { hostTokenDigest: string }): string {
+    return path.join(
+      this.directory,
+      `${LEGACY_NESTED_ROUTE_PREFIX}${this.nestedKey(route, route.hostTokenDigest)}.json`,
+    );
+  }
+
   private key(route: ThreadRoute, hostTokenDigest: string): string {
     return `${route.hostId}-${route.provider}-${route.threadId}-${route.accountId ?? "automatic"}-${hostTokenDigest}`;
   }
@@ -350,6 +478,86 @@ export class ThreadTokenStore {
     return path.join(
       this.directory,
       `${THREAD_ROUTE_PREFIX}${this.key(route, route.hostTokenDigest)}-v${epoch}.json`,
+    );
+  }
+
+  private async removeProviderFiles(
+    route: ThreadRoute & { hostTokenDigest: string },
+    epoch: number,
+  ): Promise<void> {
+    await Promise.all([
+      this.removeCredentialFile(this.fileAtEpoch(route, epoch)),
+      this.removeCredentialFile(this.legacyFile(route)),
+    ]);
+  }
+
+  private async removeCredentialFile(file: string): Promise<void> {
+    try {
+      await fs.rm(file, { force: true });
+    } catch {
+      await fs.rename(
+        file,
+        path.join(this.directory, `revoked-route-${randomUUID()}.json`),
+      );
+    }
+  }
+
+  private async quarantineUnreadableLegacyFiles(
+    threadId: string,
+  ): Promise<void> {
+    const hostIds = (await this.hosts.list()).map((host) => host.hostId);
+    const names = await fs.readdir(this.directory);
+    for (const name of names) {
+      if (
+        !name.startsWith(LEGACY_THREAD_ROUTE_PREFIX) &&
+        !name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)
+      ) continue;
+      const file = path.join(this.directory, name);
+      for (const hostId of hostIds) {
+        if (name.startsWith(LEGACY_NESTED_ROUTE_PREFIX)) {
+          const nestedPrefix = `${LEGACY_NESTED_ROUTE_PREFIX}${hostId}-${threadId}-`;
+          if (
+            name.startsWith(nestedPrefix) &&
+            /^[a-f0-9]{64}\.json$/u.test(name.slice(nestedPrefix.length))
+          ) {
+            await this.quarantineFile(file);
+            break;
+          }
+          continue;
+        }
+        for (const provider of ["claude", "codex"] as const) {
+          const prefix = `${LEGACY_THREAD_ROUTE_PREFIX}${hostId}-${provider}-`;
+          if (!name.startsWith(prefix)) continue;
+          const routeKey = name.slice(prefix.length);
+          const suffix = /-(?:automatic|[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})-[a-f0-9]{64}\.json$/u.exec(
+            routeKey,
+          );
+          if (suffix === null || routeKey.slice(0, suffix.index) !== threadId)
+            continue;
+          await this.quarantineFile(file);
+          break;
+        }
+      }
+    }
+  }
+
+  private async quarantineFile(file: string): Promise<void> {
+    try {
+      await fs.rename(
+        file,
+        path.join(this.directory, `revoked-route-${randomUUID()}.json`),
+      );
+    } catch {
+      await fs.rm(file, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private legacyFile(
+    route: ThreadRoute & { hostTokenDigest: string },
+  ): string {
+    return path.join(
+      this.directory,
+      `${LEGACY_THREAD_ROUTE_PREFIX}${this.key(route, route.hostTokenDigest)}.json`,
     );
   }
 
@@ -392,22 +600,16 @@ export class ThreadTokenStore {
     if (this.archivedThreads.has(threadId)) return true;
     if (this.activeArchiveMarkers.has(threadId)) return false;
     const name = this.archivedName(threadId);
-    if (this.unreadableArchiveMarkers.has(name)) return true;
+    if (this.corruptArchiveMarkers.has(name)) return true;
+    if (this.archiveMarkersLoaded && !this.seenArchiveMarkers.has(name)) return false;
+    if (this.archiveMarkersLoaded && !this.transientArchiveReadFailures.has(name)) return false;
     try {
-      const parsed = archiveStateSchema.safeParse(
-        JSON.parse(await fs.readFile(this.archivedFile(threadId), "utf8")),
-      );
-      if (!parsed.success || parsed.data.threadId !== threadId) {
-        this.unreadableArchiveMarkers.add(name);
-        return true;
-      }
-      this.archiveEpochs.set(threadId, parsed.data.epoch);
-      if (parsed.data.archived) this.archivedThreads.add(threadId);
-      else this.activeArchiveMarkers.add(threadId);
-      return parsed.data.archived;
+      const text = await fs.readFile(this.archivedFile(threadId), "utf8");
+      this.seenArchiveMarkers.add(name);
+      return this.applyArchiveState(name, text);
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") return false;
-      this.unreadableArchiveMarkers.add(name);
+      this.transientArchiveReadFailures.add(name);
       return true;
     }
   }

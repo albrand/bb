@@ -271,10 +271,13 @@ export function createAccountPoolPlugin(
       await threadTokens.removeThread(thread.id);
     });
     bb.events.on("thread.unarchived", async ({ thread }) => {
-      await threadTokens.restoreThread(
-        thread.id,
-        threadTokens.archiveVersion(thread.id),
-      );
+      const current = await bb.sdk.threads.get({ threadId: thread.id });
+      if (current.archivedAt === null) {
+        await threadTokens.restoreThread(
+          thread.id,
+          threadTokens.archiveVersion(thread.id),
+        );
+      }
     });
     bb.events.on("thread.deleted", async ({ thread }) => {
       await Promise.all([
@@ -353,8 +356,7 @@ export function createAccountPoolPlugin(
         await threadTokens.restoreThread(threadId, archiveVersion);
         return false;
       }
-      await threadTokens.removeThread(threadId);
-      return true;
+      return threadTokens.removeThreadIfVersion(threadId, archiveVersion);
     };
     const checkArchived = async (
       threadId: string,

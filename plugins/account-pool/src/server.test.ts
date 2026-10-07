@@ -8973,6 +8973,80 @@ describe("Account Pool credential scoping", () => {
     ).toEqual([]);
   });
 
+  it("does not restore an archived thread from a delayed unarchive event", async () => {
+    const { host } = await scopedFixture();
+    const token = await claudeToken(host, "thread-delayed-unarchive");
+    host.harness.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({ id: threadId, archivedAt: 1_000 }),
+    );
+    await host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({
+        id: "thread-delayed-unarchive",
+        archivedAt: 1_000,
+      }),
+    });
+    await host.harness.behavior.emitThreadEvent("thread.unarchived", {
+      thread: makeThreadResponse({ id: "thread-delayed-unarchive" }),
+    });
+    expect(await statusOf(host, token, "/v1/messages")).toBe(401);
+    const entries = await host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      {
+        threadId: "thread-delayed-unarchive",
+        projectId: "project-one",
+        hostId: "host-one",
+      },
+    );
+    expect(entries.some((entry) => entry.name === "ANTHROPIC_AUTH_TOKEN")).toBe(
+      false,
+    );
+  });
+
+  it("does not apply a stale archived lookup after archive and unarchive events", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const oldToken = await claudeToken(host, "thread-racing");
+    const lookupStarted = deferred();
+    const releaseLookup = deferred();
+    let lookups = 0;
+    host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      lookups += 1;
+      if (lookups === 1) {
+        lookupStarted.resolve();
+        await releaseLookup.promise;
+        return makeThreadResponse({ id: threadId, archivedAt: 1_000 });
+      }
+      return makeThreadResponse({ id: threadId });
+    });
+    const resolving = host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      {
+        threadId: "thread-racing",
+        projectId: "project-one",
+        hostId: "host-one",
+      },
+    );
+    await lookupStarted.promise;
+    await host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-racing", archivedAt: 1_000 }),
+    });
+    await host.harness.behavior.emitThreadEvent("thread.unarchived", {
+      thread: makeThreadResponse({ id: "thread-racing" }),
+    });
+    releaseLookup.resolve();
+    const entries = await resolving;
+    const token = entries.find(
+      (entry) => entry.name === "ANTHROPIC_AUTH_TOKEN",
+    );
+    expect(lookups).toBe(3);
+    if (token === undefined || typeof token.value !== "string")
+      throw new Error("Account Pool token was not resolved after unarchive.");
+    expect(await statusOf(host, oldToken, "/v1/messages")).toBe(401);
+    expect(await statusOf(host, token.value, "/v1/messages")).toBe(
+      200,
+    );
+  });
+
   it("blanks the inherited routing for an archived thread on a nested server", async () => {
     const parent = await scopedFixture();
     const { host: child } = await startNestedChild(

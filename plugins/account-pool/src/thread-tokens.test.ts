@@ -56,7 +56,7 @@ it("binds credentials to a thread, provider, and account snapshot and removes th
   expect(await threads.authenticate(second, "claude")).toEqual(selected);
   expect(await threads.authenticate(first, "claude")).toEqual(route);
   for (const file of (await fs.readdir(directory)).filter((name) =>
-    name.startsWith("thread-route-"),
+    name.startsWith("scoped-route-"),
   )) {
     expect((await fs.stat(path.join(directory, file))).mode & 0o777).toBe(
       0o600,
@@ -89,7 +89,7 @@ it("issues nested credentials per thread, apart from provider credentials", asyn
   expect(await threads.authenticateNested(null)).toBeNull();
   expect(await threads.authenticateNested("A".repeat(43))).toBeNull();
   const files = (await fs.readdir(directory)).filter((name) =>
-    name.startsWith("nested-route-"),
+    name.startsWith("scoped-nested-route-"),
   );
   expect(files).toHaveLength(2);
   for (const file of files) {
@@ -106,12 +106,12 @@ it("issues nested credentials per thread, apart from provider credentials", asyn
   });
   expect(
     (await fs.readdir(directory)).filter((name) =>
-      name.startsWith("nested-route-"),
+      name.startsWith("scoped-nested-route-"),
     ),
   ).toHaveLength(1);
 });
 
-it("keeps the stored provider credential format readable by builds without nested credentials", async () => {
+it("writes provider and nested credentials under rollback-safe prefixes", async () => {
   const { directory, threads, route, hostToken } = await fixture();
   await threads.forThread(route, hostToken);
   await threads.forNested(
@@ -119,7 +119,7 @@ it("keeps the stored provider credential format readable by builds without neste
     hostToken,
   );
   const [file] = (await fs.readdir(directory)).filter((name) =>
-    name.startsWith("thread-route-"),
+    name.startsWith("scoped-route-"),
   );
   const record: unknown = JSON.parse(
     await fs.readFile(path.join(directory, file ?? ""), "utf8"),
@@ -135,10 +135,79 @@ it("keeps the stored provider credential format readable by builds without neste
     "token",
   ]);
   const nestedFile = (await fs.readdir(directory)).find((name) =>
-    name.startsWith("nested-route-"),
+    name.startsWith("scoped-nested-route-"),
   );
   expect(nestedFile).toBeDefined();
+  expect(nestedFile?.startsWith("scoped-route-")).toBe(false);
   expect(nestedFile?.startsWith("thread-route-")).toBe(false);
+  expect(nestedFile?.startsWith("nested-route-")).toBe(false);
+});
+
+it("reads legacy provider files while new provider files use a rollback-safe prefix", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const token = await threads.forThread(route, hostToken);
+  const [currentName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-route-"),
+  );
+  expect(currentName).toBeDefined();
+  expect(currentName?.startsWith("thread-route-")).toBe(false);
+  const legacyName = currentName
+    ?.replace(/^scoped-route-/u, "thread-route-")
+    .replace(/-v0\.json$/u, ".json");
+  expect(legacyName).toBeDefined();
+  await fs.rename(
+    path.join(directory, currentName ?? ""),
+    path.join(directory, legacyName ?? ""),
+  );
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticate(token)).toEqual(route);
+});
+
+it("reads legacy nested files while new nested files use a rollback-safe prefix", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const nestedRoute = { hostId: route.hostId, threadId: route.threadId };
+  const token = await threads.forNested(nestedRoute, hostToken);
+  const [currentName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-nested-route-"),
+  );
+  expect(currentName).toBeDefined();
+  const legacyName = currentName
+    ?.replace(/^scoped-nested-route-/u, "nested-route-")
+    .replace(/-v0\.json$/u, ".json");
+  await fs.rename(
+    path.join(directory, currentName ?? ""),
+    path.join(directory, legacyName ?? ""),
+  );
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticateNested(token)).toEqual(nestedRoute);
+});
+
+it("removes legacy provider and nested credential files when archiving", async () => {
+  const { directory, threads, route, hostToken } = await fixture();
+  await threads.forThread(route, hostToken);
+  await threads.forNested(
+    { hostId: route.hostId, threadId: route.threadId },
+    hostToken,
+  );
+  const names = await fs.readdir(directory);
+  for (const name of names.filter((entry) =>
+    entry.startsWith("scoped-route-") || entry.startsWith("scoped-nested-route-"),
+  )) {
+    const legacy = name
+      .replace(/^scoped-route-/u, "thread-route-")
+      .replace(/^scoped-nested-route-/u, "nested-route-")
+      .replace(/-v0\.json$/u, ".json");
+    await fs.rename(path.join(directory, name), path.join(directory, legacy));
+  }
+  await threads.removeThread(route.threadId);
+  expect(
+    (await fs.readdir(directory)).filter(
+      (name) =>
+        name.startsWith("thread-route-") || name.startsWith("nested-route-"),
+    ),
+  ).toEqual([]);
 });
 
 it("sweeps dead and unenrolled credentials on startup and leaves other secrets alone", async () => {
@@ -159,13 +228,13 @@ it("sweeps dead and unenrolled credentials on startup and leaves other secrets a
   await fs.writeFile(path.join(directory, "account-keep.json"), "{}");
   const credentialFiles = async (prefix: string) =>
     (await fs.readdir(directory)).filter((name) => name.startsWith(prefix));
-  expect(await credentialFiles("nested-route-")).toHaveLength(3);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(3);
   const lastUsedBefore = (await hosts.list()).map(
     (summary) => summary.lastUsedAt,
   );
   const withinGrace = new ThreadTokenStore(directory, hosts);
   await withinGrace.initialize([route.hostId]);
-  expect(await credentialFiles("nested-route-")).toHaveLength(2);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(2);
   expect((await hosts.list()).map((summary) => summary.lastUsedAt)).toEqual(
     lastUsedBefore,
   );
@@ -180,8 +249,8 @@ it("sweeps dead and unenrolled credentials on startup and leaves other secrets a
   expect(await reloaded.authenticateNested(staleNested)).toBeNull();
   expect(await reloaded.authenticate(currentProvider)).toEqual(route);
   expect(await reloaded.authenticateNested(currentNested)).toEqual(nestedRoute);
-  expect(await credentialFiles("thread-route-")).toHaveLength(1);
-  expect(await credentialFiles("nested-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(1);
   expect(await credentialFiles("account-keep")).toHaveLength(1);
   expect(await credentialFiles("hub-token-")).toHaveLength(2);
 });
@@ -211,7 +280,7 @@ it("loads past unreadable or unrecognised credential files and discards them", a
   const provider = await threads.forThread(route, hostToken);
   const nested = await threads.forNested(nestedRoute, hostToken);
   const [validNested] = (await fs.readdir(directory)).filter((name) =>
-    name.startsWith("nested-route-"),
+    name.startsWith("scoped-nested-route-"),
   );
   const newerNested = {
     ...z
@@ -261,7 +330,7 @@ it.skipIf(process.getuid?.() === 0)(
     const { directory, hosts, threads, route, hostToken } = await fixture();
     const provider = await threads.forThread(route, hostToken);
     const [name] = (await fs.readdir(directory)).filter((entry) =>
-      entry.startsWith("thread-route-"),
+      entry.startsWith("scoped-route-"),
     );
     const file = path.join(directory, name ?? "");
     await fs.chmod(file, 0o000);
@@ -278,6 +347,16 @@ it.skipIf(process.getuid?.() === 0)(
 it("does not reload an unreadable credential after its thread is archived", async () => {
   const { directory, hosts, threads, route, hostToken } = await fixture();
   const token = await threads.forThread(route, hostToken);
+  const [currentName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-route-"),
+  );
+  const legacyName = currentName
+    ?.replace(/^scoped-route-/u, "thread-route-")
+    .replace(/-v0\.json$/u, ".json");
+  await fs.rename(
+    path.join(directory, currentName ?? ""),
+    path.join(directory, legacyName ?? ""),
+  );
   const unreadable = new ThreadTokenStore(directory, hosts);
   const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("EIO"));
   try {
@@ -291,7 +370,7 @@ it("does not reload an unreadable credential after its thread is archived", asyn
   expect(await reloaded.authenticate(token)).toBeNull();
   expect(
     (await fs.readdir(directory)).filter((name) =>
-      name.startsWith("thread-route-"),
+      name.startsWith("scoped-route-") || name.startsWith("thread-route-"),
     ),
   ).toEqual([]);
 });
@@ -314,6 +393,86 @@ it("keeps archive revocation across restart and restores only the current archiv
   expect(
     await reloaded.authenticate(await reloaded.forThread(route, hostToken)),
   ).toEqual(route);
+});
+
+it("does not persist archive markers for threads without credentials", async () => {
+  const { directory, threads } = await fixture();
+  await threads.removeThread("thr_empty");
+  expect(
+    (await fs.readdir(directory)).filter((name) =>
+      name.startsWith("archived-thread-"),
+    ),
+  ).toEqual([]);
+});
+
+it("recovers from a transient archive-marker read failure on active lookup", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const oldToken = await threads.forThread(route, hostToken);
+  await threads.removeThread(route.threadId);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  const readFile = vi
+    .spyOn(fs, "readFile")
+    .mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }));
+  try {
+    await reloaded.initialize([route.hostId]);
+  } finally {
+    readFile.mockRestore();
+  }
+  await reloaded.restoreThread(
+    route.threadId,
+    reloaded.archiveVersion(route.threadId),
+  );
+  const newToken = await reloaded.forThread(route, hostToken);
+  expect(newToken).not.toBe(oldToken);
+  expect(await reloaded.authenticate(oldToken)).toBeNull();
+});
+
+it("evicts credentials and quarantines files when the archive marker cannot be written", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const oldToken = await threads.forThread(route, hostToken);
+  const [routeName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-route-"),
+  );
+  const writeFile = vi
+    .spyOn(fs, "writeFile")
+    .mockRejectedValueOnce(new Error("EIO"));
+  const remove = vi.spyOn(fs, "rm").mockImplementationOnce(async () => {
+    throw new Error("EIO");
+  });
+  try {
+    await expect(threads.removeThread(route.threadId)).rejects.toThrow("EIO");
+  } finally {
+    writeFile.mockRestore();
+    remove.mockRestore();
+  }
+  expect(await threads.authenticate(oldToken)).toBeNull();
+  expect((await fs.readdir(directory)).some((name) => name === routeName)).toBe(
+    false,
+  );
+  const restoreWrite = vi
+    .spyOn(fs, "writeFile")
+    .mockRejectedValueOnce(new Error("EIO"));
+  try {
+    await expect(
+      threads.restoreThread(
+        route.threadId,
+        threads.archiveVersion(route.threadId),
+      ),
+    ).rejects.toThrow("EIO");
+  } finally {
+    restoreWrite.mockRestore();
+  }
+  await expect(threads.forThread(route, hostToken)).rejects.toThrow();
+  expect(await threads.authenticate(oldToken)).toBeNull();
+  await threads.restoreThread(
+    route.threadId,
+    threads.archiveVersion(route.threadId),
+  );
+  const newToken = await threads.forThread(route, hostToken);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticate(oldToken)).toBeNull();
+  expect(await reloaded.authenticate(newToken)).toEqual(route);
 });
 
 it("does not revive an unreadable pre-archive credential after unarchive", async () => {
@@ -353,7 +512,9 @@ it("mints even when an expired-generation record cannot be removed", async () =>
   );
   const stale = (await fs.readdir(directory)).filter(
     (entry) =>
-      entry.startsWith("thread-route-") || entry.startsWith("nested-route-"),
+      entry.startsWith("scoped-route-") ||
+      entry.startsWith("thread-route-") ||
+      entry.startsWith("scoped-nested-route-"),
   );
   expect(stale).toHaveLength(2);
   await hosts.rotate(route.hostId);
@@ -384,7 +545,7 @@ it("keeps routes apart when identifiers contain the separator", async () => {
   expect(await threads.authenticateNested(secondNested)).toEqual(second);
   expect(
     (await fs.readdir(directory)).filter((name) =>
-      name.startsWith("nested-route-"),
+      name.startsWith("scoped-nested-route-"),
     ),
   ).toHaveLength(2);
   await threads.removeThread("c");
@@ -405,22 +566,22 @@ it("reclaims expired-generation credentials for a thread when minting, and keeps
   const credentialFiles = async (prefix: string) =>
     (await fs.readdir(directory)).filter((name) => name.startsWith(prefix));
   await threads.forNested(nestedRoute, nextHostToken);
-  expect(await credentialFiles("nested-route-")).toHaveLength(3);
-  expect(await credentialFiles("thread-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(3);
+  expect(await credentialFiles("scoped-route-")).toHaveLength(1);
   advance(10 * 60_000 + 1);
   const current = await threads.forThread(route, nextHostToken);
-  expect(await credentialFiles("thread-route-")).toHaveLength(1);
-  expect(await credentialFiles("nested-route-")).toHaveLength(2);
+  expect(await credentialFiles("scoped-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(2);
   expect(await threads.authenticate(current)).toEqual(route);
   const reloaded = new ThreadTokenStore(directory, hosts);
   await reloaded.initialize([route.hostId]);
-  expect(await credentialFiles("thread-route-")).toHaveLength(1);
-  expect(await credentialFiles("nested-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(1);
   await hosts.rotate(route.hostId);
   const thirdHostToken = await hosts.forHost(route.hostId);
   advance(10 * 60_000 + 1);
   const nextNested = await threads.forNested(nestedRoute, thirdHostToken);
-  expect(await credentialFiles("thread-route-")).toHaveLength(0);
-  expect(await credentialFiles("nested-route-")).toHaveLength(1);
+  expect(await credentialFiles("scoped-route-")).toHaveLength(0);
+  expect(await credentialFiles("scoped-nested-route-")).toHaveLength(1);
   expect(await threads.authenticateNested(nextNested)).toEqual(nestedRoute);
 });
