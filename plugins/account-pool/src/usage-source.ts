@@ -59,7 +59,7 @@ export function registerUsageSource(
           })),
         );
         const accounts = routed
-          .filter(({ enabled }) => enabled)
+          .filter(({ account, enabled }) => enabled && account.enabled)
           .map(({ account }) => account)
           .sort((left, right) => left.priority - right.priority);
         return {
@@ -101,6 +101,7 @@ export function registerUsageSource(
             UsageResource["usage"],
             { status: "ok" }
           >["windows"] = [];
+          let expiredWindows = 0;
           const add = (
             id: string,
             label: string,
@@ -109,6 +110,10 @@ export function registerUsageSource(
             model: string | null,
           ) => {
             if (utilization === null) return;
+            if (reset !== null && reset <= Date.now()) {
+              expiredWindows += 1;
+              return;
+            }
             windows.push({
               kind:
                 label === "Five-hour limit"
@@ -180,7 +185,9 @@ export function registerUsageSource(
               : "Usage could not be collected for this account. Try refreshing usage.") ??
             (account.observedAt === null
               ? "Usage has not been observed for this account."
-              : null);
+              : expiredWindows > 0 && windows.length === 0
+                ? "Usage data is stale. Refresh usage."
+                : null);
           return {
             id: account.id,
             accountKey: accountKey(account),

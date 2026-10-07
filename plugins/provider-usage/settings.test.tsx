@@ -173,6 +173,30 @@ it("retains measured accounts when reloading fails", async () => {
   expect(slot.getByText("42% used")).toBeTruthy();
 });
 
+it("shows one account refresh error beside that account while keeping others current", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const failed = account("failed");
+  failed.usage = {
+    status: "error",
+    message: "Usage could not be refreshed for this account.",
+  };
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    {
+      rpc: {
+        getUsage: () => ({
+          machines: [machine("source:pool", [failed, account("current")])],
+        }),
+      },
+    },
+  );
+
+  await slot.findByText("Usage could not be refreshed for this account.");
+  expect(slot.getByText("42% used")).toBeTruthy();
+  expect(slot.queryByText("Couldn’t refresh. Showing last update.")).toBeNull();
+});
+
 it("shows pending measurements without inventing usage, then reports an unavailable account gracefully", async () => {
   const app = await loadPluginApp(() => import("./app"));
   const resource = { ...account("pending"), usage: null };

@@ -8033,6 +8033,17 @@ it("lists every routed pool account and hides them from provider usage when rout
       priority: 2,
     }),
   );
+  const disabled = accountSchema.parse(
+    await fixture.host.harness.behavior.callRpc("account.add", {
+      provider: "claude",
+      source: { kind: "api-key", apiKey: "test-disabled-account-key" },
+      label: "Disabled",
+      priority: 3,
+    }),
+  );
+  await fixture.host.harness.behavior.callRpc("account.disable", {
+    id: disabled.id,
+  });
   await fixture.host.harness.behavior.callRpc("routing.set", {
     provider: "claude",
     enabled: true,
@@ -8071,6 +8082,37 @@ it("lists every routed pool account and hides them from provider usage when rout
       await fixture.host.harness.behavior.callRpc(usageListMethod, {}),
     ),
   ).toEqual({ resources: [] });
+});
+
+it("does not publish expired quota windows as current usage", async () => {
+  const upstream = await startUpstream((_request, response) => {
+    response.end();
+  });
+  cleanups.push(upstream.close);
+  const fixture = await createFixture({ upstreamUrl: upstream.url });
+  const now = Date.now();
+  setQuota(fixture, fixture.account.id, {
+    fiveHourUtilization: 0.8,
+    fiveHourResetAt: now - 10 * 60 * 60 * 1_000,
+    fiveHourStatus: "allowed",
+    observedAt: now - 10 * 60 * 60 * 1_000,
+  });
+  await fixture.host.harness.behavior.callRpc("routing.set", {
+    provider: "claude",
+    enabled: true,
+  });
+
+  const measurement = usageMeasurementSchema.parse(
+    await fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+      resourceId: fixture.account.id,
+      refresh: false,
+    }),
+  );
+
+  expect(measurement.usage).toMatchObject({
+    status: "error",
+    message: "Usage data is stale. Refresh usage.",
+  });
 });
 
 describe("Account Pool nested proxy", () => {
