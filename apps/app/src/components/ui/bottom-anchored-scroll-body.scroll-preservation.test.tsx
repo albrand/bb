@@ -979,7 +979,8 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
       act(() => getLatestResizeObserver().trigger());
       expect(scrollArea.scrollTop).toBe(5_401);
 
-      fireEvent.pointerDown(scrollArea);
+      fireEvent.pointerDown(scrollArea, { clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 10, clientY: 110 });
       scrollArea.scrollTop = 5_501;
       if (scrollEventOrder === "after release") fireEvent.pointerUp(window);
       fireEvent.scroll(scrollArea);
@@ -1018,6 +1019,38 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
     fireEvent.pointerUp(window);
     scrollArea.scrollTop = 5_252;
     fireEvent.scroll(scrollArea);
+    act(() => getLatestResizeObserver().trigger());
+
+    expect(scrollArea.scrollTop).toBe(5_401);
+    expect(getRow("row-b").getBoundingClientRect().top).toBe(197);
+  });
+
+  it("preserves the restored row gap during a pointer press without movement", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily("thread-a"), {
+      rowId: "row-b",
+      offsetWithinRow: -197,
+      atBottom: false,
+    });
+    const { scrollArea, getRow } = renderTimeline({
+      threadId: "thread-a",
+      rowIds: ["row-a", "row-b", "row-c"],
+      virtualized: true,
+    });
+    mockScrollAreaRect(scrollArea, 796);
+    vi.spyOn(getRow("row-b"), "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, 5_598 - scrollArea.scrollTop, 100, 100),
+    );
+    setScrollMetrics(scrollArea, {
+      scrollHeight: 14_222,
+      clientHeight: 796,
+      scrollTop: 0,
+    });
+    act(() => getLatestResizeObserver().trigger());
+
+    fireEvent.pointerDown(scrollArea, { clientX: 10, clientY: 10 });
+    scrollArea.scrollTop = 5_252;
+    fireEvent.scroll(scrollArea);
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
     act(() => getLatestResizeObserver().trigger());
 
     expect(scrollArea.scrollTop).toBe(5_401);
