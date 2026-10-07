@@ -154,36 +154,72 @@ function isSource(machine: UsageMachine): boolean {
   return machine.id.startsWith("source:");
 }
 
-function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
-  const pool = machines.find(
-    (machine) => isSource(machine) && machine.displayName === "Account Pooler",
+function sourceClaudeProviders(machines: UsageMachine[]): UsageProvider[] {
+  return machines
+    .filter(isSource)
+    .flatMap((machine) =>
+      machine.providers.filter(
+        (provider) => provider.providerId === "claude-code",
+      ),
+    );
+}
+
+function distinctPooledProviders(providers: UsageProvider[]): UsageProvider[] {
+  const seen = new Set<string>();
+  return providers.filter((provider) => {
+    if (provider.accountKey == null) return true;
+    const identity = JSON.stringify([provider.providerId, provider.accountKey]);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+function shouldKeepHostClaude(
+  provider: UsageProvider,
+  pooledClaude: UsageProvider[],
+): boolean {
+  if (pooledClaude.length === 0) return true;
+  if (provider.accountKey == null) return false;
+  if (pooledClaude.some((pooled) => pooled.accountKey == null)) return false;
+  return !pooledClaude.some(
+    (pooled) =>
+      pooled.providerId === provider.providerId &&
+      pooled.accountKey === provider.accountKey,
   );
+}
+
+function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
+  const sourceClaude = distinctPooledProviders(sourceClaudeProviders(machines));
   const host = machines.find((machine) => !isSource(machine));
-  const pooledClaude =
-    pool?.providers.filter(
-      (provider) => provider.providerId === "claude-code",
-    ) ?? [];
-  const providers =
-    pooledClaude.length > 0
-      ? [
-          ...pooledClaude,
-          ...(host?.providers.filter(
-            (provider) => provider.providerId !== "claude-code",
-          ) ?? []),
-        ]
-      : (host?.providers ?? []);
-  const sourceError = [pool, host].some(
+  const hasPooledClaude = sourceClaude.length > 0;
+  const pooledClaude = sourceClaude;
+  const providers = hasPooledClaude
+    ? [
+        ...pooledClaude,
+        ...(host?.providers.filter(
+          (provider) =>
+            provider.providerId !== "claude-code" ||
+            shouldKeepHostClaude(provider, pooledClaude),
+        ) ?? []),
+      ]
+    : (host?.providers ?? []);
+  const sources = machines.filter(
+    (machine) =>
+      isSource(machine) &&
+      machine.providers.some(
+        (provider) => provider.providerId === "claude-code",
+      ),
+  );
+  const sourceError = [...sources, host].some(
     (machine) => machine !== undefined && machine.error !== null,
   );
 
-  if (host === undefined && pool === undefined) return null;
+  if (host === undefined && sources.length === 0) return null;
   return {
     id: combinedLocationId,
     displayName: "Combined",
-    status:
-      pooledClaude.length > 0
-        ? "connected"
-        : (host?.status ?? pool?.status ?? "connected"),
+    status: hasPooledClaude ? "connected" : (host?.status ?? "connected"),
     providers,
     error:
       sourceError && !hasReportedUsage(providers)
@@ -192,26 +228,66 @@ function combinedUsageMachine(machines: UsageMachine[]): UsageMachine | null {
   };
 }
 
-function usageMachinesToRefresh(
+interface UsageRefreshTarget {
+  machine: UsageMachine;
+  providerIds: string[];
+}
+
+function usageTargetsToRefresh(
   machines: UsageMachine[],
   selectedId: string | null,
-): UsageMachine[] {
+): UsageRefreshTarget[] {
   if (selectedId !== null && selectedId !== combinedLocationId) {
     const selected = machines.find((machine) => machine.id === selectedId);
-    return selected === undefined ? [] : [selected];
+    return selected === undefined
+      ? []
+      : [
+          {
+            machine: selected,
+            providerIds: [
+              ...new Set(
+                selected.providers.map((provider) => provider.providerId),
+              ),
+            ],
+          },
+        ];
   }
 
-  const pool = machines.find(
-    (machine) => isSource(machine) && machine.displayName === "Account Pooler",
+  const sourceMachines = machines.filter(
+    (machine) =>
+      isSource(machine) &&
+      machine.providers.some(
+        (provider) => provider.providerId === "claude-code",
+      ),
   );
   const host = machines.find((machine) => !isSource(machine));
-  const hasPooledClaude = pool?.providers.some(
-    (provider) => provider.providerId === "claude-code",
-  );
-  if (!hasPooledClaude) return host === undefined ? [] : [host];
-  return [pool, host].filter(
-    (machine): machine is UsageMachine => machine !== undefined,
-  );
+  if (sourceMachines.length === 0)
+    return host === undefined
+      ? []
+      : [
+          {
+            machine: host,
+            providerIds: [
+              ...new Set(host.providers.map((provider) => provider.providerId)),
+            ],
+          },
+        ];
+  const targets = sourceMachines.map((machine) => ({
+    machine,
+    providerIds: ["claude-code"],
+  }));
+  if (host !== undefined)
+    targets.push({
+      machine: host,
+      providerIds: [
+        ...new Set(
+          host.providers
+            .filter((provider) => provider.providerId !== "claude-code")
+            .map((provider) => provider.providerId),
+        ),
+      ],
+    });
+  return targets;
 }
 
 function mergeUsageMachines(
@@ -618,14 +694,10 @@ export function UsageSettings() {
         });
         if (disposed) return;
         setMachines(inventory.machines);
-        const targets = usageMachinesToRefresh(inventory.machines, selectedId)
-          .filter((machine) => machine.status === "connected")
-          .flatMap((machine) =>
-            [
-              ...new Set(
-                machine.providers.map((provider) => provider.providerId),
-              ),
-            ]
+        const targets = usageTargetsToRefresh(inventory.machines, selectedId)
+          .filter(({ machine }) => machine.status === "connected")
+          .flatMap(({ machine, providerIds }) =>
+            providerIds
               .filter((providerId) =>
                 machine.providers.some(
                   (provider) =>

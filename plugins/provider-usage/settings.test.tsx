@@ -10,10 +10,15 @@ afterEach(cleanup);
 const usageInput = (input: unknown) =>
   providerUsageRpcContract.getUsage.input.parse(input);
 
-function account(id: string, providerId = "codex"): UsageProvider {
+function account(
+  id: string,
+  providerId = "codex",
+  accountKey: string | null = null,
+): UsageProvider {
   return {
     id,
     providerId,
+    accountKey,
     accountLabel: `${id}@example.com`,
     displayName: providerId === "codex" ? "Codex" : "Claude Code",
     logoUrl: null,
@@ -36,9 +41,13 @@ function account(id: string, providerId = "codex"): UsageProvider {
     },
   };
 }
-const machine = (id: string, providers: UsageProvider[]): UsageMachine => ({
+const machine = (
+  id: string,
+  providers: UsageProvider[],
+  displayName = id === "source:pool" ? "Account Pooler" : "My machine",
+): UsageMachine => ({
   id,
-  displayName: id === "source:pool" ? "Account Pooler" : "My machine",
+  displayName,
   status: "connected",
   error: null,
   providers,
@@ -112,22 +121,25 @@ it("fetches all providers only in the selected source and keeps grouped accounts
 
 it("shows pooled Claude accounts and host Codex in the default combined view", async () => {
   const app = await loadPluginApp(() => import("./app"));
-  const hostClaude = claudeAccount("host-claude");
+  const hostClaude = claudeAccount(
+    "host-claude",
+    "anthropic:account:alexandre",
+  );
   hostClaude.accountLabel = "alexandre@example.com";
   if (hostClaude.usage?.status === "ok")
     hostClaude.usage.accountEmail = "alexandre@example.com";
-  const principal = claudeAccount("principal");
+  const principal = claudeAccount("principal", "anthropic:account:principal");
   principal.accountLabel = "principal@example.com";
   if (principal.usage?.status === "ok")
     principal.usage.accountEmail = "principal@example.com";
-  const alexandre = claudeAccount("alexandre");
+  const alexandre = claudeAccount("alexandre", "anthropic:account:alexandre");
   alexandre.accountLabel = "alexandre@example.com";
   if (alexandre.usage?.status === "ok")
     alexandre.usage.accountEmail = "alexandre@example.com";
   const result = {
     machines: [
       machine("host", [hostClaude, account("codex-account")]),
-      machine("source:pool", [principal, alexandre]),
+      machine("source:pool", [principal, alexandre], "Renamed subscriptions"),
     ],
   };
   const slot = renderSlot(
@@ -178,8 +190,94 @@ it("shows pooled Claude accounts and host Codex in the default combined view", a
   ).toBe(true);
 });
 
-function claudeAccount(id: string): UsageProvider {
-  const provider = account(id, "claude-code");
+it("drops only the matching host Claude identity and keeps a distinct account", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const matchingHost = claudeAccount(
+    "matching-host",
+    "anthropic:account:alexandre",
+  );
+  matchingHost.accountLabel = "alexandre@example.com";
+  if (matchingHost.usage?.status === "ok")
+    matchingHost.usage.accountEmail = "alexandre@example.com";
+  const distinctHost = claudeAccount(
+    "distinct-host",
+    "anthropic:account:other",
+  );
+  distinctHost.accountLabel = "other@example.com";
+  if (distinctHost.usage?.status === "ok")
+    distinctHost.usage.accountEmail = "other@example.com";
+  const pooled = claudeAccount(
+    "pooled-alexandre",
+    "anthropic:account:alexandre",
+  );
+  pooled.accountLabel = "alexandre@example.com";
+  if (pooled.usage?.status === "ok")
+    pooled.usage.accountEmail = "alexandre@example.com";
+  const slot = renderSlot(
+    app.settingsSections[0]!,
+    {},
+    {
+      rpc: {
+        getUsage: () => ({
+          machines: [
+            machine("host", [matchingHost, distinctHost]),
+            machine("source:pool", [pooled]),
+          ],
+        }),
+      },
+    },
+  );
+
+  await slot.findByText("other@example.com");
+  expect(slot.getAllByText("alexandre@example.com")).toHaveLength(1);
+  expect(slot.getAllByRole("heading", { name: "Claude Code" })).toHaveLength(2);
+});
+
+it.each([
+  {
+    name: "host identity is unknown",
+    hostIdentity: null,
+    pooledIdentity: "anthropic:account:alexandre",
+  },
+  {
+    name: "pooled identity is unknown",
+    hostIdentity: "anthropic:account:alexandre",
+    pooledIdentity: null,
+  },
+])(
+  "conservatively suppresses host Claude when $name",
+  async ({ hostIdentity, pooledIdentity }) => {
+    const app = await loadPluginApp(() => import("./app"));
+    const host = claudeAccount("host-claude", hostIdentity);
+    const pooled = claudeAccount("pooled-alexandre", pooledIdentity);
+    pooled.accountLabel = "principal@example.com";
+    if (pooled.usage?.status === "ok")
+      pooled.usage.accountEmail = "principal@example.com";
+    const slot = renderSlot(
+      app.settingsSections[0]!,
+      {},
+      {
+        rpc: {
+          getUsage: () => ({
+            machines: [
+              machine("host", [host]),
+              machine("source:pool", [pooled]),
+            ],
+          }),
+        },
+      },
+    );
+
+    await slot.findByText("principal@example.com");
+    expect(slot.queryByText("host-claude@example.com")).toBeNull();
+  },
+);
+
+function claudeAccount(
+  id: string,
+  accountKey: string | null = null,
+): UsageProvider {
+  const provider = account(id, "claude-code", accountKey);
   if (provider.usage?.status === "ok") {
     provider.usage.windows = [
       {

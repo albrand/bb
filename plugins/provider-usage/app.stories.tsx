@@ -50,12 +50,14 @@ function provider(
   id: string,
   providerId: string,
   usage: ProviderUsage | null,
+  accountKey: string | null = null,
 ): UsageProvider {
   const isClaude = providerId === "claude-code";
   const displayName = isClaude ? "Claude Code" : "Codex";
   return {
     id,
     providerId,
+    accountKey,
     accountLabel: `${id}@example.com`,
     displayName,
     logoUrl: isClaude ? claudeCodeLogoUrl : codexLogoUrl,
@@ -286,6 +288,7 @@ const combinedMachines = [
       "host-claude",
       "claude-code",
       measured("alexandre@example.com", 20, "Max (20x)"),
+      "anthropic:account:alexandre",
     ),
     provider("host-codex", "codex", measured("work@example.com", 46, "Pro")),
     liveAccount(
@@ -300,11 +303,13 @@ const combinedMachines = [
       "principal",
       "claude-code",
       measured("principal@example.com", 31, "Max (20x)"),
+      "anthropic:account:principal",
     ),
     provider(
       "alexandre",
       "claude-code",
       measured("alexandre@example.com", 20, "Max (20x)"),
+      "anthropic:account:alexandre",
     ),
   ]),
 ];
