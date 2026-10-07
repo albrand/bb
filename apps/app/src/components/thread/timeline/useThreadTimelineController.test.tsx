@@ -1649,7 +1649,7 @@ describe("useThreadTimelineController commits", () => {
     expect(hasThreadTimelineUnseenEvents(queryClient, "thread-1")).toBe(true);
   });
 
-  it("clears unseen events once the catch-up fetch succeeds", async () => {
+  it("clears catch-up state while keeping the latest opening policy after fetch", async () => {
     vi.mocked(sdk.threads.timeline).mockResolvedValueOnce(
       makeTimelineResponse({
         maxSeq: 2,
@@ -1671,6 +1671,7 @@ describe("useThreadTimelineController commits", () => {
       ]);
     });
     expect(hasThreadTimelineUnseenEvents(queryClient, "thread-1")).toBe(false);
+    expect(view.latest().isCatchingUpTimeline).toBe(false);
     expect(view.latest().hasUnseenTimelineEvents).toBe(true);
   });
 });
