@@ -10,9 +10,11 @@ interface ThreadUnreadDividerThreadState {
 
 interface ThreadUnreadDividerSnapshot {
   attentionAt: number;
+  hasAttentionAfterOpening: boolean;
   hasUnseenUpdatesOnOpen: boolean;
   isFocused: boolean;
   isOpening: boolean;
+  isPlaceholderData: boolean;
   placement: ThreadTimelineUnreadDividerPlacement | null;
   threadId: string;
 }
@@ -36,7 +38,11 @@ interface UseThreadUnreadDividerStateArgs {
   bootstrapQuery: Parameters<
     typeof didThreadDetailBootstrapRefreshAfterMount
   >[0];
-  threadQuery: { isFetchedAfterMount: boolean; isError: boolean };
+  threadQuery: {
+    isFetchedAfterMount: boolean;
+    isError: boolean;
+    isPlaceholderData: boolean;
+  };
   hasUnseenTimelineEvents: boolean;
   isFocused?: boolean;
   routeThreadId: string | undefined;
@@ -135,6 +141,10 @@ export function useThreadUnreadDividerState({
         currentSnapshot?.threadId === threadId
           ? currentSnapshot.isOpening && isOpening
           : isOpening;
+      const replacedPlaceholder =
+        currentSnapshot?.threadId === threadId &&
+        currentSnapshot.isPlaceholderData &&
+        !threadQuery.isPlaceholderData;
       if (
         currentSnapshot?.threadId === threadId &&
         currentSnapshot.attentionAt === threadLatestAttentionAt
@@ -144,24 +154,36 @@ export function useThreadUnreadDividerState({
         if (threadLastReadAt === null) {
           return {
             attentionAt: threadLatestAttentionAt,
+            hasAttentionAfterOpening:
+              currentSnapshot.hasAttentionAfterOpening,
             hasUnseenUpdatesOnOpen:
-              currentSnapshot.hasUnseenUpdatesOnOpen || becameFocused,
+              currentSnapshot.hasUnseenUpdatesOnOpen ||
+              becameFocused ||
+              replacedPlaceholder,
             isFocused,
             isOpening: nextIsOpening,
+            isPlaceholderData: threadQuery.isPlaceholderData,
             placement: { kind: "before-first" },
             threadId,
           };
         }
-        return currentSnapshot.isOpening === nextIsOpening && !focusChanged
+        const placement = buildUnreadDividerPlacement(threadState);
+        return currentSnapshot.isOpening === nextIsOpening &&
+          !focusChanged &&
+          !replacedPlaceholder
           ? currentSnapshot
           : {
               ...currentSnapshot,
               hasUnseenUpdatesOnOpen:
                 currentSnapshot.hasUnseenUpdatesOnOpen ||
-                (becameFocused &&
-                  buildUnreadDividerPlacement(threadState) !== null),
+                ((becameFocused || replacedPlaceholder) &&
+                  placement !== null),
               isFocused,
               isOpening: nextIsOpening,
+              isPlaceholderData: threadQuery.isPlaceholderData,
+              placement: replacedPlaceholder
+                ? placement
+                : currentSnapshot.placement,
             };
       }
 
@@ -172,6 +194,13 @@ export function useThreadUnreadDividerState({
         isFocused;
       return {
         attentionAt: threadLatestAttentionAt,
+        hasAttentionAfterOpening:
+          currentSnapshot?.threadId === threadId
+            ? currentSnapshot.hasAttentionAfterOpening ||
+              (!currentSnapshot.isOpening &&
+                !becameFocused &&
+                placement !== null)
+            : false,
         hasUnseenUpdatesOnOpen:
           currentSnapshot?.threadId === threadId
             ? currentSnapshot.hasUnseenUpdatesOnOpen ||
@@ -180,6 +209,7 @@ export function useThreadUnreadDividerState({
             : placement !== null,
         isFocused,
         isOpening: nextIsOpening,
+        isPlaceholderData: threadQuery.isPlaceholderData,
         placement,
         threadId,
       };
@@ -191,6 +221,7 @@ export function useThreadUnreadDividerState({
     threadId,
     threadLastReadAt,
     threadLatestAttentionAt,
+    threadQuery.isPlaceholderData,
   ]);
 
   if (
@@ -215,7 +246,9 @@ export function useThreadUnreadDividerState({
   const hasUnseenUpdatesOnOpen =
     snapshot !== null && snapshot.threadId === threadId
       ? snapshot.hasUnseenUpdatesOnOpen ||
-        ((snapshot.isOpening || (!snapshot.isFocused && isFocused)) &&
+        ((snapshot.isOpening ||
+          (!snapshot.isFocused && isFocused) ||
+          (snapshot.isPlaceholderData && !threadQuery.isPlaceholderData)) &&
           isThreadUnread({
             lastReadAt: threadLastReadAt,
             latestAttentionAt: threadLatestAttentionAt,
@@ -224,13 +257,29 @@ export function useThreadUnreadDividerState({
           lastReadAt: threadLastReadAt,
           latestAttentionAt: threadLatestAttentionAt,
         });
+  const becameFocused =
+    snapshot !== null &&
+    snapshot.threadId === threadId &&
+    !snapshot.isFocused &&
+    isFocused;
+  const hasNewAttentionAfterOpening =
+    snapshot !== null &&
+    snapshot.threadId === threadId &&
+    !snapshot.isOpening &&
+    !(snapshot.isPlaceholderData && !threadQuery.isPlaceholderData) &&
+    !hasUnseenUpdatesOnOpen &&
+    (snapshot.hasAttentionAfterOpening ||
+      (snapshot.attentionAt !== threadLatestAttentionAt && !becameFocused));
   return {
     hasUnseenTimelineEvents: shouldOpenThreadAtLatest({
-      hasUnseenTimelineEvents: isFocused && hasUnseenTimelineEvents,
+      hasUnseenTimelineEvents:
+        isFocused && hasUnseenTimelineEvents && !hasNewAttentionAfterOpening,
       hasUnseenUpdatesOnOpen: isFocused && hasUnseenUpdatesOnOpen,
     }),
     placement:
-      snapshot !== null && snapshot.threadId === threadId
+      snapshot !== null &&
+      snapshot.threadId === threadId &&
+      !(snapshot.isPlaceholderData && !threadQuery.isPlaceholderData)
         ? snapshot.placement
         : thread === undefined
           ? null

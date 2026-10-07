@@ -97,6 +97,7 @@ function OpenThread({
   isOpening = false,
   bootstrapUpdatedAt = 0,
   isThreadQueryError = false,
+  isThreadPlaceholder = false,
   isFocused = true,
 }: {
   lastReadAt: number;
@@ -105,6 +106,7 @@ function OpenThread({
   isOpening?: boolean;
   bootstrapUpdatedAt?: number;
   isThreadQueryError?: boolean;
+  isThreadPlaceholder?: boolean;
   isFocused?: boolean;
 }) {
   const { placement, hasUnseenTimelineEvents: openAtLatest } =
@@ -118,6 +120,7 @@ function OpenThread({
       threadQuery: {
         isFetchedAfterMount: !isOpening,
         isError: isThreadQueryError,
+        isPlaceholderData: isThreadPlaceholder,
       },
       isFocused,
       hasUnseenTimelineEvents,
@@ -154,14 +157,17 @@ function renderThread(
   isOpening = false,
   bootstrapUpdatedAt = 0,
   isFocused = true,
+  isPlaceholderData = false,
 ) {
   const queryClient = new QueryClient();
+  let currentIsPlaceholderData = isPlaceholderData;
   const element = (
     unseen: boolean,
     latestAttentionAt = 300,
     opening = isOpening,
     queryError = false,
     focused = isFocused,
+    placeholderData = currentIsPlaceholderData,
   ) => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -175,6 +181,7 @@ function renderThread(
             isOpening={opening}
             bootstrapUpdatedAt={bootstrapUpdatedAt}
             isThreadQueryError={queryError}
+            isThreadPlaceholder={placeholderData}
             isFocused={focused}
           />
         </ThreadProviderContext.Provider>
@@ -199,6 +206,8 @@ function renderThread(
   return {
     area,
     catchUp: () => rerender(element(true)),
+    receiveNewEvent: (latestAttentionAt = 400) =>
+      rerender(element(true, latestAttentionAt)),
     receiveAttention: () => rerender(element(false, 400)),
     finishOpeningWithAttention: () => rerender(element(false, 400, false)),
     changeOpening: (opening: boolean) => rerender(element(false, 300, opening)),
@@ -207,6 +216,11 @@ function renderThread(
       rerender(element(false, 400, false, false, false)),
     blurThread: () => rerender(element(false, 300, false, false, false)),
     focusThread: () => rerender(element(false, 400, false, false, true)),
+    focusWithoutNewAttention: () => rerender(element(false, 300, false, false, true)),
+    receiveFreshThread: (latestAttentionAt: number) => {
+      currentIsPlaceholderData = false;
+      rerender(element(false, latestAttentionAt));
+    },
     failOpening: () => rerender(element(false, 300, true, true)),
   };
 }
@@ -485,4 +499,105 @@ describe("opening an unseen timeline", () => {
       expect(area.scrollTop).toBe(userScrolled ? 100 : 3300);
     },
   );
+
+  it("keeps a settled read position when a new event arrives immediately", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, changeOpening, receiveNewEvent } = renderThread(350, false, true);
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    changeOpening(false);
+    expect(area.scrollTop).toBe(200);
+    receiveNewEvent();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+  });
+
+  it("opens at newest when unseen catch-up arrives after 25 seconds of opening", () => {
+    const { area, catchUp } = renderThread(150, false, true);
+    resize();
+    act(() => vi.advanceTimersByTime(25_000));
+    catchUp();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
+
+  it("follows a new event when already at the bottom", () => {
+    const { area, receiveNewEvent } = renderThread(350);
+    resize();
+    area.scrollTop = height - area.clientHeight;
+    fireEvent.scroll(area);
+    receiveNewEvent();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
+
+  it("opens at newest when new attention arrives while a read cache is opening", () => {
+    const { area, catchUp, receiveOpeningAttention } = renderThread(350, false, true);
+    resize();
+    receiveOpeningAttention();
+    act(() => vi.advanceTimersByTime(25_000));
+    catchUp();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
+
+  it("keeps a read restored position when the same thread becomes focused", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, blurThread, focusWithoutNewAttention } = renderThread(350);
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    blurThread();
+    focusWithoutNewAttention();
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(200);
+  });
+
+  it("opens at newest when fresh unread data replaces a settled read placeholder", () => {
+    getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
+      rowId: "answer-100",
+      offsetWithinRow: 0,
+      atBottom: false,
+    });
+    const { area, receiveFreshThread } = renderThread(
+      350,
+      false,
+      true,
+      Date.now(),
+      true,
+      true,
+    );
+    resize();
+    act(() => vi.advanceTimersByTime(1));
+    flushFrames();
+    resize();
+    expect(area.scrollTop).toBe(200);
+    receiveFreshThread(400);
+    height += 600;
+    resize();
+    flushFrames();
+    expect(area.scrollTop).toBe(3300);
+  });
 });

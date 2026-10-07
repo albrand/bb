@@ -540,6 +540,7 @@ function ThreadDetailViewInternal(
   const {
     data: queriedThread,
     isFetchedAfterMount,
+    isPlaceholderData,
     isError: isThreadQueryError,
     isFetching,
     isLoadingError,
@@ -905,7 +906,11 @@ function ThreadDetailViewInternal(
   });
   const unreadDividerState = useThreadUnreadDividerState({
     bootstrapQuery: threadDetailBootstrapQuery,
-    threadQuery: { isFetchedAfterMount, isError: isThreadQueryError },
+    threadQuery: {
+      isFetchedAfterMount,
+      isError: isThreadQueryError,
+      isPlaceholderData,
+    },
     hasUnseenTimelineEvents,
     isFocused,
     routeThreadId: threadId,
