@@ -2157,6 +2157,7 @@ export function PromptBoxInternal({
     if (isPointerCoarseRef.current) return;
 
     const focusEditor = () => {
+      if (isPointerCoarseRef.current) return;
       if (editor.isDestroyed) return;
       if (document.activeElement?.closest("[data-sidebar-rename-editor]"))
         return;

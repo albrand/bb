@@ -1472,7 +1472,7 @@ describe("PromptBoxInternal controlled value sync", () => {
         onComposerLayoutChange: initialLayoutChange,
       });
       const view = render(<PromptBoxInternal {...props} compact={undefined} />);
-      await waitForPromptFocus();
+      expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement);
 
       document.body.append(outsideTarget);
       outsideTarget.focus();
