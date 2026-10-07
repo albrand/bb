@@ -529,6 +529,36 @@ function mockPointerCoarse(matches: boolean): () => void {
   };
 }
 
+function mockMutablePointerCoarse(matches: boolean) {
+  const originalMatchMedia = window.matchMedia;
+  const mediaQueryList = new EventTarget() as MediaQueryList;
+  let currentMatches = matches;
+  Object.defineProperties(mediaQueryList, {
+    matches: { get: () => currentMatches },
+    media: { value: "(pointer: coarse)" },
+    onchange: { value: null, writable: true },
+    addListener: {
+      value: (listener: EventListener) =>
+        mediaQueryList.addEventListener("change", listener),
+    },
+    removeListener: {
+      value: (listener: EventListener) =>
+        mediaQueryList.removeEventListener("change", listener),
+    },
+  });
+  window.matchMedia = vi.fn().mockReturnValue(mediaQueryList);
+
+  return {
+    setMatches(nextMatches: boolean) {
+      currentMatches = nextMatches;
+      mediaQueryList.dispatchEvent(new Event("change"));
+    },
+    restore() {
+      window.matchMedia = originalMatchMedia;
+    },
+  };
+}
+
 function mockNavigatorIdentity({
   userAgent,
   vendor,
@@ -1386,6 +1416,120 @@ describe("PromptBoxInternal controlled value sync", () => {
       await waitForPromptFocus();
     } finally {
       restoreMatchMedia();
+    }
+  });
+
+  it("preserves external focus when a coarse pointer becomes fine", async () => {
+    const pointer = mockMutablePointerCoarse(true);
+    const outsideTarget = document.createElement("button");
+    const initialLayoutChange = vi.fn();
+    const nextLayoutChange = vi.fn();
+    try {
+      const props = createPromptBoxProps({
+        onComposerLayoutChange: initialLayoutChange,
+      });
+      const view = render(<PromptBoxInternal {...props} compact={undefined} />);
+
+      await waitFor(() =>
+        expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
+      );
+      document.body.append(outsideTarget);
+      outsideTarget.focus();
+
+      act(() => {
+        pointer.setMatches(false);
+        view.rerender(
+          <PromptBoxInternal
+            {...props}
+            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+            onComposerLayoutChange={nextLayoutChange}
+          />,
+        );
+      });
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
+
+      expect(initialLayoutChange).toHaveBeenCalledWith("expanded");
+      expect(nextLayoutChange).toHaveBeenCalledWith("compact");
+      expect(document.activeElement).toBe(outsideTarget);
+    } finally {
+      outsideTarget.remove();
+      pointer.restore();
+    }
+  });
+
+  it("preserves external focus when a fine pointer becomes coarse", async () => {
+    const pointer = mockMutablePointerCoarse(false);
+    const outsideTarget = document.createElement("button");
+    const initialLayoutChange = vi.fn();
+    const nextLayoutChange = vi.fn();
+    try {
+      const props = createPromptBoxProps({
+        onComposerLayoutChange: initialLayoutChange,
+      });
+      const view = render(<PromptBoxInternal {...props} compact={undefined} />);
+      expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement);
+
+      document.body.append(outsideTarget);
+      outsideTarget.focus();
+      act(() => {
+        pointer.setMatches(true);
+        view.rerender(
+          <PromptBoxInternal
+            {...props}
+            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+            onComposerLayoutChange={nextLayoutChange}
+          />,
+        );
+      });
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
+
+      expect(initialLayoutChange).toHaveBeenCalledWith("expanded");
+      expect(nextLayoutChange).toHaveBeenCalledWith("compact");
+      expect(document.activeElement).toBe(outsideTarget);
+    } finally {
+      outsideTarget.remove();
+      pointer.restore();
+    }
+  });
+
+  it("honors a focus-scope change when a coarse pointer becomes fine", async () => {
+    const pointer = mockMutablePointerCoarse(true);
+    try {
+      const view = render(
+        <PromptBoxHistoryAutoFocusHarness historyResetKey={0} />,
+      );
+      await waitFor(() =>
+        expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
+      );
+      const outsideTarget = screen.getByRole("button", {
+        name: "Outside focus target",
+      });
+      outsideTarget.focus();
+
+      act(() => {
+        pointer.setMatches(false);
+        view.rerender(<PromptBoxHistoryAutoFocusHarness historyResetKey={1} />);
+      });
+      await act(
+        () =>
+          new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          ),
+      );
+
+      expect(document.activeElement).toBe(getPromptEditorElement());
+    } finally {
+      pointer.restore();
     }
   });
 
