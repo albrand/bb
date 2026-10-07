@@ -507,6 +507,11 @@ it("persists revocation when the credential directory cannot be read", async () 
   const { directory, hosts, threads, route, hostToken } = await fixture();
   const oldToken = await threads.forThread(route, hostToken);
   const archiveOnly = new ThreadTokenStore(directory, hosts);
+  expect(
+    (await fs.readdir(directory)).filter((name) =>
+      name.startsWith("archived-thread-"),
+    ),
+  ).toEqual([]);
   const readDir = vi
     .spyOn(fs, "readdir")
     .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
