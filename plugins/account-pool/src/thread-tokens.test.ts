@@ -241,6 +241,42 @@ it("does not quarantine a legacy nested file whose host and thread split is ambi
   expect(await fs.readdir(directory)).toContain(legacyName);
 });
 
+it("quarantines only the exact legacy nested thread id", async () => {
+  const { directory, hosts, threads, hostToken } = await fixture();
+  await threads.forNested({ hostId: "host-one", threadId: "a-b" }, hostToken);
+  const [currentName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-nested-route-host-one-a-b-"),
+  );
+  const legacyName = currentName
+    ?.replace(/^scoped-nested-route-/u, "nested-route-")
+    .replace(/-v0\.json$/u, ".json");
+  await fs.rename(
+    path.join(directory, currentName ?? ""),
+    path.join(directory, legacyName ?? ""),
+  );
+  const unreadable = new ThreadTokenStore(directory, hosts);
+  const originalReadFile = fs.readFile.bind(fs);
+  const readFile = vi.spyOn(fs, "readFile").mockImplementation((file, options) => {
+    if (String(file) === path.join(directory, legacyName ?? ""))
+      return Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" }));
+    return originalReadFile(file, options);
+  });
+  try {
+    await unreadable.initialize(["host-one"]);
+  } finally {
+    readFile.mockRestore();
+  }
+  await unreadable.removeThread("a");
+  expect(await fs.readdir(directory)).toContain(legacyName);
+  await unreadable.removeThread("a-b");
+  expect(await fs.readdir(directory)).not.toContain(legacyName);
+  expect(
+    (await fs.readdir(directory)).some((name) =>
+      name.startsWith("revoked-route-"),
+    ),
+  ).toBe(true);
+});
+
 it("sweeps dead and unenrolled credentials on startup and leaves other secrets alone", async () => {
   const { directory, hosts, threads, route, hostToken, advance } =
     await fixture();
@@ -426,6 +462,37 @@ it("keeps archive revocation across restart and restores only the current archiv
   ).toEqual(route);
 });
 
+it("keeps an evicted token revoked after failed file cleanup and restoration", async () => {
+  const { directory, threads, route, hostToken } = await fixture();
+  const oldToken = await threads.forThread(route, hostToken);
+  const [routeName] = (await fs.readdir(directory)).filter((name) =>
+    name.startsWith("scoped-route-"),
+  );
+  const routeFile = path.join(directory, routeName ?? "");
+  const originalRemove = fs.rm.bind(fs);
+  const remove = vi.spyOn(fs, "rm").mockImplementation((file, options) => {
+    if (String(file) === routeFile)
+      return Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" }));
+    return originalRemove(file, options);
+  });
+  const originalRename = fs.rename.bind(fs);
+  const rename = vi.spyOn(fs, "rename").mockImplementation((from, to) => {
+    if (String(from) === routeFile && String(to).includes("revoked-route-"))
+      return Promise.reject(Object.assign(new Error("EIO"), { code: "EIO" }));
+    return originalRename(from, to);
+  });
+  try {
+    await threads.removeThread(route.threadId);
+  } finally {
+    remove.mockRestore();
+    rename.mockRestore();
+  }
+  expect(await fs.readdir(directory)).toContain(routeName);
+  expect(await threads.authenticate(oldToken)).toBeNull();
+  await threads.restoreThread(route.threadId, threads.archiveVersion(route.threadId));
+  expect(await threads.authenticate(oldToken)).toBeNull();
+});
+
 it("does not persist archive markers for threads without credentials", async () => {
   const { directory, threads } = await fixture();
   await threads.removeThread("thr_empty");
@@ -434,6 +501,28 @@ it("does not persist archive markers for threads without credentials", async () 
       name.startsWith("archived-thread-"),
     ),
   ).toEqual([]);
+});
+
+it("persists revocation when the credential directory cannot be read", async () => {
+  const { directory, hosts, threads, route, hostToken } = await fixture();
+  const oldToken = await threads.forThread(route, hostToken);
+  const readDir = vi
+    .spyOn(fs, "readdir")
+    .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+  try {
+    await threads.removeThread(route.threadId);
+  } finally {
+    readDir.mockRestore();
+  }
+  expect(await threads.authenticate(oldToken)).toBeNull();
+  expect(
+    (await fs.readdir(directory)).some((name) =>
+      name.startsWith("archived-thread-"),
+    ),
+  ).toBe(true);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticate(oldToken)).toBeNull();
 });
 
 it("does not scan credential files when restoring a never-archived thread", async () => {

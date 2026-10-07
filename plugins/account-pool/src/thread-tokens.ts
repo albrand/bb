@@ -260,8 +260,15 @@ export class ThreadTokenStore {
       const epoch = this.archiveEpoch(threadId);
       const nextEpoch = advanceEpoch ? epoch + 1 : epoch;
       this.archiveEpochs.set(threadId, nextEpoch);
-      const names = await fs.readdir(this.directory);
+      let names: string[] = [];
+      let directoryReadFailed = false;
+      try {
+        names = await fs.readdir(this.directory);
+      } catch {
+        directoryReadFailed = true;
+      }
       const shouldPersist =
+        directoryReadFailed ||
         this.archiveMarkerNames(threadId).some((name) =>
           this.seenArchiveMarkers.has(name),
         ) ||
@@ -576,18 +583,20 @@ export class ThreadTokenStore {
           break;
         }
       }
-      const nestedMatches = hostIds.filter((candidateHostId) => {
+      const nestedMatches = hostIds.flatMap((candidateHostId) => {
         const prefix = `${LEGACY_NESTED_ROUTE_PREFIX}${candidateHostId}-`;
-        if (!name.startsWith(prefix)) return false;
-        const candidateThread = /^(.+)-[a-f0-9]{64}\.json$/u.exec(
+        if (!name.startsWith(prefix)) return [];
+        const candidate = /^(.+)-([a-f0-9]{64})\.json$/u.exec(
           name.slice(prefix.length),
         );
-        return candidateThread !== null;
+        return candidate === null
+          ? []
+          : [{ threadId: candidate[1] }];
       });
       if (
         name.startsWith(LEGACY_NESTED_ROUTE_PREFIX) &&
         nestedMatches.length === 1 &&
-        name.startsWith(`${LEGACY_NESTED_ROUTE_PREFIX}${nestedMatches[0]}-${threadId}-`)
+        nestedMatches[0]?.threadId === threadId
       ) await this.quarantineFile(file);
     }
   }

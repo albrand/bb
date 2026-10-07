@@ -9038,6 +9038,32 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, token, "/v1/messages")).toBe(401);
   });
 
+  it("does not restore an unarchived event whose thread lookup is still archived", async () => {
+    const fixture = await scopedFixture();
+    const { host } = fixture;
+    const threadId = "thread-still-archived";
+    const token = await claudeToken(host, threadId);
+    await host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: threadId, archivedAt: 1_000 }),
+    });
+    host.harness.sdk.stub("threads.get", async ({ threadId: id }) =>
+      makeThreadResponse({ id, archivedAt: 1_000 }),
+    );
+    await host.harness.behavior.emitThreadEvent("thread.unarchived", {
+      thread: makeThreadResponse({ id: threadId }),
+    });
+    const directory = path.join(fixture.dataDir, ...POOL_SECRETS);
+    const markerName = (await fs.readdir(directory)).find((name) =>
+      name.startsWith("archived-thread-"),
+    );
+    expect(markerName).toBeDefined();
+    const marker = JSON.parse(
+      await fs.readFile(path.join(directory, markerName ?? ""), "utf8"),
+    ) as { archived: boolean };
+    expect(marker.archived).toBe(true);
+    expect(await statusOf(host, token, "/v1/messages")).toBe(401);
+  });
+
   it("does not apply a stale archived lookup after archive and unarchive events", async () => {
     const fixture = await scopedFixture();
     const { host } = fixture;
