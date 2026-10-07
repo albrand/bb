@@ -1347,11 +1347,12 @@ describe("CommandPalette", () => {
   });
 
   it("matches loaded titles on the first character and keeps the highlight when server rows merge in", async () => {
+    const fixtureNow = Date.now();
     modeState.activeRecents = Array.from({ length: 6 }, (_, index) =>
       makeThread(`fix-${index}`, {
         title: `Fix ${index}`,
-        lastReadAt: Date.now(),
-        updatedAt: Date.now() - index,
+        lastReadAt: fixtureNow,
+        updatedAt: fixtureNow - index,
       }),
     );
     const { rerenderPalette } = renderPalette();
@@ -1419,11 +1420,12 @@ describe("CommandPalette", () => {
   });
 
   it("keeps a highlighted row in view when server rows push it down", async () => {
+    const fixtureNow = Date.now();
     modeState.activeRecents = Array.from({ length: 6 }, (_, index) =>
       makeThread(`fix-${index}`, {
         title: `Fix ${index}`,
-        lastReadAt: Date.now(),
-        updatedAt: Date.now() - index,
+        lastReadAt: fixtureNow,
+        updatedAt: fixtureNow - index,
       }),
     );
     const { rerenderPalette } = renderPalette();
