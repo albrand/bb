@@ -122,6 +122,32 @@ describe("useThreadReadTracking", () => {
     expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it("waits until an unread split pane receives focus before marking it read", () => {
+    const markThreadRead = makeMarkThreadRead();
+    const { rerender } = renderTrackingHook(
+      ({ isFocused }: { isFocused: boolean }) =>
+        useThreadReadTracking({
+          isFocused,
+          markThreadRead,
+          thread: {
+            id: "thr_unfocused_split",
+            lastReadAt: 10,
+            latestAttentionAt: 20,
+          },
+        }),
+      { initialProps: { isFocused: false } },
+    );
+
+    expect(markThreadRead.mutateAsync).not.toHaveBeenCalled();
+
+    rerender({ isFocused: true });
+
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledOnce();
+    expect(markThreadRead.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ threadId: "thr_unfocused_split" }),
+    );
+  });
+
   it("retries a failed read after pageshow while already visible", async () => {
     const markThreadRead = makeMarkThreadRead();
     markThreadRead.mutateAsync.mockRejectedValueOnce(new Error("Failed"));

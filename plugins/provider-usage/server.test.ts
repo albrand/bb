@@ -5,6 +5,7 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import plugin from "./server.js";
 import { usageListMethod, usageFetchMethod } from "./usage-source-contract.js";
+import { usageSnapshotSchema } from "./usage-schema.js";
 
 it("preserves a restarting host status while usage is temporarily unavailable", async () => {
   const host = createFakePluginHost({
@@ -49,10 +50,12 @@ it("preserves a restarting host status while usage is temporarily unavailable", 
   }
 });
 
-it("lists cheaply, fetches only the selected source/provider, preserves failed measurements, and evicts removed resources", async () => {
+it("lists cheaply, fetches only an explicit source/provider, preserves per-account failures, and evicts removed resources", async () => {
   let enabled = true;
   let failure = false;
+  let failedResourceId: string | null = null;
   let hasWork = true;
+  let expiredWindows = false;
   const rpc = vi.fn(async ({ pluginId, method, input }) => {
     if (method === usageListMethod)
       return pluginId === "pool"
@@ -93,7 +96,8 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
               },
             ],
           };
-    if (failure) throw new Error("Upstream failed");
+    if (failure || failedResourceId === input.resourceId)
+      throw new Error("Upstream failed");
     return {
       observedAt: 123,
       usage: {
@@ -105,7 +109,9 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
             id: "week",
             label: "Weekly",
             usedPercent: 42,
-            resetsAt: null,
+            resetsAt: expiredWindows
+              ? new Date(Date.now() - 60_000).toISOString()
+              : null,
             model: null,
             cost: null,
           },
@@ -179,10 +185,26 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
       ],
     });
     expect(
-      rpc.mock.calls.every(([args]) => args.method === usageListMethod),
-    ).toBe(true);
+      rpc.mock.calls.some(([args]) => args.method === usageFetchMethod),
+    ).toBe(false);
+    await host.harness.behavior.callRpc("getUsage", {
+      ...request,
+      providerId: "codex",
+    });
+    await host.harness.behavior.callRpc("getUsage", {
+      ...request,
+      providerId: "claude-code",
+    });
+    expect(
+      rpc.mock.calls
+        .filter(([args]) => args.method === usageFetchMethod)
+        .map(([args]) => args.input.resourceId)
+        .sort(),
+    ).toEqual(["claude", "host", "personal", "work"]);
+    rpc.mockClear();
     const target = {
       ...request,
+      force: true,
       machineIds: ["source:pool"],
       providerId: "codex",
     };
@@ -196,10 +218,13 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
           args.input.refresh,
         ]),
     ).toEqual([
-      ["pool", "personal", false],
-      ["pool", "work", false],
+      ["pool", "personal", true],
+      ["pool", "work", true],
     ]);
-    await host.harness.behavior.callRpc("getUsage", target);
+    await host.harness.behavior.callRpc("getUsage", {
+      ...target,
+      force: false,
+    });
     expect(
       rpc.mock.calls.filter(([args]) => args.method === usageFetchMethod),
     ).toHaveLength(2);
@@ -207,27 +232,58 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
     expect(
       await host.harness.behavior.callRpc("getUsage", {
         ...target,
+        providerId: "codex",
         force: true,
       }),
     ).toMatchObject({
       machines: [
-        { id: "host" },
+        { id: "host", providers: [{ usage: { status: "ok" } }] },
         {
           id: "source:pool",
-          error: "Some usage could not be refreshed.",
+          error: null,
           providers: [
+            { usage: { status: "error" } },
+            { usage: { status: "error" } },
             { usage: { status: "ok" } },
-            { usage: { status: "ok" } },
-            { usage: null },
           ],
         },
       ],
     });
     failure = false;
+    failedResourceId = "work";
+    rpc.mockClear();
+    const partialRefresh = await host.harness.behavior.callRpc("getUsage", {
+      ...target,
+      providerId: "codex",
+      force: true,
+    });
+    expect(partialRefresh).toMatchObject({
+      machines: [
+        { id: "host" },
+        {
+          id: "source:pool",
+          error: null,
+          providers: [
+            { id: "pool:personal", usage: { status: "ok" } },
+            { id: "pool:work", usage: { status: "error" } },
+            { id: "pool:claude", usage: { status: "ok" } },
+          ],
+        },
+      ],
+    });
+    expect(
+      rpc.mock.calls
+        .filter(([args]) => args.method === usageFetchMethod)
+        .map(([args]) => args.input.resourceId)
+        .sort(),
+    ).toEqual(["personal", "work"]);
+    failedResourceId = null;
+    failure = false;
     hasWork = false;
     expect(
       await host.harness.behavior.callRpc("getUsage", {
         ...target,
+        providerId: "codex",
         force: true,
       }),
     ).toMatchObject({
@@ -258,6 +314,22 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
         .filter(([args]) => args.method === usageFetchMethod)
         .at(-1)?.[0].pluginId,
     ).toBe("local");
+    expiredWindows = true;
+    const stale = usageSnapshotSchema.parse(
+      await host.harness.behavior.callRpc("getUsage", {
+        ...target,
+        force: true,
+      }),
+    );
+    const pool = stale.machines.find((machine) => machine.id === "source:pool");
+    expect(pool?.error).toBeNull();
+    expect(
+      pool?.providers.find((provider) => provider.id === "pool:personal")
+        ?.usage,
+    ).toEqual({
+      status: "error",
+      message: "Usage data is stale. Refresh usage.",
+    });
     enabled = false;
     expect(
       await host.harness.behavior.callRpc("getUsage", request),

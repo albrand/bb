@@ -420,9 +420,10 @@ describe("provider usage footer disclosure", () => {
     const callsBeforeFocus = fetchMock.mock.calls.length;
     window.dispatchEvent(new Event("focus"));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeFocus + 1),
+      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeFocus + 3),
     );
-    expect(fetchMock.mock.calls.at(-1)?.[1]).toEqual(
+    const focusCalls = fetchMock.mock.calls.slice(callsBeforeFocus);
+    expect(focusCalls[0]?.[1]).toEqual(
       expect.objectContaining({
         body: JSON.stringify({
           force: false,
@@ -432,6 +433,14 @@ describe("provider usage footer disclosure", () => {
         }),
       }),
     );
+    expect(
+      focusCalls
+        .slice(1)
+        .map(([, options]) => JSON.parse(options!.body as string)),
+    ).toEqual([
+      expect.objectContaining({ providerId: "claude-code" }),
+      expect.objectContaining({ providerId: "codex" }),
+    ]);
 
     now.mockRestore();
     fireEvent.pointerDown(

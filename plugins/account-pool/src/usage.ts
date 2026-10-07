@@ -79,6 +79,7 @@ function normalizeBucket(bucket: UsageBucket, now: number): FamilyQuota | null {
   const resetAt = parseReset(
     bucket.resets_at ?? bucket.reset_at ?? bucket.resetAt ?? null,
   );
+  if (resetAt !== null && resetAt <= now) return null;
   if (utilization === null && resetAt === null && bucket.status == null)
     return null;
   return {
@@ -143,6 +144,16 @@ export function quotaFromUsage(
     data.limits === undefined
       ? { ...previous.familyWeekly }
       : { ...EMPTY_FAMILY_WEEKLY };
+  if (data.limits === undefined)
+    for (const family of ["fable", "sonnet", "opus", "haiku"] as const) {
+      const window = familyWeekly[family];
+      if (
+        window?.resetAt !== null &&
+        window?.resetAt !== undefined &&
+        window.resetAt <= now
+      )
+        familyWeekly[family] = null;
+    }
   for (const limit of data.limits ?? []) {
     if (
       limit.kind !== "weekly_scoped" &&
@@ -172,6 +183,10 @@ export function quotaFromUsage(
     data.five_hour == null ? null : normalizeBucket(data.five_hour, now);
   const sevenDay =
     data.seven_day == null ? null : normalizeBucket(data.seven_day, now);
+  const previousFiveHourIsCurrent =
+    previous.fiveHourResetAt === null || previous.fiveHourResetAt > now;
+  const previousSevenDayIsCurrent =
+    previous.sevenDayResetAt === null || previous.sevenDayResetAt > now;
   return {
     ...previous,
     accountId,
@@ -192,12 +207,24 @@ export function quotaFromUsage(
               observedAt: now,
               source: "usage",
             },
-    fiveHourUtilization: fiveHour?.utilization ?? previous.fiveHourUtilization,
-    fiveHourResetAt: fiveHour?.resetAt ?? previous.fiveHourResetAt,
-    fiveHourStatus: fiveHour?.status ?? previous.fiveHourStatus,
-    sevenDayUtilization: sevenDay?.utilization ?? previous.sevenDayUtilization,
-    sevenDayResetAt: sevenDay?.resetAt ?? previous.sevenDayResetAt,
-    sevenDayStatus: sevenDay?.status ?? previous.sevenDayStatus,
+    fiveHourUtilization:
+      fiveHour?.utilization ??
+      (previousFiveHourIsCurrent ? previous.fiveHourUtilization : null),
+    fiveHourResetAt:
+      fiveHour?.resetAt ??
+      (previousFiveHourIsCurrent ? previous.fiveHourResetAt : null),
+    fiveHourStatus:
+      fiveHour?.status ??
+      (previousFiveHourIsCurrent ? previous.fiveHourStatus : null),
+    sevenDayUtilization:
+      sevenDay?.utilization ??
+      (previousSevenDayIsCurrent ? previous.sevenDayUtilization : null),
+    sevenDayResetAt:
+      sevenDay?.resetAt ??
+      (previousSevenDayIsCurrent ? previous.sevenDayResetAt : null),
+    sevenDayStatus:
+      sevenDay?.status ??
+      (previousSevenDayIsCurrent ? previous.sevenDayStatus : null),
     familyWeekly,
     observedAt: now,
   };
