@@ -1,3 +1,4 @@
+import { markThreadPruningWork } from "./thread-pruning-work.js";
 import { isBeforeLatestThreadEvent } from "./event-pruning-guards.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
 import {
@@ -342,6 +343,7 @@ export function deleteThreadEventSuffixInTransaction(
     .run();
   if (result.changes > 0) {
     bumpThreadEventRewriteGeneration(args.threadId);
+    markThreadPruningWork(db, [args.threadId]);
   }
   return { deletedEventCount: result.changes };
 }
@@ -509,6 +511,7 @@ export function insertEvents(
           }
         }
       }
+      markThreadPruningWork(tx, eventTypesByThreadId.keys());
       return { insertedCount, insertedInputIndexes };
     },
     { behavior: "immediate" },
@@ -896,8 +899,10 @@ export function appendDaemonEventsInTransaction(
       source: "event-append",
     });
   }
-
-  return {
+  markThreadPruningWork(
+    db,
+    acceptedEvents.map((event) => event.threadId),
+  );  return {
     acceptedEvents,
     insertedInputIndexes,
     skippedTurnUnstartedInputIndexes,
@@ -980,7 +985,7 @@ export function copyStoredThreadEventsInTransaction(
       source: "event-append",
     });
   }
-  return args.rows.length;
+  markThreadPruningWork(db, [args.targetThreadId]);  return args.rows.length;
 }
 
 export function appendStoredThreadEventInTransaction<
@@ -1071,8 +1076,7 @@ export function appendStoredThreadEventsInTransaction(
       source: "event-append",
     });
   }
-
-  return sequences;
+  markThreadPruningWork(db, threadIds);  return sequences;
 }
 
 export function appendStoredThreadEvent<TType extends ThreadEventType>(

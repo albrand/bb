@@ -2097,6 +2097,11 @@ function TimelineRowsList({
             getScrollElement={getWindowingScrollElement}
             itemKeys={itemKeys}
             measurements={measurements}
+            pinnedToEnd={
+              isTopLevelList &&
+              detailScrollRoot === null &&
+              bottomAnchor?.isAtBottom === true
+            }
             renderItem={(index, windowedState) => {
               const item = items[index];
               if (item === undefined) {

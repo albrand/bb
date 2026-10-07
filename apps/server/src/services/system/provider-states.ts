@@ -37,6 +37,7 @@ function unknownProviderState(
     canInstall: false,
     canUpdate: false,
     loginCommand: null,
+    localLoginCommand: null,
   };
 }
 
@@ -85,6 +86,7 @@ async function getProviderState(
       providerId: args.provider.id,
       displayName: args.provider.displayName,
       ...result.health,
+      localLoginCommand: result.health.localLoginCommand ?? null,
     };
     if (health.status !== "unauthenticated" && health.status !== "expired") {
       return health;
@@ -101,6 +103,7 @@ async function getProviderState(
       accountEmail: null,
       planLabel: contributed.label,
       loginCommand: null,
+      localLoginCommand: null,
     };
   } catch {
     return unknownProviderState(

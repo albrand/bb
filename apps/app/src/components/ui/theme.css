@@ -128,7 +128,7 @@
   --text-2xs--line-height: 0.875rem;
 }
 
-@media (max-width: 767px) and (pointer: coarse) {
+@media (hover: none) {
   :root {
     --text-2xs: 0.6875rem;
     --text-2xs--line-height: 0.9375rem;
@@ -349,7 +349,6 @@
   }
 
   @media (max-width: 767px) and (pointer: coarse) {
-    /* The overlay is hidden on coarse phones, so no room is reserved. */
     .bb-sidebar-hover-actions-row:is(:hover, :has(:focus-visible))
       .bb-sidebar-hover-actions-inset,
     .bb-sidebar-hover-actions-row:has(

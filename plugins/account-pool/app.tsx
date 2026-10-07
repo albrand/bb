@@ -97,6 +97,12 @@ type DialogState =
   | null;
 
 type ConfigField = Exclude<keyof AccountPoolConfig, "parentMode">;
+const CONFIG_FIELDS: readonly ConfigField[] = [
+  "anthropicUpstreamBaseUrl",
+  "codexUpstreamBaseUrl",
+  "switchThreshold",
+];
+const ACCOUNT_ACTIONS = ["toggle", "priority", "refresh", "remove"] as const;
 
 const PROVIDERS: Array<{ id: PoolProvider; title: string }> = [
   { id: "claude", title: "Claude" },
@@ -1061,7 +1067,12 @@ function AccountPoolSettings() {
   });
   const [dialog, setDialog] = useState<DialogState>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<ReadonlyMap<string, boolean | null>>(
+    () => new Map(),
+  );
+  const configSaving = CONFIG_FIELDS.some((field) =>
+    pending.has(`config-${field}`),
+  );
   const [optimisticOrder, setOptimisticOrder] = useState<{
     provider: PoolProvider;
     ids: string[];
@@ -1195,9 +1206,19 @@ function AccountPoolSettings() {
     dialog === null || dialog.kind === "api-key" || dialog.accountId === null
       ? null
       : (accounts.find((account) => account.id === dialog.accountId) ?? null);
+  function markPending(key: string, target: boolean | null): void {
+    setPending((current) => new Map(current).set(key, target));
+  }
+  function clearPending(key: string): void {
+    setPending((current) => {
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }
   async function run(key: string, action: () => Promise<void>): Promise<void> {
-    if (pending !== null) return;
-    setPending(key);
+    if (pending.has(key)) return;
+    markPending(key, null);
     setError(null);
     try {
       await action();
@@ -1205,15 +1226,23 @@ function AccountPoolSettings() {
     } catch (actionError) {
       setError(errorText(actionError));
     } finally {
-      setPending(null);
+      clearPending(key);
     }
+  }
+  function switchValue(key: string, stored: boolean): boolean {
+    return pending.get(key) ?? stored;
+  }
+  function accountPending(accountId: string): boolean {
+    return ACCOUNT_ACTIONS.some((action) =>
+      pending.has(`${action}-${accountId}`),
+    );
   }
   function updateConfigDraft(field: ConfigField, value: string): void {
     setDrafts((current) => ({ ...current, [field]: value }));
     setConfigErrors((current) => ({ ...current, [field]: null }));
   }
   async function saveConfigField(field: ConfigField): Promise<void> {
-    if (config === null || pending !== null) return;
+    if (config === null || configSaving) return;
     let update: AccountPoolConfigSetInput;
     if (field === "switchThreshold") {
       const raw = drafts.switchThreshold.trim();
@@ -1248,7 +1277,7 @@ function AccountPoolSettings() {
           ? { anthropicUpstreamBaseUrl: value }
           : { codexUpstreamBaseUrl: value };
     }
-    setPending(`config-${field}`);
+    markPending(`config-${field}`, null);
     setConfigErrors((current) => ({ ...current, [field]: null }));
     try {
       applyConfig(await rpc.call("config.set", update));
@@ -1258,7 +1287,7 @@ function AccountPoolSettings() {
         [field]: errorText(saveError),
       }));
     } finally {
-      setPending(null);
+      clearPending(`config-${field}`);
     }
   }
   async function startClaude(
@@ -1326,7 +1355,8 @@ function AccountPoolSettings() {
     account: AccountSummary,
     action: SubscriptionAction,
   ): Promise<void> {
-    if (pending !== null && action === "toggle") return;
+    if (accountPending(account.id)) return;
+    if (action === "toggle" && pending.size > 0) return;
     if (action === "details") {
       setDialog({ kind: "account", accountId: account.id });
       return;
@@ -1367,7 +1397,7 @@ function AccountPoolSettings() {
     provider: PoolProvider,
     event: DragEndEvent,
   ): Promise<void> {
-    if (pending !== null || event.over === null) return;
+    if (pending.has(`order-${provider}`) || event.over === null) return;
     const records = accounts.filter((account) => account.provider === provider);
     const ids = foldSubscriptions(records).map((account) => account.id);
     const from = ids.findIndex((id) => id === event.active.id);
@@ -1424,9 +1454,9 @@ function AccountPoolSettings() {
             <label className="inline-flex shrink-0 items-center justify-center pointer-coarse:-my-2.5 pointer-coarse:size-11">
               <Switch
                 checked={proxying}
-                aria-disabled={pending !== null || undefined}
+                aria-disabled={pending.size > 0 || undefined}
                 className={
-                  pending !== null ? "cursor-not-allowed opacity-50" : undefined
+                  pending.size > 0 ? "cursor-not-allowed opacity-50" : undefined
                 }
                 aria-label="Use the parent Account Pooler"
                 onCheckedChange={(enabled) =>
@@ -1540,9 +1570,9 @@ function AccountPoolSettings() {
                       Route {provider.title} threads
                       <Switch
                         checked={status?.routing[provider.id] ?? true}
-                        aria-disabled={pending !== null || undefined}
+                        aria-disabled={pending.size > 0 || undefined}
                         className={
-                          pending !== null
+                          pending.size > 0
                             ? "cursor-not-allowed opacity-50"
                             : undefined
                         }
@@ -1582,10 +1612,10 @@ function AccountPoolSettings() {
                                 ? null
                                 : nextSubscriptionId,
                             )}
-                            pending={pending !== null}
+                            pending={pending.size > 0}
                             refreshing={
                               statusIsCached ||
-                              pending === `refresh-${account.id}`
+                              pending.has(`refresh-${account.id}`)
                             }
                             reorderDisabled={providerAccounts.length < 2}
                             onAction={(action) =>
@@ -1616,7 +1646,7 @@ function AccountPoolSettings() {
                   <LocalLoginRow
                     key={`${login.providerId}:${login.email ?? ""}`}
                     login={login}
-                    pending={pending !== null}
+                    pending={pending.size > 0}
                     onAdd={(provider) => void chooseAdd(provider, "import")}
                   />
                 ))}
@@ -1657,9 +1687,9 @@ function AccountPoolSettings() {
                       <label className="ml-auto flex w-fit items-center justify-center pointer-coarse:size-11">
                         <Switch
                           checked={status.routing[provider.id]}
-                          aria-disabled={pending !== null || undefined}
+                          aria-disabled={pending.size > 0 || undefined}
                           className={
-                            pending !== null
+                            pending.size > 0
                               ? "cursor-not-allowed opacity-50"
                               : undefined
                           }
@@ -1689,7 +1719,7 @@ function AccountPoolSettings() {
                       ? undefined
                       : true
                   }
-                  disabled={config === null || pending !== null}
+                  disabled={config === null || configSaving}
                   value={drafts.anthropicUpstreamBaseUrl}
                   onChange={(event) =>
                     updateConfigDraft(
@@ -1718,7 +1748,7 @@ function AccountPoolSettings() {
                       ? undefined
                       : true
                   }
-                  disabled={config === null || pending !== null}
+                  disabled={config === null || configSaving}
                   value={drafts.codexUpstreamBaseUrl}
                   onChange={(event) =>
                     updateConfigDraft(
@@ -1747,7 +1777,7 @@ function AccountPoolSettings() {
                   aria-invalid={
                     configErrors.switchThreshold === null ? undefined : true
                   }
-                  disabled={config === null || pending !== null}
+                  disabled={config === null || configSaving}
                   value={drafts.switchThreshold}
                   onChange={(event) =>
                     updateConfigDraft("switchThreshold", event.target.value)
@@ -1812,7 +1842,8 @@ function AccountPoolSettings() {
                 </Button>
                 <Button
                   disabled={
-                    !Number.isInteger(Number(priority)) || pending !== null
+                    !Number.isInteger(Number(priority)) ||
+                    pending.has(`priority-${selectedAccount.id}`)
                   }
                   onClick={() =>
                     void run(`priority-${selectedAccount.id}`, async () => {
@@ -1851,7 +1882,7 @@ function AccountPoolSettings() {
                   Cancel
                 </Button>
                 <Button
-                  disabled={apiKey.trim().length === 0 || pending !== null}
+                  disabled={apiKey.trim().length === 0 || pending.has("api-key")}
                   onClick={() =>
                     void run("api-key", async () => {
                       await rpc.call("account.add", {
@@ -1894,7 +1925,7 @@ function AccountPoolSettings() {
                 </Button>
                 <Button
                   variant="destructive"
-                  disabled={pending !== null}
+                  disabled={pending.has(`remove-${selectedAccount.id}`)}
                   onClick={() =>
                     void run(`remove-${selectedAccount.id}`, async () => {
                       await rpc.call("account.remove", {
@@ -1924,7 +1955,7 @@ function AccountPoolSettings() {
                   Cancel
                 </Button>
                 <Button
-                  disabled={pending !== null}
+                  disabled={pending.size > 0}
                   onClick={() =>
                     void run(`toggle-${selectedAccount.id}`, async () => {
                       await rpc
@@ -1967,7 +1998,9 @@ function AccountPoolSettings() {
             loginStep={loginStep}
             codexStep={null}
             loginDone={loginDone}
-            pending={pending !== null}
+            pending={
+              pending.has("claude-login") || pending.has("complete-claude")
+            }
             pastedCode={pastedCode}
             countdown={0}
             error={error}
@@ -2006,7 +2039,7 @@ function AccountPoolSettings() {
             loginStep={null}
             codexStep={codexStep}
             loginDone={loginDone}
-            pending={pending !== null}
+            pending={pending.has("codex-login")}
             pastedCode=""
             countdown={countdown}
             error={error}

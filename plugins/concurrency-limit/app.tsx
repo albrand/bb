@@ -175,7 +175,7 @@ function ConcurrencyLimitSettings() {
         <Input
           aria-label="Overall thread limit"
           aria-invalid={invalidField === GLOBAL_FIELD}
-          className="w-28"
+          className="w-28 shrink-0"
           disabled={disabled}
           inputMode="numeric"
           max={MAX_LIMIT_VALUE}
@@ -231,7 +231,7 @@ function ConcurrencyLimitSettings() {
                   <Input
                     aria-label={`${host.name} thread limit`}
                     aria-invalid={invalidField === host.id}
-                    className="w-28"
+                    className="w-28 shrink-0"
                     disabled={disabled}
                     inputMode="numeric"
                     max={MAX_LIMIT_VALUE}

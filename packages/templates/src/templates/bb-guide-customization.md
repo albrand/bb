@@ -128,13 +128,20 @@ unhandled-event preferences are preserved. Set it with
 `bb settings general showDiagnosticEvents <true|false>`.
 
 Settings → General → Show Git changes and Commit button controls the git
-summary, expanded file list, and Commit action in the thread header and overflow
-menu.
+summary, expanded file list, pull-request status and actions above the composer,
+and Commit action in the thread header and overflow menu.
 `showGitChanges` defaults to true; use
 `bb settings general showGitChanges false` to hide them, or true to restore them.
 The server saves this preference across reloads and shares it across connected
-clients. PR status and workspace warnings remain visible. SDK callers can update
+clients. Thread relationships and workspace warnings remain visible. SDK callers can update
 `showGitChanges` through `sdk.system.updateGeneralSettings` with the current settings.
+
+Settings → General → Show messages from before a context clear controls whether a
+cleared thread still shows its earlier messages above the `Context cleared`
+boundary. `keepHistoryAfterContextClear` defaults to false; use
+`bb settings general keepHistoryAfterContextClear true` to keep them in the
+timeline, outline, and message lookups. The next prompt still starts a fresh
+provider conversation.
 
 Settings → General also includes `steerActiveThreadOnEnter`, which defaults to
 true for a new install. An earlier install with saved settings or work keeps
@@ -175,11 +182,15 @@ branches bb creates after the change.
   bb settings ai-services set <thread-title|commit-message|voice> <automatic|off|service-id> [--plugin <plugin-id>]
   bb settings ai-services test <thread-title|commit-message>
   bb settings general <key> <value>
+  bb settings replay-onboarding
   bb settings completed-turns [provider-id] [collapse|flat|default]
   bb settings experiment <key> <value>
-  bb settings usage [--machine <id-or-name>]
+  bb settings usage [--machine <id-or-name>] [--refresh]
   bb settings version [--force]
   bb settings reload
+
+Use `--refresh` to fetch fresh provider usage; ordinary reads may reuse results
+for 10 seconds. The SDK equivalent is `bb.sdk.system.usageLimits({ refresh: true })`.
 
 `bb settings ai-services` shows which AI service writes thread titles (and so
 branch names), commit messages, and voice transcripts, plus every service a
@@ -196,6 +207,13 @@ own model.
 `bb settings show`. Boolean preferences take `true`, `false`, `on`, or `off`,
 and `null` clears a preference that can be unset.
 
+`bb settings replay-onboarding` clears `onboardingCompletedAt`, so the first-run
+setup guide (connect an agent, add projects, pick plugins, set up devices) shows
+again in every open client. Settings → General → Setup guide has the same
+button. `setupChecklistVisible` controls the "Finish setting up bb" checklist
+on the home screen; the guide turns it on when steps are left undone, and
+dismissing the checklist turns it off.
+
 `bb settings completed-turns` lists how each provider shows a finished turn:
 `collapse` folds the turn's work into one "Worked for" row and keeps the final
 answer visible, and `flat` keeps every step visible. Each provider has a
@@ -210,7 +228,11 @@ The default-off `navigationRail` experiment keeps a vertical rail of
 destinations on the left edge of the sidebar on every screen. Home returns to
 the last thread, Settings sits at the bottom, and New thread moves into the
 sidebar header. The sidebar beside the rail still swaps between the thread
-list, Plugins, Skills, and Settings. While it is on, bb draws the navigation
+list, Plugins, Skills, and Settings. Collapsing the sidebar hides that list
+and leaves the rail in place. In the macOS desktop app the rail and a title
+bar across the top of the window share one background; the title bar holds
+the window controls, Back and Forward, and the sidebar toggle, and the
+sidebar and page sit in a card with a rounded top-left corner. While it is on, bb draws the navigation
 itself, so the Navigation and Header choices under Settings → Appearance are
 not used; they apply again when the experiment is turned off. Narrow windows
 and phones keep the regular drawer.

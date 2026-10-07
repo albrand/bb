@@ -38,25 +38,6 @@ import {
   useSortableSettingsRow,
 } from "./sortable-settings-rows";
 
-function withProviderCompletedTurnDisplay(
-  settings: AppSettings,
-  provider: ProviderInfo,
-  display: CompletedTurnDisplay,
-): AppSettings {
-  const overrides = Object.fromEntries(
-    Object.entries(settings.providerCompletedTurnDisplay).filter(
-      ([providerId]) => providerId !== provider.id,
-    ),
-  );
-  return {
-    ...settings,
-    providerCompletedTurnDisplay:
-      display === provider.completedTurnDisplay
-        ? overrides
-        : { ...overrides, [provider.id]: display },
-  };
-}
-
 interface CompletedTurnDisplayRowProps {
   disabled: boolean;
   generalSettings: AppSettings;
@@ -115,7 +96,9 @@ function CompletedTurnDisplayRow({
 interface ProvidersSettingsSectionProps {
   disabled: boolean;
   generalSettings: AppSettings;
-  onGeneralSettingsChange: (next: AppSettings) => Promise<unknown> | void;
+  onGeneralSettingsChange: (
+    patch: Partial<AppSettings>,
+  ) => Promise<unknown> | void;
 }
 
 interface ProviderSignIn {
@@ -169,6 +152,25 @@ export function reorderProviderIds(
     return null;
   }
   return arrayMove([...ids], activeIndex, overIndex);
+}
+
+function withProviderCompletedTurnDisplay(
+  settings: AppSettings,
+  provider: ProviderInfo,
+  display: CompletedTurnDisplay,
+): AppSettings {
+  const overrides = Object.fromEntries(
+    Object.entries(settings.providerCompletedTurnDisplay).filter(
+      ([providerId]) => providerId !== provider.id,
+    ),
+  );
+  return {
+    ...settings,
+    providerCompletedTurnDisplay:
+      display === provider.completedTurnDisplay
+        ? overrides
+        : { ...overrides, [provider.id]: display },
+  };
 }
 
 function ProviderRowIcon({
@@ -321,7 +323,6 @@ function SortableProviderRow({
           provider.available
             ? () => {
                 void onGeneralSettingsChange({
-                  ...generalSettings,
                   defaultProviderId: provider.id,
                 });
               }
@@ -364,7 +365,6 @@ export function ProvidersSettingsSection({
     let write: Promise<unknown> | void;
     try {
       write = onGeneralSettingsChange({
-        ...generalSettings,
         providerOrder: next,
       });
     } catch {
@@ -450,7 +450,6 @@ export function ProvidersSettingsSection({
             disabled={disabled}
             onCheckedChange={(enabled) =>
               onGeneralSettingsChange({
-                ...generalSettings,
                 allowFastServiceTier: enabled,
               })
             }

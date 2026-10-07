@@ -373,12 +373,22 @@ it with
 
 The "Show Git changes and Commit button" switch in Settings → General defaults to on.
 Turn it off to hide the untracked, uncommitted, and committed file summary and
-expanded file list above every thread composer, plus the Commit action in the
-thread header and overflow menu. PR status, thread relationships,
-and workspace warnings remain visible. This server-wide preference persists
+expanded file list above every thread composer, the pull-request status and actions
+in that shelf, and the Commit action in the thread header and overflow menu.
+Thread relationships and workspace warnings remain visible. This server-wide preference persists
 across reloads and applies to every connected app client. Set it with
 `bb settings general showGitChanges false` or read the current config and call
 `sdk.system.updateGeneralSettings({ ...config.generalSettings, showGitChanges: false })`.
+Older clients that omit the field preserve the saved value.
+
+The "Show messages from before a context clear" switch in Settings → General defaults
+to off. When off, a thread's timeline, conversation outline, and message lookup
+start at its latest `Context cleared` boundary. Turn it on to keep earlier
+messages above the boundary; they load on scroll like other older activity and
+appear in the outline and `bb thread log --message` lookups. Clearing still starts a
+fresh provider conversation and resets the context meter either way. Set it
+with `bb settings general keepHistoryAfterContextClear true` or
+`bb.sdk.system.updateGeneralSettings` using `keepHistoryAfterContextClear`.
 Older clients that omit the field preserve the saved value.
 
 The "Thread archive confirmation" switch in Settings → General defaults to on.
@@ -388,6 +398,14 @@ preference applies to all connected app clients. Set it with
 `bb settings general confirmThreadArchive false` or
 `bb.sdk.system.updateGeneralSettings` using `confirmThreadArchive`.
 CLI and SDK archive operations remain non-interactive.
+
+A new install opens a first-run setup guide (connect an agent, add projects,
+pick plugins, set up devices). `onboardingCompletedAt` in general settings
+records when it was finished or skipped; `bb settings replay-onboarding`, or
+Settings → General → Setup guide, clears it so the guide shows again.
+`setupChecklistVisible` controls the "Finish setting up bb" home-screen
+checklist. The projects step lists what `bb project discover` and
+`bb.sdk.hosts.experimental_discoverRepos({ hostId })` return.
 
 The "Streamer mode" toggle in Settings → General hides every `customModels`
 entry from `~/.bb/config.json` in all model lists: the web and mobile pickers,
@@ -1097,10 +1115,12 @@ same operations to its app client.
 
 **Customize row actions**, in a thread row's actions menu, picks
 the quick-action buttons a thread row shows on hover, left of its actions menu.
-It previews a thread row with three action slots; click a slot to pick an
-action for it or Hide to empty it. Picking an action that is already in another slot swaps
+It turns that row's quick actions into three editable slots in place, with the
+rest of the list still visible; click a slot to pick an action for it, or Hide
+to empty a filled slot. Picking an action that is already in another slot swaps
 the two. Drag a filled slot onto another to reorder them. Hiding every slot
-leaves only the actions menu.
+leaves only the actions menu. Done, Escape, or a click elsewhere finishes;
+each change saves immediately.
 Archived rows keep their unarchive button regardless of this setting.
 
 The Thread list plugin's `rowActions` preference defaults to `["archive"]` and
@@ -1402,7 +1422,11 @@ The default-off `navigationRail` experiment keeps a vertical rail of
 destinations on the left edge of the sidebar on every screen. Home returns to
 the last thread, Settings sits at the bottom, and New thread moves into the
 sidebar header. The sidebar beside the rail still swaps between the thread
-list, Plugins, Skills, and Settings. While it is on, bb draws the navigation
+list, Plugins, Skills, and Settings. Collapsing the sidebar hides that list
+and leaves the rail in place. In the macOS desktop app the rail and a title
+bar across the top of the window share one background; the title bar holds
+the window controls, Back and Forward, and the sidebar toggle, and the
+sidebar and page sit in a card with a rounded top-left corner. While it is on, bb draws the navigation
 itself, so the Navigation and Header choices under Settings → Appearance are
 not used; they apply again when the experiment is turned off. Narrow windows
 and phones keep the regular drawer.

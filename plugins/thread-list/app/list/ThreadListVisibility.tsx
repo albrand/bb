@@ -2,6 +2,7 @@ import { ThreadCreationPlacementScope } from "./ThreadCreationPlacement.js";
 import {
   createContext,
   lazy,
+  useCallback,
   Suspense,
   useContext,
   useEffect,
@@ -18,10 +19,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { ActionMenuSeparator } from "../ui/action-menu-items.js";
-import {
-  SIDEBAR_CONTENT_SELECTOR,
-  SidebarContentElementContext,
-} from "../ui/sidebar.js";
+import { SidebarContentElementContext } from "../ui/sidebar.js";
 import { reorderStoredOrder } from "../model/stored-order.js";
 import { sidebarHiddenGroupsAtom } from "../preferences/atoms.js";
 import { CollapsedThreadStatusGlyph } from "../rows/ThreadRow.js";
@@ -33,8 +31,14 @@ import {
   SidebarCustomizeActionContent,
   type SidebarVisibilityItem,
 } from "./SidebarVisibilityControls.js";
-import { ThreadRowActionsCustomize } from "./ThreadRowActionsCustomize.js";
-import { CustomizeRowActionsContext } from "./customizeRowActionsContext.js";
+import {
+  CustomizeRowActionsContext,
+  ThreadRowActionsCustomizingContext,
+  type ThreadRowActionsCustomizing,
+} from "./customizeRowActionsContext.js";
+import {
+  useFinishRowActionsOnOutsideClick,
+} from "./ThreadRowActionsCustomize.js";
 
 const LazySidebarVisibilityCustomize = lazy(async () => {
   const module = await import("./SidebarVisibilityCustomize");
@@ -76,16 +80,14 @@ export function ThreadListVisibility({
   children: ReactNode;
 }) {
   const [hidden, setHidden] = useAtom(sidebarHiddenGroupsAtom);
-  const [customizing, setCustomizing] = useState<"list" | "rowActions" | null>(
+  const [customizing, setCustomizing] = useState<"list" | null>(null);
+  const [rowActionsThreadId, setRowActionsThreadId] = useState<string | null>(
     null,
   );
   const compact = useIsCompactViewport();
   const container = useRef<HTMLDivElement>(null);
   const focusTarget = useRef<string | null>(null);
-  const rowActionsOrigin = useRef<{
-    threadId: string;
-    scrollTop: number;
-  } | null>(null);
+  const rowActionsFocusTarget = useRef<string | null>(null);
   const hiddenIds = useMemo(() => new Set(hidden), [hidden]);
   const groupsById = new Map(groups.map((group) => [group.id, group]));
   const orderedGroups = order.flatMap((id) => {
@@ -126,22 +128,16 @@ export function ThreadListVisibility({
     return () => cancelAnimationFrame(frame);
   }, [hidden, customizing]);
   useEffect(() => {
-    const origin = rowActionsOrigin.current;
-    if (origin === null || customizing) return;
-    rowActionsOrigin.current = null;
-    const scroller = container.current?.closest<HTMLElement>(
-      SIDEBAR_CONTENT_SELECTOR,
-    );
-    if (scroller) scroller.scrollTop = origin.scrollTop;
+    const threadId = rowActionsFocusTarget.current;
+    if (threadId === null || rowActionsThreadId !== null) return;
+    rowActionsFocusTarget.current = null;
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         const link = Array.from(
           container.current?.querySelectorAll<HTMLElement>(
             "[data-sidebar-thread-id]",
           ) ?? [],
-        ).find(
-          (element) => element.dataset.sidebarThreadId === origin.threadId,
-        );
+        ).find((element) => element.dataset.sidebarThreadId === threadId);
         const target =
           link
             ?.closest("[data-sidebar-rename-row]")
@@ -152,21 +148,38 @@ export function ThreadListVisibility({
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [customizing]);
+  }, [rowActionsThreadId]);
   const customizeRowActions = (threadId: string) => {
-    rowActionsOrigin.current = {
-      threadId,
-      scrollTop:
-        container.current?.closest<HTMLElement>(SIDEBAR_CONTENT_SELECTOR)
-          ?.scrollTop ?? 0,
-    };
-    setCustomizing("rowActions");
+    setRowActionsThreadId(threadId);
   };
+  const finishCustomizingRowActions = useCallback(
+    (restoreFocus: boolean) => {
+      rowActionsFocusTarget.current = restoreFocus ? rowActionsThreadId : null;
+      setRowActionsThreadId(null);
+    },
+    [rowActionsThreadId],
+  );
+  useFinishRowActionsOnOutsideClick(
+    rowActionsThreadId === null ? null : finishCustomizingRowActions,
+  );
+  const rowActionsCustomizing = useMemo<ThreadRowActionsCustomizing | null>(
+    () =>
+      rowActionsThreadId === null
+        ? null
+        : {
+            threadId: rowActionsThreadId,
+            onDone: finishCustomizingRowActions,
+          },
+    [finishCustomizingRowActions, rowActionsThreadId],
+  );
   const value: ThreadListVisibilityState = {
     hiddenGroups: orderedGroups.filter((group) => hiddenIds.has(group.id)),
     label,
     selectedThreadId,
-    customize: () => setCustomizing("list"),
+    customize: () => {
+      setRowActionsThreadId(null);
+      setCustomizing("list");
+    },
     hide: (id) => {
       focusTarget.current = "more";
       setVisible(id, false);
@@ -179,13 +192,11 @@ export function ThreadListVisibility({
   return (
     <VisibilityContext.Provider value={value}>
       <CustomizeRowActionsContext.Provider value={customizeRowActions}>
-        <div ref={container} tabIndex={-1} className="min-w-0 outline-none">
-          {customizing === "rowActions" ? (
-            <ThreadRowActionsCustomize
-              onDone={() => setCustomizing(null)}
-              variant={compact ? "compact" : "card"}
-            />
-          ) : customizing === "list" ? (
+        <ThreadRowActionsCustomizingContext.Provider
+          value={rowActionsCustomizing}
+        >
+          <div ref={container} tabIndex={-1} className="min-w-0 outline-none">
+          {customizing === "list" ? (
             <Suspense fallback={null}>
               <LazySidebarVisibilityCustomize
                 items={orderedGroups}
@@ -216,7 +227,8 @@ export function ThreadListVisibility({
           ) : (
             children
           )}
-        </div>
+          </div>
+        </ThreadRowActionsCustomizingContext.Provider>
       </CustomizeRowActionsContext.Provider>
     </VisibilityContext.Provider>
   );

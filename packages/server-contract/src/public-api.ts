@@ -130,6 +130,7 @@ import type {
   EnvironmentStatusResponse,
   HostDirectoryListing,
   HostDirectoryQuery,
+  HostDiscoveredReposResponse,
   HostEnrollmentCommandResponse,
   HostReconnectResponse,
   HostListQuery,
@@ -960,6 +961,12 @@ export const publicApiRoutes = {
         hostDirectoryQuerySchema,
       ),
       response: jsonResponse<HostDirectoryListing>(),
+    }),
+    discoveredRepos: defineRoute({
+      path: "/hosts/:id/discovered-repos",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<HostDiscoveredReposResponse>(),
     }),
     file: defineRoute({
       path: "/hosts/:id/files/:filePath{.+}",

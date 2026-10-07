@@ -85,7 +85,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "Build a whole page, such as a dashboard, a board, or an inbox",
           "Give the page a URL that can be shared and works with back and forward",
-          "Add fixed tabs beside Browser and Terminal",
+          "Add fixed tabs beside Browser and Terminal, and open terminals it started in any folder",
           "Show live status on its sidebar row",
         ],
         apiSymbols: [
@@ -103,6 +103,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "useBbContext",
           "useBbNavigate",
           "BbNavigate.toPluginPanel",
+          "BbNavigate.experimental_openTerminal",
         ],
         firstParty: ["Automations", "Docs", "GitHub", "Tasks", "Theme Preview"],
       },
@@ -1269,6 +1270,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginsArea.experimental_setSafeMode",
           "ThreadsArea.experimental_searchPromptHistory",
           "PluginBbSdk.hosts.get",
+          "PluginBbSdk.hosts.experimental_discoverRepos",
           "PluginBbSdk.experimental_promptHistory.list",
           "PluginBbSdk.environments.experimental_cleanup",
           "PluginBbSdk.plugins.experimental_getSafeMode",

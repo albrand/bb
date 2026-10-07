@@ -7,14 +7,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@bb/shared-ui/dropdown-menu";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@bb/shared-ui/hover-reveal";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { TruncateStart } from "@/components/ui/truncate-start";
 import { formatCompactRelativeTime } from "@/lib/relative-time";
 
 const INFO_LIST_LEADING_CLASS =
   "flex size-3 shrink-0 items-center justify-center";
 
-const INFO_LIST_CARET_CLASS = "size-3 shrink-0 transition-transform";
+export const INFO_LIST_CARET_CLASS = "size-3 shrink-0 transition-transform";
 
 const INFO_LIST_DEFAULT_LIMIT = 5;
 
@@ -26,13 +28,13 @@ export function infoListCollapses(
 }
 
 const INFO_LIST_ROW_CLASS =
-  "group relative -mx-1 flex h-6 min-w-0 items-center gap-1.5 rounded px-1 transition-colors hover:bg-state-hover";
+  "group relative -mx-1 flex h-6 min-w-0 items-center gap-1.5 rounded px-1 transition-colors has-[:focus-visible]:bg-state-hover";
 
 const INFO_LIST_PRIMARY_CLASS =
-  "min-w-0 truncate text-left text-xs leading-5 text-foreground no-underline after:absolute after:inset-0 after:rounded after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring";
+  "min-w-0 cursor-pointer truncate text-left text-xs leading-5 text-foreground no-underline after:absolute after:inset-0 after:rounded after:content-[''] focus-visible:outline-none";
 
 const INFO_LIST_QUIET_CONTROL_CLASS =
-  "rounded text-2xs text-subtle-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "rounded text-2xs text-subtle-foreground transition-colors hover:text-foreground focus-visible:bg-state-hover focus-visible:text-foreground focus-visible:outline-none";
 
 function InfoCountPill({ count }: { count: number }) {
   return (
@@ -148,7 +150,11 @@ export interface InfoListRowProps {
   actions?: readonly InfoRowActionItem[];
   trailing?: ReactNode;
   selected?: boolean;
+  depth?: number;
+  expanded?: boolean;
 }
+
+const INFO_LIST_INDENT_REM = 1.125;
 
 export function InfoListRow({
   leading,
@@ -160,6 +166,8 @@ export function InfoListRow({
   actions = [],
   trailing,
   selected = false,
+  depth = 0,
+  expanded,
 }: InfoListRowProps) {
   const primary =
     target === null ? (
@@ -177,6 +185,7 @@ export function InfoListRow({
       <button
         type="button"
         title={title}
+        aria-expanded={expanded}
         onClick={target.onSelect}
         className={INFO_LIST_PRIMARY_CLASS}
       >
@@ -186,8 +195,25 @@ export function InfoListRow({
   return (
     <li
       className={cn(INFO_LIST_ROW_CLASS, selected && "bg-state-active")}
+      style={
+        depth > 0
+          ? {
+              paddingLeft: `calc(0.25rem + ${depth * INFO_LIST_INDENT_REM}rem)`,
+            }
+          : undefined
+      }
       aria-current={selected ? "true" : undefined}
     >
+      {Array.from({ length: depth }, (_, level) => (
+        <span
+          key={level}
+          className="pointer-events-none absolute inset-y-0 w-px bg-border"
+          style={{
+            left: `calc(0.25rem + 5.5px + ${level * INFO_LIST_INDENT_REM}rem)`,
+          }}
+          aria-hidden
+        />
+      ))}
       {leadingLabel ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -207,9 +233,9 @@ export function InfoListRow({
       <span className="flex min-w-0 flex-1 items-center gap-1 pr-2">
         {primary}
         {context ? (
-          <span className="shrink-0 text-2xs text-subtle-foreground">
+          <TruncateStart className="min-w-0 text-2xs text-subtle-foreground [flex-shrink:9999]">
             {context}
-          </span>
+          </TruncateStart>
         ) : null}
         <InfoRowInlineActions actions={actions} />
       </span>
@@ -228,8 +254,10 @@ export interface InfoRowActionItem {
   onSelect: () => void;
 }
 
-const INFO_ROW_ACTION_CLASS =
-  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-state-active hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 pointer-coarse:opacity-100";
+const INFO_ROW_ACTION_CLASS = cn(
+  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-state-active hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100",
+  HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
+);
 
 function InfoRowAction({
   action,
@@ -265,7 +293,7 @@ function InfoRowInlineActions({
     <InfoRowAction
       key={action.label}
       action={action}
-      className={collapsesOnTouch ? "pointer-coarse:hidden" : undefined}
+      className={collapsesOnTouch ? "[@media(hover:none)]:hidden" : undefined}
     />
   ));
 }
@@ -284,7 +312,7 @@ function InfoRowTouchActionsMenu({
         <button
           type="button"
           aria-label="More actions"
-          className={cn(INFO_ROW_ACTION_CLASS, "hidden pointer-coarse:flex")}
+          className={cn(INFO_ROW_ACTION_CLASS, "hidden [@media(hover:none)]:flex")}
         >
           <Icon name="MoreHorizontal" className="size-3" aria-hidden />
         </button>
@@ -349,7 +377,10 @@ export function InfoList<T>({
     <ul className="relative m-0 list-none p-0 max-md:pointer-coarse:[--text-xs--line-height:1.125rem] max-md:pointer-coarse:[--text-xs:0.8125rem]">
       {rail ? (
         <span
-          className="pointer-events-none absolute top-3 bottom-3 left-[5.5px] w-px bg-border"
+          className={cn(
+            "pointer-events-none absolute top-3 left-[5.5px] w-px bg-border [mask-image:linear-gradient(to_bottom,black_calc(100%-1rem),transparent)]",
+            canToggle ? "bottom-6" : "-bottom-3",
+          )}
           aria-hidden
         />
       ) : null}
@@ -364,7 +395,7 @@ export function InfoList<T>({
             onClick={() => setIsExpanded((value) => !value)}
             className={cn(
               INFO_LIST_QUIET_CONTROL_CLASS,
-              "-mx-1 flex h-6 w-[calc(100%+0.5rem)] min-w-0 items-center gap-1.5 px-1 text-left hover:bg-state-hover",
+              "-mx-1 flex h-6 w-[calc(100%+0.5rem)] min-w-0 cursor-pointer items-center gap-1.5 px-1 text-left",
             )}
           >
             <span className={INFO_LIST_LEADING_CLASS}>

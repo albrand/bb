@@ -35,7 +35,6 @@ function controller(
 ): ThreadTerminalController {
   return {
     activeSession: session,
-    canCreateTerminal: true,
     handleActiveTerminalSessionChange: () => undefined,
     handleActiveTerminalTitleChange: () => undefined,
     handleActiveTerminalUserInput: () => undefined,

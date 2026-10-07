@@ -2,21 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { TerminalSession } from "@bb/server-contract";
 import {
+  terminalQueryScopeForTarget,
   useCloseTerminal,
-  useCloseEnvironmentTerminal,
-  useCloseThreadTerminal,
   useCreateTerminal,
-  useCreateEnvironmentTerminal,
-  useCreateThreadTerminal,
-  useEnvironmentTerminals,
   useRenameTerminal,
-  useRenameEnvironmentTerminal,
-  useRenameThreadTerminal,
   useTerminals,
-  useThreadTerminals,
 } from "@/hooks/queries/thread-terminal-queries";
 import {
-  useActiveFixedRightTerminalId,
+  useFixedPanelTabsState,
   useRemoveFixedRightTerminalTab,
   useSetFixedRightTerminalActiveTerminal,
 } from "@/lib/fixed-panel-tabs";
@@ -47,12 +40,13 @@ const TERMINAL_TITLE_RENAME_DEBOUNCE_MS = 250;
 export type { ThreadTerminalTarget };
 
 export interface ThreadTerminalControllerArgs {
-  canCreateTerminal: boolean;
+  canCreateTerminal?: boolean;
   isPanelOpen: boolean;
   isPanelPersistedOpen: boolean;
   panelStateId?: string;
-  preferredTerminalId?: string;
-  syncThreadId: string | null;
+  preferredTerminalId?: string | null;
+  syncThreadId?: string | null;
+  terminalId?: string;
   fixedPanelTarget?: TerminalCreateTarget;
   fixedTerminalId?: string;
   target: ThreadTerminalTarget;
@@ -60,7 +54,7 @@ export interface ThreadTerminalControllerArgs {
 
 export interface ThreadTerminalController {
   activeSession: TerminalSession | null;
-  canCreateTerminal: boolean;
+  canCreateTerminal?: boolean;
   handleActiveTerminalSessionChange: (session: TerminalSession) => void;
   handleActiveTerminalTitleChange: ThreadTerminalTitleChangeHandler;
   handleActiveTerminalUserInput: ThreadTerminalActionHandler;
@@ -143,31 +137,33 @@ export function pickActiveTerminalId(
 }
 
 export function useThreadTerminalController({
-  canCreateTerminal,
+  canCreateTerminal = true,
   isPanelOpen,
   isPanelPersistedOpen,
   panelStateId,
-  preferredTerminalId,
-  syncThreadId,
+  preferredTerminalId: suppliedPreferredTerminalId,
+  syncThreadId: suppliedSyncThreadId,
+  terminalId,
   fixedPanelTarget,
   fixedTerminalId,
   target,
 }: ThreadTerminalControllerArgs): ThreadTerminalController {
   const queryClient = useQueryClient();
-  const terminalTargetKind = target.kind;
+  const preferredTerminalId = suppliedPreferredTerminalId ?? terminalId;
+  const syncThreadId =
+    suppliedSyncThreadId ??
+    (target.kind === "thread" ? target.threadId : null);
   const terminalTargetId = resolveTerminalScopeKey(target);
-  const threadQueryId = target.kind === "thread" ? target.threadId : "";
-  const environmentQueryId =
-    target.kind === "environment" ? target.environmentId : "";
   const fixedPanelStateId = panelStateId ?? terminalTargetId;
-  const activeFixedTerminalId = useActiveFixedRightTerminalId(
-    fixedPanelStateId,
-    syncThreadId,
+  const fixedPanelState = useFixedPanelTabsState(fixedPanelStateId, syncThreadId);
+  const activeFixedTab = fixedPanelState.secondary.tabs.find(
+    (tab) => tab.id === fixedPanelState.secondary.activeTabId,
   );
+  const activeFixedTerminalId =
+    activeFixedTab?.kind === "terminal" ? activeFixedTab.terminalId : null;
   const setActiveFixedTerminal = useSetFixedRightTerminalActiveTerminal(
     fixedPanelStateId,
     syncThreadId,
-    fixedPanelTarget,
   );
   const removeFixedTerminalTab = useRemoveFixedRightTerminalTab(
     fixedPanelStateId,
@@ -195,60 +191,15 @@ export function useThreadTerminalController({
     isPanelOpen,
     isPanelPersistedOpen,
   });
-  const threadTerminalsQuery = useThreadTerminals(threadQueryId, {
-    enabled: isPanelOpen && terminalTargetKind === "thread",
+  const terminalsQuery = useTerminals(terminalQueryScopeForTarget(target), {
+    enabled: isPanelOpen,
   });
-  const environmentTerminalsQuery = useEnvironmentTerminals(
-    environmentQueryId,
-    {
-      enabled: isPanelOpen && terminalTargetKind === "environment",
-    },
-  );
-  const globalTerminalsQuery = useTerminals(
-    target.kind === "host_path"
-      ? {
-          kind: "host_path",
-          hostId: target.hostId,
-          ...(target.cwd === null ? {} : { cwd: target.cwd }),
-        }
-      : null,
-    {
-      enabled: isPanelOpen && terminalTargetKind === "host_path",
-    },
-  );
-  const terminalsQuery =
-    terminalTargetKind === "thread"
-      ? threadTerminalsQuery
-      : terminalTargetKind === "environment"
-        ? environmentTerminalsQuery
-        : globalTerminalsQuery;
-  const createThreadTerminal = useCreateThreadTerminal();
-  const createEnvironmentTerminal = useCreateEnvironmentTerminal();
   const createTerminal = useCreateTerminal();
-  const closeThreadTerminal = useCloseThreadTerminal();
-  const closeEnvironmentTerminal = useCloseEnvironmentTerminal();
   const closeTerminalMutation = useCloseTerminal();
-  const renameThreadTerminal = useRenameThreadTerminal();
-  const renameEnvironmentTerminal = useRenameEnvironmentTerminal();
   const renameTerminal = useRenameTerminal();
-  const isCreateTerminalPending =
-    terminalTargetKind === "thread"
-      ? createThreadTerminal.isPending
-      : terminalTargetKind === "environment"
-        ? createEnvironmentTerminal.isPending
-        : createTerminal.isPending;
-  const isCloseTerminalPending =
-    terminalTargetKind === "thread"
-      ? closeThreadTerminal.isPending
-      : terminalTargetKind === "environment"
-        ? closeEnvironmentTerminal.isPending
-        : closeTerminalMutation.isPending;
-  const closingTerminalVariables =
-    terminalTargetKind === "thread"
-      ? closeThreadTerminal.variables
-      : terminalTargetKind === "environment"
-        ? closeEnvironmentTerminal.variables
-        : closeTerminalMutation.variables;
+  const isCreateTerminalPending = createTerminal.isPending;
+  const isCloseTerminalPending = closeTerminalMutation.isPending;
+  const closingTerminalVariables = closeTerminalMutation.variables;
   const sessions = useMemo(() => {
     const currentSessions =
       terminalsQuery.data?.sessions ?? EMPTY_TERMINAL_SESSIONS;
@@ -339,7 +290,9 @@ export function useThreadTerminalController({
     ) {
       return;
     }
-    setActiveFixedTerminal(activeTerminalId);
+    if (activeTerminalId !== null) {
+      setActiveFixedTerminal(activeTerminalId, fixedPanelTarget ?? target);
+    }
   }, [
     activeFixedTerminalId,
     activeTerminalId,
@@ -367,36 +320,19 @@ export function useThreadTerminalController({
       cols: DEFAULT_TERMINAL_COLS,
       rows: DEFAULT_TERMINAL_ROWS,
     };
-    const created =
-      target.kind === "thread"
-        ? createThreadTerminal.mutateAsync({
-            ...request,
-            threadId: target.threadId,
-          })
-        : target.kind === "environment"
-          ? createEnvironmentTerminal.mutateAsync({
-              ...request,
-              environmentId: target.environmentId,
-            })
-          : createTerminal.mutateAsync({
-              ...request,
-              target: {
-                kind: "host_path",
-                hostId: target.hostId,
-                cwd: target.cwd,
-              },
-            });
+    const created = createTerminal.mutateAsync({
+      ...request,
+      target,
+    });
     void created
       .then((session) => {
         uiCreatedTerminalIdsRef.current.add(session.id);
-        setActiveFixedTerminal(session.id);
+        setActiveFixedTerminal(session.id, fixedPanelTarget ?? target);
       })
       .catch(() => undefined);
   }, [
     canCreateTerminal,
     createTerminal,
-    createEnvironmentTerminal,
-    createThreadTerminal,
     isCreateTerminalPending,
     setActiveFixedTerminal,
     target,
@@ -411,38 +347,20 @@ export function useThreadTerminalController({
     }: {
       mode: TerminalCloseMode;
       onSettled?: () => void;
-      onSuccess?: (session: TerminalSession) => void;
+      onSuccess?: (session: TerminalSession | null) => void;
       terminalId: string;
     }) => {
-      const options = {
-        onSettled: () => {
-          onSettled?.();
+      closeTerminalMutation.mutate(
+        { mode, terminalId },
+        {
+          onSettled: () => onSettled?.(),
+          onSuccess: (session) => {
+            onSuccess?.(session);
+          },
         },
-        onSuccess,
-      };
-      if (terminalTargetKind === "thread") {
-        closeThreadTerminal.mutate(
-          { mode, threadId: terminalTargetId, terminalId },
-          options,
-        );
-        return;
-      }
-      if (terminalTargetKind === "environment") {
-        closeEnvironmentTerminal.mutate(
-          { mode, environmentId: terminalTargetId, terminalId },
-          options,
-        );
-        return;
-      }
-      closeTerminalMutation.mutate({ mode, terminalId }, options);
+      );
     },
-    [
-      closeEnvironmentTerminal,
-      closeTerminalMutation,
-      closeThreadTerminal,
-      terminalTargetId,
-      terminalTargetKind,
-    ],
+    [closeTerminalMutation],
   );
 
   useEffect(() => {
@@ -464,7 +382,7 @@ export function useThreadTerminalController({
         mode: "force",
         terminalId: session.id,
         onSuccess: (closedSession) => {
-          if (closedSession.status !== "exited") {
+          if (closedSession?.status !== "exited") {
             return;
           }
           uiCreatedTerminalIdsRef.current.delete(closedSession.id);
@@ -543,7 +461,7 @@ export function useThreadTerminalController({
         mode: "if-clean",
         terminalId: session.id,
         onSuccess: (closedSession) => {
-          if (closedSession.status !== "exited") {
+          if (closedSession?.status !== "exited") {
             return;
           }
           uiCreatedTerminalIdsRef.current.delete(closedSession.id);
@@ -573,7 +491,7 @@ export function useThreadTerminalController({
 
   const handleSelectTerminal = useCallback(
     (terminalId: string) => {
-      setActiveFixedTerminal(terminalId);
+      setActiveFixedTerminal(terminalId, fixedPanelTarget ?? target);
     },
     [setActiveFixedTerminal],
   );
@@ -640,28 +558,6 @@ export function useThreadTerminalController({
               latestRequestedTitleRenameRef.current = null;
             }
           };
-          if (terminalTargetKind === "thread") {
-            renameThreadTerminal.mutate(
-              {
-                threadId: terminalTargetId,
-                terminalId: request.terminalId,
-                title: request.title,
-              },
-              { onSettled },
-            );
-            return;
-          }
-          if (terminalTargetKind === "environment") {
-            renameEnvironmentTerminal.mutate(
-              {
-                environmentId: terminalTargetId,
-                terminalId: request.terminalId,
-                title: request.title,
-              },
-              { onSettled },
-            );
-            return;
-          }
           renameTerminal.mutate(
             {
               terminalId: request.terminalId,
@@ -673,11 +569,7 @@ export function useThreadTerminalController({
       },
       [
         activeSession,
-        renameEnvironmentTerminal,
         renameTerminal,
-        renameThreadTerminal,
-        terminalTargetId,
-        terminalTargetKind,
       ],
     );
 

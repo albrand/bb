@@ -278,6 +278,7 @@ function load(
   const threadId = testThread.thread.id;
   return loadThreadConversationOutline(testThread.db, testThread.thread, {
     completedTurnDisplay,
+    includeClearedContextHistory: false,
     maxSeq: getLatestThreadSequence(testThread.db, { threadId }),
     outlineSequence: getLatestStoredConversationOutlineSequence(testThread.db, {
       threadId,
@@ -293,6 +294,7 @@ function expectMatchesFull(
   expect(result).toEqual(
     buildThreadConversationOutline(testThread.coldDb, testThread.thread, {
       completedTurnDisplay,
+      includeClearedContextHistory: false,
       maxSeq: result.maxSeq,
     }),
   );
@@ -342,7 +344,9 @@ function expectCheckpointFallbackForTailEvent(tailEvent: RowSpec): void {
         maxSeq: getLatestThreadSequence(testThread.db, {
           threadId: testThread.thread.id,
         }),
+        historySequenceStart: 0,
         contextBoundarySeq: 0,
+        orderingBoundarySequence: null,
         resolveProjectionState: () => ({
           includeNestedEvents: true,
           summaryCompactionEnabled: false,

@@ -1450,6 +1450,14 @@ forms behave the same.
 
 **Kept experimental (2026-08-22).** `experimental_hostId` is persisted inside opener-tab `paramsJson` (a rename needs a read-compat shim), Windows/UNC paths were never verified, and `experimental_openFilePreview` has no consumer.
 
+**Core callers.** `usePanelFiles` owns file opening on the thread view, New
+thread screen, and plugin page: core's workspace, host, and storage opens and
+this API's `openFilePreview` build the same tab requests, and one scope rule
+(workspace by environment, host files only with a thread and environment,
+storage by thread; plugin pages accept any explicit target) is checked in
+`usePanelFiles.test.tsx` against every surface. Links use `usePanelBrowser`
+for in-app browser tabs and link-preference routing on every surface.
+
 **What it does.** Gives plugin UI explicit, source-safe references to live
 workspace, host, and thread-storage files. Ordinary `experimental_FileLink`
 activation and the preview method use the current surface's shared file-tab
@@ -1480,6 +1488,42 @@ malformed runtime targets remain inert in both the app and SDK test runtime.
    target variants; do not weaken live-file guarantees to accommodate them.
 7. Confirm `PluginFileOpenerSource.experimental_hostId` can become a stable
    required `hostId` field without breaking older opener implementations.
+
+## Terminal navigation (`BbNavigate.experimental_openTerminal`)
+
+**What it does.** Shows an existing terminal session in the current surface's
+BB terminal panel: the host fetches the session, selects its tab (adding one
+when needed), and reveals the panel. Plugins create the session with
+`useSdk().terminals.create`, so the create scope (thread, environment, or host
+path) decides the directory. A thread surface accepts only that thread's
+terminals, the New thread screen only terminals in its current terminal scope,
+and a plugin page any terminal, tagging the tab with the session's own scope.
+It resolves false for unknown (404) or exited terminals and surfaces without a
+terminal panel; other fetch failures reject. Closing the tab force-closes the
+terminal, as for user-started terminals. Requested in #1132 and by a plugin
+author whose code review page could not show a terminal in the reviewed
+worktree.
+
+**Core callers.** Every surface's terminal tabs go through
+`usePanelTerminals`: its `open` is the navigation handler this API calls, and
+core's Start terminal row, the `terminal.open` shortcut, and terminal tab
+selection use the same `select` path after creating or choosing a terminal.
+`usePanelTerminals.test.tsx` runs one contract table against the thread view,
+New thread screen, and plugin page rules.
+
+**Audit before stabilizing.**
+
+1. Decide whether plugins need tabs that hide without closing the terminal
+   (#1132's `closeBehavior: "detach"`). Thread and New-thread surfaces derive
+   tabs from live sessions, so this needs a hidden-session notion in panel
+   state rather than a flag on the call.
+2. Confirm the per-surface acceptance rules with a real consumer, including
+   environment terminals opened from a thread view and host-path terminals
+   whose cwd differs from the New thread screen's target.
+3. Verify compact-viewport drawer reveal, split panes, and opening a terminal
+   whose host is disconnected.
+4. Decide whether a nav panel should also declare a default terminal scope so
+   the native "+ Terminal" button follows the page's worktree.
 
 ## Host plugin foundation (`bb.hosts.experimental_client`, `ExperimentalHostClient.experimental_onWorkerExit`, `ExperimentalHostClient.experimental_onSignal`, `ExperimentalHostRpcContext.experimental_retainWorker`, `experimental_defineHostEntry`, `experimental_killProcessesWithCwdUnder`, and `experimental_createHostEntryHarness`)
 
@@ -3903,3 +3947,9 @@ Stabilize after verifying group archive and Undo with descendants, already archi
 Starts a server-owned plugin update and returns its job immediately. `experimental_updateJobs.list/get` exposes queued/running phases and terminal update, rollback, or failure results. Jobs continue across client disconnects; finished jobs remain for ten minutes. Jobs are in memory and do not survive server restarts. `applyUpdate` retains its result contract by polling the job; raw callers without `Prefer: respond-async` retain the synchronous response. Running updates cannot be cancelled during activation or rollback.
 
 Stabilization requires exercising reconnect/reload, concurrent deduplication, rollback delivery, missing jobs after restart, and CLI/SDK parity before dropping the experimental prefix. No host-daemon wire change.
+
+## `PluginBbSdk.hosts.experimental_discoverRepos`
+
+`hosts.experimental_discoverRepos({ hostId })` asks the machine for git repositories under the user's home directory with local activity in the last 30 days, newest first, capped at 10. Each entry has `path`, `name`, `lastActivityAt`, `originUrl`, and `projectId` (the bb project already bound to that path on that machine, or null). `truncated` is true when the three-second walk budget ran out. The walk stops at each repository root, skips dot-directories, common build directories, scratch directories (`tmp`, `temp`, `tmp-*`, `Downloads`), linked worktrees, and submodules. The first-run setup guide and `bb project discover` use it. Host-daemon wire change: the `host.discover_repos` command (protocol 230).
+
+Stabilize after deciding whether depth, recency window, and limit should be caller options, and after exercising slow or network-mounted home directories and Windows hosts.
