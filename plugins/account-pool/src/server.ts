@@ -16,7 +16,7 @@ import {
   type PoolStatus,
 } from "./contracts.js";
 import { draftSelectionSchema } from "./contracts.js";
-import { ThreadTokenStore } from "./thread-tokens.js";
+import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
 import {
   AVAILABILITY_PATH,
   PARENT_TOKEN_ENV,
@@ -30,7 +30,7 @@ import type {
   ImportedClaudeCredentials,
   ImportedCodexCredentials,
 } from "./credentials.js";
-import { createHub } from "./hub.js";
+import { createHub, waitForDelay } from "./hub.js";
 import { PoolOperations } from "./operations.js";
 import {
   accountPoolBindingReadRpcContract,
@@ -76,6 +76,7 @@ export interface AccountPoolPluginOptions {
 
 const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
+const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
 const PROVIDER_ROUTING_ENV: Record<PoolProvider, readonly string[]> = {
@@ -361,6 +362,35 @@ export function createAccountPoolPlugin(
       }
       return threadTokens.removeThreadIfVersion(threadId, archiveVersion);
     };
+    const lookupThread: ThreadLookup = async (threadId) => {
+      try {
+        const thread = await bb.sdk.threads.get({ threadId });
+        return thread.archivedAt === null && thread.deletedAt === null
+          ? "live"
+          : "gone";
+      } catch (error) {
+        if (isThreadNotFound(error)) return "gone";
+        throw error;
+      }
+    };
+    const sweepThreadCredentials = async (
+      signal: AbortSignal,
+    ): Promise<void> => {
+      while (!signal.aborted) {
+        try {
+          const { checked, revoked, failed } =
+            await threadTokens.sweepThreads(lookupThread);
+          if (revoked > 0 || failed > 0) {
+            bb.log.warn(
+              `Account Pooler thread credential sweep checked ${checked} threads, revoked ${revoked}, and could not look up ${failed}.`,
+            );
+          }
+        } catch {
+          bb.log.warn("Account Pooler thread credential sweep failed.");
+        }
+        await waitForDelay(THREAD_SWEEP_INTERVAL_MS, signal);
+      }
+    };
     const checkArchived = async (
       threadId: string,
     ): Promise<
@@ -551,9 +581,25 @@ export function createAccountPoolPlugin(
       auth: "none",
     });
     bb.background.service("hub", {
-      start: (signal) => hub.start(signal),
+      start: async (signal) => {
+        await Promise.all([
+          hub.start(signal),
+          sweepThreadCredentials(signal),
+        ]);
+      },
     });
   };
+}
+
+function isThreadNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 404 &&
+    "code" in error &&
+    error.code === "thread_not_found"
+  );
 }
 
 async function inspectDisableState(

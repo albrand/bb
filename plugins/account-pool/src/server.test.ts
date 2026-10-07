@@ -10040,14 +10040,12 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, revokedNested, "/availability")).toBe(401);
   });
 
-  it("keeps the tokens of a thread archived while the plugin was down valid until the machine token rotates", async () => {
-    let now = 1_000;
-    const fixture = await scopedFixture({ now: () => now });
-    const missed = await claudeToken(fixture.host, "thread-missed");
-    const missedNested = await nestedToken(fixture.host, "thread-missed");
+  async function reloadHub(
+    fixture: Fixture,
+    stubLookup: (host: Fixture["host"]) => void,
+  ): Promise<Fixture["host"]> {
     const host = await fixture.host.harness.lifecycle.reload(
       createAccountPoolPlugin({
-        now: () => now,
         usageUrl: EMPTY_USAGE_URL,
         codexUsageUrl: EMPTY_USAGE_URL,
         importCodexCredentials: async () => ({
@@ -10061,6 +10059,7 @@ describe("Account Pool credential scoping", () => {
         }),
       }),
     );
+    stubLookup(host);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       service.controller.abort();
@@ -10073,19 +10072,88 @@ describe("Account Pool credential scoping", () => {
       );
       expect(status.accepting).toBe(true);
     });
-    expect(await statusOf(host, missed, "/v1/messages")).toBe(200);
-    expect(await statusOf(host, missedNested, "/availability")).toBe(200);
-    now = 2_000;
-    const rotate = await host.harness.behavior.runCli([
-      "token",
-      "rotate",
-      "--machine",
-      "One",
-    ]);
-    expect(rotate.exitCode).toBe(0);
-    now = 2_000 + 10 * 60_000 + 1;
-    expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
+    return host;
+  }
+
+  async function downgradeToLegacyFiles(
+    fixture: Fixture,
+    threadId: string,
+  ): Promise<void> {
+    const directory = path.join(fixture.dataDir, ...POOL_SECRETS);
+    for (const name of await fs.readdir(directory)) {
+      if (!name.includes(threadId)) continue;
+      const legacy = name
+        .replace(/^scoped-route-/u, "thread-route-")
+        .replace(/^scoped-nested-route-/u, "nested-route-")
+        .replace(/-v0\.json$/u, ".json");
+      if (legacy === name) continue;
+      await fs.rename(path.join(directory, name), path.join(directory, legacy));
+    }
+  }
+
+  it("revokes the legacy tokens of a thread archived while the plugin was down and keeps an active thread's legacy tokens", async () => {
+    const fixture = await scopedFixture();
+    const missed = await claudeToken(fixture.host, "thread-missed");
+    const missedNested = await nestedToken(fixture.host, "thread-missed");
+    const active = await claudeToken(fixture.host, "thread-live");
+    const activeNested = await nestedToken(fixture.host, "thread-live");
+    await downgradeToLegacyFiles(fixture, "thread-missed");
+    await downgradeToLegacyFiles(fixture, "thread-live");
+    const lookups: string[] = [];
+    const host = await reloadHub(fixture, (reloaded) =>
+      reloaded.harness.sdk.stub("threads.get", async ({ threadId }) => {
+        lookups.push(threadId);
+        return makeThreadResponse({
+          id: threadId,
+          archivedAt: threadId === "thread-missed" ? 1_000 : null,
+        });
+      }),
+    );
+    await vi.waitFor(async () => {
+      expect(await statusOf(host, missed, "/v1/messages")).toBe(401);
+    });
     expect(await statusOf(host, missedNested, "/availability")).toBe(401);
+    expect(await statusOf(host, active, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, activeNested, "/availability")).toBe(200);
+    expect(lookups.sort()).toEqual([
+      "thread-live",
+      "thread-missed",
+      "thread-one",
+    ]);
+    const names = await fs.readdir(path.join(fixture.dataDir, ...POOL_SECRETS));
+    expect(names.filter((name) => name.includes("thread-missed"))).toEqual([]);
+    expect(names.some((name) => name.startsWith("archived-thread-"))).toBe(
+      true,
+    );
+  });
+
+  it("revokes the tokens of a thread that no longer exists but keeps them when the lookup fails or a 404 is not a missing thread", async () => {
+    const fixture = await scopedFixture();
+    const gone = await claudeToken(fixture.host, "thread-gone");
+    const failing = await claudeToken(fixture.host, "thread-failing");
+    const proxy = await claudeToken(fixture.host, "thread-proxy");
+    for (const threadId of ["thread-gone", "thread-failing", "thread-proxy"])
+      await downgradeToLegacyFiles(fixture, threadId);
+    const host = await reloadHub(fixture, (reloaded) =>
+      reloaded.harness.sdk.stub("threads.get", async ({ threadId }) => {
+        if (threadId === "thread-gone")
+          throw Object.assign(new Error("HTTP 404: Thread not found"), {
+            status: 404,
+            code: "thread_not_found",
+          });
+        if (threadId === "thread-proxy")
+          throw Object.assign(new Error("HTTP 404: Not Found"), {
+            status: 404,
+            code: null,
+          });
+        throw new Error("lookup failed");
+      }),
+    );
+    await vi.waitFor(async () => {
+      expect(await statusOf(host, gone, "/v1/messages")).toBe(401);
+    });
+    expect(await statusOf(host, failing, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, proxy, "/v1/messages")).toBe(200);
   });
 
   it("exports nothing for an archived thread and revokes any token it already held", async () => {

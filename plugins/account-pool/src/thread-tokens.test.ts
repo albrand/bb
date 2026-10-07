@@ -864,3 +864,135 @@ it("reclaims expired-generation credentials for a thread when minting, and keeps
   expect(await credentialFiles("scoped-nested-route-")).toHaveLength(1);
   expect(await threads.authenticateNested(nextNested)).toEqual(nestedRoute);
 });
+
+async function downgradeToLegacy(directory: string): Promise<void> {
+  for (const name of await fs.readdir(directory)) {
+    const legacy = name
+      .replace(/^scoped-route-/u, "thread-route-")
+      .replace(/^scoped-nested-route-/u, "nested-route-")
+      .replace(/-v0\.json$/u, ".json");
+    if (legacy !== name)
+      await fs.rename(path.join(directory, name), path.join(directory, legacy));
+  }
+}
+
+async function legacyFixture(threadIds: readonly string[]) {
+  const base = await fixture();
+  const tokens = new Map<string, { provider: string; nested: string }>();
+  for (const threadId of threadIds) {
+    tokens.set(threadId, {
+      provider: await base.threads.forThread(
+        { ...base.route, threadId },
+        base.hostToken,
+      ),
+      nested: await base.threads.forNested(
+        { hostId: base.route.hostId, threadId },
+        base.hostToken,
+      ),
+    });
+  }
+  await downgradeToLegacy(base.directory);
+  const reloaded = new ThreadTokenStore(base.directory, base.hosts);
+  await reloaded.initialize([base.route.hostId]);
+  const tokenOf = (threadId: string) => {
+    const found = tokens.get(threadId);
+    if (found === undefined) throw new Error("unknown thread");
+    return found;
+  };
+  return { ...base, threads: reloaded, tokenOf };
+}
+
+it("revokes legacy credentials of an archived thread that never had a marker and keeps an active thread's", async () => {
+  const { threads, route, tokenOf } = await legacyFixture([
+    "thr_archived",
+    "thr_active",
+  ]);
+  const archived = tokenOf("thr_archived");
+  const active = tokenOf("thr_active");
+  expect((await threads.authenticate(archived.provider))?.threadId).toBe(
+    "thr_archived",
+  );
+  expect(await threads.authenticateNested(archived.nested)).not.toBeNull();
+  const lookup = vi.fn(async (threadId: string) =>
+    threadId === "thr_archived" ? ("gone" as const) : ("live" as const),
+  );
+  expect(await threads.sweepThreads(lookup)).toEqual({
+    checked: 2,
+    revoked: 1,
+    failed: 0,
+  });
+  expect(await threads.authenticate(archived.provider)).toBeNull();
+  expect(await threads.authenticateNested(archived.nested)).toBeNull();
+  expect(await threads.authenticate(active.provider)).toEqual({
+    ...route,
+    threadId: "thr_active",
+  });
+  expect(await threads.authenticateNested(active.nested)).toEqual({
+    hostId: route.hostId,
+    threadId: "thr_active",
+  });
+});
+
+it("keeps every credential and does not throw when the thread lookup fails", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_a", "thr_b"]);
+  const failed = await threads.sweepThreads(async (threadId) => {
+    if (threadId === "thr_a") throw new Error("lookup failed");
+    return "live";
+  });
+  expect(failed).toEqual({ checked: 2, revoked: 0, failed: 1 });
+  expect(await threads.authenticate(tokenOf("thr_a").provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf("thr_b").provider)).not.toBeNull();
+  const allFail = await threads.sweepThreads(async () => {
+    throw new Error("lookup failed");
+  });
+  expect(allFail).toEqual({ checked: 2, revoked: 0, failed: 2 });
+  expect(await threads.authenticate(tokenOf("thr_a").provider)).not.toBeNull();
+  expect(await threads.authenticateNested(tokenOf("thr_b").nested)).not.toBeNull();
+});
+
+it("keeps a revoked legacy credential revoked after a reload, even if its file reappears", async () => {
+  const { directory, hosts, route, threads, tokenOf } = await legacyFixture([
+    "thr_archived",
+  ]);
+  const token = tokenOf("thr_archived");
+  const legacyFiles = await Promise.all(
+    (await fs.readdir(directory))
+      .filter(
+        (name) =>
+          name.startsWith("thread-route-") || name.startsWith("nested-route-"),
+      )
+      .map(async (name) => ({
+        name,
+        text: await fs.readFile(path.join(directory, name), "utf8"),
+      })),
+  );
+  expect(legacyFiles.length).toBe(2);
+  await threads.sweepThreads(async () => "gone");
+  expect(
+    (await fs.readdir(directory)).some((name) =>
+      name.startsWith("archived-thread-"),
+    ),
+  ).toBe(true);
+  for (const file of legacyFiles)
+    await fs.writeFile(path.join(directory, file.name), file.text);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticate(token.provider)).toBeNull();
+  expect(await reloaded.authenticateNested(token.nested)).toBeNull();
+  expect(
+    (await fs.readdir(directory)).filter(
+      (name) =>
+        name.startsWith("thread-route-") || name.startsWith("nested-route-"),
+    ),
+  ).toEqual([]);
+});
+
+it("counts a thread archived by its event during the lookup as revoked without a second removal", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_racing"]);
+  const result = await threads.sweepThreads(async (threadId) => {
+    await threads.removeThread(threadId);
+    return "gone";
+  });
+  expect(result.failed).toBe(0);
+  expect(await threads.authenticate(tokenOf("thr_racing").provider)).toBeNull();
+});

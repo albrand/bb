@@ -55,6 +55,13 @@ type NestedRouteRecord = z.infer<typeof nestedRouteSchema>;
 export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
 export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
+export type ThreadLookup = (threadId: string) => Promise<"live" | "gone">;
+export type ThreadSweepResult = {
+  checked: number;
+  revoked: number;
+  failed: number;
+};
+
 export class ThreadTokenStore {
   private readonly routes = new Map<string, RouteRecord>();
   private readonly tokenIndex = new Map<string, RouteRecord>();
@@ -323,6 +330,29 @@ export class ThreadTokenStore {
       await this.quarantineUnreadableLegacyFiles(threadId, names).catch(() => undefined);
       if (markerError !== undefined) throw markerError;
     });
+  }
+
+  async sweepThreads(lookup: ThreadLookup): Promise<ThreadSweepResult> {
+    const threadIds = new Set<string>();
+    for (const record of this.routes.values()) threadIds.add(record.threadId);
+    for (const record of this.nestedRoutes.values())
+      threadIds.add(record.threadId);
+    const result: ThreadSweepResult = {
+      checked: threadIds.size,
+      revoked: 0,
+      failed: 0,
+    };
+    for (const threadId of threadIds) {
+      const version = this.archiveVersion(threadId);
+      try {
+        if ((await lookup(threadId)) === "live") continue;
+        if (await this.removeThreadIfVersion(threadId, version))
+          result.revoked += 1;
+      } catch {
+        result.failed += 1;
+      }
+    }
+    return result;
   }
 
   async removeThreadIfVersion(
