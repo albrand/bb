@@ -11,6 +11,7 @@ interface ThreadUnreadDividerThreadState {
 interface ThreadUnreadDividerSnapshot {
   attentionAt: number;
   hasUnseenUpdatesOnOpen: boolean;
+  hasUnseenTimelineEventsOnOpen: boolean;
   isFocused: boolean;
   isOpening: boolean;
   placement: ThreadTimelineUnreadDividerPlacement | null;
@@ -146,6 +147,8 @@ export function useThreadUnreadDividerState({
             attentionAt: threadLatestAttentionAt,
             hasUnseenUpdatesOnOpen:
               currentSnapshot.hasUnseenUpdatesOnOpen || becameFocused,
+            hasUnseenTimelineEventsOnOpen:
+              currentSnapshot.hasUnseenTimelineEventsOnOpen,
             isFocused,
             isOpening: nextIsOpening,
             placement: { kind: "before-first" },
@@ -178,6 +181,10 @@ export function useThreadUnreadDividerState({
               ((currentSnapshot.isOpening || becameFocused) &&
                 placement !== null)
             : placement !== null,
+        hasUnseenTimelineEventsOnOpen:
+          currentSnapshot?.threadId === threadId
+            ? currentSnapshot.hasUnseenTimelineEventsOnOpen
+            : hasUnseenTimelineEvents,
         isFocused,
         isOpening: nextIsOpening,
         placement,
@@ -191,7 +198,18 @@ export function useThreadUnreadDividerState({
     threadId,
     threadLastReadAt,
     threadLatestAttentionAt,
+    hasUnseenTimelineEvents,
   ]);
+
+  const snapshotForThread =
+    snapshot?.threadId === threadId ? snapshot : null;
+  const hasUnseenTimelineEventsToOpenLatest =
+    snapshotForThread === null
+      ? hasUnseenTimelineEvents
+      : snapshotForThread.hasUnseenTimelineEventsOnOpen ||
+        (isOpening && hasUnseenTimelineEvents);
+  const shouldOpenForUnseenTimelineEvents =
+    isFocused && hasUnseenTimelineEventsToOpenLatest;
 
   if (
     !shouldTrackThreadUnreadDivider({
@@ -208,7 +226,7 @@ export function useThreadUnreadDividerState({
   ) {
     return {
       ...NO_UNREAD_DIVIDER_STATE,
-      hasUnseenTimelineEvents: isFocused && hasUnseenTimelineEvents,
+      hasUnseenTimelineEvents: shouldOpenForUnseenTimelineEvents,
     };
   }
 
@@ -226,7 +244,7 @@ export function useThreadUnreadDividerState({
         });
   return {
     hasUnseenTimelineEvents: shouldOpenThreadAtLatest({
-      hasUnseenTimelineEvents: isFocused && hasUnseenTimelineEvents,
+      hasUnseenTimelineEvents: shouldOpenForUnseenTimelineEvents,
       hasUnseenUpdatesOnOpen: isFocused && hasUnseenUpdatesOnOpen,
     }),
     placement:

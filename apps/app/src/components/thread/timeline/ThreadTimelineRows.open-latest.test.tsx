@@ -460,7 +460,7 @@ describe("opening an unseen timeline", () => {
   });
 
   it.each([false, true])(
-    "handles late unseen data while respecting user input=%s",
+    "preserves a restored reading position for late unseen data after 23 seconds with user input=%s",
     (userScrolled) => {
       getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
         rowId: "answer-100",
@@ -478,11 +478,12 @@ describe("opening an unseen timeline", () => {
         area.scrollTop = 100;
         fireEvent.scroll(area);
       }
+      act(() => vi.advanceTimersByTime(23_200));
       catchUp();
       height += 600;
       resize();
       flushFrames();
-      expect(area.scrollTop).toBe(userScrolled ? 100 : 3300);
+      expect(area.scrollTop).toBe(userScrolled ? 100 : 200);
     },
   );
 });
