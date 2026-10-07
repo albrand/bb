@@ -757,11 +757,9 @@ export function BottomAnchoredScrollBody({
   }, [markUserScrollIntent]);
 
   const startPointerScrollIntent = useCallback(() => {
-    userScrollIntentObservedRef.current = true;
-    cancelPrependPositionHold();
-    scrollToTopInProgressRef.current = false;
+    markUserScrollIntent();
     pointerScrollIntentRef.current = true;
-  }, [cancelPrependPositionHold]);
+  }, [markUserScrollIntent]);
 
   const endPointerScrollIntent = useCallback(() => {
     pointerScrollIntentRef.current = false;

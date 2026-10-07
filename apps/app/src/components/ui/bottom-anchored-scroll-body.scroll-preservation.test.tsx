@@ -867,12 +867,7 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
     mockScrollAreaRect(first.scrollArea, 796);
     vi.spyOn(first.getRow("row-b"), "getBoundingClientRect").mockImplementation(
       () =>
-        new DOMRect(
-          0,
-          rowDocumentTop - first.scrollArea.scrollTop,
-          100,
-          100,
-        ),
+        new DOMRect(0, rowDocumentTop - first.scrollArea.scrollTop, 100, 100),
     );
     setScrollMetrics(first.scrollArea, {
       scrollHeight: 14_222,
@@ -898,7 +893,10 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
       virtualized: true,
     });
     mockScrollAreaRect(restored.scrollArea, 796);
-    vi.spyOn(restored.getRow("row-b"), "getBoundingClientRect").mockImplementation(
+    vi.spyOn(
+      restored.getRow("row-b"),
+      "getBoundingClientRect",
+    ).mockImplementation(
       () =>
         new DOMRect(
           0,
@@ -955,6 +953,44 @@ describe("BottomAnchoredScrollBody scroll preservation", () => {
 
     expect(scrollArea.scrollTop).toBe(manualScrollTop);
   });
+
+  it.each(["before release", "after release"] as const)(
+    "keeps a pointer drag authoritative when its scroll event arrives %s",
+    (scrollEventOrder) => {
+      getDefaultStore().set(threadTimelineScrollAnchorAtomFamily("thread-a"), {
+        rowId: "row-b",
+        offsetWithinRow: -197,
+        atBottom: false,
+      });
+      const { scrollArea, getRow } = renderTimeline({
+        threadId: "thread-a",
+        rowIds: ["row-a", "row-b", "row-c"],
+        virtualized: true,
+      });
+      mockScrollAreaRect(scrollArea, 796);
+      vi.spyOn(getRow("row-b"), "getBoundingClientRect").mockImplementation(
+        () => new DOMRect(0, 5_598 - scrollArea.scrollTop, 100, 100),
+      );
+      setScrollMetrics(scrollArea, {
+        scrollHeight: 14_222,
+        clientHeight: 796,
+        scrollTop: 0,
+      });
+      act(() => getLatestResizeObserver().trigger());
+      expect(scrollArea.scrollTop).toBe(5_401);
+
+      fireEvent.pointerDown(scrollArea);
+      scrollArea.scrollTop = 5_501;
+      if (scrollEventOrder === "after release") fireEvent.pointerUp(window);
+      fireEvent.scroll(scrollArea);
+      if (scrollEventOrder === "before release") fireEvent.pointerUp(window);
+      act(() => getLatestResizeObserver().trigger());
+      fireEvent.scroll(scrollArea);
+
+      expect(scrollArea.scrollTop).toBe(5_501);
+      expect(getRow("row-b").getBoundingClientRect().top).toBe(97);
+    },
+  );
 
   it.each([
     { edge: "top", offsetWithinRow: -20, rowTop: 5, expectedScrollTop: 0 },
