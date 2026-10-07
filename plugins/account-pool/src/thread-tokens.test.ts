@@ -515,11 +515,18 @@ it("persists revocation when the credential directory cannot be read", async () 
   } finally {
     readDir.mockRestore();
   }
-  expect(
-    (await fs.readdir(directory)).some((name) =>
-      name.startsWith("archived-thread-"),
-    ),
-  ).toBe(true);
+  const markerName = (await fs.readdir(directory)).find((name) =>
+    name.startsWith("archived-thread-"),
+  );
+  expect(markerName).toBeDefined();
+  const marker = JSON.parse(
+    await fs.readFile(path.join(directory, markerName ?? ""), "utf8"),
+  ) as { threadId: string; epoch: number; archived: boolean };
+  expect(marker).toEqual({
+    threadId: route.threadId,
+    epoch: 1,
+    archived: true,
+  });
   const reloaded = new ThreadTokenStore(directory, hosts);
   await reloaded.initialize([route.hostId]);
   expect(await reloaded.authenticate(oldToken)).toBeNull();
