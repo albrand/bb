@@ -32,10 +32,11 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
       aria-checked={checked}
       disabled={disabled}
       data-state={checked ? "checked" : "unchecked"}
+      data-switch-hit-area
       className={cn(
-        `peer relative inline-flex shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
-        size === "default" && "h-5 w-9",
-        size === "sm" && "h-4 w-7",
+        "peer relative inline-flex shrink-0 cursor-pointer items-center justify-start rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
+        size === "default" && "h-5 w-9 pointer-coarse:size-11",
+        size === "sm" && "h-4 w-7 pointer-coarse:size-11",
         className,
       )}
       onClick={(event) => {
@@ -45,19 +46,24 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
         }
       }}
     >
-      <span
+      <div
         aria-hidden
         data-state={checked ? "checked" : "unchecked"}
+        data-switch-track
         className={cn(
-          "pointer-events-none block rounded-full bg-background ring-0 transition-transform data-[state=unchecked]:bg-foreground data-[state=unchecked]:translate-x-0",
-          size === "default" && "size-4 data-[state=checked]:translate-x-4",
-          size === "sm" && "size-3 data-[state=checked]:translate-x-3",
+          `pointer-events-none absolute inset-0 m-auto box-border rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
+          size === "default" && "h-5 w-9",
+          size === "sm" && "h-4 w-7",
         )}
       />
       <span
         aria-hidden
-        data-switch-hit-area
-        className="pointer-coarse:absolute pointer-coarse:block pointer-coarse:-inset-x-2 pointer-coarse:-inset-y-3.5 hidden"
+        data-state={checked ? "checked" : "unchecked"}
+        className={cn(
+          "pointer-events-none relative z-10 block rounded-full bg-background ring-0 transition-transform data-[state=unchecked]:bg-foreground data-[state=unchecked]:translate-x-0",
+          size === "default" && "ml-px size-4 pointer-coarse:ml-[5px] data-[state=checked]:translate-x-4",
+          size === "sm" && "ml-px size-3 pointer-coarse:ml-[9px] data-[state=checked]:translate-x-3",
+        )}
       />
     </button>
   ),

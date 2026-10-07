@@ -599,14 +599,21 @@ it("gives subscription and routing switches a 44px coarse-pointer hit area", asy
   for (const name of switchNames) {
     const control = await slot.findByRole("switch", { name });
     expect(control.className).toContain("h-4 w-7");
-    const hitArea = control.querySelector("[data-switch-hit-area]");
-    if (hitArea === null) throw new Error("Switch hit area is missing.");
-    expect(hitArea.className).toContain("pointer-coarse:absolute");
-    expect(hitArea.className).toContain("pointer-coarse:block");
-    expect(hitArea.className).toContain("pointer-coarse:-inset-x-2");
-    expect(hitArea.className).toContain("pointer-coarse:-inset-y-3.5");
-    expect(hitArea.className).toContain("hidden");
+    expect(control.getAttribute("data-switch-hit-area")).toBe("");
+    expect(control.className).toContain("pointer-coarse:size-11");
+    expect(control.querySelector("[data-switch-track]")).toBeTruthy();
   }
+
+  const subscriptionSwitch = slot.getByRole("switch", {
+    name: "Use person@example.com",
+  });
+  const checkedBeforeActions = subscriptionSwitch.getAttribute("aria-checked");
+  fireEvent.click(
+    slot.getByRole("button", { name: "person@example.com actions" }),
+  );
+  expect(subscriptionSwitch.getAttribute("aria-checked")).toBe(
+    checkedBeforeActions,
+  );
 });
 
 describe("Account Pool settings", () => {
