@@ -297,7 +297,11 @@ function printTokenWeather(
   const contextFill = contextUsage
     ? contextUsage.usedTokens / contextUsage.modelContextWindow
     : null;
-  const weather = summarizeTokenWeather({ turns, contextFill });
+  const weather = summarizeTokenWeather({
+    contextFill,
+    totals: summary.total,
+    turns,
+  });
   const compactionTurnIds = (timeline?.rows ?? []).flatMap((row) =>
     row.kind === "system" &&
     row.systemKind === "operation" &&
@@ -327,7 +331,7 @@ function printTokenWeather(
     );
   }
   console.log(
-    "  Rules: stormy at ≥85% context fill, or ≥50% fresh-input growth with <20% cache reuse; cloudy at ≥70% fill, ≥25% growth, or <35% reuse; clear at ≥35% reuse, <25% growth and <70% fill.",
+    "  Rules: overall weather follows durable thread cache reuse (clear at ≥35%, cloudy below); per-turn readings also consider same-model fresh-input growth. Context fill is shown separately.",
   );
   if (compactions.length === 0) {
     console.log(

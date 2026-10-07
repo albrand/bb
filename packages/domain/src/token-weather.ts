@@ -105,6 +105,7 @@ export function tokenWeatherForMetrics(args: {
 
 export function summarizeTokenWeather(args: {
   contextFill?: number | null;
+  totals?: TokenWeatherSummary["totals"];
   turns: TokenWeatherTurn[];
 }): TokenWeatherSummary {
   const contextFill = args.contextFill ?? null;
@@ -143,9 +144,18 @@ export function summarizeTokenWeather(args: {
   const knownFresh = measured.flatMap((turn) =>
     turn.inputTokens === null ? [] : [turn.inputTokens],
   );
+  const totals = args.totals ?? {
+    cachedInputTokens: sumKnown(measured.map((turn) => turn.cachedInputTokens)),
+    inputTokens: sumKnown(measured.map((turn) => turn.inputTokens)),
+    outputTokens: sumKnown(measured.map((turn) => turn.outputTokens)),
+    reasoningOutputTokens: sumKnown(
+      measured.map((turn) => turn.reasoningOutputTokens),
+    ),
+    totalTokens: sumKnown(measured.map((turn) => turn.totalTokens)),
+  };
   const overallCacheShare = cacheReuseShare(
-    sumKnown(measured.map((turn) => turn.inputTokens)),
-    sumKnown(measured.map((turn) => turn.cachedInputTokens)),
+    totals.inputTokens,
+    totals.cachedInputTokens,
   );
   const medFresh = median(knownFresh);
   const latest = measured.at(-1);
@@ -158,17 +168,7 @@ export function summarizeTokenWeather(args: {
       knownFresh.length === 0
         ? null
         : { min: Math.min(...knownFresh), max: Math.max(...knownFresh) },
-    totals: {
-      inputTokens: sumKnown(measured.map((turn) => turn.inputTokens)),
-      cachedInputTokens: sumKnown(
-        measured.map((turn) => turn.cachedInputTokens),
-      ),
-      outputTokens: sumKnown(measured.map((turn) => turn.outputTokens)),
-      reasoningOutputTokens: sumKnown(
-        measured.map((turn) => turn.reasoningOutputTokens),
-      ),
-      totalTokens: sumKnown(measured.map((turn) => turn.totalTokens)),
-    },
+    totals,
     turns: measured.map((turn) => ({
       ...turn,
       weather: tokenWeatherForMetrics({
@@ -179,8 +179,8 @@ export function summarizeTokenWeather(args: {
     })),
     weather: tokenWeatherForMetrics({
       cacheReuseShare: overallCacheShare,
-      contextFill,
-      freshInputChange: latest?.freshInputChange ?? null,
+      contextFill: null,
+      freshInputChange: null,
     }),
   };
 }
@@ -193,10 +193,17 @@ export function estimateCompactionSavings(args: {
   const turns = [...args.turns];
   const compactionTurnIds = new Set(args.compactionTurnIds);
   const lookaheadTurns = args.lookaheadTurns ?? 3;
+  const compactionIndexes = turns.flatMap((turn, index) =>
+    compactionTurnIds.has(turn.turnId) ? [index] : [],
+  );
   return turns.flatMap((turn, index) => {
     if (!compactionTurnIds.has(turn.turnId)) return [];
+    const previousCompactionIndex =
+      compactionIndexes.filter((candidate) => candidate < index).at(-1) ?? -1;
+    const nextCompactionIndex =
+      compactionIndexes.find((candidate) => candidate > index) ?? turns.length;
     const earlier = turns
-      .slice(0, index)
+      .slice(previousCompactionIndex + 1, index)
       .filter(
         (candidate) =>
           turn.model !== null &&
@@ -206,30 +213,24 @@ export function estimateCompactionSavings(args: {
       )
       .map((candidate) => estimatedContextTokens(candidate)!);
     const beforeTokens = median(earlier.slice(-3));
-    const later = turn.model
-      ? turns
-          .slice(index + 1)
-          .filter(
-            (candidate) =>
-              candidate.model === turn.model &&
-              candidate.providerId === turn.providerId &&
-              estimatedContextTokens(candidate) !== null,
-          )
-          .slice(0, lookaheadTurns)
-      : [];
-    const afterTokens = later[0]
-      ? estimatedContextTokens(later[0])
-      : null;
+    const later = turns
+      .slice(index + 1, nextCompactionIndex)
+      .filter(
+        (candidate) =>
+          turn.model !== null &&
+          candidate.model === turn.model &&
+          candidate.providerId === turn.providerId &&
+          estimatedContextTokens(candidate) !== null,
+      )
+      .slice(0, lookaheadTurns);
+    const afterTokens = later[0] ? estimatedContextTokens(later[0]) : null;
     const observedSavingsTokens =
       beforeTokens === null || later.length === 0
         ? null
         : later.reduce(
             (total, candidate) =>
               total +
-              Math.max(
-                0,
-                beforeTokens - estimatedContextTokens(candidate)!,
-              ),
+              Math.max(0, beforeTokens - estimatedContextTokens(candidate)!),
             0,
           );
     const compactionCostTokens = turn.totalTokens;

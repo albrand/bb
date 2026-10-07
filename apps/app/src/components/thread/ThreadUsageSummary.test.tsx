@@ -20,12 +20,15 @@ import {
 const useThreadSpendSummary = vi.hoisted(() => vi.fn());
 const useThreadTimeline = vi.hoisted(() => vi.fn());
 const childSummary = vi.hoisted(() => vi.fn());
+const timelinePage = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThreadSpendSummary,
   useThreadTimeline,
 }));
-vi.mock("@/lib/sdk", () => ({ sdk: { threads: { childSummary } } }));
+vi.mock("@/lib/sdk", () => ({
+  sdk: { threads: { childSummary, timeline: timelinePage } },
+}));
 
 describe("thread usage summary", () => {
   afterEach(cleanup);
@@ -45,6 +48,7 @@ describe("thread usage summary", () => {
     useThreadSpendSummary.mockReset();
     useThreadTimeline.mockReset();
     childSummary.mockReset();
+    timelinePage.mockReset();
     useThreadTimeline.mockReturnValue({ data: undefined });
     useThreadSpendSummary.mockReturnValue({
       data: {
@@ -91,6 +95,147 @@ describe("thread usage summary", () => {
     });
   });
 
+  it("uses persisted thread totals when pruned turns have unavailable usage", async () => {
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: false,
+        providerId: "codex",
+        total: {
+          inputTokens: 22,
+          cachedInputTokens: 2_100_000,
+          outputTokens: 5_900,
+          reasoningOutputTokens: 0,
+          totalTokens: 2_105_922,
+        },
+        turns: [
+          {
+            turnId: "visible-turn",
+            inputTokens: 22,
+            cachedInputTokens: 2_100_000,
+            outputTokens: 5_900,
+            reasoningOutputTokens: null,
+            totalTokens: 2_105_922,
+          },
+          {
+            turnId: "pruned-turn",
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningOutputTokens: null,
+            totalTokens: null,
+          },
+        ],
+      },
+    });
+    useThreadTimeline.mockReturnValue({
+      data: {
+        rows: [],
+        timelinePage: { olderCursor: null },
+        contextWindowUsage: null,
+      },
+    });
+    const queryClient = new QueryClient();
+    render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary
+            threadId="pruned-thread"
+            turnId="visible-turn"
+          />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByText(/in 22/));
+
+    const panel = await screen.findByRole("dialog", {
+      name: "Token weather and compaction savings",
+    });
+    await within(panel).findByText("Fresh input total");
+    expect(within(panel).getByText("At least 22")).toBeTruthy();
+    expect(within(panel).getByText("At least 2,100,000")).toBeTruthy();
+    expect(within(panel).getByText("At least 5,900")).toBeTruthy();
+    expect(within(panel).getByText("At least 2,105,922")).toBeTruthy();
+    expect(within(panel).getByText("100%")).toBeTruthy();
+    expect(within(panel).getByText("clear")).toBeTruthy();
+  });
+
+  it("keeps compaction estimates unavailable when retained turns have unknown models", async () => {
+    const turn = (
+      turnId: string,
+      inputTokens: number,
+      totalTokens: number,
+    ) => ({
+      turnId,
+      model: null,
+      inputTokens,
+      cachedInputTokens: totalTokens - inputTokens,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens,
+    });
+    useThreadSpendSummary.mockReturnValue({
+      data: {
+        historyComplete: false,
+        providerId: "codex",
+        total: {
+          inputTokens: 330,
+          cachedInputTokens: 2_670,
+          outputTokens: 2_000,
+          reasoningOutputTokens: 0,
+          totalTokens: 5_000,
+        },
+        turns: [
+          turn("after-3", 10, 100),
+          turn("after-2", 10, 100),
+          turn("after-1", 10, 100),
+          turn("compaction", 1_000, 2_000),
+          turn("before-3", 100, 1_000),
+          turn("before-2", 100, 1_000),
+          turn("before-1", 100, 1_000),
+        ],
+      },
+    });
+    useThreadTimeline.mockReturnValue({
+      data: {
+        rows: [
+          {
+            kind: "system",
+            systemKind: "operation",
+            operationKind: "compaction",
+            turnId: "compaction",
+          },
+        ],
+        timelinePage: { olderCursor: null },
+        contextWindowUsage: null,
+      },
+    });
+    const queryClient = new QueryClient();
+    render(
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThreadTurnTokenSummary
+            threadId="compacted-thread"
+            turnId="after-3"
+          />
+        </QueryClientProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByText(/in 10/));
+
+    const panel = await screen.findByRole("dialog", {
+      name: "Token weather and compaction savings",
+    });
+    expect(
+      await within(panel).findByText("Context before / after"),
+    ).toBeTruthy();
+    expect(
+      within(panel).getByText(/unavailable\s*\/\s*unavailable/i),
+    ).toBeTruthy();
+    expect(within(panel).getByText("Unavailable, estimated")).toBeTruthy();
+  });
+
   it("renders compact per-turn tokens and an expandable child agent summary", async () => {
     const queryClient = new QueryClient();
     const { container } = render(
@@ -118,6 +263,10 @@ describe("thread usage summary", () => {
       (await screen.findAllByText("Cached (read + write)")).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText("Included in output").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Overall thread weather follows durable cache reuse/),
+    ).not.toHaveLength(0);
+    expect(screen.queryByText(/latest reported context fill/i)).toBeNull();
     expect(await screen.findByText(/Ran 2 agents/)).toBeTruthy();
     expect(screen.getByText(/Σ 64.4M/)).toBeTruthy();
 
