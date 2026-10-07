@@ -917,6 +917,28 @@ const PROVIDER_MODEL_CATALOG_SCOPES = [
   "workspace",
 ] as const satisfies readonly PluginProviderModelCatalogScope[];
 
+const PROVIDER_CHILD_THREAD_MODEL_MAX = 200;
+
+function validateProviderChildThreadModel(
+  providerId: string,
+  value: unknown,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== "string" ||
+    value.trim() !== value ||
+    value.length === 0 ||
+    value.length > PROVIDER_CHILD_THREAD_MODEL_MAX
+  ) {
+    throw new Error(
+      `provider "${providerId}" models.childThreadModel must be a trimmed string of 1-${PROVIDER_CHILD_THREAD_MODEL_MAX} characters`,
+    );
+  }
+  return value;
+}
+
 function validateProviderModelCatalogScope(
   providerId: string,
   value: unknown,
@@ -1179,6 +1201,7 @@ export type NormalizedPluginProviderDeclaration = Omit<
   readonly models: {
     readonly fallback?: readonly PluginProviderFallbackModel[];
     readonly scope: PluginProviderModelCatalogScope;
+    readonly childThreadModel?: string;
   };
 };
 
@@ -1444,6 +1467,10 @@ export function validatePluginProviderDeclaration(
     id,
     declaration.models?.scope,
   );
+  const childThreadModel = validateProviderChildThreadModel(
+    id,
+    declaration.models?.childThreadModel,
+  );
   const envPassthrough =
     declaration.env === undefined
       ? undefined
@@ -1504,6 +1531,7 @@ export function validatePluginProviderDeclaration(
     models: Object.freeze({
       ...(fallbackModels === undefined ? {} : { fallback: fallbackModels }),
       scope: modelCatalogScope,
+      ...(childThreadModel === undefined ? {} : { childThreadModel }),
     }),
     ...(envPassthrough === undefined
       ? {}

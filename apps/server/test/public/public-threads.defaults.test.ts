@@ -4,9 +4,11 @@ import {
 } from "./public-thread-test-harness.js";
 
 import {
+  archiveThread,
   createProjectSource,
   getProjectExecutionDefaults,
   listThreadsWithPendingInteractionState,
+  recordThreadSpawner,
   setExperiments,
   upsertProjectExecutionDefaults,
 } from "@bb/db";
@@ -24,7 +26,7 @@ import {
   seedThreadRuntimeState,
   seedThread,
 } from "../helpers/seed.js";
-import { withTestHarness } from "../helpers/test-app.js";
+import { type TestAppHarness, withTestHarness } from "../helpers/test-app.js";
 import { installFakeGitWorktreeProvider } from "../helpers/environment-provider.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -339,6 +341,195 @@ describe("public thread default routes", () => {
     });
   });
 
+  it.each([
+    {
+      name: "child without a model",
+      parent: true,
+      model: undefined,
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      name: "child naming Opus",
+      parent: true,
+      model: "claude-opus-5-5",
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      name: "top-level thread naming Opus",
+      parent: false,
+      model: "claude-opus-5-5",
+      expected: "claude-opus-5-5",
+    },
+    {
+      name: "top-level thread without a model",
+      parent: false,
+      model: undefined,
+      expected: "claude-opus-5-5",
+    },
+    {
+      name: "top-level thread a mid-turn thread spawned, naming Opus",
+      parent: false,
+      spawnedBy: "active",
+      model: "claude-opus-5-5",
+      expected: "claude-sonnet-5-5",
+    },
+    ...(["missing", "idle", "other-project", "archived"] as const).map(
+      (spawnedBy) => ({
+        name: `top-level thread naming a ${spawnedBy} spawner`,
+        parent: false,
+        spawnedBy,
+        model: "claude-opus-5-5",
+        expected: "claude-opus-5-5",
+      }),
+    ),
+  ] as Array<{
+    name: string;
+    parent: boolean;
+    spawnedBy?: "active" | "missing" | "idle" | "other-project" | "archived";
+    model: string | undefined;
+    expected: string;
+  }>)(
+    "starts a Claude $name on $expected",
+    async ({ parent, spawnedBy, model, expected }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/thread-defaults-claude-child",
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/thread-defaults-claude-child",
+        });
+        upsertProjectExecutionDefaults(harness.db, {
+          projectId: project.id,
+          providerId: "claude-code",
+          model: "claude-opus-5-5",
+          serviceTier: "default",
+          reasoningLevel: "high",
+          permissionMode: "accept-edits",
+        });
+        const parentThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+        });
+        const spawnedByThreadId = seedSpawner(harness, {
+          kind: spawnedBy,
+          projectId: project.id,
+          hostId: host.id,
+        });
+
+        const response = await harness.app.request("/api/v1/threads", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            origin: "cli",
+            projectId: project.id,
+            providerId: "claude-code",
+            ...(model !== undefined ? { model } : {}),
+            input: [{ type: "text", text: "Review the change" }],
+            environment: { type: "reuse", environmentId: environment.id },
+            ...(parent ? { parentThreadId: parentThread.id } : {}),
+            ...(spawnedByThreadId === undefined ? {} : { spawnedByThreadId }),
+          }),
+        });
+
+        expect(response.status).toBe(201);
+        const createdThread = threadSchema.parse(await readJson(response));
+        const queuedStart = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "thread.start" &&
+            command.threadId === createdThread.id,
+        );
+        expect(queuedStart.command).toMatchObject({
+          options: { model: expected, reasoningLevel: "high" },
+        });
+      });
+    },
+  );
+
+  it.each([
+    { name: "child", parent: true, expected: "claude-sonnet-5-5" },
+    { name: "top-level thread", parent: false, expected: "claude-opus-5-5" },
+    {
+      name: "top-level thread another thread spawned",
+      parent: false,
+      spawned: true,
+      expected: "claude-sonnet-5-5",
+    },
+  ] as Array<{
+    name: string;
+    parent: boolean;
+    spawned?: boolean;
+    expected: string;
+  }>)(
+    "runs a Claude $name's follow-up naming Opus on $expected",
+    async ({ parent, spawned, expected }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/thread-defaults-claude-followup",
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/thread-defaults-claude-followup",
+        });
+        const parentThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+        });
+        const thread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+          providerId: "claude-code",
+          parentThreadId: parent ? parentThread.id : null,
+          status: "idle",
+        });
+        if (spawned) {
+          recordThreadSpawner(harness.db, {
+            threadId: thread.id,
+            spawnedByThreadId: parentThread.id,
+          });
+        }
+        seedThreadRuntimeState(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-claude-followup",
+        });
+
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/send`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              input: [{ type: "text", text: "Keep going", mentions: [] }],
+              mode: "steer-if-active",
+              model: "claude-opus-5-5",
+              permissionMode: "full",
+              reasoningLevel: "high",
+              serviceTier: "default",
+            }),
+          },
+        );
+
+        expect(response.status).toBe(200);
+        const dispatched = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "turn.submit" && command.threadId === thread.id,
+        );
+        expect(dispatched.command).toMatchObject({
+          options: { model: expected, reasoningLevel: "high" },
+        });
+      });
+    },
+  );
+
   it("uses the requested provider's remembered defaults after another provider was used", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
@@ -436,7 +627,10 @@ describe("public thread default routes", () => {
         model: "claude-remembered",
         reasoningLevel: "low",
       });
-      expect(await read("")).toMatchObject({ providerId: "codex", model: "gpt-5" });
+      expect(await read("")).toMatchObject({
+        providerId: "codex",
+        model: "gpt-5",
+      });
       expect(await read("?providerId=never-used")).toBeNull();
     });
   });
@@ -883,3 +1077,44 @@ describe("public thread default routes", () => {
     });
   });
 });
+
+// A spawner the server should believe (mid-turn, same project) or one of the
+// kinds it must ignore.
+function seedSpawner(
+  harness: TestAppHarness,
+  args: {
+    kind: "active" | "missing" | "idle" | "other-project" | "archived" | undefined;
+    projectId: string;
+    hostId: string;
+  },
+): string | undefined {
+  switch (args.kind) {
+    case undefined:
+      return undefined;
+    case "missing":
+      return "thr_missing";
+    case "other-project": {
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: args.hostId,
+        path: "/tmp/thread-defaults-other-project",
+      });
+      return seedThread(harness.deps, {
+        projectId: project.id,
+        status: "active",
+      }).id;
+    }
+    case "archived": {
+      const spawner = seedThread(harness.deps, {
+        projectId: args.projectId,
+        status: "active",
+      });
+      archiveThread(harness.db, harness.deps.hub, spawner.id);
+      return spawner.id;
+    }
+    default:
+      return seedThread(harness.deps, {
+        projectId: args.projectId,
+        status: args.kind,
+      }).id;
+  }
+}

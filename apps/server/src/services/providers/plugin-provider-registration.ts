@@ -237,6 +237,9 @@ export function buildPluginProviderRegistration(args: {
     extensionKinds: declaration.extensionKinds ?? {},
     visibility: declaration.experimental_visibility ?? "always",
     fallbackModels: projectFallbackModels(declaration),
+    ...(declaration.models.childThreadModel === undefined
+      ? {}
+      : { childThreadModel: declaration.models.childThreadModel }),
     envPassthrough: declaration.env?.passthrough ?? [],
     nativeSkillRoots:
       declaration.experimental_nativeSkillRoots ?? EMPTY_PROVIDER_NATIVE_ROOTS,

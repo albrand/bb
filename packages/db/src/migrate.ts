@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DbConnection } from "./connection.js";
 import { ensureItemCompletionLookupIndex } from "./fork-item-completion-index.js";
+import { ensureThreadSpawnersTable } from "./fork-thread-spawners.js";
 import { restoreNativeThreadDraftsToDraftsQueue } from "./fork-restore-native-drafts.js";
 import {
   compatibleMigrationHashes,
@@ -1621,4 +1622,5 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
   validateAppliedMigrationHistory(db, migrationsFolder);
   validatePendingInteractionsSchema(db);
   ensureItemCompletionLookupIndex(db);
+  ensureThreadSpawnersTable(db);
 }

@@ -46,6 +46,8 @@ export interface ProviderRegistration {
   visibility: "always" | "installed";
   pluginId: string;
   fallbackModels: readonly AvailableModel[];
+  /** The provider's declared model for child threads, if it declared one. */
+  childThreadModel?: string;
   envPassthrough: readonly string[];
   nativeSkillRoots: ProviderNativeRoots;
   nativeCommandRoots: ProviderNativeRoots;

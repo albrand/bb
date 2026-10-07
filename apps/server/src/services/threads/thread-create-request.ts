@@ -41,6 +41,7 @@ export interface ThreadCreateServiceRequestInput {
   serviceTier?: CreateThreadRequest["serviceTier"];
   sourceSeqEnd?: CreateThreadRequest["sourceSeqEnd"];
   sourceThreadId?: string;
+  spawnedByThreadId?: string;
   startedOnBehalfOf: StartedOnBehalfOf | null;
   title?: string;
   visibility?: ThreadVisibility;

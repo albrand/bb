@@ -663,7 +663,7 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn does not default parent thread id from BB_THREAD_ID", async () => {
+  it("bb thread spawn records BB_THREAD_ID as the spawner, not the parent", async () => {
     vi.stubEnv("BB_PROJECT_ID", "proj-1");
     vi.stubEnv("BB_THREAD_ID", "thread-context-parent");
     const thread: domain.Thread = fixtures.makeThread({
@@ -704,6 +704,7 @@ describe("bb thread spawn command output", () => {
         model: "gpt-5",
         input: [{ type: "text", text: "hello", mentions: [] }],
         environment: { type: "project-default" },
+        spawnedByThreadId: "thread-context-parent",
       },
     });
   });
