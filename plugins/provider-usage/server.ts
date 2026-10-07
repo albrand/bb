@@ -62,18 +62,29 @@ function normalizedUsage(
 ): ProviderUsage | null {
   if (usage === undefined) return null;
   switch (usage.status) {
-    case "ok":
+    case "ok": {
+      const windows = usage.windows.filter((window) => {
+        if (window.resetsAt === null) return true;
+        const resetAt = Date.parse(window.resetsAt);
+        return !Number.isFinite(resetAt) || resetAt > Date.now();
+      });
+      if (usage.windows.length > 0 && windows.length === 0)
+        return {
+          status: "error",
+          message: "Usage data is stale. Refresh usage.",
+        };
       return {
         status: "ok",
         accountEmail: usage.accountEmail || null,
         planLabel: usage.planLabel || null,
-        windows: usage.windows.map((window) => ({
+        windows: windows.map((window) => ({
           label: window.label,
           usedPercent: window.usedPercent,
           resetsAt: window.resetsAt || null,
           cost: window.cost ?? null,
         })),
       };
+    }
     case "not_installed":
       return { status: "not_installed" };
     case "unauthenticated":
@@ -124,6 +135,7 @@ function resourceProvider(
   measurement: UsageMeasurement | undefined,
   pluginId: string,
   providers: Provider[],
+  failed: boolean,
 ): UsageProvider {
   const metadata = providers.find(
     (provider) => provider.id === resource.providerId,
@@ -137,6 +149,14 @@ function resourceProvider(
       },
       measurement?.usage,
     ),
+    ...(failed
+      ? {
+          usage: {
+            status: "error" as const,
+            message: "Usage could not be refreshed for this account.",
+          },
+        }
+      : {}),
     ...(resource.scope.kind === "shared"
       ? {
           signInHint:
@@ -186,8 +206,6 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
       })
       .then((raw) => {
         const value = normalizeUsageMeasurement(raw);
-        if (value.usage.status === "error")
-          throw new Error("Usage could not be refreshed.");
         measurements.set(key, { value, loadedAt: Date.now() });
         failures.delete(key);
         return value;
@@ -352,10 +370,16 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
         const key = keyOf(source.pluginId, resource.id);
         const cached = measurements.get(key);
         machine.providers.push(
-          resourceProvider(resource, cached?.value, source.pluginId, providers),
+          resourceProvider(
+            resource,
+            cached?.value,
+            source.pluginId,
+            providers,
+            failures.has(key),
+          ),
         );
-        if (source.error !== null || failures.has(key))
-          machine.error = "Some usage could not be refreshed.";
+        if (source.error !== null)
+          machine.error = "Some usage resources could not be listed.";
       }
     }
     const providerOrder = new Map(

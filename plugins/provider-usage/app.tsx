@@ -121,7 +121,7 @@ function refreshUsage({
   maxAgeMs: number;
   providerId?: string | null;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<UsageSnapshot | null> {
   activeRefreshCount += 1;
   updateStore({ ...storeSnapshot, error: null, isRefreshing: true });
   return (async () => {
@@ -152,15 +152,17 @@ function refreshUsage({
         error: null,
         isRefreshing: activeRefreshCount > 1,
       });
+      return parsed.data.result;
     } catch (cause) {
       if (signal?.aborted === true) {
-        return;
+        return null;
       }
       console.warn("Provider usage refresh failed", cause);
       updateStore({
         ...storeSnapshot,
         error: "Couldn’t refresh usage.",
       });
+      return null;
     } finally {
       activeRefreshCount -= 1;
       if (activeRefreshCount === 0 && storeSnapshot.isRefreshing) {
@@ -987,18 +989,49 @@ export default definePluginApp((app) => {
         if (signal.aborted || document.visibilityState !== "visible") return;
         timer = window.setTimeout(runSafetyRefresh, SAFETY_REFRESH_INTERVAL_MS);
       };
-      const reconcile = (maxAgeMs: number, machineIds: string[] | null) => {
-        void refreshUsage({
+      const reconcile = async (
+        maxAgeMs: number,
+        machineIds: string[] | null,
+      ) => {
+        const inventory = await refreshUsage({
           pluginId,
           force: false,
           machineIds,
           maxAgeMs,
           signal,
         });
+        if (inventory === null || signal.aborted) return;
+        const machinesByProvider = new Map<string, string[]>();
+        for (const machine of inventory.machines) {
+          if (machineIds !== null && !machineIds.includes(machine.id)) continue;
+          for (const provider of machine.providers) {
+            const machineIdsForProvider =
+              machinesByProvider.get(provider.providerId) ?? [];
+            if (!machineIdsForProvider.includes(machine.id))
+              machineIdsForProvider.push(machine.id);
+            machinesByProvider.set(provider.providerId, machineIdsForProvider);
+          }
+        }
+        for (const [providerId, providerMachineIds] of machinesByProvider) {
+          if (signal.aborted) return;
+          await refreshUsage({
+            pluginId,
+            force: false,
+            machineIds: providerMachineIds,
+            maxAgeMs,
+            providerId,
+            signal,
+          });
+        }
       };
       const runSafetyRefresh = () => {
         if (document.visibilityState === "visible") {
-          reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
+          void reconcile(SAFETY_REFRESH_INTERVAL_MS, null).catch(
+            (cause: unknown) => {
+              if (!signal.aborted)
+                console.warn("Provider usage reconciliation failed", cause);
+            },
+          );
         }
         scheduleSafetyRefresh();
       };
@@ -1015,7 +1048,10 @@ export default definePluginApp((app) => {
           inactiveAt !== null &&
           Date.now() - inactiveAt >= FOCUS_MAX_AGE_MS
         ) {
-          reconcile(FOCUS_MAX_AGE_MS, null);
+          void reconcile(FOCUS_MAX_AGE_MS, null).catch((cause: unknown) => {
+            if (!signal.aborted)
+              console.warn("Provider usage reconciliation failed", cause);
+          });
         }
         scheduleSafetyRefresh();
       };
@@ -1034,7 +1070,12 @@ export default definePluginApp((app) => {
       document.addEventListener("visibilitychange", onVisibilityChange);
       window.addEventListener("blur", onBlur);
       window.addEventListener("focus", onActive);
-      reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
+      void reconcile(SAFETY_REFRESH_INTERVAL_MS, null).catch(
+        (cause: unknown) => {
+          if (!signal.aborted)
+            console.warn("Provider usage reconciliation failed", cause);
+        },
+      );
       scheduleSafetyRefresh();
       return () => {
         if (timer !== null) window.clearTimeout(timer);
