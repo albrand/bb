@@ -249,6 +249,19 @@ describe("opening an unseen timeline", () => {
     expect(area.scrollTop).toBe(399_200);
   });
 
+  it("respects browser scrolling to a timeline control reached by Tab", () => {
+    const { area } = renderThread();
+    resize();
+    const control = document.createElement("button");
+    area.append(control);
+    fireEvent.keyDown(document.body, { key: "Tab", shiftKey: true });
+    act(() => control.focus());
+    area.scrollTop = 200;
+    fireEvent.scroll(area);
+    act(() => vi.advanceTimersByTime(25_000));
+    expect(area.scrollTop).toBe(200);
+  });
+
   it("opens an existing split at its latest update when it receives focus", () => {
     getDefaultStore().set(threadTimelineScrollAnchorAtomFamily(THREAD_ID), {
       rowId: "answer-100",

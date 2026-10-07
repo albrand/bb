@@ -233,6 +233,8 @@ export function BottomAnchoredScrollBody({
   const scrollToTopInProgressRef = useRef(false);
   const userScrollIntentUntilRef = useRef(0);
   const userScrollInputPendingRef = useRef(false);
+  const tabFocusTransitionPendingRef = useRef(false);
+  const tabFocusTransitionTimeoutRef = useRef<number | null>(null);
   const pointerScrollIntentRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const restoreFramesRemainingRef = useRef(0);
@@ -663,6 +665,28 @@ export function BottomAnchoredScrollBody({
       window.performance.now() + USER_SCROLL_INTENT_MS;
   }, [cancelPrependPositionHold]);
 
+  const trackTabFocusTransition = useCallback((event: KeyboardEvent) => {
+    if (event.key !== "Tab") return;
+    tabFocusTransitionPendingRef.current = true;
+    if (tabFocusTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(tabFocusTransitionTimeoutRef.current);
+    }
+    tabFocusTransitionTimeoutRef.current = window.setTimeout(() => {
+      tabFocusTransitionPendingRef.current = false;
+      tabFocusTransitionTimeoutRef.current = null;
+    }, 0);
+  }, []);
+
+  const markTabFocusScrollIntent = useCallback(() => {
+    if (!tabFocusTransitionPendingRef.current) return;
+    tabFocusTransitionPendingRef.current = false;
+    if (tabFocusTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(tabFocusTransitionTimeoutRef.current);
+      tabFocusTransitionTimeoutRef.current = null;
+    }
+    markUserScrollIntent();
+  }, [markUserScrollIntent]);
+
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
@@ -1052,6 +1076,7 @@ export function BottomAnchoredScrollBody({
     scrollArea.addEventListener("scroll", handleScrollEvent, {
       passive: true,
     });
+    scrollArea.addEventListener("focusin", markTabFocusScrollIntent);
     scrollArea.addEventListener("wheel", markWheelScrollIntent, {
       passive: true,
     });
@@ -1066,6 +1091,7 @@ export function BottomAnchoredScrollBody({
     });
     window.addEventListener("pointerup", endPointerScrollIntent);
     window.addEventListener("pointercancel", endPointerScrollIntent);
+    window.addEventListener("keydown", trackTabFocusTransition);
     window.addEventListener("keydown", markKeyboardScrollIntent);
 
     queueBottomRestore();
@@ -1074,13 +1100,19 @@ export function BottomAnchoredScrollBody({
       resizeObserver?.disconnect();
       cancelPrependPositionHold();
       scrollArea.removeEventListener("scroll", handleScrollEvent);
+      scrollArea.removeEventListener("focusin", markTabFocusScrollIntent);
       scrollArea.removeEventListener("wheel", markWheelScrollIntent);
       scrollArea.removeEventListener("touchstart", markTouchStartScrollIntent);
       scrollArea.removeEventListener("touchmove", markTouchMoveScrollIntent);
       scrollArea.removeEventListener("pointerdown", startPointerScrollIntent);
       window.removeEventListener("pointerup", endPointerScrollIntent);
       window.removeEventListener("pointercancel", endPointerScrollIntent);
+      window.removeEventListener("keydown", trackTabFocusTransition);
       window.removeEventListener("keydown", markKeyboardScrollIntent);
+      if (tabFocusTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(tabFocusTransitionTimeoutRef.current);
+        tabFocusTransitionTimeoutRef.current = null;
+      }
       if (scrollbarIdleTimeout !== null) {
         window.clearTimeout(scrollbarIdleTimeout);
       }
@@ -1094,11 +1126,13 @@ export function BottomAnchoredScrollBody({
     handleScroll,
     handleScrollAreaResize,
     markKeyboardScrollIntent,
+    markTabFocusScrollIntent,
     markTouchMoveScrollIntent,
     markTouchStartScrollIntent,
     markWheelScrollIntent,
     queueBottomRestore,
     startPointerScrollIntent,
+    trackTabFocusTransition,
   ]);
 
   return (
