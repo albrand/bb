@@ -65,6 +65,7 @@ export interface AccountPoolPluginOptions {
   usageUrl?: string;
   drainTimeoutMs?: number;
   threadSweepStartupTimeoutMs?: number;
+  threadSweepRetryMs?: number;
   maxAffinityBindings?: number;
   disposeTimeoutMs?: number;
   importCredentials?: () => Promise<ImportedClaudeCredentials>;
@@ -79,6 +80,7 @@ const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
 const THREAD_SWEEP_STARTUP_TIMEOUT_MS = 15_000;
+const THREAD_SWEEP_RETRY_MS = 60_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
 const PROVIDER_ROUTING_ENV: Record<PoolProvider, readonly string[]> = {
@@ -377,7 +379,7 @@ export function createAccountPoolPlugin(
     };
     const sweepThreadCredentialsOnce = async (
       signal: AbortSignal,
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       try {
         const { checked, revoked, failed } = await threadTokens.sweepThreads(
           lookupThread,
@@ -388,16 +390,25 @@ export function createAccountPoolPlugin(
             `Account Pooler thread credential sweep checked ${checked} threads, revoked ${revoked}, and could not look up ${failed}.`,
           );
         }
+        return failed === 0;
       } catch {
         bb.log.warn("Account Pooler thread credential sweep failed.");
+        return false;
       }
     };
     const sweepThreadCredentialsPeriodically = async (
       signal: AbortSignal,
+      startupComplete: boolean,
     ): Promise<void> => {
+      let complete = startupComplete;
       while (!signal.aborted) {
-        await waitForDelay(THREAD_SWEEP_INTERVAL_MS, signal);
-        if (!signal.aborted) await sweepThreadCredentialsOnce(signal);
+        await waitForDelay(
+          complete
+            ? THREAD_SWEEP_INTERVAL_MS
+            : (options.threadSweepRetryMs ?? THREAD_SWEEP_RETRY_MS),
+          signal,
+        );
+        if (!signal.aborted) complete = await sweepThreadCredentialsOnce(signal);
       }
     };
     const checkArchived = async (
@@ -591,7 +602,7 @@ export function createAccountPoolPlugin(
     });
     bb.background.service("hub", {
       start: async (signal) => {
-        await sweepThreadCredentialsOnce(
+        const startupComplete = await sweepThreadCredentialsOnce(
           AbortSignal.any([
             signal,
             AbortSignal.timeout(
@@ -602,7 +613,7 @@ export function createAccountPoolPlugin(
         );
         await Promise.all([
           hub.start(signal),
-          sweepThreadCredentialsPeriodically(signal),
+          sweepThreadCredentialsPeriodically(signal, startupComplete),
         ]);
       },
     });

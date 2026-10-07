@@ -10210,13 +10210,16 @@ describe("Account Pool credential scoping", () => {
     expect(await statusOf(host, live, "/v1/messages")).toBe(200);
   });
 
-  it("starts accepting after the startup timeout when the thread lookup hangs, keeping every credential", async () => {
+  it("starts accepting after the startup timeout when the thread lookup hangs, then retries and revokes the stale credential", async () => {
     const fixture = await scopedFixture();
-    const held = await claudeToken(fixture.host, "thread-held");
-    await downgradeToLegacyFiles(fixture, "thread-held");
+    const stale = await claudeToken(fixture.host, "thread-stale");
+    const live = await claudeToken(fixture.host, "thread-live");
+    await downgradeToLegacyFiles(fixture, "thread-stale");
+    await downgradeToLegacyFiles(fixture, "thread-live");
     const host = await fixture.host.harness.lifecycle.reload(
       createAccountPoolPlugin({
         threadSweepStartupTimeoutMs: 50,
+        threadSweepRetryMs: 50,
         usageUrl: EMPTY_USAGE_URL,
         codexUsageUrl: EMPTY_USAGE_URL,
         importCodexCredentials: async () => ({
@@ -10230,14 +10233,22 @@ describe("Account Pool credential scoping", () => {
         }),
       }),
     );
+    let recovered = false;
     host.harness.sdk.stub(
       "threads.get",
-      ({ signal }: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        }),
+      ({ threadId, signal }: { threadId: string; signal?: AbortSignal }) =>
+        recovered
+          ? Promise.resolve(
+              makeThreadResponse({
+                id: threadId,
+                archivedAt: threadId === "thread-stale" ? 1_000 : null,
+              }),
+            )
+          : new Promise((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(signal.reason), {
+                once: true,
+              });
+            }),
     );
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
@@ -10251,7 +10262,13 @@ describe("Account Pool credential scoping", () => {
       );
       expect(status.accepting).toBe(true);
     });
-    expect(await statusOf(host, held, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, stale, "/v1/messages")).toBe(200);
+    expect(await statusOf(host, live, "/v1/messages")).toBe(200);
+    recovered = true;
+    await vi.waitFor(async () => {
+      expect(await statusOf(host, stale, "/v1/messages")).toBe(401);
+    });
+    expect(await statusOf(host, live, "/v1/messages")).toBe(200);
   });
 
   it("exports nothing for an archived thread and revokes any token it already held", async () => {
