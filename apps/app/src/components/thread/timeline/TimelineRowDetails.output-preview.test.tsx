@@ -165,6 +165,9 @@ describe("previewed command output", () => {
     const view = renderExpandedRow(previewedCommandRow());
 
     await waitFor(() => {
+      expect(timelineTurnSummaryDetails).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
       expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
     });
     await waitFor(() => {
