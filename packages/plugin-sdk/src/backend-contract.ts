@@ -1571,6 +1571,13 @@ export interface PluginProviderDeclaration {
      * redundant probe. The default is therefore the safe one.
      */
     scope?: PluginProviderModelCatalogScope;
+    /**
+     * The model every turn of a child thread runs on: a thread with a parent,
+     * or a top-level thread another thread spawned. It replaces whatever model
+     * the turn asked for or inherited. Omitted, children run like any other
+     * thread. 1–200 characters.
+     */
+    childThreadModel?: string;
   };
   /**
    * Daemon environment variables this provider's bridge may read. Provider

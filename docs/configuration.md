@@ -158,12 +158,13 @@ signal it, so a stale file left by a crash cannot stop an unrelated process.
 
 ## In-App Updates
 
-In-app updates are off unless you start bb with `--in-app-updates`:
-`npx bb-app start --in-app-updates` (or a global `bb-app`), or
-`pnpm start --in-app-updates` from a source checkout. bb then runs under a small
+In-app updates are on when you start bb with `npx bb-app start` (or a global
+`bb-app`) or with `pnpm start` from a source checkout. bb runs under a small
 update shim, so Settings → Updates and `bb updates app apply` can update bb
-without a terminal. Without the flag, bb starts as before and Settings → Updates
-shows the npm upgrade command for release installs. Source checkouts show their
+without a terminal. Pass `--no-in-app-updates` to turn them off: bb then starts
+without the shim and Settings → Updates shows the npm upgrade command for
+release installs. `--in-app-updates`, which earlier releases needed, is still
+accepted and changes nothing. Source checkouts show their
 Git revision, or a labeled build version when unavailable, and are never compared
 with npm releases. Without the update shim, no freshness indicator is shown.
 Failed checks report “Latest unknown”; release checks can be retried in the UI,
@@ -224,7 +225,7 @@ child; do not set them yourself.
 | `BB_HOST_DAEMON_PORT`          | `bb-app env`, environment, or `--host-daemon-port` | Startup-only            | Local host-daemon API port. Defaults to `38887`. A full launcher or desktop app restart is required after a persistent set or unset.                                                                                                                                                                                                                                                                           |
 | `BB_LOG_LEVEL`                 | `bb-app config`                                    | Startup-only debugging  | Log level: `trace`, `debug`, `info`, `warn`, `error`, or `fatal`. A full launcher or desktop app restart is required.                                                                                                                                                                                                                                                                                          |
 | `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and defaults to proxying to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key.                                                                                                                                                                      |
-| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent Account Pooler hub. Paired with `BB_ACCOUNT_POOL_PARENT_URL`; both must be well formed or proxying stays off. Not a `bb-app config` key.                                                                                                                                                                                                               |
+| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Token this nested server presents to the parent Account Pooler hub, scoped to the thread that launched it and never the machine token. It stops working when the plugin sees that thread archived or deleted (a missed event is not replayed), or ten minutes after the machine token is rotated. Paired with `BB_ACCOUNT_POOL_PARENT_URL`; both must be well formed or proxying stays off. Not a `bb-app config` key. |
 
 The `bb` CLI records each failed invocation on the machine that ran it, in
 `<data dir>/logs/cli-errors.jsonl`: the time, CLI version, command path, error
@@ -273,9 +274,9 @@ another voice service.
 bb accepts voice recordings up to 25 MB. A service may set a lower limit;
 Codex transcribes recordings up to 20 MB and bb cloud up to 10 MB.
 
-Open microphone preferences by right-clicking the composer microphone or pressing
-Shift+F10 while it is focused. A warning opens preferences when the microphone
-is clicked. Desktop uses an anchored popover; mobile uses a drawer. Opening
+Open microphone preferences by right-clicking the composer microphone, pressing
+Shift+F10 while it is focused, or clicking the Microphone control in Settings →
+Voice Input. A warning opens preferences when the microphone is clicked. Desktop uses an anchored popover; mobile uses a drawer. Opening
 preferences starts a local microphone preview with the recording waveform and
 a list of inputs. Closing preferences releases the preview. The recording controls
 contain only cancel, stop, and send; microphone preferences are available while idle.
@@ -296,7 +297,7 @@ stop recording or switch microphones automatically. While idle, a warning opens
 preferences on click. Audio preview runs only while microphone preferences are
 open; it is not saved or transcribed.
 
-The microphone picker in Settings → Voice Input is client-local. It stores the
+The microphone preference is client-local. It stores the
 selected browser `MediaDevices` device id in localStorage as
 `bb.voiceInput.audioInputDeviceId`. Recording prefers that microphone and falls
 back to the system default and other available inputs when it is disconnected,
@@ -1225,8 +1226,14 @@ by the CLI. Plugin startup and `bb pool status` remove token files for machines
 that are no longer enrolled. Status lists token mint and last-use timestamps
 plus recently routed threads whose machines do not have a usable local Claude
 login. Rotate one machine's token with
-`bb pool token rotate --machine <id-or-name>`; the prior token remains valid
-for ten minutes so in-flight requests can drain. Bypass or restore routing for
+`bb pool token rotate --machine <id-or-name>`; the prior token and the
+per-thread and nested-server tokens derived from it remain valid for ten
+minutes so in-flight requests can drain, then stop working. Archiving or
+deleting a thread revokes its tokens as soon as the plugin receives the event.
+An event missed while the plugin is down is not replayed, so those tokens stay
+valid until bb next resolves that archived thread's environment, which revokes
+them, or until the ten-minute grace after you rotate that machine's token ends.
+Bypass or restore routing for
 one thread with `bb pool bypass <thread-id>` or
 `bb pool bypass <thread-id> --off`. Account listing, enable, disable, removal,
 priority changes, and usage refreshes are available through

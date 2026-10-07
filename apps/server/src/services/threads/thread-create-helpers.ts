@@ -6,6 +6,7 @@ import {
   getProject,
   getThread,
   isSqliteForeignKeyConstraint,
+  recordThreadSpawner,
 } from "@bb/db";
 import type { DbNotifier } from "@bb/db";
 import type { HostDaemonCommand } from "@bb/host-daemon-contract";
@@ -87,6 +88,30 @@ export function buildEnvironmentProvisionCommand(
   };
 }
 
+// The server has no caller identity finer than the client, so a spawner is
+// only believed when it could be the agent making this call: a live thread in
+// the same project that is mid-turn right now. Anything else is ignored and
+// the new thread keeps its own model.
+function resolveRecordableSpawner(
+  deps: Pick<AppDeps, "db">,
+  args: { projectId: string; spawnedByThreadId: string | undefined },
+) {
+  if (args.spawnedByThreadId === undefined) {
+    return null;
+  }
+  const spawner = getThread(deps.db, args.spawnedByThreadId);
+  if (
+    spawner === null ||
+    spawner.projectId !== args.projectId ||
+    spawner.archivedAt !== null ||
+    spawner.deletedAt !== null ||
+    spawner.status !== "active"
+  ) {
+    return null;
+  }
+  return spawner;
+}
+
 export function createThreadRecord(
   deps: Pick<AppDeps, "db"> & { hub: DbNotifier },
   args: {
@@ -124,6 +149,16 @@ export function createThreadRecord(
       status: "pending",
       startupContext: args.startupContext,
     });
+    const spawner = resolveRecordableSpawner(deps, {
+      projectId: thread.projectId,
+      spawnedByThreadId: args.request.spawnedByThreadId,
+    });
+    if (spawner !== null) {
+      recordThreadSpawner(deps.db, {
+        threadId: thread.id,
+        spawnedByThreadId: spawner.id,
+      });
+    }
     emitPluginThreadCreated(thread);
     return thread;
   } catch (error) {

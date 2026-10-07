@@ -38,6 +38,11 @@ function exactTokens(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString("en");
 }
 
+function totalTokensLabel(value: number | null, historyComplete: boolean) {
+  const rendered = exactTokens(value);
+  return value !== null && !historyComplete ? `At least ${rendered}` : rendered;
+}
+
 const turnWeatherBySpendSummary = new WeakMap<
   ThreadSpendSummaryResponse,
   Map<string, ReturnType<typeof summarizeTokenWeather>["turns"][number]>
@@ -126,8 +131,9 @@ export function ThreadTurnTokenTooltipContent({
             <span className="col-span-2 text-muted-foreground">
               Per-turn rules: stormy at ≥50% fresh-input growth with under 20%
               cache reuse; cloudy at ≥25% growth or under 35% reuse; clear when
-              measured reuse is ≥35% and growth is under 25%. The thread panel
-              also applies its latest reported context fill.
+              measured reuse is ≥35% and growth is under 25%. Overall thread
+              weather follows durable cache reuse; context fill is shown
+              separately.
             </span>
           </>
         ) : null}
@@ -201,9 +207,7 @@ export function ThreadTurnTokenSummary({
           ) : null}
           {hasTotalTokens && tightSummaryValue !== null ? (
             <span data-token-part="total">
-              <span data-token-total-full>
-                Σ {compact(tightSummaryValue)}
-              </span>
+              <span data-token-total-full>Σ {compact(tightSummaryValue)}</span>
               <span
                 data-token-total-tight
                 aria-label={`Total ${exactTokens(tightSummaryValue)} tokens`}
@@ -465,6 +469,7 @@ function ThreadTokenWeatherPanel({
   const weather = spend
     ? summarizeTokenWeather({
         contextFill,
+        totals: spend.total,
         turns: chronologicalTurns,
       })
     : null;
@@ -501,15 +506,40 @@ function ThreadTokenWeatherPanel({
               </p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-md border border-border/70 p-3 tabular-nums">
                 <span>Fresh input total</span>
-                <span>{exactTokens(weather.totals.inputTokens)}</span>
+                <span>
+                  {totalTokensLabel(
+                    weather.totals.inputTokens,
+                    spend?.historyComplete ?? false,
+                  )}
+                </span>
                 <span>Cached input</span>
-                <span>{exactTokens(weather.totals.cachedInputTokens)}</span>
+                <span>
+                  {totalTokensLabel(
+                    weather.totals.cachedInputTokens,
+                    spend?.historyComplete ?? false,
+                  )}
+                </span>
                 <span>Output</span>
-                <span>{exactTokens(weather.totals.outputTokens)}</span>
+                <span>
+                  {totalTokensLabel(
+                    weather.totals.outputTokens,
+                    spend?.historyComplete ?? false,
+                  )}
+                </span>
                 <span>Reasoning reported</span>
-                <span>{exactTokens(weather.totals.reasoningOutputTokens)}</span>
+                <span>
+                  {totalTokensLabel(
+                    weather.totals.reasoningOutputTokens,
+                    spend?.historyComplete ?? false,
+                  )}
+                </span>
                 <span>Total</span>
-                <span>{exactTokens(weather.totals.totalTokens)}</span>
+                <span>
+                  {totalTokensLabel(
+                    weather.totals.totalTokens,
+                    spend?.historyComplete ?? false,
+                  )}
+                </span>
                 <span>Cache reuse share (approx.)</span>
                 <span>{formatPercent(weather.cacheReuseShare)}</span>
                 <span>Context fill (latest report)</span>
@@ -522,13 +552,12 @@ function ThreadTokenWeatherPanel({
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Clear: cache reuse ≥35% and same-model fresh-input growth under
-                25%, with context fill under 70% when reported. Cloudy: fill
-                ≥70%, growth ≥25%, or reuse under 35%. Stormy: fill ≥85%, or
-                growth ≥50% with reuse under 20%. Cached input combines reads
-                and writes, so reuse is approximate. Reasoning is reported
-                metadata and is not added again to total. Missing values remain
-                unavailable.
+                Overall weather uses the durable thread cache-reuse share so it
+                stays stable when older turn and context reports are pruned.
+                Context fill and per-turn changes use the latest retained
+                reports. Cached input combines reads and writes, so reuse is
+                approximate. Reasoning is reported metadata and is not added
+                again to total. Missing values remain unavailable.
               </p>
               <div className="grid gap-2">
                 <h3 className="font-medium">Per-turn changes</h3>
@@ -595,10 +624,12 @@ function ThreadTokenWeatherPanel({
               ))
             )}
             <p className="text-xs text-muted-foreground">
-              Before is the median fresh input from up to three earlier
-              same-model turns; after is the first later same-model input.
-              Estimated savings compare up to three later inputs against that
-              pre-compaction median and subtract no cache-price assumption.
+              Before is the median fresh input from up to three earlier turns
+              with matching provider and model metadata; after is the first
+              later matching input. Estimates require known matching provider
+              and model metadata. Estimated savings compare up to three later
+              inputs against that pre-compaction median and subtract no
+              cache-price assumption.
             </p>
           </div>
         </div>

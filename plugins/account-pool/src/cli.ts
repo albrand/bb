@@ -1020,7 +1020,7 @@ export function registerPoolCli(
         "token rotate": cliCommand({
           summary: "Rotate one machine's Account Pooler bearer token",
           description:
-            "The previous token keeps working for ten minutes. Tokens are never printed.",
+            "The previous machine token and every per-thread and nested-server token derived from it keep working for ten minutes, then stop. Threads receive new tokens the next time bb resolves their environment. Tokens are never printed.",
           suggestFor: ["rotate", "token"],
           options: {
             machine: {

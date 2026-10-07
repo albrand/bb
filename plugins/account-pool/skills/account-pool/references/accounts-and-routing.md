@@ -69,8 +69,8 @@ end of the provider's priority order by default; rename them with
 `bb pool account rename <id> <label>`. Newly added or enabled accounts are
 available without a plugin reload. With an
 enabled account whose secret file remains readable and valid, matching Claude
-Code or Codex sessions receive the pool route and a distinct secret token for
-their machine.
+Code or Codex sessions receive the pool route and a secret token scoped to
+their thread. The machine token itself is never handed to an agent.
 Codex receives `CODEX_OPENAI_BASE_URL` and the secret
 `CODEX_POOL_AUTH_TOKEN`; bb applies them as in-memory app-server config.
 Codex image generation and editing use the same authenticated pool route.
@@ -232,7 +232,20 @@ A bb server started from inside another bb server's thread inherits that parent'
 pooler routing through its environment. The parent contributes
 `BB_ACCOUNT_POOL_PARENT_URL` and `BB_ACCOUNT_POOL_PARENT_TOKEN` alongside the
 provider routing variables, and the nested server enables the pooler on first run
-when it sees them.
+when it sees them. The token is scoped to the launching thread, is accepted only
+for pooled provider requests and `/availability`, and stops working when that
+thread is archived or deleted, or ten minutes after the machine token is
+rotated. An archive or delete event missed while the plugin is down is not
+replayed, so those tokens end when bb next resolves that archived thread's
+environment, or when you rotate the machine token and wait out those ten
+minutes. A nested server
+started before this scoping existed holds the machine token, which the hub no
+longer accepts; relaunch it so it receives a scoped token.
+
+The nested token is scoped to the thread, not to a provider or an account. It
+reaches both providers' pooled routes, ignores the thread's pinned account and
+bypass setting, and stays in the environment a nested server's threads inherit
+even when that server isolates or cannot route.
 
 `bb pool parent` reports the detected parent, the current mode, and which
 providers the parent can serve. `bb pool parent proxy` and `bb pool parent
@@ -249,6 +262,6 @@ In `isolate` mode the nested server contributes empty routing variables, which
 overrides the inherited values so threads fall back to that instance's own
 accounts or to each provider's own credentials.
 
-Proxied traffic authenticates as the parent machine's token, so `bb pool status`
-on the parent attributes it to the parent host rather than to the nested
-instance.
+Proxied traffic authenticates with the nested token of the launching thread and
+is attributed to that thread's machine, so `bb pool status` on the parent
+attributes it to the parent host rather than to the nested instance.

@@ -268,6 +268,16 @@ export function createAccountPoolPlugin(
         return null;
       },
     );
+    bb.events.on("thread.archived", async ({ thread }) => {
+      await threadTokens.removeThread(thread.id);
+    });
+    bb.events.on("thread.unarchived", async ({ thread }) => {
+      const archiveVersion = threadTokens.archiveVersion(thread.id);
+      const current = await bb.sdk.threads.get({ threadId: thread.id });
+      if (current.archivedAt === null) {
+        await threadTokens.restoreThread(thread.id, archiveVersion);
+      }
+    });
     bb.events.on("thread.deleted", async ({ thread }) => {
       await Promise.all([
         threadTokens.removeThread(thread.id),
@@ -331,7 +341,8 @@ export function createAccountPoolPlugin(
       {
         name: PARENT_TOKEN_ENV,
         value: token,
-        reason: "Account Pooler hub token for this machine",
+        reason:
+          "Account Pooler token scoped to this thread for nested bb servers it launches",
       },
     ];
     const neutralized = (provider: PoolProvider): PoolEnvEntry[] =>
@@ -341,9 +352,37 @@ export function createAccountPoolPlugin(
         reason:
           "Account Pooler is isolated from the parent bb server's pool on this instance",
       }));
+    const revokeIfArchived = async (threadId: string): Promise<boolean> => {
+      const archiveVersion = threadTokens.archiveVersion(threadId);
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (thread.archivedAt === null) {
+        await threadTokens.restoreThread(threadId, archiveVersion);
+        return false;
+      }
+      return threadTokens.removeThreadIfVersion(threadId, archiveVersion);
+    };
+    const checkArchived = async (
+      threadId: string,
+    ): Promise<
+      | { status: "archived" }
+      | { status: "active" }
+      | { status: "unknown"; error: unknown }
+    > => {
+      try {
+        return (await revokeIfArchived(threadId))
+          ? { status: "archived" }
+          : { status: "active" };
+      } catch (error) {
+        return { status: "unknown", error };
+      }
+    };
     const contributeFor =
       (provider: PoolProvider, serving: (token: string) => PoolEnvEntry[]) =>
       async (context: { threadId: string; hostId: string }) => {
+        const unrouted = () =>
+          hasConfiguredParentPool ? neutralized(provider) : [];
+        const archive = await checkArchived(context.threadId);
+        if (archive.status === "archived") return unrouted();
         const bypassed = await routing.isBypassed(context.threadId);
         const selectedAccountId = await routing.selectedAccount(
           context.threadId,
@@ -356,7 +395,8 @@ export function createAccountPoolPlugin(
             ? await canServe(provider)
             : await operations.isRoutingEnabled(provider));
         if (canRoute) {
-          const parentToken = await hubTokens.forHost(context.hostId);
+          if (archive.status === "unknown") throw archive.error;
+          const hostToken = await hubTokens.forHost(context.hostId);
           const token = await threadTokens.forThread(
             {
               threadId: context.threadId,
@@ -364,14 +404,19 @@ export function createAccountPoolPlugin(
               provider,
               accountId,
             },
-            parentToken,
+            hostToken,
           );
+          const nestedToken = await threadTokens.forNested(
+            { threadId: context.threadId, hostId: context.hostId },
+            hostToken,
+          );
+          if (await revokeIfArchived(context.threadId)) return unrouted();
           if (provider === "claude") {
             await routing.recordRouted(context.threadId, context.hostId);
           }
-          return [...serving(token), ...markerEntries(parentToken)];
+          return [...serving(token), ...markerEntries(nestedToken)];
         }
-        return hasConfiguredParentPool ? neutralized(provider) : [];
+        return unrouted();
       };
     const proxiedHealth = async (provider: PoolProvider) =>
       (await canServe(provider))
@@ -394,7 +439,7 @@ export function createAccountPoolPlugin(
         {
           name: "ANTHROPIC_AUTH_TOKEN",
           value: token,
-          reason: "Account Pooler hub token for this machine",
+          reason: "Account Pooler token scoped to this thread",
         },
         {
           name: "ENABLE_TOOL_SEARCH",
@@ -424,7 +469,7 @@ export function createAccountPoolPlugin(
         {
           name: "CODEX_POOL_AUTH_TOKEN",
           value: token,
-          reason: "Account Pooler hub token for this machine",
+          reason: "Account Pooler token scoped to this thread",
         },
       ]),
     );
@@ -490,7 +535,7 @@ export function createAccountPoolPlugin(
       "GET",
       AVAILABILITY_PATH,
       async (context) => {
-        if ((await hub.authenticate(context.req.raw)) === null) {
+        if ((await hub.authenticateNested(context.req.raw)) === null) {
           return new Response(null, { status: 401 });
         }
         return Response.json(

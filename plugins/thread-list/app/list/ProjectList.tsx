@@ -456,6 +456,7 @@ function buildGroupSectionItem(
 }
 
 function useGroupedModeThreadDnd({
+  containerProjectId,
   collapsedThreadIds,
   compareThreads,
   onToggleThreadCollapsed,
@@ -465,6 +466,7 @@ function useGroupedModeThreadDnd({
   rootItems,
   threads,
 }: {
+  containerProjectId?: string;
   collapsedThreadIds: Set<string>;
   compareThreads: ThreadComparator;
   onToggleThreadCollapsed: ToggleCollapsedId;
@@ -484,6 +486,7 @@ function useGroupedModeThreadDnd({
   );
   const threadDnd = useSectionThreadDnd({
     containerId: CHRONOLOGICAL_CONTAINER_ID,
+    containerProjectId,
     enabled: true,
     rootItems,
     topLevelSectionOrder: order,
@@ -669,6 +672,7 @@ function ProjectModeSections({
     [effectivePinnedThreadIds, threads],
   );
   const threadDnd = useGroupedModeThreadDnd({
+    containerProjectId: personalProjectId ?? undefined,
     collapsedThreadIds,
     compareThreads,
     onToggleThreadCollapsed,

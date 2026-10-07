@@ -5,6 +5,7 @@ import {
   deriveStoredEventItemFields,
   getThread,
   getEnvironment,
+  getLatestThreadSequence,
   listCompletedTurnsByThreadIds,
   listStoredDaemonReplayKeys,
   listThreadEnvironmentAssignmentsOnHost,
@@ -109,6 +110,7 @@ interface ResolveEventsToApplyArgs {
 }
 
 interface NotifyInsertedEventThreadsDeps {
+  db: AppDeps["db"];
   hub: AppDeps["hub"];
 }
 
@@ -369,6 +371,7 @@ function notifyInsertedEventThreads(
         ? { backgroundActivityChanged: true }
         : {}),
       eventTypes: Array.from(eventTypes),
+      timelineSequence: getLatestThreadSequence(deps.db, { threadId }),
     });
   }
 }

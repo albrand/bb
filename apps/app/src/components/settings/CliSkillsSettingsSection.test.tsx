@@ -27,6 +27,7 @@ function host(id: string, name: string): Host {
 
 function installButton(): HTMLButtonElement {
   const button = screen.getByRole("button", { name: /bb CLI skills/ });
+  expect(button.className).toContain("pointer-coarse:min-h-11");
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error("Install control is not a button");
   }
@@ -203,9 +204,7 @@ describe("CliSkillsSettingsSectionContent", () => {
     expect(installButton().disabled).toBe(false);
     expect(installButton().textContent).toBe("Install");
     expect(
-      screen.getByText(
-        "Status unavailable on Laptop; Disconnected: Studio",
-      ),
+      screen.getByText("Status unavailable on Laptop; Disconnected: Studio"),
     ).toBeDefined();
   });
 
@@ -280,8 +279,7 @@ describe("getCliSkillsPresentation", () => {
       ]),
     ).toEqual({
       action: "reinstall",
-      statusBadge:
-        "Installed on 2 machines; status unavailable on Unknown box",
+      statusBadge: "Installed on 2 machines; status unavailable on Unknown box",
     });
   });
 

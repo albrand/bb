@@ -1,12 +1,77 @@
-import { setThreadExecutionOverride } from "@bb/db";
+import { recordThreadSpawner, setThreadExecutionOverride } from "@bb/db";
 import { encodeClientTurnRequestIdNumber, threadScope } from "@bb/domain";
 import { threadExecutionProfileResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
-import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
+import { seedEvent, seedThread, seedThreadFixture } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
 describe("thread execution profile", () => {
+  it.each([
+    {
+      kind: "parent-linked child",
+      parent: true,
+      spawned: false,
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      kind: "agent-spawned root",
+      parent: false,
+      spawned: true,
+      expected: "claude-sonnet-5-5",
+    },
+    {
+      kind: "user-started root",
+      parent: false,
+      spawned: false,
+      expected: "claude-opus-5-5",
+    },
+  ])(
+    "reports the effective model for a $kind with an Opus override",
+    async ({ parent, spawned, expected }) => {
+      await withTestHarness(async (harness) => {
+        const fixture = seedThreadFixture(harness, {
+          thread: { providerId: "claude-code" },
+        });
+        const thread = seedThread(harness.deps, {
+          projectId: fixture.project.id,
+          environmentId: fixture.environment.id,
+          providerId: "claude-code",
+          parentThreadId: parent ? fixture.thread.id : null,
+        });
+        if (spawned) {
+          recordThreadSpawner(harness.db, {
+            threadId: thread.id,
+            spawnedByThreadId: fixture.thread.id,
+          });
+        }
+        setThreadExecutionOverride(harness.db, {
+          threadId: thread.id,
+          modelOverride: "claude-opus-5-5",
+          reasoningLevelOverride: "high",
+        });
+
+        const defaultsResponse = await harness.app.request(
+          `/api/v1/threads/${thread.id}/default-execution-options`,
+        );
+        expect(defaultsResponse.status).toBe(200);
+        expect(await readJson(defaultsResponse)).toMatchObject({
+          model: expected,
+        });
+
+        const profileResponse = await harness.app.request(
+          `/api/v1/threads/${thread.id}/execution-profile`,
+        );
+        expect(profileResponse.status).toBe(200);
+        const profile = threadExecutionProfileResponseSchema.parse(
+          await readJson(profileResponse),
+        );
+        expect(profile.overrides.model).toBe("claude-opus-5-5");
+        expect(profile.nextTurn).toMatchObject({ model: expected });
+      });
+    },
+  );
+
   it("separates the last request, the stored overrides and the next turn", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
