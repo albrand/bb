@@ -267,6 +267,7 @@ export {
   getPluginArtifactByResolution,
   getPluginArtifact,
   listPluginArtifacts,
+  listInstalledPluginIdsOverlappingPath,
   listPluginArtifactsAtOrUnderPath,
   listPluginArtifactsInGitCheckout,
   listPluginArtifactsUnderPath,

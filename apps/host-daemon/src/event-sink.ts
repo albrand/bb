@@ -13,6 +13,8 @@ import {
 } from "./server-client.js";
 
 const DEFAULT_DEBOUNCE_MS = 100;
+const INITIAL_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 30_000;
 
 const TURN_START_RETRY_INITIAL_MS = 250;
 const TURN_START_RETRY_MAX_MS = 10_000;
@@ -153,6 +155,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
   let disposed = false;
   let backedUpSinceMs: number | null = null;
   let backpressureLogged = false;
+  let retryDelayMs = INITIAL_RETRY_DELAY_MS;
   let turnStartRetryDelayMs = TURN_START_RETRY_INITIAL_MS;
   let turnStartRetryPending = false;
   let pendingTurnStart: { key: string; sinceMs: number } | null = null;
@@ -301,7 +304,11 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       return;
     }
     if (flushTimer !== null) {
-      if (delayMs > 0) {
+      if (
+        delayMs > 0 ||
+        retryDelayMs > INITIAL_RETRY_DELAY_MS ||
+        turnStartRetryDelayMs > TURN_START_RETRY_INITIAL_MS
+      ) {
         return;
       }
       clearScheduledFlush();
@@ -349,7 +356,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       if (!turnStartPending && !isPermanentPostRejection(normalized)) {
         options.logger.error(
           runtimeErrorLogFields(normalized),
-          "Failed to post daemon events; will retry on the next flush",
+          "Failed to post daemon events; keeping events queued for retry",
         );
         return 0;
       }
@@ -410,6 +417,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
         undetailedTurnStartSinceMs = null;
         backedUpSinceMs = null;
         backpressureLogged = false;
+        retryDelayMs = INITIAL_RETRY_DELAY_MS;
       }
       if (delivered < batch.length) {
         return;
@@ -438,6 +446,10 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
             TURN_START_RETRY_MAX_MS,
           );
         }
+      } else if (!disposed && queue.length > 0 && options.isSessionOpen()) {
+        const delayMs = Math.floor(retryDelayMs * (0.5 + Math.random() * 0.5));
+        retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+        scheduleFlush(delayMs);
       }
     }
   }

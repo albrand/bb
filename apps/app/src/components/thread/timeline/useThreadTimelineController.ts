@@ -1,5 +1,5 @@
 import type { CommitOlderTimelineRows } from "./load-older-timeline-rows.js";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   useQueryClient,
   type QueryObserverResult,
@@ -60,15 +60,14 @@ export interface UseThreadTimelineControllerResult {
   timelineRows: TimelineRow[];
 }
 
-interface MountFetchState {
-  hasNewEvents: boolean;
-  key: string | null;
-  settled: boolean;
-}
-
 interface LoadedTimelineTracker {
   latestTimeline: ThreadTimelineResponse | undefined;
   loaded: LoadedTimelineState;
+}
+
+interface UnseenTimelineOpenState {
+  hasUnseenTimelineEvents: boolean;
+  threadId: string | null;
 }
 
 function isTimelineSurfaceForBase(
@@ -129,25 +128,25 @@ export function useThreadTimelineController({
   threadId,
 }: UseThreadTimelineControllerArgs): UseThreadTimelineControllerResult {
   const queryClient = useQueryClient();
-  const mountFetchKey = enabled ? threadId : null;
-  const [mountFetch, setMountFetch] = useState<MountFetchState>({
-    hasNewEvents: false,
-    key: null,
-    settled: false,
-  });
-  const isNewMountFetch = mountFetch.key !== mountFetchKey;
-  const mountFetchHasNewEvents = isNewMountFetch
-    ? mountFetchKey !== null &&
-      hasThreadTimelineUnseenEvents(queryClient, mountFetchKey)
-    : mountFetch.hasNewEvents;
-  const isTrackingMountFetch =
-    mountFetchKey !== null &&
-    mountFetchHasNewEvents &&
-    (isNewMountFetch || !mountFetch.settled);
-  const isTrackingMountFetchRef = useRef(isTrackingMountFetch);
-  isTrackingMountFetchRef.current = isTrackingMountFetch;
+  const openThreadId = enabled ? threadId : null;
+  const [unseenTimelineOpenState, setUnseenTimelineOpenState] =
+    useState<UnseenTimelineOpenState>({
+      hasUnseenTimelineEvents: false,
+      threadId: null,
+    });
+  const isNewTimelineOpen = unseenTimelineOpenState.threadId !== openThreadId;
+  const hadUnseenTimelineEventsOnOpen = isNewTimelineOpen
+    ? openThreadId !== null &&
+      hasThreadTimelineUnseenEvents(queryClient, openThreadId)
+    : unseenTimelineOpenState.hasUnseenTimelineEvents;
+  if (isNewTimelineOpen) {
+    setUnseenTimelineOpenState({
+      hasUnseenTimelineEvents: hadUnseenTimelineEventsOnOpen,
+      threadId: openThreadId,
+    });
+  }
   const notifyOnChangeProps = useCallback((): TimelineQueryResultProp[] => {
-    if (isTrackingMountFetchRef.current) {
+    if (hasThreadTimelineUnseenEvents(queryClient, threadId)) {
       return TIMELINE_CONTROLLER_PROPS_WITHOUT_ROWS;
     }
     const cachedTimeline = queryClient.getQueryData<ThreadTimelineResponse>(
@@ -321,22 +320,13 @@ export function useThreadTimelineController({
     latestTimelineQuery.isLoading ||
     (timelineQueryState.status === "loading" && timelineRows.length === 0) ||
     (latestTimelineQuery.isFetching && timelineRows.length === 0);
-  const isMountFetchIdle =
-    mountFetchKey !== null && !latestTimelineQuery.isFetching;
-  if (
-    isNewMountFetch ||
-    (mountFetch.hasNewEvents && isMountFetchIdle && !mountFetch.settled)
-  ) {
-    setMountFetch({
-      hasNewEvents: mountFetchHasNewEvents,
-      key: mountFetchKey,
-      settled: isMountFetchIdle,
-    });
-  }
   const isCatchingUpTimeline =
-    isTrackingMountFetch &&
-    latestTimelineQuery.isFetching &&
+    enabled &&
+    hasThreadTimelineUnseenEvents(queryClient, threadId) &&
     timelineRows.length > 0;
+  const hasUnseenTimelineEvents =
+    hadUnseenTimelineEventsOnOpen ||
+    hasThreadTimelineUnseenEvents(queryClient, threadId);
   const timelineError =
     timelineLoading || timelineQueryState.status !== "unavailable"
       ? null
@@ -352,7 +342,7 @@ export function useThreadTimelineController({
     goal: latestTimeline?.goal ?? null,
     modelFallback: latestTimeline?.modelFallback ?? null,
     hasOlderTimelineRows,
-    hasUnseenTimelineEvents: mountFetchHasNewEvents,
+    hasUnseenTimelineEvents,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
     loadOlderTimelineRows,

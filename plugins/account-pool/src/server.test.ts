@@ -4575,6 +4575,7 @@ describe("Account Pool plugin", () => {
           const provider = wire === "claude" ? "claude" : "codex";
           let now = Date.now();
           const attempts: Array<string | null> = [];
+          const parentRetry = deferred();
           const fixture = await affinityFixture(
             provider,
             async (_input, init) => {
@@ -4584,6 +4585,7 @@ describe("Account Pool plugin", () => {
                   headers.get("authorization")?.slice(7) ??
                   null,
               );
+              if (attempts.length === 4) await parentRetry.promise;
               return attempts.length === 3
                 ? Response.json(
                     {},
@@ -4621,12 +4623,14 @@ describe("Account Pool plugin", () => {
                     (account) => account.id === fixture.account.id,
                   )?.status,
                 ).toBe("held");
+                expect(attempts).toHaveLength(4);
               },
               { interval: 5 },
             );
             const child = await send("child", "parent");
             expect(child.status).toBe(200);
             await child.text();
+            parentRetry.resolve();
             await (await paced).text();
             await (await send("child", "parent")).text();
             expect(attempts).toEqual([
@@ -4647,6 +4651,7 @@ describe("Account Pool plugin", () => {
               )?.status,
             ).toBe("ready");
           } finally {
+            parentRetry.resolve();
             const response = await paced;
             if (!response.bodyUsed) await response.text();
           }

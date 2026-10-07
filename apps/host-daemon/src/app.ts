@@ -924,6 +924,7 @@ export async function createHostDaemonApp(
       sessionState.value = session?.sessionId ?? null;
       desktopBrowserBroker.setConnected(session !== null);
       if (session === null) {
+        terminalManager.releaseOutputFlowControl();
         clearInteractiveInterruptRetry();
         interactiveInterruptRetryDelayMs = INTERACTIVE_INTERRUPT_RETRY_DELAY_MS;
         return;
