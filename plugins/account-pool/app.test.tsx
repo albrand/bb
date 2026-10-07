@@ -575,6 +575,40 @@ describe("Account Pool parent banner", () => {
   });
 });
 
+it("gives subscription and routing switches a 44px coarse-pointer hit area", async () => {
+  const slot = render([
+    account(),
+    account({
+      id: "22222222-2222-4222-8222-222222222222",
+      provider: "codex",
+      label: "codex@example.com",
+      email: "codex@example.com",
+      accountUuid: null,
+      codexAccountId: "codex-account",
+      subscriptionType: null,
+      rateLimitTier: null,
+    }),
+  ]);
+  const switchNames = [
+    "Use person@example.com",
+    "Use codex@example.com",
+    "Route Claude threads",
+    "Route Codex threads",
+  ];
+
+  for (const name of switchNames) {
+    const control = await slot.findByRole("switch", { name });
+    expect(control.className).toContain("h-4 w-7");
+    const hitArea = control.querySelector("[data-switch-hit-area]");
+    if (hitArea === null) throw new Error("Switch hit area is missing.");
+    expect(hitArea.className).toContain("pointer-coarse:absolute");
+    expect(hitArea.className).toContain("pointer-coarse:block");
+    expect(hitArea.className).toContain("pointer-coarse:-inset-x-2");
+    expect(hitArea.className).toContain("pointer-coarse:-inset-y-3.5");
+    expect(hitArea.className).toContain("hidden");
+  }
+});
+
 describe("Account Pool settings", () => {
   it("renders cached accounts as refreshing until live status arrives, then caches it", async () => {
     window.localStorage.setItem(

@@ -33,7 +33,7 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
       disabled={disabled}
       data-state={checked ? "checked" : "unchecked"}
       className={cn(
-        `peer inline-flex shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
+        `peer relative inline-flex shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-input shadow-xs ${CONTROL_HOVER_TRANSITION} outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-foreground data-[state=unchecked]:border-input data-[state=unchecked]:bg-muted`,
         size === "default" && "h-5 w-9",
         size === "sm" && "h-4 w-7",
         className,
@@ -53,6 +53,11 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
           size === "default" && "size-4 data-[state=checked]:translate-x-4",
           size === "sm" && "size-3 data-[state=checked]:translate-x-3",
         )}
+      />
+      <span
+        aria-hidden
+        data-switch-hit-area
+        className="pointer-coarse:absolute pointer-coarse:block pointer-coarse:-inset-x-2 pointer-coarse:-inset-y-3.5 hidden"
       />
     </button>
   ),
