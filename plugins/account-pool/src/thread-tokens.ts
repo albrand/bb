@@ -55,6 +55,20 @@ type NestedRouteRecord = z.infer<typeof nestedRouteSchema>;
 export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
 export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
+export type ThreadLookup = (
+  threadId: string,
+  signal?: AbortSignal,
+) => Promise<"live" | "gone">;
+export type ThreadSweepOptions = {
+  signal?: AbortSignal;
+  lookupTimeoutMs?: number;
+};
+export type ThreadSweepResult = {
+  checked: number;
+  revoked: number;
+  failed: number;
+};
+
 export class ThreadTokenStore {
   private readonly routes = new Map<string, RouteRecord>();
   private readonly tokenIndex = new Map<string, RouteRecord>();
@@ -68,6 +82,7 @@ export class ThreadTokenStore {
   private readonly corruptArchiveMarkers = new Set<string>();
   private readonly archiveDurabilityFailures = new Set<string>();
   private archiveMarkersLoaded = false;
+  private readonly lookupFailures = new Map<string, number>();
   private readonly archiveVersions = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
 
@@ -323,6 +338,60 @@ export class ThreadTokenStore {
       await this.quarantineUnreadableLegacyFiles(threadId, names).catch(() => undefined);
       if (markerError !== undefined) throw markerError;
     });
+  }
+
+  async sweepThreads(
+    lookup: ThreadLookup,
+    options: ThreadSweepOptions = {},
+  ): Promise<ThreadSweepResult> {
+    const threadIds = new Set<string>();
+    for (const record of this.routes.values()) threadIds.add(record.threadId);
+    for (const record of this.nestedRoutes.values())
+      threadIds.add(record.threadId);
+    for (const threadId of this.lookupFailures.keys())
+      if (!threadIds.has(threadId)) this.lookupFailures.delete(threadId);
+    const ordered = [...threadIds].sort(
+      (left, right) =>
+        (this.lookupFailures.get(left) ?? 0) -
+        (this.lookupFailures.get(right) ?? 0),
+    );
+    const result: ThreadSweepResult = {
+      checked: ordered.length,
+      revoked: 0,
+      failed: 0,
+    };
+    for (const threadId of ordered) {
+      if (options.signal?.aborted === true) {
+        result.failed += 1;
+        continue;
+      }
+      const lookupSignals = [
+        ...(options.signal === undefined ? [] : [options.signal]),
+        ...(options.lookupTimeoutMs === undefined
+          ? []
+          : [AbortSignal.timeout(options.lookupTimeoutMs)]),
+      ];
+      const lookupSignal =
+        lookupSignals.length === 0 ? undefined : AbortSignal.any(lookupSignals);
+      const version = this.archiveVersion(threadId);
+      try {
+        const status = await untilAborted(
+          lookup(threadId, lookupSignal),
+          lookupSignal,
+        );
+        this.lookupFailures.delete(threadId);
+        if (status === "live") continue;
+        if (await this.removeThreadIfVersion(threadId, version))
+          result.revoked += 1;
+      } catch {
+        this.lookupFailures.set(
+          threadId,
+          (this.lookupFailures.get(threadId) ?? 0) + 1,
+        );
+        result.failed += 1;
+      }
+    }
+    return result;
   }
 
   async removeThreadIfVersion(
@@ -722,6 +791,21 @@ export class ThreadTokenStore {
     if (this.archiveMarkersLoaded && !this.hasMarkerFailure(threadId)) return false;
     return this.hasMarkerFailure(threadId);
   }
+}
+
+function untilAborted<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (signal === undefined) return operation;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
+  });
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -16,7 +16,7 @@ import {
   type PoolStatus,
 } from "./contracts.js";
 import { draftSelectionSchema } from "./contracts.js";
-import { ThreadTokenStore } from "./thread-tokens.js";
+import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
 import {
   AVAILABILITY_PATH,
   PARENT_TOKEN_ENV,
@@ -30,7 +30,7 @@ import type {
   ImportedClaudeCredentials,
   ImportedCodexCredentials,
 } from "./credentials.js";
-import { createHub } from "./hub.js";
+import { createHub, waitForDelay } from "./hub.js";
 import { PoolOperations } from "./operations.js";
 import {
   accountPoolBindingReadRpcContract,
@@ -64,6 +64,10 @@ export interface AccountPoolPluginOptions {
   codexUsageUrl?: string;
   usageUrl?: string;
   drainTimeoutMs?: number;
+  threadSweepTimeoutMs?: number;
+  threadSweepLookupTimeoutMs?: number;
+  threadSweepIntervalMs?: number;
+  threadSweepRetryMs?: number;
   maxAffinityBindings?: number;
   disposeTimeoutMs?: number;
   importCredentials?: () => Promise<ImportedClaudeCredentials>;
@@ -76,6 +80,10 @@ export interface AccountPoolPluginOptions {
 
 const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
+const THREAD_SWEEP_INTERVAL_MS = 15 * 60_000;
+const THREAD_SWEEP_TIMEOUT_MS = 15_000;
+const THREAD_SWEEP_LOOKUP_TIMEOUT_MS = 5_000;
+const THREAD_SWEEP_RETRY_MS = 60_000;
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool/http";
 
 const PROVIDER_ROUTING_ENV: Record<PoolProvider, readonly string[]> = {
@@ -361,6 +369,61 @@ export function createAccountPoolPlugin(
       }
       return threadTokens.removeThreadIfVersion(threadId, archiveVersion);
     };
+    const lookupThread: ThreadLookup = async (threadId, signal) => {
+      try {
+        const thread = await bb.sdk.threads.get({ threadId, signal });
+        return thread.archivedAt === null && thread.deletedAt === null
+          ? "live"
+          : "gone";
+      } catch (error) {
+        if (isThreadNotFound(error)) return "gone";
+        throw error;
+      }
+    };
+    const sweepThreadCredentialsOnce = async (
+      serviceSignal: AbortSignal,
+    ): Promise<boolean> => {
+      try {
+        const { checked, revoked, failed } = await threadTokens.sweepThreads(
+          lookupThread,
+          {
+            signal: AbortSignal.any([
+              serviceSignal,
+              AbortSignal.timeout(
+                options.threadSweepTimeoutMs ?? THREAD_SWEEP_TIMEOUT_MS,
+              ),
+            ]),
+            lookupTimeoutMs:
+              options.threadSweepLookupTimeoutMs ??
+              THREAD_SWEEP_LOOKUP_TIMEOUT_MS,
+          },
+        );
+        if (revoked > 0 || failed > 0) {
+          bb.log.warn(
+            `Account Pooler thread credential sweep checked ${checked} threads, revoked ${revoked}, and could not look up ${failed}.`,
+          );
+        }
+        return failed === 0;
+      } catch {
+        bb.log.warn("Account Pooler thread credential sweep failed.");
+        return false;
+      }
+    };
+    const sweepThreadCredentialsPeriodically = async (
+      signal: AbortSignal,
+      startupComplete: boolean,
+    ): Promise<void> => {
+      let complete = startupComplete;
+      while (!signal.aborted) {
+        await waitForDelay(
+          complete
+            ? (options.threadSweepIntervalMs ?? THREAD_SWEEP_INTERVAL_MS)
+            : (options.threadSweepRetryMs ?? THREAD_SWEEP_RETRY_MS),
+          signal,
+        );
+        if (!signal.aborted) complete = await sweepThreadCredentialsOnce(signal);
+      }
+    };
     const checkArchived = async (
       threadId: string,
     ): Promise<
@@ -551,9 +614,26 @@ export function createAccountPoolPlugin(
       auth: "none",
     });
     bb.background.service("hub", {
-      start: (signal) => hub.start(signal),
+      start: async (signal) => {
+        const startupComplete = await sweepThreadCredentialsOnce(signal);
+        await Promise.all([
+          hub.start(signal),
+          sweepThreadCredentialsPeriodically(signal, startupComplete),
+        ]);
+      },
     });
   };
+}
+
+function isThreadNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 404 &&
+    "code" in error &&
+    error.code === "thread_not_found"
+  );
 }
 
 async function inspectDisableState(

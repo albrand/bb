@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { HubTokenStore } from "./store.js";
-import { ThreadTokenStore } from "./thread-tokens.js";
+import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -863,4 +863,234 @@ it("reclaims expired-generation credentials for a thread when minting, and keeps
   expect(await credentialFiles("scoped-route-")).toHaveLength(0);
   expect(await credentialFiles("scoped-nested-route-")).toHaveLength(1);
   expect(await threads.authenticateNested(nextNested)).toEqual(nestedRoute);
+});
+
+async function downgradeToLegacy(directory: string): Promise<void> {
+  for (const name of await fs.readdir(directory)) {
+    const legacy = name
+      .replace(/^scoped-route-/u, "thread-route-")
+      .replace(/^scoped-nested-route-/u, "nested-route-")
+      .replace(/-v0\.json$/u, ".json");
+    if (legacy !== name)
+      await fs.rename(path.join(directory, name), path.join(directory, legacy));
+  }
+}
+
+async function legacyFixture(threadIds: readonly string[]) {
+  const base = await fixture();
+  const tokens = new Map<string, { provider: string; nested: string }>();
+  for (const threadId of threadIds) {
+    tokens.set(threadId, {
+      provider: await base.threads.forThread(
+        { ...base.route, threadId },
+        base.hostToken,
+      ),
+      nested: await base.threads.forNested(
+        { hostId: base.route.hostId, threadId },
+        base.hostToken,
+      ),
+    });
+  }
+  await downgradeToLegacy(base.directory);
+  const reloaded = new ThreadTokenStore(base.directory, base.hosts);
+  await reloaded.initialize([base.route.hostId]);
+  const tokenOf = (threadId: string) => {
+    const found = tokens.get(threadId);
+    if (found === undefined) throw new Error("unknown thread");
+    return found;
+  };
+  return { ...base, threads: reloaded, tokenOf };
+}
+
+it("revokes legacy credentials of an archived thread that never had a marker and keeps an active thread's", async () => {
+  const { threads, route, tokenOf } = await legacyFixture([
+    "thr_archived",
+    "thr_active",
+  ]);
+  const archived = tokenOf("thr_archived");
+  const active = tokenOf("thr_active");
+  expect((await threads.authenticate(archived.provider))?.threadId).toBe(
+    "thr_archived",
+  );
+  expect(await threads.authenticateNested(archived.nested)).not.toBeNull();
+  const lookup = vi.fn(async (threadId: string) =>
+    threadId === "thr_archived" ? ("gone" as const) : ("live" as const),
+  );
+  expect(await threads.sweepThreads(lookup)).toEqual({
+    checked: 2,
+    revoked: 1,
+    failed: 0,
+  });
+  expect(await threads.authenticate(archived.provider)).toBeNull();
+  expect(await threads.authenticateNested(archived.nested)).toBeNull();
+  expect(await threads.authenticate(active.provider)).toEqual({
+    ...route,
+    threadId: "thr_active",
+  });
+  expect(await threads.authenticateNested(active.nested)).toEqual({
+    hostId: route.hostId,
+    threadId: "thr_active",
+  });
+});
+
+it("keeps every credential and does not throw when the thread lookup fails", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_a", "thr_b"]);
+  const failed = await threads.sweepThreads(async (threadId) => {
+    if (threadId === "thr_a") throw new Error("lookup failed");
+    return "live";
+  });
+  expect(failed).toEqual({ checked: 2, revoked: 0, failed: 1 });
+  expect(await threads.authenticate(tokenOf("thr_a").provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf("thr_b").provider)).not.toBeNull();
+  const allFail = await threads.sweepThreads(async () => {
+    throw new Error("lookup failed");
+  });
+  expect(allFail).toEqual({ checked: 2, revoked: 0, failed: 2 });
+  expect(await threads.authenticate(tokenOf("thr_a").provider)).not.toBeNull();
+  expect(await threads.authenticateNested(tokenOf("thr_b").nested)).not.toBeNull();
+});
+
+it("keeps a revoked legacy credential revoked after a reload, even if its file reappears", async () => {
+  const { directory, hosts, route, threads, tokenOf } = await legacyFixture([
+    "thr_archived",
+  ]);
+  const token = tokenOf("thr_archived");
+  const legacyFiles = await Promise.all(
+    (await fs.readdir(directory))
+      .filter(
+        (name) =>
+          name.startsWith("thread-route-") || name.startsWith("nested-route-"),
+      )
+      .map(async (name) => ({
+        name,
+        text: await fs.readFile(path.join(directory, name), "utf8"),
+      })),
+  );
+  expect(legacyFiles.length).toBe(2);
+  await threads.sweepThreads(async () => "gone");
+  expect(
+    (await fs.readdir(directory)).some((name) =>
+      name.startsWith("archived-thread-"),
+    ),
+  ).toBe(true);
+  for (const file of legacyFiles)
+    await fs.writeFile(path.join(directory, file.name), file.text);
+  const reloaded = new ThreadTokenStore(directory, hosts);
+  await reloaded.initialize([route.hostId]);
+  expect(await reloaded.authenticate(token.provider)).toBeNull();
+  expect(await reloaded.authenticateNested(token.nested)).toBeNull();
+  expect(
+    (await fs.readdir(directory)).filter(
+      (name) =>
+        name.startsWith("thread-route-") || name.startsWith("nested-route-"),
+    ),
+  ).toEqual([]);
+});
+
+it("counts a thread archived by its event during the lookup as revoked without a second removal", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_racing"]);
+  const result = await threads.sweepThreads(async (threadId) => {
+    await threads.removeThread(threadId);
+    return "gone";
+  });
+  expect(result.failed).toBe(0);
+  expect(await threads.authenticate(tokenOf("thr_racing").provider)).toBeNull();
+});
+
+it("gives up on a lookup that never settles once the sweep deadline passes and keeps the credential", async () => {
+  const { threads, tokenOf } = await legacyFixture(["thr_hung"]);
+  const result = await threads.sweepThreads(
+    () => new Promise<never>(() => undefined),
+    { signal: AbortSignal.timeout(30) },
+  );
+  expect(result).toEqual({ checked: 1, revoked: 0, failed: 1 });
+  expect(await threads.authenticate(tokenOf("thr_hung").provider)).not.toBeNull();
+});
+
+async function loadOrder(
+  directory: string,
+  threadIds: readonly string[],
+): Promise<string[]> {
+  const order: string[] = [];
+  for (const name of await fs.readdir(directory)) {
+    if (!name.startsWith("thread-route-")) continue;
+    const threadId = threadIds.find((candidate) => name.includes(candidate));
+    if (threadId !== undefined && !order.includes(threadId))
+      order.push(threadId);
+  }
+  return order;
+}
+
+it("does not let threads whose lookups hang starve a later archived thread, and bounds every sweep", async () => {
+  const names = ["thr_one", "thr_two", "thr_three"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hangA, hangB, archived] = await loadOrder(directory, names);
+  if (hangA === undefined || hangB === undefined || archived === undefined)
+    throw new Error("missing thread");
+  const lookup: ThreadLookup = (threadId) =>
+    threadId === archived
+      ? Promise.resolve("gone")
+      : new Promise<never>(() => undefined);
+  const started = Date.now();
+  const sweepOptions = () => ({
+    signal: AbortSignal.timeout(60),
+    lookupTimeoutMs: 50,
+  });
+  const one = await threads.sweepThreads(lookup, sweepOptions());
+  expect(Date.now() - started).toBeLessThan(2_000);
+  expect(one).toEqual({ checked: 3, revoked: 0, failed: 3 });
+  const two = await threads.sweepThreads(lookup, sweepOptions());
+  expect(two).toEqual({ checked: 3, revoked: 1, failed: 2 });
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hangA).provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf(hangB).provider)).not.toBeNull();
+});
+
+it("checks later threads when an earlier lookup times out on its own", async () => {
+  const names = ["thr_one", "thr_two"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hang, archived] = await loadOrder(directory, names);
+  if (hang === undefined || archived === undefined)
+    throw new Error("missing thread");
+  const result = await threads.sweepThreads(
+    (threadId) =>
+      threadId === archived
+        ? Promise.resolve("gone")
+        : new Promise<never>(() => undefined),
+    { signal: AbortSignal.timeout(5_000), lookupTimeoutMs: 30 },
+  );
+  expect(result).toEqual({ checked: 2, revoked: 1, failed: 1 });
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hang).provider)).not.toBeNull();
+});
+
+it("revokes a later archived thread even when every thread failed a prior sweep and the earlier ones keep hanging", async () => {
+  const names = ["thr_one", "thr_two", "thr_three"];
+  const { directory, threads, tokenOf } = await legacyFixture(names);
+  const [hangA, hangB, archived] = await loadOrder(directory, names);
+  if (hangA === undefined || hangB === undefined || archived === undefined)
+    throw new Error("missing thread");
+  let archivedRecovered = false;
+  const lookup: ThreadLookup = (threadId) =>
+    threadId === archived && archivedRecovered
+      ? Promise.resolve("gone")
+      : new Promise<never>(() => undefined);
+  const allFailed = await threads.sweepThreads(lookup, {
+    signal: AbortSignal.timeout(5_000),
+    lookupTimeoutMs: 20,
+  });
+  expect(allFailed).toEqual({ checked: 3, revoked: 0, failed: 3 });
+  archivedRecovered = true;
+  let revoked = 0;
+  for (let sweeps = 0; revoked === 0 && sweeps < 4; sweeps += 1)
+    revoked += (
+      await threads.sweepThreads(lookup, {
+        signal: AbortSignal.timeout(40),
+        lookupTimeoutMs: 30,
+      })
+    ).revoked;
+  expect(revoked).toBe(1);
+  expect(await threads.authenticate(tokenOf(archived).provider)).toBeNull();
+  expect(await threads.authenticate(tokenOf(hangA).provider)).not.toBeNull();
+  expect(await threads.authenticate(tokenOf(hangB).provider)).not.toBeNull();
 });
