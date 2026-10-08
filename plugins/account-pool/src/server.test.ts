@@ -11773,8 +11773,21 @@ else {
   it.skipIf(process.env.POOL_E2E_BB_CLI === undefined)(
     "drives the real bb CLI: the proof travels on stdin, never in argv or the child env",
     async () => {
-      const realCli = process.env.POOL_E2E_BB_CLI ?? "";
       const { base, run, hubSend, readToken, listRoutes, work, threadProof, cliRequests } = await harness();
+      // A pass-through in front of the real CLI records the environment the
+      // launcher gives each bb CLI process, then execs the real CLI unchanged.
+      const cliEnvDump = path.join(work, "cli-env.jsonl");
+      const realCli = path.join(work, "bb-recorded");
+      await fs.writeFile(
+        realCli,
+        `#!/bin/sh\n${JSON.stringify(process.execPath)} -e 'require("node:fs").appendFileSync(process.argv[1], JSON.stringify(process.env) + "\\n")' ${JSON.stringify(cliEnvDump)}\nexec ${JSON.stringify(process.env.POOL_E2E_BB_CLI ?? "")} "$@"\n`,
+        { mode: 0o755 },
+      );
+      const cliEnvs = async () =>
+        (await fs.readFile(cliEnvDump, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as Record<string, string>);
       const envDump = path.join(work, "child-env.json");
       const dumpEnv = `require("node:fs").writeFileSync(${JSON.stringify(envDump)}, JSON.stringify(process.env));`;
       const result = await run(
@@ -11795,6 +11808,10 @@ else {
         expect(entry.argv.join("\u0000")).not.toContain(threadProof);
         expect(entry.stdinInputs).toEqual({ proof: threadProof });
       }
+      // Neither bb CLI process (issue, revoke) inherited the proof.
+      const recorded = await cliEnvs();
+      expect(recorded).toHaveLength(2);
+      for (const env of recorded) expect(Object.values(env)).not.toContain(threadProof);
       // The child got its actor route, never the thread's proof.
       const childEnv = JSON.parse(await fs.readFile(envDump, "utf8")) as Record<string, string>;
       expect(Object.values(childEnv)).not.toContain(threadProof);

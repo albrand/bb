@@ -35,9 +35,11 @@ command -v "$bb_cli" >/dev/null 2>&1 || die "bb CLI not found: $bb_cli"
 command -v node >/dev/null 2>&1 || die "node is required to read the issuer response"
 # Issuing and revoking need proof that this caller acts for the thread: the
 # pool token bb contributed to that thread (ANTHROPIC_AUTH_TOKEN inside a bb
-# thread). It reaches the CLI on stdin, never argv, and is never exported.
+# thread). It reaches the CLI on stdin, never argv. The source variable is
+# unset at once, so neither the bb CLI nor the command inherits it.
 [[ "$proof_env" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "--proof-env must name an environment variable"
 proof="${!proof_env:-}"
+unset "$proof_env"
 [ -n "$proof" ] || die "no thread proof in \$$proof_env; run inside the thread whose route you need, or pass --proof-env"
 
 if [ -z "$actor" ]; then
