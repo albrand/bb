@@ -361,6 +361,7 @@ function ParentThreadInlineSegment({
             title={section.parentThreadTitle}
             className={PARENT_THREAD_TITLE_CLASS}
             inline
+            inlineText
           />
         </NavLink>
       </span>
@@ -442,6 +443,7 @@ function ParentThreadSectionBody({
             title={section.parentThreadTitle}
             className={PARENT_THREAD_TITLE_CLASS}
             inline
+            inlineText
           />
         </NavLink>
         .
