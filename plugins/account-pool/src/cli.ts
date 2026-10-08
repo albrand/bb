@@ -1056,7 +1056,7 @@ export function registerPoolCli(
           summary:
             "Issue a revocable Account Pooler route token for one actor on one live thread",
           description:
-            "Prints the token as the only line on stdout (or as the token field with --json) so a launcher can capture it with command substitution. The token is scoped to this thread and actor, follows the thread's routing choice, and stops working when the thread is archived or deleted, when the actor is revoked, or when the machine token rotates. Re-issuing returns the same token unless --rotate is given. Never paste the output into a chat, a log, or a command line.",
+            "Operator-surface command: any local bb CLI caller can run it for any live thread; the thread id the CLI forwards is unauthenticated metadata, so issuing grants no privilege beyond what that caller already has locally. Prints the token as the only line on stdout (or as the token field with --json, together with a non-secret generation, the hub URL and the non-secret launch environment) so a launcher can capture it. The token is scoped to this thread and actor, follows the thread's routing choice, and stops working when the thread is archived or deleted, when the actor is revoked, or when the machine token rotates. Issuing is exclusive: it is refused when the actor already has a route on the thread unless --rotate replaces it. Never paste the output into a chat, a log, or a command line.",
           options: {
             thread: {
               type: "string",
@@ -1078,32 +1078,27 @@ export function registerPoolCli(
             },
             rotate: {
               type: "boolean",
-              description: "Replace the actor's existing token",
-            },
-            exclusive: {
-              type: "boolean",
               description:
-                "Refuse when the actor already has a route on the thread (unless --rotate)",
+                "Replace the actor's existing route (default: refuse when one exists)",
             },
             json: JSON_OPTION,
           },
           run: (input) =>
             attempt(async () => {
               try {
-                const { token, route, hubUrl } = await actorRoutes.issue({
+                const issued = await actorRoutes.issue({
                   threadId: input.options.thread,
                   actorId: input.options.actor,
                   ...(input.options.provider === undefined
                     ? {}
                     : { provider: input.options.provider }),
                   rotate: input.options.rotate === true,
-                  exclusive: input.options.exclusive === true,
                 });
                 return {
                   exitCode: 0,
                   stdout: input.options.json
-                    ? json({ ok: true, token, route, hubUrl })
-                    : `${token}\n`,
+                    ? json({ ok: true, ...issued })
+                    : `${issued.token}\n`,
                 };
               } catch (error) {
                 if (error instanceof ActorRouteError)
@@ -1116,6 +1111,8 @@ export function registerPoolCli(
         }),
         "route revoke": cliCommand({
           summary: "Revoke an actor's Account Pooler route tokens",
+          description:
+            "With --generation, revokes only the route whose generation matches, so a launcher cleaning up never revokes a route another launch rotated in.",
           options: {
             actor: {
               type: "string",
@@ -1128,12 +1125,21 @@ export function registerPoolCli(
               placeholder: "thread-id",
               description: "Limit the revocation to one thread",
             },
+            generation: {
+              type: "string",
+              placeholder: "generation",
+              description:
+                "Revoke only the route with this generation (from route issue --json)",
+            },
             json: JSON_OPTION,
           },
           run: (input) =>
             attempt(async () => {
               const result = await actorRoutes.revoke({
                 actorId: input.options.actor,
+                ...(input.options.generation === undefined
+                  ? {}
+                  : { generation: input.options.generation }),
                 ...(input.options.thread === undefined
                   ? {}
                   : { threadId: input.options.thread }),
@@ -1161,7 +1167,7 @@ export function registerPoolCli(
                     : `${routes
                         .map(
                           (route) =>
-                            `${route.actorId}\t${route.threadId}\t${route.provider}\t${route.hostId}\t${route.accountId ?? "automatic"}\t${route.lastRoutedAt ?? "never"}`,
+                            `${route.actorId}\t${route.threadId}\t${route.provider}\t${route.hostId}\t${route.accountId ?? "automatic"}\t${route.generation}\t${route.lastRoutedAt ?? "never"}`,
                         )
                         .join("\n")}\n`,
               };

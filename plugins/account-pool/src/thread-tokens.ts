@@ -71,7 +71,15 @@ export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
 export type ActorRoute = Omit<ActorRouteRecord, "token" | "hostTokenDigest">;
 export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
+export const actorGenerationSchema = z.string().regex(/^[a-f0-9]{16}$/u);
+
+export type ActorRouteListing = ActorRoute & { generation: string };
+
 export class ActorRouteExistsError extends Error {}
+
+export function actorGeneration(token: string): string {
+  return digest(`actor-generation:${token}`).slice(0, 16);
+}
 
 export type ThreadLookup = (
   threadId: string,
@@ -251,7 +259,7 @@ export class ThreadTokenStore {
     route: ActorRoute,
     hostToken: string,
     options: { rotate?: boolean; exclusive?: boolean } = {},
-  ): Promise<string> {
+  ): Promise<{ token: string; generation: string }> {
     const parsed = actorRouteSchema
       .omit({ token: true, hostTokenDigest: true })
       .parse(route);
@@ -268,7 +276,10 @@ export class ThreadTokenStore {
         options.rotate !== true &&
         existing.accountId === parsed.accountId
       )
-        return existing.token;
+        return {
+          token: existing.token,
+          generation: actorGeneration(existing.token),
+        };
       const record: ActorRouteRecord = {
         ...parsed,
         hostTokenDigest,
@@ -283,7 +294,7 @@ export class ThreadTokenStore {
       this.actorRoutes.set(key, record);
       this.actorTokenIndex.set(digest(record.token), record);
       await this.reclaimDead(record);
-      return record.token;
+      return { token: record.token, generation: actorGeneration(record.token) };
     });
   }
 
@@ -311,16 +322,17 @@ export class ThreadTokenStore {
     };
   }
 
-  listActors(): ActorRoute[] {
+  listActors(): ActorRouteListing[] {
     const order = (route: ActorRoute) =>
       [route.threadId, route.actorId, route.provider].join("|");
     return [...this.actorRoutes.values()]
-      .map(({ hostId, threadId, actorId, provider, accountId }) => ({
+      .map(({ hostId, threadId, actorId, provider, accountId, token }) => ({
         hostId,
         threadId,
         actorId,
         provider,
         accountId,
+        generation: actorGeneration(token),
       }))
       .sort((a, b) => order(a).localeCompare(order(b)));
   }
@@ -328,13 +340,23 @@ export class ThreadTokenStore {
   async revokeActor(filter: {
     actorId: string;
     threadId?: string;
+    generation?: string;
   }): Promise<number> {
     const actorId = actorIdSchema.parse(filter.actorId);
+    const generation =
+      filter.generation === undefined
+        ? undefined
+        : actorGenerationSchema.parse(filter.generation);
     return this.serialize(async () => {
       let revoked = 0;
       for (const [key, record] of [...this.actorRoutes]) {
         if (record.actorId !== actorId) continue;
         if (filter.threadId !== undefined && record.threadId !== filter.threadId)
+          continue;
+        if (
+          generation !== undefined &&
+          actorGeneration(record.token) !== generation
+        )
           continue;
         this.actorRoutes.delete(key);
         this.actorTokenIndex.delete(digest(record.token));

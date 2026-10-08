@@ -6,6 +6,13 @@ import { z } from "zod";
 import { HubTokenStore } from "./store.js";
 import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
 
+async function actorToken(
+  store: ThreadTokenStore,
+  ...args: Parameters<ThreadTokenStore["forActor"]>
+): Promise<string> {
+  return (await store.forActor(...args)).token;
+}
+
 const directories: string[] = [];
 afterEach(async () => {
   for (const directory of directories.splice(0))
@@ -1100,13 +1107,13 @@ it("issues actor credentials per thread, actor, and provider with strict private
   const alpha = { ...route, actorId: "elyra:term_alpha.1" };
   const beta = { ...route, actorId: "elyra:term_beta.1" };
   const [first, same] = await Promise.all([
-    threads.forActor(alpha, hostToken),
-    threads.forActor(alpha, hostToken),
+    actorToken(threads, alpha, hostToken),
+    actorToken(threads, alpha, hostToken),
   ]);
   expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   expect(same).toBe(first);
-  const other = await threads.forActor(beta, hostToken);
-  const codex = await threads.forActor({ ...alpha, provider: "codex" }, hostToken);
+  const other = await actorToken(threads, beta, hostToken);
+  const codex = await actorToken(threads, { ...alpha, provider: "codex" }, hostToken);
   expect(new Set([first, other, codex]).size).toBe(3);
   expect(await threads.authenticateActor(first, "claude")).toEqual(alpha);
   expect(await threads.authenticateActor(first, "codex")).toBeNull();
@@ -1118,7 +1125,7 @@ it("issues actor credentials per thread, actor, and provider with strict private
   expect(await threads.authenticateActor(null)).toBeNull();
   expect(await threads.authenticateActor("A".repeat(43))).toBeNull();
   await expect(
-    threads.forActor({ ...alpha, actorId: "bad actor/../id" }, hostToken),
+    actorToken(threads, { ...alpha, actorId: "bad actor/../id" }, hostToken),
   ).rejects.toThrow();
   const files = (await fs.readdir(directory)).filter((name) =>
     name.startsWith("scoped-actor-route-"),
@@ -1148,15 +1155,15 @@ it("issues actor credentials per thread, actor, and provider with strict private
 it("rotates, re-snapshots, and revokes actor credentials", async () => {
   const { directory, threads, route, hostToken } = await fixture();
   const actor = { ...route, actorId: "actor-one" };
-  const first = await threads.forActor(actor, hostToken);
-  const rotated = await threads.forActor(actor, hostToken, { rotate: true });
+  const first = await actorToken(threads, actor, hostToken);
+  const rotated = await actorToken(threads, actor, hostToken, { rotate: true });
   expect(rotated).not.toBe(first);
   expect(await threads.authenticateActor(first)).toBeNull();
   expect(await threads.authenticateActor(rotated)).toEqual(actor);
   const pinned = { ...actor, accountId: "11111111-1111-4111-8111-111111111111" };
-  expect(await threads.forActor(pinned, hostToken)).toBe(rotated);
+  expect(await actorToken(threads, pinned, hostToken)).toBe(rotated);
   expect(await threads.authenticateActor(rotated)).toEqual(pinned);
-  const secondThread = await threads.forActor(
+  const secondThread = await actorToken(threads, 
     { ...actor, threadId: "thr_two" },
     hostToken,
   );
@@ -1176,8 +1183,8 @@ it("rotates, re-snapshots, and revokes actor credentials", async () => {
 it("revokes actor credentials with their thread, sweep, and machine token rotation", async () => {
   const { directory, hosts, threads, route, hostToken, advance } = await fixture();
   const actor = { ...route, actorId: "actor-one" };
-  const token = await threads.forActor(actor, hostToken);
-  const kept = await threads.forActor({ ...actor, threadId: "thr_kept" }, hostToken);
+  const token = await actorToken(threads, actor, hostToken);
+  const kept = await actorToken(threads, { ...actor, threadId: "thr_kept" }, hostToken);
   const lookup: ThreadLookup = async (threadId) =>
     threadId === route.threadId ? "gone" : "live";
   expect(await threads.sweepThreads(lookup)).toMatchObject({ checked: 2, revoked: 1 });
@@ -1186,7 +1193,7 @@ it("revokes actor credentials with their thread, sweep, and machine token rotati
     ...actor,
     threadId: "thr_kept",
   });
-  await expect(threads.forActor(actor, hostToken)).rejects.toThrow("archived");
+  await expect(actorToken(threads, actor, hostToken)).rejects.toThrow("archived");
   await threads.removeThread("thr_kept");
   expect(await threads.authenticateActor(kept)).toBeNull();
   expect(
@@ -1195,7 +1202,7 @@ it("revokes actor credentials with their thread, sweep, and machine token rotati
     ),
   ).toEqual([]);
   const live = { ...actor, threadId: "thr_live" };
-  const before = await threads.forActor(live, hostToken);
+  const before = await actorToken(threads, live, hostToken);
   await hosts.rotate(route.hostId);
   expect(await threads.authenticateActor(before)).toEqual(live);
   advance(10 * 60_000 + 1);
@@ -1209,9 +1216,9 @@ it("revokes actor credentials with their thread, sweep, and machine token rotati
 it("reloads valid actor credentials and drops malformed or unenrolled ones", async () => {
   const { directory, hosts, threads, route, hostToken } = await fixture();
   const actor = { ...route, actorId: "actor-one" };
-  const token = await threads.forActor(actor, hostToken);
+  const token = await actorToken(threads, actor, hostToken);
   const goneToken = await hosts.forHost("host-gone");
-  await threads.forActor({ ...actor, hostId: "host-gone" }, goneToken);
+  await actorToken(threads, { ...actor, hostId: "host-gone" }, goneToken);
   const [file] = (await fs.readdir(directory)).filter(
     (name) => name.startsWith("scoped-actor-route-") && name.includes("host-one"),
   );
@@ -1220,7 +1227,7 @@ it("reloads valid actor credentials and drops malformed or unenrolled ones", asy
   const reloaded = new ThreadTokenStore(directory, hosts);
   await reloaded.initialize([route.hostId]);
   expect(await reloaded.authenticateActor(token)).toEqual(actor);
-  expect(reloaded.listActors()).toEqual([actor]);
+  expect(reloaded.listActors()).toEqual([{ ...actor, generation: expect.stringMatching(/^[a-f0-9]{16}$/u) }]);
   await expect(fs.stat(malformed)).rejects.toThrow();
   const archivedThreads = new ThreadTokenStore(directory, hosts);
   await archivedThreads.initialize([route.hostId]);
@@ -1228,4 +1235,36 @@ it("reloads valid actor credentials and drops malformed or unenrolled ones", asy
   const afterRestart = new ThreadTokenStore(directory, hosts);
   await afterRestart.initialize([route.hostId]);
   expect(await afterRestart.authenticateActor(token)).toBeNull();
+});
+
+it("derives a non-secret generation that changes on rotation and gates conditional revocation", async () => {
+  const { threads, route, hostToken } = await fixture();
+  const actor = { ...route, actorId: "launch:gen" };
+  const first = await threads.forActor(actor, hostToken);
+  expect(first.generation).toMatch(/^[a-f0-9]{16}$/u);
+  expect(first.token).not.toContain(first.generation);
+  expect((await threads.forActor(actor, hostToken)).generation).toBe(
+    first.generation,
+  );
+  const rotated = await threads.forActor(actor, hostToken, { rotate: true });
+  expect(rotated.generation).not.toBe(first.generation);
+  expect(threads.listActors()[0]?.generation).toBe(rotated.generation);
+  expect(
+    await threads.revokeActor({
+      actorId: actor.actorId,
+      threadId: actor.threadId,
+      generation: first.generation,
+    }),
+  ).toBe(0);
+  expect(await threads.authenticateActor(rotated.token)).not.toBeNull();
+  expect(
+    await threads.revokeActor({
+      actorId: actor.actorId,
+      generation: rotated.generation,
+    }),
+  ).toBe(1);
+  expect(await threads.authenticateActor(rotated.token)).toBeNull();
+  await expect(
+    threads.revokeActor({ actorId: actor.actorId, generation: "nothex" }),
+  ).rejects.toThrow();
 });

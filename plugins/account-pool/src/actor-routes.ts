@@ -2,8 +2,10 @@ import { z } from "zod";
 import { providerSchema, type PoolProvider } from "./contracts.js";
 import {
   ActorRouteExistsError,
+  actorGenerationSchema,
   actorIdSchema,
   type ActorRoute,
+  type ActorRouteListing,
   type ThreadTokenStore,
 } from "./thread-tokens.js";
 import type { HubTokenStore } from "./store.js";
@@ -16,7 +18,6 @@ export const actorRouteIssueInputSchema = z
     actorId: actorIdSchema,
     provider: providerSchema.default("claude"),
     rotate: z.boolean().default(false),
-    exclusive: z.boolean().default(false),
   })
   .strict();
 
@@ -24,8 +25,22 @@ export const actorRouteRevokeInputSchema = z
   .object({
     actorId: actorIdSchema,
     threadId: threadIdSchema.optional(),
+    generation: actorGenerationSchema.optional(),
   })
   .strict();
+
+export interface LaunchEnvEntry {
+  name: string;
+  value: string;
+}
+
+export interface IssuedActorRoute {
+  token: string;
+  generation: string;
+  route: ActorRoute;
+  hubUrl: string;
+  launchEnv: LaunchEnvEntry[];
+}
 
 export interface ActorRouteThread {
   hostId: string | null;
@@ -43,6 +58,7 @@ export interface ActorRouteDeps {
     provider: PoolProvider,
   ) => Promise<string | null>;
   canServe: (provider: PoolProvider) => Promise<boolean>;
+  launchEnv: (provider: PoolProvider) => Promise<LaunchEnvEntry[]>;
   hubUrl: () => string;
   recordRouted: (
     threadId: string,
@@ -62,7 +78,7 @@ export class ActorRouteIssuer {
 
   async issue(
     raw: z.input<typeof actorRouteIssueInputSchema>,
-  ): Promise<{ token: string; route: ActorRoute; hubUrl: string }> {
+  ): Promise<IssuedActorRoute> {
     const input = actorRouteIssueInputSchema.parse(raw);
     const thread = await this.deps.getThread(input.threadId);
     if (thread === null)
@@ -99,11 +115,11 @@ export class ActorRouteIssuer {
       ),
     };
     const hostToken = await this.deps.hubTokens.forHost(hostId);
-    let token: string;
+    let minted: { token: string; generation: string };
     try {
-      token = await this.deps.threadTokens.forActor(route, hostToken, {
+      minted = await this.deps.threadTokens.forActor(route, hostToken, {
         rotate: input.rotate,
-        exclusive: input.exclusive,
+        exclusive: !input.rotate,
       });
     } catch (error) {
       if (error instanceof ActorRouteExistsError)
@@ -112,19 +128,49 @@ export class ActorRouteIssuer {
         );
       throw error;
     }
-    const after = await this.deps.getThread(input.threadId);
-    if (after === null || after.archived) {
-      await this.deps.threadTokens.revokeActor({
+    const revokeMinted = () =>
+      this.deps.threadTokens.revokeActor({
         actorId: input.actorId,
         threadId: input.threadId,
+        generation: minted.generation,
       });
-      throw new ActorRouteError(
-        `Thread ${input.threadId} was archived while the route was issued.`,
-      );
+    let refusal: string | null;
+    try {
+      refusal = await this.recheck(input, hostId);
+    } catch (error) {
+      await revokeMinted();
+      throw error;
     }
+    if (refusal !== null) {
+      await revokeMinted();
+      throw new ActorRouteError(refusal);
+    }
+    const launchEnv = await this.deps.launchEnv(input.provider);
     await this.deps.recordRouted(input.threadId, hostId, input.provider);
     this.deps.onIssued(route, input.rotate);
-    return { token, route, hubUrl: this.deps.hubUrl() };
+    return {
+      token: minted.token,
+      generation: minted.generation,
+      route,
+      hubUrl: this.deps.hubUrl(),
+      launchEnv,
+    };
+  }
+
+  private async recheck(
+    input: z.output<typeof actorRouteIssueInputSchema>,
+    hostId: string,
+  ): Promise<string | null> {
+    const after = await this.deps.getThread(input.threadId);
+    if (after === null || after.archived)
+      return `Thread ${input.threadId} was archived while the route was issued.`;
+    if (after.hostId !== hostId)
+      return `Thread ${input.threadId} moved to another machine while the route was issued.`;
+    if (await this.deps.isBypassed(input.threadId))
+      return `Pooled routing was bypassed for thread ${input.threadId} while the route was issued.`;
+    if (!(await this.deps.canServe(input.provider)))
+      return `Pooled ${input.provider} routing stopped being servable while the route was issued.`;
+    return null;
   }
 
   async revoke(
@@ -132,12 +178,13 @@ export class ActorRouteIssuer {
   ): Promise<{ revoked: number }> {
     const input = actorRouteRevokeInputSchema.parse(raw);
     const revoked = await this.deps.threadTokens.revokeActor(input);
-    await this.deps.forgetRouted(input.actorId, input.threadId ?? null);
+    if (revoked > 0 || input.generation === undefined)
+      await this.deps.forgetRouted(input.actorId, input.threadId ?? null);
     this.deps.onRevoked(input.actorId, input.threadId ?? null, revoked);
     return { revoked };
   }
 
-  async list(): Promise<Array<ActorRoute & { lastRoutedAt: number | null }>> {
+  async list(): Promise<Array<ActorRouteListing & { lastRoutedAt: number | null }>> {
     return Promise.all(
       this.deps.threadTokens.listActors().map(async (route) => ({
         ...route,

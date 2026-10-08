@@ -347,6 +347,33 @@ export function createAccountPoolPlugin(
       }
       return operations.hasUsableEnabledAccount(provider);
     };
+    const subscriptionCacheEntries = async (): Promise<PoolEnvEntry[]> =>
+      proxyingParent() === null &&
+      (await operations.routesOnlyApiKeys("claude"))
+        ? []
+        : [
+            {
+              name: "ENABLE_PROMPT_CACHING_1H",
+              value: "1",
+              reason:
+                "Claude Code uses a 5-minute prompt cache behind a custom base URL; subscription accounts get the 1-hour cache Claude Code uses for a direct subscription login",
+            },
+          ];
+    const claudePolicyEntries = async (): Promise<PoolEnvEntry[]> => [
+      {
+        name: "ENABLE_TOOL_SEARCH",
+        value: "true",
+        reason:
+          "Claude Code turns tool search off behind a custom base URL; the hub forwards tool_reference blocks",
+      },
+      {
+        name: "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+        value: "1",
+        reason:
+          "Claude Code limits Opus to a 200k context window behind a custom base URL; the hub forwards to Anthropic's API",
+      },
+      ...(await subscriptionCacheEntries()),
+    ];
     const actorRoutes = new ActorRouteIssuer({
       threadTokens,
       hubTokens,
@@ -356,15 +383,11 @@ export function createAccountPoolPlugin(
             threadId,
             include: "environment",
           });
-          const environment = (
-            thread as { environment?: { hostId?: unknown } | null }
-          ).environment;
+          const hostId =
+            "environment" in thread ? thread.environment?.hostId : undefined;
           return {
             archived: thread.archivedAt !== null || thread.deletedAt !== null,
-            hostId:
-              typeof environment?.hostId === "string"
-                ? environment.hostId
-                : null,
+            hostId: typeof hostId === "string" && hostId !== "" ? hostId : null,
           };
         } catch (error) {
           if (isThreadNotFound(error)) return null;
@@ -379,6 +402,14 @@ export function createAccountPoolPlugin(
           ? await routing.selectedAccount(threadId, provider)
           : null,
       canServe,
+      launchEnv: async (provider) =>
+        provider === "claude"
+          ? (await claudePolicyEntries()).flatMap((entry) =>
+              typeof entry.value === "string"
+                ? [{ name: entry.name, value: entry.value }]
+                : [],
+            )
+          : [],
       hubUrl: () =>
         `${bb.server.loopbackBaseUrl.replace(/\/+$/u, "")}${HUB_BASE_PATH}`,
       lastRoutedAt: (route) =>
@@ -549,18 +580,6 @@ export function createAccountPoolPlugin(
         }
         return unrouted();
       };
-    const subscriptionCacheEntries = async (): Promise<PoolEnvEntry[]> =>
-      proxyingParent() === null &&
-      (await operations.routesOnlyApiKeys("claude"))
-        ? []
-        : [
-            {
-              name: "ENABLE_PROMPT_CACHING_1H",
-              value: "1",
-              reason:
-                "Claude Code uses a 5-minute prompt cache behind a custom base URL; subscription accounts get the 1-hour cache Claude Code uses for a direct subscription login",
-            },
-          ];
     const proxiedHealth = async (provider: PoolProvider) =>
       (await canServe(provider))
         ? {
@@ -584,19 +603,7 @@ export function createAccountPoolPlugin(
           value: token,
           reason: "Account Pooler token scoped to this thread",
         },
-        {
-          name: "ENABLE_TOOL_SEARCH",
-          value: "true",
-          reason:
-            "Claude Code turns tool search off behind a custom base URL; the hub forwards tool_reference blocks",
-        },
-        {
-          name: "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
-          value: "1",
-          reason:
-            "Claude Code limits Opus to a 200k context window behind a custom base URL; the hub forwards to Anthropic's API",
-        },
-        ...(await subscriptionCacheEntries()),
+        ...(await claudePolicyEntries()),
       ]),
     );
     bb.providers.experimental_contributeEnvHealth("claude-code", () =>

@@ -35,4 +35,4 @@ Experimental: routing, storage, and CLI may change.
 
 ## For agents
 
-`bb pool account add|list|local|sign-in-again|rename|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id> [--off]`, and `bb pool bypass get <thread-id>` (read-only). Commands accept `--json` and `--help`; `bb pool --help` lists them.
+`bb pool account add|list|local|sign-in-again|rename|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id> [--off]`, and `bb pool bypass get <thread-id>` (read-only), plus `bb pool route issue|revoke|list` for per-actor route tokens (an operator-surface command available to any local bb CLI caller; see the skill reference). Commands accept `--json` and `--help`; `bb pool --help` lists them.
