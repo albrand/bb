@@ -11790,9 +11790,19 @@ else {
           .map((line) => JSON.parse(line) as Record<string, string>);
       const envDump = path.join(work, "child-env.json");
       const dumpEnv = `require("node:fs").writeFileSync(${JSON.stringify(envDump)}, JSON.stringify(process.env));`;
+      // The caller pre-exports variables named like the launcher's internals,
+      // and allexport through SHELLOPTS. Neither may carry the proof or the
+      // route token into a subprocess.
+      const preExported = {
+        proof: "pre-exported",
+        token: "pre-exported",
+        issued: "pre-exported",
+        hub_url: "pre-exported",
+        SHELLOPTS: "allexport",
+      };
       const result = await run(
         ["--bb", realCli, "--actor", "real-cli-actor"],
-        { BB_SERVER_URL: base, BB_THREAD_ID: "" },
+        { BB_SERVER_URL: base, BB_THREAD_ID: "", ...preExported },
         [process.execPath, "-e", dumpEnv],
       ).done;
       expect(result.code).toBe(0);
@@ -11811,12 +11821,22 @@ else {
       // Neither bb CLI process (issue, revoke) inherited the proof.
       const recorded = await cliEnvs();
       expect(recorded).toHaveLength(2);
-      for (const env of recorded) expect(Object.values(env)).not.toContain(threadProof);
+      // Failures name the variables that carry a secret, never their values.
+      const carriers = (env: Record<string, string>, secret: string) =>
+        Object.entries(env)
+          .filter(([name, value]) => name.includes(secret) || value.includes(secret))
+          .map(([name]) => name);
+      for (const env of recorded) expect(carriers(env, threadProof)).toEqual([]);
       // The child got its actor route, never the thread's proof.
       const childEnv = JSON.parse(await fs.readFile(envDump, "utf8")) as Record<string, string>;
-      expect(Object.values(childEnv)).not.toContain(threadProof);
-      expect(childEnv.ANTHROPIC_AUTH_TOKEN).toMatch(/^.{43}$/u);
-      expect(childEnv.ANTHROPIC_AUTH_TOKEN).not.toBe(threadProof);
+      expect(carriers(childEnv, threadProof)).toEqual([]);
+      const actorToken = childEnv.ANTHROPIC_AUTH_TOKEN ?? "";
+      expect(actorToken).toMatch(/^.{43}$/u);
+      expect(actorToken === threadProof).toBe(false);
+      // The route token reaches the child only as ANTHROPIC_AUTH_TOKEN and
+      // never reaches a bb CLI process.
+      expect(carriers(childEnv, actorToken)).toEqual(["ANTHROPIC_AUTH_TOKEN"]);
+      for (const env of recorded) expect(carriers(env, actorToken)).toEqual([]);
       // Revoked on exit: the actor route no longer serves, nothing is listed.
       expect(await hubSend(childEnv.ANTHROPIC_AUTH_TOKEN ?? "")).toBe(401);
       expect(await listRoutes()).toEqual([]);

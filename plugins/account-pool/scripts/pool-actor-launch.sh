@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
 umask 077
+# The thread proof and the route token live in shell variables. Turn off
+# allexport (inheritable through SHELLOPTS) and drop any inherited variable
+# with an internal name, so no internal variable is ever exported.
+set +a
+unset thread actor rotate proof_env bb_cli proof suffix issue_args issued \
+  generation revoked revoke_failed final_status child parse_status token \
+  hub_url env_names env_values env_name env_value index status
 
 HUB_PATH="/api/v1/plugins/account-pool/http"
 
@@ -159,7 +166,7 @@ exec 3<&-
   done
   export ANTHROPIC_BASE_URL="$hub_url"
   export ANTHROPIC_AUTH_TOKEN="$token"
-  unset token hub_url env_names env_values env_name env_value index
+  unset proof token hub_url env_names env_values env_name env_value index
   trap - EXIT TERM HUP INT
   exec "$@"
 ) <&0 &
