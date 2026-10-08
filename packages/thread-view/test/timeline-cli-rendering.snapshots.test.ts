@@ -873,7 +873,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
   });
 
-  it("shows provisioning failure as user input, operation, and error", () => {
+  it("shows provisioning failure once with its transcript and error detail", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const timeline = renderTimelineFixture({
       events: [
@@ -917,21 +917,13 @@ describe("timeline CLI rendering snapshots", () => {
       },
     });
 
-    expect(messageKinds(timeline.messages)).toEqual([
-      "user",
-      "operation",
-      "error",
-    ]);
+    expect(messageKinds(timeline.messages)).toEqual(["user", "operation"]);
     expect(timeline.text).toMatchInlineSnapshot(`
       "── User ────────────────────────────────────────────────────
       Start the failing workspace
 
       ── Provisioning thread failed ──────────────────────────────
         Running setup
-        pnpm install failed
-
-      ── Error ───────────────────────────────────────────────────
-        Provisioning thread failed
         pnpm install failed"
     `);
   });
@@ -2276,6 +2268,7 @@ describe("timeline CLI rendering snapshots", () => {
       {
         kind: "operation",
         id: "thread-1:op:reasoning:kind:reasoning|turn:turn-1|parent:root|item:reasoning-1",
+        sourceEvent: { seq: 2, part: 0 },
         threadId: "thread-1",
         sourceSeqStart: 2,
         sourceSeqEnd: 4,

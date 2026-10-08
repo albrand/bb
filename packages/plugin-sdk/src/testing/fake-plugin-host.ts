@@ -1131,6 +1131,7 @@ function createFakePluginHostInternal(
     "experimental_thread.events": [],
     "experimental_terminal.input": [],
     "experimental_host.deleted": [],
+    "experimental_environment.removed": [],
     "thread.created": [],
     "thread.active": [],
     "thread.idle": [],
@@ -1638,6 +1639,8 @@ function createFakePluginHostInternal(
             threadEventHandlers["experimental_thread.events"].length,
           "experimental_terminal.input":
             threadEventHandlers["experimental_terminal.input"].length,
+          "experimental_environment.removed":
+            threadEventHandlers["experimental_environment.removed"].length,
           "experimental_host.deleted":
             threadEventHandlers["experimental_host.deleted"].length,
           "thread.created": threadEventHandlers["thread.created"].length,

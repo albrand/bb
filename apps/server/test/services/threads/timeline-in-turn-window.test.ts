@@ -411,6 +411,7 @@ function buildPage(
     completedTurnDisplay: "collapse",
     eventBudget,
     responseByteBudget,
+    includeClearedContextHistory: false,
     includeDiagnosticOperations: false,
     includeNestedRows: false,
     maxInlineOutputChars: 32_000,
@@ -432,6 +433,7 @@ function buildNestedPage(
     completedTurnDisplay: "collapse",
     eventBudget,
     responseByteBudget,
+    includeClearedContextHistory: false,
     includeDiagnosticOperations: false,
     includeNestedRows: true,
     maxInlineOutputChars: 32_000,
@@ -1847,6 +1849,7 @@ describe("timeline inline output reads", () => {
     const capped = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       eventBudget: LARGE_BUDGET,
+      includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
       includeNestedRows: false,
       maxInlineOutputChars: 32_000,
@@ -1856,6 +1859,7 @@ describe("timeline inline output reads", () => {
     const uncapped = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       eventBudget: LARGE_BUDGET,
+      includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
       includeNestedRows: false,
       maxInlineOutputChars: null,
@@ -2247,6 +2251,7 @@ describe("turn details for an item that finishes in a later turn", () => {
     const unfinishedLatest = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       eventBudget: LARGE_BUDGET,
+      includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,

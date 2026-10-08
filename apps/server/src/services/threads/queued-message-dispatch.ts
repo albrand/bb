@@ -47,6 +47,7 @@ export type QueuedMessageDispatchWake =
   | { kind: "workspace-ready"; threadId: string }
   | { kind: "provisioning-ended"; threadId: string }
   | { kind: "interaction-settled"; threadId: string }
+  | { kind: "edit-released"; queuedMessageId: string; threadId: string }
   | { kind: "host-connected"; hostId: string }
   | { kind: "time-reached"; now: number }
   | { kind: "retry-due"; now: number }
@@ -122,6 +123,12 @@ function dispatchWakeContext(
     case "turn-started":
     case "interaction-settled":
       return { threadId: wake.threadId, wake: wake.kind };
+    case "edit-released":
+      return {
+        queuedMessageId: wake.queuedMessageId,
+        threadId: wake.threadId,
+        wake: wake.kind,
+      };
     case "idle-recovery":
     case "failed-retry":
       return { now: wake.now, wake: wake.kind };
@@ -257,6 +264,12 @@ async function executePreparedQueuedMessageDispatch(
     case "interaction-settled":
       await runInteractionSettledDispatch(deps, wake.threadId);
       return;
+    case "edit-released":
+      await runEditReleasedDispatch(deps, {
+        id: wake.queuedMessageId,
+        threadId: wake.threadId,
+      });
+      return;
     case "plugin-recheck":
       await runPluginRecheckDispatch(deps);
       return;
@@ -386,6 +399,18 @@ function isDeferredQueuedMessageDispatchOutcome(error: unknown): boolean {
     isQueuedMessageAutoSendPausedError(error) ||
     error instanceof ThreadContextClearInProgressError
   );
+}
+
+async function runEditReleasedDispatch(
+  deps: QueueDispatchDeps,
+  row: QueuedMessageDispatchRef,
+): Promise<void> {
+  await attemptAutomaticQueuedMessage(deps, row, {
+    now: Date.now(),
+    respectRequeuePacing: false,
+    retryingFailure: false,
+  });
+  await runThreadReadyDispatch(deps, row.threadId);
 }
 
 async function attemptAutomaticQueuedMessage(

@@ -89,6 +89,7 @@ function load(
   return buildThreadTimelineWithProfile(testThread.db, testThread.thread, {
     completedTurnDisplay,
     eventBudget,
+    includeClearedContextHistory: false,
     includeNestedRows: true,
     includeDiagnosticOperations: false,
     maxInlineOutputChars: null,
@@ -115,6 +116,7 @@ function steer(result: ReturnType<typeof load>) {
 function outlineOptions(testThread: TestThread) {
   return {
     completedTurnDisplay: "collapse" as const,
+    includeClearedContextHistory: false,
     maxSeq: getLatestThreadSequence(testThread.db, {
       threadId: testThread.thread.id,
     }),
@@ -327,6 +329,7 @@ describe("rejected steer turn context", () => {
             {
               completedTurnDisplay: display,
               eventBudget: 64,
+              includeClearedContextHistory: false,
               includeNestedRows: true,
               includeDiagnosticOperations: false,
               maxInlineOutputChars: null,

@@ -163,19 +163,19 @@ function ConcurrencyLimitSettings() {
   return (
     <ResourceDetailPanel
       surface="recessed"
-      className="w-full space-y-4 px-3 py-3"
+      className="w-full space-y-5 px-3 py-3"
     >
-      <div className="flex items-start justify-between gap-5">
+      <div className="flex items-start justify-between gap-6 pr-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm text-foreground">Overall limit</p>
-          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
+          <h3 className="text-sm font-medium text-foreground">Overall limit</h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Leave blank for no overall limit. Use 0 to pause new work.
           </p>
         </div>
         <Input
           aria-label="Overall thread limit"
           aria-invalid={invalidField === GLOBAL_FIELD}
-          className="w-28"
+          className="w-28 shrink-0"
           disabled={disabled}
           inputMode="numeric"
           max={MAX_LIMIT_VALUE}
@@ -231,7 +231,7 @@ function ConcurrencyLimitSettings() {
                   <Input
                     aria-label={`${host.name} thread limit`}
                     aria-invalid={invalidField === host.id}
-                    className="w-28"
+                    className="w-28 shrink-0"
                     disabled={disabled}
                     inputMode="numeric"
                     max={MAX_LIMIT_VALUE}

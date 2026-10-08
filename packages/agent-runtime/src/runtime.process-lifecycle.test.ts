@@ -555,7 +555,12 @@ describe("createAgentRuntime process lifecycle", () => {
         processKey: "fake",
         providerId: "fake",
       });
+      const replacementProvider = manager.requireProviderProcess({
+        processKey: "fake",
+        providerId: "fake",
+      });
       expect(exitedPid).toBeDefined();
+      expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
     } finally {
       await manager.shutdown();
@@ -612,7 +617,12 @@ describe("createAgentRuntime process lifecycle", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 150));
 
+      const replacementProvider = manager.requireProviderProcess({
+        processKey: "fake",
+        providerId: "fake",
+      });
       expect(exitedPid).toBeDefined();
+      expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
       expect(manager.listRunningProviders()).toEqual(["fake"]);
     } finally {
@@ -676,7 +686,12 @@ describe("createAgentRuntime process lifecycle", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 100));
 
+      const replacementProvider = manager.requireProviderProcess({
+        processKey: "fake",
+        providerId: "fake",
+      });
       expect(exitedPid).toBeDefined();
+      expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
       expect(lines).not.toContainEqual({
         childPid: exitedPid,

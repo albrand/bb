@@ -45,7 +45,9 @@ export function createPersonalWorkspaceHostEntry() {
               });
         const existed = await pathExists(target);
         if (existed) {
-          await experimental_killProcessesWithCwdUnder({ directory: target });
+          await experimental_killProcessesWithCwdUnder({
+            directories: [target],
+          });
         }
         await removeDirectoryTree(target);
         return { removed: existed };

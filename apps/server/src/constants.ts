@@ -14,4 +14,4 @@ export const DIFF_FILE_PATCH_MAX_BYTES = 512 * 1024;
 export const DIFF_FILES_INLINE_PATCH_MAX_FILES = 10;
 
 export const TURN_ACCEPTANCE_GRACE_MS = 3_000;
-export const ARCHIVE_UNDO_GRACE_MS = 30_000;
+export { ARCHIVE_UNDO_GRACE_MS } from "@bb/domain";

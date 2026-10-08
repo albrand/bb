@@ -236,7 +236,7 @@ function PluginSettingField({
         aria-invalid={ariaInvalid}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
-        className="h-7 w-full text-xs sm:w-64"
+        className="h-7 w-full text-xs @min-[36rem]/settings:w-64"
       />
     );
   }
@@ -281,7 +281,7 @@ function PluginSettingField({
       placeholder={isSecret ? (secretIsSet ? "[set]" : "[not set]") : undefined}
       onChange={(event) => onChange(event.target.value)}
       onBlur={onBlur}
-      className={isSecret ? textSettingInputClass("") : textSettingInputClass(value)}
+      className={`${isSecret ? textSettingInputClass("") : textSettingInputClass(value)} @min-[36rem]/settings:w-64`}
     />
   );
 }

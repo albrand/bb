@@ -42,14 +42,13 @@ function withProviderCompletedTurnDisplay(
   settings: AppSettings,
   provider: ProviderInfo,
   display: CompletedTurnDisplay,
-): AppSettings {
+): Pick<AppSettings, "providerCompletedTurnDisplay"> {
   const overrides = Object.fromEntries(
     Object.entries(settings.providerCompletedTurnDisplay).filter(
       ([providerId]) => providerId !== provider.id,
     ),
   );
   return {
-    ...settings,
     providerCompletedTurnDisplay:
       display === provider.completedTurnDisplay
         ? overrides
@@ -60,7 +59,9 @@ function withProviderCompletedTurnDisplay(
 interface CompletedTurnDisplayRowProps {
   disabled: boolean;
   generalSettings: AppSettings;
-  onGeneralSettingsChange: (next: AppSettings) => Promise<unknown> | void;
+  onGeneralSettingsChange: (
+    patch: Partial<AppSettings>,
+  ) => Promise<unknown> | void;
   provider: ProviderInfo;
 }
 
@@ -115,7 +116,9 @@ function CompletedTurnDisplayRow({
 interface ProvidersSettingsSectionProps {
   disabled: boolean;
   generalSettings: AppSettings;
-  onGeneralSettingsChange: (next: AppSettings) => Promise<unknown> | void;
+  onGeneralSettingsChange: (
+    patch: Partial<AppSettings>,
+  ) => Promise<unknown> | void;
 }
 
 interface ProviderSignIn {
@@ -321,7 +324,6 @@ function SortableProviderRow({
           provider.available
             ? () => {
                 void onGeneralSettingsChange({
-                  ...generalSettings,
                   defaultProviderId: provider.id,
                 });
               }
@@ -364,7 +366,6 @@ export function ProvidersSettingsSection({
     let write: Promise<unknown> | void;
     try {
       write = onGeneralSettingsChange({
-        ...generalSettings,
         providerOrder: next,
       });
     } catch {
@@ -450,7 +451,6 @@ export function ProvidersSettingsSection({
             disabled={disabled}
             onCheckedChange={(enabled) =>
               onGeneralSettingsChange({
-                ...generalSettings,
                 allowFastServiceTier: enabled,
               })
             }

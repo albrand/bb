@@ -209,10 +209,29 @@ export type SetQueuedThreadMessageGroupBoundaryResult =
   | ReorderQueuedThreadMessageClaimed;
 
 export type UpdateQueuedThreadMessageResult =
-  | { kind: "updated"; queuedMessage: QueuedThreadMessageRow }
+  | {
+      kind: "updated";
+      queuedMessage: QueuedThreadMessageRow;
+      releasedEditHold: boolean;
+    }
   | { kind: "not_found" }
   | { kind: "claimed" }
   | { kind: "stale" };
+
+export interface QueuedThreadMessageEditHoldArgs {
+  id: string;
+  threadId: string;
+}
+
+export interface HoldQueuedThreadMessageForEditArgs
+  extends QueuedThreadMessageEditHoldArgs {
+  heldUntil: number;
+}
+
+export type HoldQueuedThreadMessageForEditResult =
+  | { kind: "held" }
+  | { kind: "not_found" }
+  | { kind: "claimed" };
 
 export type ReleaseQueuedMessageClaimArgs =
   ClaimedQueuedThreadMessageMutationArgs;
@@ -322,6 +341,15 @@ function queuedMessageGroupingEnvelopeMatches(
 
 function isQueuedThreadMessageClaimed(row: QueuedThreadMessageRow): boolean {
   return row.claimedAt !== null || row.claimToken !== null;
+}
+
+function isQueuedThreadMessageGroupEditHeld(
+  rows: readonly QueuedThreadMessageRow[],
+  now: number,
+): boolean {
+  return rows.some(
+    (row) => row.editHeldUntil !== null && row.editHeldUntil > now,
+  );
 }
 
 function requireClaimedQueuedThreadMessage(
@@ -611,6 +639,7 @@ export function createQueuedThreadMessageInTransaction(
       groupWithNext: false,
       claimedAt: null,
       claimToken: null,
+      editHeldUntil: null,
       sortKey,
       createdAt: now,
       updatedAt: now,
@@ -659,6 +688,7 @@ export function updateQueuedThreadMessage(
         .update(queuedThreadMessages)
         .set({
           content: JSON.stringify(input.content),
+          editHeldUntil: null,
           updatedAt: Math.max(Date.now(), existing.updatedAt + 1),
         })
         .where(eq(queuedThreadMessages.id, input.id))
@@ -667,7 +697,11 @@ export function updateQueuedThreadMessage(
       if (!queuedMessage) {
         return { kind: "not_found" };
       }
-      return { kind: "updated", queuedMessage };
+      return {
+        kind: "updated",
+        queuedMessage,
+        releasedEditHold: existing.editHeldUntil !== null,
+      };
     },
     { behavior: "immediate" },
   );
@@ -676,6 +710,48 @@ export function updateQueuedThreadMessage(
     notifier.notifyThread(input.threadId, ["queue-changed"]);
   }
   return result;
+}
+
+export function holdQueuedThreadMessageForEdit(
+  db: DbConnection,
+  args: HoldQueuedThreadMessageForEditArgs,
+): HoldQueuedThreadMessageForEditResult {
+  return db.transaction(
+    (tx): HoldQueuedThreadMessageForEditResult => {
+      const existing = getQueuedThreadMessage(tx, args.id);
+      if (!existing || existing.threadId !== args.threadId) {
+        return { kind: "not_found" };
+      }
+      if (isQueuedThreadMessageClaimed(existing)) {
+        return { kind: "claimed" };
+      }
+      tx.update(queuedThreadMessages)
+        .set({ editHeldUntil: args.heldUntil })
+        .where(eq(queuedThreadMessages.id, args.id))
+        .run();
+      return { kind: "held" };
+    },
+    { behavior: "immediate" },
+  );
+}
+
+export function releaseQueuedThreadMessageEditHold(
+  db: DbConnection,
+  args: QueuedThreadMessageEditHoldArgs,
+): boolean {
+  return (
+    db
+      .update(queuedThreadMessages)
+      .set({ editHeldUntil: null })
+      .where(
+        and(
+          eq(queuedThreadMessages.id, args.id),
+          eq(queuedThreadMessages.threadId, args.threadId),
+          isNotNull(queuedThreadMessages.editHeldUntil),
+        ),
+      )
+      .run().changes > 0
+  );
 }
 
 export function getQueuedThreadMessage(db: DbQueryConnection, id: string) {
@@ -918,8 +994,10 @@ function isAutomaticQueuedThreadMessageGroupClaimAllowed(
   rows: readonly QueuedThreadMessageRow[],
   pauseOrdinaryMessages: boolean,
   retryingFailure: boolean,
+  now: number,
 ): boolean {
   return (
+    !isQueuedThreadMessageGroupEditHeld(rows, now) &&
     (retryingFailure || rows.every((row) => row.failureReason === null)) &&
     (!pauseOrdinaryMessages ||
       rows.every((row) => !isOrdinaryTurnEndQueuedMessage(row)))
@@ -953,6 +1031,7 @@ export function claimQueuedThreadMessageGroup(
             group,
             isThreadQueueAutoSendPaused(tx, existing.threadId),
             policy.retryingFailure,
+            Date.now(),
           )) ||
         (policy.kind === "automatic" && !policy.isGroupEligible(group))
       ) {
@@ -990,19 +1069,26 @@ export function claimNextQueuedThreadMessageGroup(
     (tx) => {
       const queuedMessages = listQueuedThreadMessages(tx, threadId);
       const pauseOrdinaryMessages = isThreadQueueAutoSendPaused(tx, threadId);
+      const now = Date.now();
+      const drainableGroups = partitionQueuedMessageGroups(
+        queuedMessages,
+      ).filter((rows) => rows.some(isIdleDrainableQueuedMessage));
+      const editHeldIndex = drainableGroups.findIndex((rows) =>
+        isQueuedThreadMessageGroupEditHeld(rows, now),
+      );
       const group =
-        partitionQueuedMessageGroups(queuedMessages).find((rows) => {
-          const eligible =
-            rows.some(isIdleDrainableQueuedMessage) && isGroupEligible(rows);
-          return (
-            eligible &&
-            isAutomaticQueuedThreadMessageGroupClaimAllowed(
-              rows,
-              pauseOrdinaryMessages,
-              false,
-            )
-          );
-        }) ?? null;
+        drainableGroups
+          .slice(0, editHeldIndex === -1 ? undefined : editHeldIndex)
+          .find(
+            (rows) =>
+              isGroupEligible(rows) &&
+              isAutomaticQueuedThreadMessageGroupClaimAllowed(
+                rows,
+                pauseOrdinaryMessages,
+                false,
+                now,
+              ),
+          ) ?? null;
       if (group === null) {
         return null;
       }

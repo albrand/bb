@@ -11,7 +11,9 @@ thread/type/sequence index. These are hints: it does not inspect request input,
 resolve acceptance, or require the hinted event to produce a visible row. It
 prefers hints within the event budget, or the nearest older hint for an
 oversized conversation. Without a request hint it can cut at an ordinary event
-sequence. The latest completed context clear is the history floor.
+sequence. The latest completed context clear is the history floor unless the
+`keepHistoryAfterContextClear` general setting is on; then pages continue across
+it to the start of the thread.
 
 A page owns an event window `[start, end)`. It returns projected rows whose
 `sourceSeqStart` falls inside that window, in display order. Context loaded
@@ -193,6 +195,6 @@ a sequence still invalidate the cache but do not claim that messages are missing
 A successful response acknowledges only sequences through its `maxSeq`, so a
 response that predates another known event cannot clear that event. The catch-up
 indicator appears only after the timeline has remained behind for one second,
-disappears immediately when the cache catches up, and floats over the
-timeline without adding or removing scroll height. Initial loads without cached
-rows continue to use the loading skeleton.
+and disappears immediately when the cache catches up. It renders as a row at the
+end of the timeline. Initial loads without cached rows continue to use the
+loading skeleton.
