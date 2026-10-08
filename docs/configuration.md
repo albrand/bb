@@ -1691,6 +1691,20 @@ reloads before that turn. A failed reload is logged, the turn still runs, and
 the next turn tries again. An MCP sign-in that Codex keeps only in the OS
 keychain does not change these files, so it does not trigger a reload.
 
+### Ask User Question plugin
+
+The builtin Ask User Question plugin keeps an unanswered question card open for
+30 minutes by default. When it expires, the agent receives a timeout result and
+the card closes. Choose `1 hour`, `4 hours`, `8 hours`, `24 hours`, `3 days`, or
+`7 days` under the plugin settings, or configure it from the CLI:
+
+```bash
+bb plugin config ask-user-question set questionTimeout "24 hours"
+```
+
+The setting applies to questions asked after it changes. A server restart still
+closes every open card.
+
 ### Provider retry plugin
 
 The builtin Provider retry plugin is enabled on fresh installations. When a turn
