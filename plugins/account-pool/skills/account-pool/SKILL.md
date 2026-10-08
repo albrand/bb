@@ -15,8 +15,8 @@ ordering, or failover, read
 
 For per-actor route tokens (`bb pool route issue|revoke|list`) and the launcher
 script that runs an external `claude` through the pool, read the "Actor routes"
-section of the same reference. Issuance is an operator-surface command any local
-bb CLI caller can run.
+section of the same reference. Issuing and revoking need the thread's own pool
+token on `--proof-stdin`.
 
 Use stdin or supported login/import flows for credentials; never put secret values
 in command arguments or chat. Confirm the resulting account and routing state.

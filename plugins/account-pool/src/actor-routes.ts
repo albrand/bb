@@ -18,6 +18,7 @@ export const actorRouteIssueInputSchema = z
     actorId: actorIdSchema,
     provider: providerSchema.default("claude"),
     rotate: z.boolean().default(false),
+    proof: z.string(),
   })
   .strict();
 
@@ -26,6 +27,7 @@ export const actorRouteRevokeInputSchema = z
     actorId: actorIdSchema,
     threadId: threadIdSchema.optional(),
     generation: actorGenerationSchema.optional(),
+    proof: z.string(),
   })
   .strict();
 
@@ -80,6 +82,7 @@ export class ActorRouteIssuer {
     raw: z.input<typeof actorRouteIssueInputSchema>,
   ): Promise<IssuedActorRoute> {
     const input = actorRouteIssueInputSchema.parse(raw);
+    await this.requireProof(input.proof, input.threadId);
     const thread = await this.deps.getThread(input.threadId);
     if (thread === null)
       throw new ActorRouteError(`Thread ${input.threadId} does not exist.`);
@@ -157,6 +160,18 @@ export class ActorRouteIssuer {
     };
   }
 
+  // The CLI's thread id is caller-forwarded metadata, so it never authorizes
+  // anything. A caller proves it acts for a thread by presenting a live token
+  // the pool contributed to that same thread; any other token, an actor route,
+  // or a token for another thread is refused with the same message.
+  private async requireProof(proof: string, threadId: string): Promise<void> {
+    const proven = await this.deps.threadTokens.authenticateThreadProof(proof);
+    if (proven !== threadId)
+      throw new ActorRouteError(
+        `No proof for thread ${threadId}: pipe that thread's own Account Pooler token to --proof-stdin.`,
+      );
+  }
+
   private async recheck(
     input: z.output<typeof actorRouteIssueInputSchema>,
     hostId: string,
@@ -176,11 +191,19 @@ export class ActorRouteIssuer {
   async revoke(
     raw: z.input<typeof actorRouteRevokeInputSchema>,
   ): Promise<{ revoked: number }> {
-    const input = actorRouteRevokeInputSchema.parse(raw);
+    const { proof, ...parsed } = actorRouteRevokeInputSchema.parse(raw);
+    // Revocation is scoped to the proven thread: without --thread it covers
+    // only that thread, never the actor's routes on other threads.
+    const proven = await this.deps.threadTokens.authenticateThreadProof(proof);
+    if (proven === null || (parsed.threadId !== undefined && parsed.threadId !== proven))
+      throw new ActorRouteError(
+        `No proof for thread ${parsed.threadId ?? "(unspecified)"}: pipe that thread's own Account Pooler token to --proof-stdin.`,
+      );
+    const input = { ...parsed, threadId: proven };
     const revoked = await this.deps.threadTokens.revokeActor(input);
     if (revoked > 0 || input.generation === undefined)
-      await this.deps.forgetRouted(input.actorId, input.threadId ?? null);
-    this.deps.onRevoked(input.actorId, input.threadId ?? null, revoked);
+      await this.deps.forgetRouted(input.actorId, input.threadId);
+    this.deps.onRevoked(input.actorId, input.threadId, revoked);
     return { revoked };
   }
 

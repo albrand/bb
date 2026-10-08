@@ -428,6 +428,17 @@ export class ThreadTokenStore {
     return { hostId: record.hostId, threadId: record.threadId };
   }
 
+  /**
+   * The thread a caller proves it acts for: a live token the pool contributed
+   * to that thread's own provider processes (thread or nested route). Actor
+   * routes are not proof, so an actor cannot mint or revoke further actors.
+   */
+  async authenticateThreadProof(token: string | null): Promise<string | null> {
+    const route =
+      (await this.authenticate(token)) ?? (await this.authenticateNested(token));
+    return route?.threadId ?? null;
+  }
+
   async removeThread(threadId: string): Promise<void> {
     this.archiveVersions.set(threadId, this.archiveVersion(threadId) + 1);
     const advanceEpoch = !this.archivedThreads.has(threadId);

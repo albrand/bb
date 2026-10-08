@@ -10930,7 +10930,27 @@ describe("Actor route issuer", () => {
         environment: hostId === null ? null : { hostId },
       } as never;
     });
-    const cli = fixture.host.harness.behavior.runCli;
+    // The thread's own pool token, as bb contributes it to that thread; "" when
+    // the thread cannot hold one (no environment or an unenrolled machine).
+    const proofFor = async (thread: string) => {
+      const hostId = environments.has(thread) ? environments.get(thread) : "host-one";
+      if (hostId === null || hostId === undefined) return "";
+      return resolveToken(fixture.host, hostId, thread).catch(() => "");
+    };
+    const runCli = fixture.host.harness.behavior.runCli;
+    // Route issue/revoke take the proof from stdin, like the bb CLI.
+    const cli = async (argv: string[], proof?: string) => {
+      const verb = argv[0] === "route" ? argv[1] : undefined;
+      if (verb !== "issue" && verb !== "revoke") return runCli(argv);
+      const threadAt = argv.indexOf("--thread");
+      const thread = threadAt === -1 ? undefined : argv[threadAt + 1];
+      // Without --thread, a revoke is scoped to the proven thread; the
+      // fixture's main thread is thread-x.
+      const value = proof ?? (await proofFor(thread ?? "thread-x"));
+      return runCli([...argv, "--proof-stdin"], {
+        experimental_stdinInputs: { proof: value },
+      });
+    };
     const issue = async (thread: string, actor: string, extra: string[] = []) =>
       cli(["route", "issue", "--thread", thread, "--actor", actor, ...extra]);
     const send = async (token: string, route = "/v1/messages") => {
@@ -10950,7 +10970,7 @@ describe("Actor route issuer", () => {
           .all() as Array<{ affinity_key: string }>
       ).map((row) => JSON.parse(row.affinity_key) as string[]);
     const tokenOf = (result: { stdout: string }) => result.stdout.trim();
-    return { fixture, seen, archived, environments, hooks, issue, send, affinityKeys, tokenOf, cli };
+    return { fixture, seen, archived, environments, hooks, issue, send, affinityKeys, tokenOf, cli, proofFor };
   }
 
   const policyNames = [
@@ -11136,8 +11156,46 @@ describe("Actor route issuer", () => {
     });
     expect(await send(rotated)).toBe(401);
     expect(await send(onOtherThread)).toBe(200);
-    await cli(["route", "revoke", "--actor", "actor-a"]);
+    await cli(["route", "revoke", "--actor", "actor-a", "--thread", "thread-y"]);
     expect(await send(onOtherThread)).toBe(401);
+  });
+
+  it("issues and revokes only for the thread the caller proves, never from caller-selected metadata", async () => {
+    const { fixture, issue, send, tokenOf, cli, proofFor } = await actorFixture();
+    const proofA = await proofFor("thread-a");
+    const refusal = "No proof for thread thread-b";
+    // A caller holding thread A's token cannot mint a route for thread B.
+    const crossMint = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x", "--json"], proofA);
+    expect(crossMint.exitCode).not.toBe(0);
+    expect(crossMint.stdout).not.toMatch(/"token"/u);
+    expect(crossMint.stdout + crossMint.stderr).toContain(refusal);
+    // Neither can a missing, bogus, or forwarded-metadata-only caller.
+    for (const proof of ["", "x".repeat(43), "thread-b"]) {
+      const refused = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x"], proof);
+      expect(refused.exitCode).not.toBe(0);
+      expect(refused.stdout).toBe("");
+    }
+    // An actor route is not proof, so an actor cannot mint further actors.
+    const actorB = tokenOf(await issue("thread-b", "actor-b"));
+    const chained = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-y"], actorB);
+    expect(chained.exitCode).not.toBe(0);
+    expect(chained.stdout).toBe("");
+    // Thread A's proof cannot revoke thread B's route, with or without --thread.
+    const crossRevoke = await cli(["route", "revoke", "--actor", "actor-b", "--thread", "thread-b", "--json"], proofA);
+    expect(crossRevoke.exitCode).not.toBe(0);
+    const scoped = await cli(["route", "revoke", "--actor", "actor-b", "--json"], proofA);
+    expect(JSON.parse(scoped.stdout)).toEqual({ ok: true, revoked: 0 });
+    expect(await send(actorB)).toBe(200);
+    // The proof must also go through stdin: an argv value is refused outright.
+    const argvProof = await fixture.host.harness.behavior.runCli([
+      "route", "issue", "--thread", "thread-a", "--actor", "actor-z", "--proof", proofA,
+    ]);
+    expect(argvProof.exitCode).not.toBe(0);
+    expect(argvProof.stdout).toBe("");
+    // The proven thread's own token works.
+    const own = await cli(["route", "issue", "--thread", "thread-a", "--actor", "actor-z"], proofA);
+    expect(own.exitCode).toBe(0);
+    expect(await send(tokenOf(own))).toBe(200);
   });
 
   it("rejects bogus, cross-provider, and unrelated tokens and leaves existing tokens alone", async () => {
@@ -11353,8 +11411,14 @@ describe("Actor launcher end to end", () => {
             return;
           }
           if (url === "/__cli") {
-            const argv = (JSON.parse(body) as { argv: string[] }).argv;
-            const result = await target.harness.behavior.runCli(argv);
+            const { argv, stdin } = JSON.parse(body) as {
+              argv: string[];
+              stdin?: Record<string, string>;
+            };
+            const result = await target.harness.behavior.runCli(
+              argv,
+              stdin === undefined ? undefined : { experimental_stdinInputs: stdin },
+            );
             response.setHeader("content-type", "application/json");
             response.end(JSON.stringify(result));
             return;
@@ -11434,6 +11498,8 @@ describe("Actor launcher end to end", () => {
       } as never;
     });
     target = fixture.host;
+    // Inside a bb thread the launcher holds that thread's own pool token.
+    const threadProof = await resolveToken(fixture.host, "host-one", "thread-e2e");
     const work = await mkdtemp(path.join(tmpdir(), "bb-launcher-e2e-"));
     cleanups.push(() => fs.rm(work, { recursive: true, force: true }));
     const shimDir = path.join(work, "shim");
@@ -11447,7 +11513,14 @@ if (process.env.SHIM_FAIL_REVOKE === "1" && args[1] === "revoke") {
   process.stderr.write("shim: revoke unavailable\\n");
   process.exit(1);
 }
-fetch(process.env.SHIM_CONTROL + "/__cli", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argv: args }) })
+// Like the bb CLI, an --<name>-stdin option is filled from stdin.
+const stdinOption = args.find((arg) => arg.endsWith("-stdin"));
+const readStdin = () => new Promise((resolve) => {
+  let data = "";
+  process.stdin.on("data", (chunk) => (data += chunk)).on("end", () => resolve(data));
+});
+(stdinOption === undefined ? Promise.resolve(undefined) : readStdin())
+  .then((value) => fetch(process.env.SHIM_CONTROL + "/__cli", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argv: args, ...(value === undefined ? {} : { stdin: { [stdinOption.slice(2, -"-stdin".length)]: value } }) }) }))
   .then((r) => r.json())
   .then((r) => {
     if (r.stdout) process.stdout.write(r.stdout);
@@ -11495,6 +11568,7 @@ else {
             PATH: `${shimDir}:${process.env.PATH ?? ""}`,
             SHIM_CONTROL: base,
             ANTHROPIC_API_KEY: "direct-credential-must-not-leak",
+            ANTHROPIC_AUTH_TOKEN: threadProof,
             ...env,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -11524,7 +11598,12 @@ else {
       (JSON.parse((await fixture.host.harness.behavior.runCli(["route", "list", "--json"])).stdout) as {
         routes: unknown[];
       }).routes;
-    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work };
+    // Issue/revoke as the thread itself, outside the launcher.
+    const threadCli = (argv: string[]) =>
+      fixture.host.harness.behavior.runCli([...argv, "--proof-stdin"], {
+        experimental_stdinInputs: { proof: threadProof },
+      });
+    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work, threadProof, threadCli };
   }
 
   it("runs the real launcher against the real issuer and revokes the route when the child exits", async () => {
@@ -11544,8 +11623,9 @@ else {
   });
 
   it("applies the 1-hour cache variable for a subscription pool and strips every inherited auth variable", async () => {
-    const { run } = await harness({ subscription: true });
-    const result = await run([], {
+    const { run, threadProof } = await harness({ subscription: true });
+    const result = await run(["--proof-env", "THREAD_POOL_PROOF"], {
+      THREAD_POOL_PROOF: threadProof,
       ANTHROPIC_AUTH_TOKEN: "inherited-auth-must-not-win",
       ANTHROPIC_BASE_URL: "http://127.0.0.1:9/inherited",
       CLAUDE_CODE_OAUTH_TOKEN: "inherited-oauth-must-not-leak",
@@ -11559,8 +11639,8 @@ else {
   });
 
   it("drops an inherited cache variable for an API-key-only pool", async () => {
-    const { run } = await harness();
-    const result = await run([], { ENABLE_PROMPT_CACHING_1H: "1", ANTHROPIC_AUTH_TOKEN: "inherited-auth-must-not-win" }).done;
+    const { run, threadProof } = await harness();
+    const result = await run(["--proof-env", "THREAD_POOL_PROOF"], { THREAD_POOL_PROOF: threadProof, ENABLE_PROMPT_CACHING_1H: "1", ANTHROPIC_AUTH_TOKEN: "inherited-auth-must-not-win" }).done;
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("cache1h=undefined");
   });
@@ -11582,7 +11662,7 @@ else {
   });
 
   it("does not revoke a newer route that another launch rotated in when the first launch exits", async () => {
-    const { fixture, run, hubSend, listRoutes, work } = await harness();
+    const { run, hubSend, listRoutes, work, threadCli } = await harness();
     const release = path.join(work, "release-a");
     const waitForFile =
       "const f=process.argv[1];console.log('child-ready');setInterval(()=>{if(require('node:fs').existsSync(f))process.exit(0)},50)";
@@ -11590,7 +11670,7 @@ else {
     await vi.waitFor(() => expect(launchA.output()).toContain("child-ready"));
     const rotated = JSON.parse(
       (
-        await fixture.host.harness.behavior.runCli([
+        await threadCli([
           "route", "issue", "--thread", "thread-e2e", "--actor", "shared-actor", "--rotate", "--json",
         ])
       ).stdout,
@@ -11700,9 +11780,9 @@ else {
   });
 
   it("refuses to reuse a live actor id unless --rotate is given", async () => {
-    const { fixture, run, readToken, hubSend } = await harness();
+    const { run, readToken, hubSend, threadCli } = await harness();
     const existing = (
-      await fixture.host.harness.behavior.runCli([
+      await threadCli([
         "route", "issue", "--thread", "thread-e2e", "--actor", "shared-actor",
       ])
     ).stdout.trim();

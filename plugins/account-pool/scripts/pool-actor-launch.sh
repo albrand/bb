@@ -5,7 +5,7 @@ umask 077
 HUB_PATH="/api/v1/plugins/account-pool/http"
 
 usage() {
-  echo "usage: pool-actor-launch.sh --thread <thread-id> [--actor <actor-id>] [--rotate] [--bb <bb-cli>] -- <command> [args...]" >&2
+  echo "usage: pool-actor-launch.sh --thread <thread-id> [--actor <actor-id>] [--rotate] [--proof-env <VAR>] [--bb <bb-cli>] -- <command> [args...]" >&2
 }
 
 die() {
@@ -16,12 +16,14 @@ die() {
 thread=""
 actor=""
 rotate=0
+proof_env="ANTHROPIC_AUTH_TOKEN"
 bb_cli="${BB_CLI:-bb}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --thread) [ "$#" -ge 2 ] || { usage; exit 2; }; thread="$2"; shift 2 ;;
     --actor) [ "$#" -ge 2 ] || { usage; exit 2; }; actor="$2"; shift 2 ;;
     --bb) [ "$#" -ge 2 ] || { usage; exit 2; }; bb_cli="$2"; shift 2 ;;
+    --proof-env) [ "$#" -ge 2 ] || { usage; exit 2; }; proof_env="$2"; shift 2 ;;
     --rotate) rotate=1; shift ;;
     --) shift; break ;;
     -h|--help) usage; exit 0 ;;
@@ -31,6 +33,12 @@ done
 [ -n "$thread" ] && [ "$#" -gt 0 ] || { usage; exit 2; }
 command -v "$bb_cli" >/dev/null 2>&1 || die "bb CLI not found: $bb_cli"
 command -v node >/dev/null 2>&1 || die "node is required to read the issuer response"
+# Issuing and revoking need proof that this caller acts for the thread: the
+# pool token bb contributed to that thread (ANTHROPIC_AUTH_TOKEN inside a bb
+# thread). It reaches the CLI on stdin, never argv, and is never exported.
+[[ "$proof_env" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "--proof-env must name an environment variable"
+proof="${!proof_env:-}"
+[ -n "$proof" ] || die "no thread proof in \$$proof_env; run inside the thread whose route you need, or pass --proof-env"
 
 if [ -z "$actor" ]; then
   suffix="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
@@ -41,7 +49,7 @@ fi
 
 issue_args=(pool route issue --thread "$thread" --actor "$actor" --provider claude --json)
 [ "$rotate" -eq 0 ] || issue_args+=(--rotate)
-issued="$("$bb_cli" "${issue_args[@]}")" \
+issued="$(printf '%s' "$proof" | "$bb_cli" "${issue_args[@]}" --proof-stdin)" \
   || die "could not issue a pooled route for actor '$actor' on thread '$thread'; not starting the command (no fallback to direct auth)"
 
 generation=""
@@ -57,12 +65,12 @@ revoke_route() {
   if [ -n "$generation" ]; then
     args+=(--generation "$generation")
   elif [ "$rotate" -eq 1 ]; then
-    echo "pool-actor-launch: the issuer response had no generation, so the route for actor '$actor' on thread '$thread' was left in place (it may belong to another launch); revoke it manually with: bb pool route revoke --actor $actor --thread $thread" >&2
+    echo "pool-actor-launch: the issuer response had no generation, so the route for actor '$actor' on thread '$thread' was left in place (it may belong to another launch); revoke it manually from inside that thread with: bb pool route revoke --actor $actor --thread $thread --proof-stdin" >&2
     return 0
   fi
-  if ! "$bb_cli" "${args[@]}" >/dev/null; then
+  if ! printf '%s' "$proof" | "$bb_cli" "${args[@]}" --proof-stdin >/dev/null; then
     revoke_failed=1
-    echo "pool-actor-launch: FAILED to revoke the pooled route for actor '$actor' on thread '$thread'; revoke it manually with: bb pool route revoke --actor $actor --thread $thread" >&2
+    echo "pool-actor-launch: FAILED to revoke the pooled route for actor '$actor' on thread '$thread'; revoke it manually from inside that thread with: bb pool route revoke --actor $actor --thread $thread --proof-stdin" >&2
   fi
 }
 

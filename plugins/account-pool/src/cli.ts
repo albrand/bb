@@ -54,6 +54,15 @@ const JSON_OPTION = {
   description: "Emit machine-readable JSON",
 } as const;
 
+const PROOF_OPTION = {
+  type: "string",
+  required: true,
+  stdin: true,
+  placeholder: "token",
+  description:
+    "The thread's own Account Pooler token, proving the caller acts for it. Stdin only: --proof-stdin",
+} as const;
+
 const PROVIDER_OPTION = {
   type: "enum",
   values: ["claude", "codex"],
@@ -1056,7 +1065,7 @@ export function registerPoolCli(
           summary:
             "Issue a revocable Account Pooler route token for one actor on one live thread",
           description:
-            "Operator-surface command: any local bb CLI caller can run it for any live thread; the thread id the CLI forwards is unauthenticated metadata, so issuing grants no privilege beyond what that caller already has locally. Prints the token as the only line on stdout (or as the token field with --json, together with a non-secret generation, the hub URL and the non-secret launch environment) so a launcher can capture it. The token is scoped to this thread and actor, follows the thread's routing choice, and stops working when the thread is archived or deleted, when the actor is revoked, or when the machine token rotates. Issuing is exclusive: it is refused when the actor already has a route on the thread unless --rotate replaces it. Never paste the output into a chat, a log, or a command line.",
+            "Requires proof that the caller acts for the thread: pipe that thread's own Account Pooler token (ANTHROPIC_AUTH_TOKEN inside a bb thread) to --proof-stdin. The thread id the CLI forwards is unauthenticated metadata and never authorizes issuing; an actor route is not proof, so actors cannot mint further actors. Prints the token as the only line on stdout (or as the token field with --json, together with a non-secret generation, the hub URL and the non-secret launch environment) so a launcher can capture it. The token is scoped to this thread and actor, follows the thread's routing choice, and stops working when the thread is archived or deleted, when the actor is revoked, or when the machine token rotates. Issuing is exclusive: it is refused when the actor already has a route on the thread unless --rotate replaces it. Never paste the output into a chat, a log, or a command line.",
           options: {
             thread: {
               type: "string",
@@ -1081,6 +1090,7 @@ export function registerPoolCli(
               description:
                 "Replace the actor's existing route (default: refuse when one exists)",
             },
+            proof: PROOF_OPTION,
             json: JSON_OPTION,
           },
           run: (input) =>
@@ -1089,6 +1099,7 @@ export function registerPoolCli(
                 const issued = await actorRoutes.issue({
                   threadId: input.options.thread,
                   actorId: input.options.actor,
+                  proof: input.options.proof,
                   ...(input.options.provider === undefined
                     ? {}
                     : { provider: input.options.provider }),
@@ -1123,7 +1134,8 @@ export function registerPoolCli(
             thread: {
               type: "string",
               placeholder: "thread-id",
-              description: "Limit the revocation to one thread",
+              description:
+                "Thread whose routes to revoke; must be the thread the proof belongs to (default: that thread)",
             },
             generation: {
               type: "string",
@@ -1131,19 +1143,30 @@ export function registerPoolCli(
               description:
                 "Revoke only the route with this generation (from route issue --json)",
             },
+            proof: PROOF_OPTION,
             json: JSON_OPTION,
           },
           run: (input) =>
             attempt(async () => {
-              const result = await actorRoutes.revoke({
-                actorId: input.options.actor,
-                ...(input.options.generation === undefined
-                  ? {}
-                  : { generation: input.options.generation }),
-                ...(input.options.thread === undefined
-                  ? {}
-                  : { threadId: input.options.thread }),
-              });
+              let result: { revoked: number };
+              try {
+                result = await actorRoutes.revoke({
+                  actorId: input.options.actor,
+                  proof: input.options.proof,
+                  ...(input.options.generation === undefined
+                    ? {}
+                    : { generation: input.options.generation }),
+                  ...(input.options.thread === undefined
+                    ? {}
+                    : { threadId: input.options.thread }),
+                });
+              } catch (error) {
+                if (error instanceof ActorRouteError)
+                  throw new PluginCliError(error.message, {
+                    code: "route_revoke_refused",
+                  });
+                throw error;
+              }
               return {
                 exitCode: 0,
                 stdout: input.options.json

@@ -275,20 +275,29 @@ actor, follows the thread's subscription choice, bypass and routing switches
 (checked on every request), and keeps its own conversation affinity per actor.
 
 ```sh
-bb pool route issue --thread <thread-id> --actor <actor-id> [--provider claude|codex] [--rotate] [--json]
-bb pool route revoke --actor <actor-id> [--thread <thread-id>] [--generation <generation>] [--json]
+bb pool route issue --thread <thread-id> --actor <actor-id> --proof-stdin [--provider claude|codex] [--rotate] [--json]
+bb pool route revoke --actor <actor-id> --proof-stdin [--thread <thread-id>] [--generation <generation>] [--json]
 bb pool route list [--json]
-plugins/account-pool/scripts/pool-actor-launch.sh --thread <thread-id> [--actor <actor-id>] [--rotate] [--bb <bb-cli>] -- claude [args]
+plugins/account-pool/scripts/pool-actor-launch.sh --thread <thread-id> [--actor <actor-id>] [--rotate] [--proof-env <VAR>] [--bb <bb-cli>] -- claude [args]
 ```
 
-Issuance is an operator-surface command. Any local bb CLI caller can run it for
-any live, enrolled thread; it adds no privilege and makes no claim that the
-caller owns the thread. The plugin CLI context's `threadId` is the
-caller-supplied `BB_THREAD_ID` value (apps/cli/src/context-env.ts:48, sent in
-the request body and copied to the context at apps/server/src/routes/plugins.ts:560;
-the route only runs the browser-origin guard at plugins.ts:200), and bb exposes
-no authenticated caller identity or user-versus-agent distinction. Do not treat
-`route issue` as caller-isolated.
+Issuing and revoking require proof that the caller acts for the thread. The
+caller pipes that thread's own live Account Pooler token, the one bb contributes
+to the thread's provider processes (`ANTHROPIC_AUTH_TOKEN` inside a bb thread),
+to `--proof-stdin`. The option is stdin-only, so the proof never reaches process
+arguments. The server accepts a thread or nested route token bound to that same
+thread. It refuses with one message any other thread's token, an actor route
+(actors cannot mint further actors), or a missing or unknown token. A revoke
+without `--thread` covers only the proven thread.
+
+The plugin CLI context's `threadId` is the caller-supplied `BB_THREAD_ID` value
+(apps/cli/src/context-env.ts:48, copied to the context at
+apps/server/src/routes/plugins.ts:560). It is unauthenticated metadata and never
+authorizes issuing; only the proof does. A caller that already holds a thread's
+pool token could use the pool directly, so issuing grants nothing beyond what
+that token already allows. The launcher reads the proof from
+`ANTHROPIC_AUTH_TOKEN` by default (`--proof-env` names another variable), pipes
+it to the CLI, and never exports it to the child.
 
 `issue` prints the token as the only stdout line. With `--json` it returns
 `token`, `generation`, `hubUrl`, route metadata and `launchEnv`. `generation` is
