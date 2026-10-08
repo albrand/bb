@@ -160,10 +160,6 @@ export class ActorRouteIssuer {
     };
   }
 
-  // The CLI's thread id is caller-forwarded metadata, so it never authorizes
-  // anything. A caller proves it acts for a thread by presenting a live token
-  // the pool contributed to that same thread; any other token, an actor route,
-  // or a token for another thread is refused with the same message.
   private async requireProof(proof: string, threadId: string): Promise<void> {
     const proven = await this.deps.threadTokens.authenticateThreadProof(proof);
     if (proven !== threadId)
@@ -192,8 +188,6 @@ export class ActorRouteIssuer {
     raw: z.input<typeof actorRouteRevokeInputSchema>,
   ): Promise<{ revoked: number }> {
     const { proof, ...parsed } = actorRouteRevokeInputSchema.parse(raw);
-    // Revocation is scoped to the proven thread: without --thread it covers
-    // only that thread, never the actor's routes on other threads.
     const proven = await this.deps.threadTokens.authenticateThreadProof(proof);
     if (proven === null || (parsed.threadId !== undefined && parsed.threadId !== proven))
       throw new ActorRouteError(

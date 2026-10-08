@@ -10930,22 +10930,17 @@ describe("Actor route issuer", () => {
         environment: hostId === null ? null : { hostId },
       } as never;
     });
-    // The thread's own pool token, as bb contributes it to that thread; "" when
-    // the thread cannot hold one (no environment or an unenrolled machine).
     const proofFor = async (thread: string) => {
       const hostId = environments.has(thread) ? environments.get(thread) : "host-one";
       if (hostId === null || hostId === undefined) return "";
       return resolveToken(fixture.host, hostId, thread).catch(() => "");
     };
     const runCli = fixture.host.harness.behavior.runCli;
-    // Route issue/revoke take the proof from stdin, like the bb CLI.
     const cli = async (argv: string[], proof?: string) => {
       const verb = argv[0] === "route" ? argv[1] : undefined;
       if (verb !== "issue" && verb !== "revoke") return runCli(argv);
       const threadAt = argv.indexOf("--thread");
       const thread = threadAt === -1 ? undefined : argv[threadAt + 1];
-      // Without --thread, a revoke is scoped to the proven thread; the
-      // fixture's main thread is thread-x.
       const value = proof ?? (await proofFor(thread ?? "thread-x"));
       return runCli([...argv, "--proof-stdin"], {
         experimental_stdinInputs: { proof: value },
@@ -11164,35 +11159,29 @@ describe("Actor route issuer", () => {
     const { fixture, issue, send, tokenOf, cli, proofFor } = await actorFixture();
     const proofA = await proofFor("thread-a");
     const refusal = "No proof for thread thread-b";
-    // A caller holding thread A's token cannot mint a route for thread B.
     const crossMint = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x", "--json"], proofA);
     expect(crossMint.exitCode).not.toBe(0);
     expect(crossMint.stdout).not.toMatch(/"token"/u);
     expect(crossMint.stdout + crossMint.stderr).toContain(refusal);
-    // Neither can a missing, bogus, or forwarded-metadata-only caller.
     for (const proof of ["", "x".repeat(43), "thread-b"]) {
       const refused = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x"], proof);
       expect(refused.exitCode).not.toBe(0);
       expect(refused.stdout).toBe("");
     }
-    // An actor route is not proof, so an actor cannot mint further actors.
     const actorB = tokenOf(await issue("thread-b", "actor-b"));
     const chained = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-y"], actorB);
     expect(chained.exitCode).not.toBe(0);
     expect(chained.stdout).toBe("");
-    // Thread A's proof cannot revoke thread B's route, with or without --thread.
     const crossRevoke = await cli(["route", "revoke", "--actor", "actor-b", "--thread", "thread-b", "--json"], proofA);
     expect(crossRevoke.exitCode).not.toBe(0);
     const scoped = await cli(["route", "revoke", "--actor", "actor-b", "--json"], proofA);
     expect(JSON.parse(scoped.stdout)).toEqual({ ok: true, revoked: 0 });
     expect(await send(actorB)).toBe(200);
-    // The proof must also go through stdin: an argv value is refused outright.
     const argvProof = await fixture.host.harness.behavior.runCli([
       "route", "issue", "--thread", "thread-a", "--actor", "actor-z", "--proof", proofA,
     ]);
     expect(argvProof.exitCode).not.toBe(0);
     expect(argvProof.stdout).toBe("");
-    // The proven thread's own token works.
     const own = await cli(["route", "issue", "--thread", "thread-a", "--actor", "actor-z"], proofA);
     expect(own.exitCode).toBe(0);
     expect(await send(tokenOf(own))).toBe(200);
@@ -11398,7 +11387,6 @@ describe("Actor launcher end to end", () => {
     args: { hubBase?: (base: string) => string; subscription?: boolean } = {},
   ) {
     let target: ReturnType<typeof createFakePluginHost> | null = null;
-    // Requests from the real bb CLI (POOL_E2E_BB_CLI), as the server sees them.
     const cliRequests: Array<{ argv: string[]; stdinInputs: Record<string, string> }> = [];
     const server = http.createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -11425,7 +11413,6 @@ describe("Actor launcher end to end", () => {
             response.end(JSON.stringify(result));
             return;
           }
-          // The two bb server routes the real bb CLI uses for plugin commands.
           if (url === "/api/v1/plugins/contributions") {
             response.setHeader("content-type", "application/json");
             response.end(JSON.stringify({
@@ -11526,7 +11513,6 @@ describe("Actor launcher end to end", () => {
       } as never;
     });
     target = fixture.host;
-    // Inside a bb thread the launcher holds that thread's own pool token.
     const threadProof = await resolveToken(fixture.host, "host-one", "thread-e2e");
     const work = await mkdtemp(path.join(tmpdir(), "bb-launcher-e2e-"));
     cleanups.push(() => fs.rm(work, { recursive: true, force: true }));
@@ -11626,7 +11612,6 @@ else {
       (JSON.parse((await fixture.host.harness.behavior.runCli(["route", "list", "--json"])).stdout) as {
         routes: unknown[];
       }).routes;
-    // Issue/revoke as the thread itself, outside the launcher.
     const threadCli = (argv: string[]) =>
       fixture.host.harness.behavior.runCli([...argv, "--proof-stdin"], {
         experimental_stdinInputs: { proof: threadProof },
@@ -11768,14 +11753,10 @@ else {
     expect(hubSend).toBeDefined();
   });
 
-  // POOL_E2E_BB_CLI is a real bb CLI executable (e.g. apps/cli/bin/bb built
-  // from this commit). It talks to this harness as its bb server.
   it.skipIf(process.env.POOL_E2E_BB_CLI === undefined)(
     "drives the real bb CLI: the proof travels on stdin, never in argv or the child env",
     async () => {
       const { base, run, hubSend, readToken, listRoutes, work, threadProof, cliRequests } = await harness();
-      // A pass-through in front of the real CLI records the environment the
-      // launcher gives each bb CLI process, then execs the real CLI unchanged.
       const cliEnvDump = path.join(work, "cli-env.jsonl");
       const realCli = path.join(work, "bb-recorded");
       await fs.writeFile(
@@ -11790,9 +11771,6 @@ else {
           .map((line) => JSON.parse(line) as Record<string, string>);
       const envDump = path.join(work, "child-env.json");
       const dumpEnv = `require("node:fs").writeFileSync(${JSON.stringify(envDump)}, JSON.stringify(process.env));`;
-      // The caller pre-exports variables named like the launcher's internals,
-      // and allexport through SHELLOPTS. Neither may carry the proof or the
-      // route token into a subprocess.
       const preExported = {
         proof: "pre-exported",
         token: "pre-exported",
@@ -11807,8 +11785,6 @@ else {
       ).done;
       expect(result.code).toBe(0);
       expect(result.stderr).not.toContain("FAILED");
-      // The real CLI sent exactly an issue then a revoke, each carrying the
-      // proof only as a stdin input, never as an argument.
       expect(cliRequests.map((entry) => entry.argv.slice(0, 2))).toEqual([
         ["route", "issue"],
         ["route", "revoke"],
@@ -11818,31 +11794,23 @@ else {
         expect(entry.argv.join("\u0000")).not.toContain(threadProof);
         expect(entry.stdinInputs).toEqual({ proof: threadProof });
       }
-      // Neither bb CLI process (issue, revoke) inherited the proof.
       const recorded = await cliEnvs();
       expect(recorded).toHaveLength(2);
-      // Failures name the variables that carry a secret, never their values.
       const carriers = (env: Record<string, string>, secret: string) =>
         Object.entries(env)
           .filter(([name, value]) => name.includes(secret) || value.includes(secret))
           .map(([name]) => name);
       for (const env of recorded) expect(carriers(env, threadProof)).toEqual([]);
-      // The child got its actor route, never the thread's proof.
       const childEnv = JSON.parse(await fs.readFile(envDump, "utf8")) as Record<string, string>;
       expect(carriers(childEnv, threadProof)).toEqual([]);
       const actorToken = childEnv.ANTHROPIC_AUTH_TOKEN ?? "";
       expect(actorToken).toMatch(/^.{43}$/u);
       expect(actorToken === threadProof).toBe(false);
-      // The route token reaches the child only as ANTHROPIC_AUTH_TOKEN and
-      // never reaches a bb CLI process.
       expect(carriers(childEnv, actorToken)).toEqual(["ANTHROPIC_AUTH_TOKEN"]);
       for (const env of recorded) expect(carriers(env, actorToken)).toEqual([]);
-      // Revoked on exit: the actor route no longer serves, nothing is listed.
       expect(await hubSend(childEnv.ANTHROPIC_AUTH_TOKEN ?? "")).toBe(401);
       expect(await listRoutes()).toEqual([]);
       expect(readToken).toBeDefined();
-      // A caller holding only another thread's proof is refused through the
-      // same real CLI path, and the command never starts.
       const refused = await run(
         ["--bb", realCli, "--actor", "real-cli-other"],
         { BB_SERVER_URL: base, BB_THREAD_ID: "" },
