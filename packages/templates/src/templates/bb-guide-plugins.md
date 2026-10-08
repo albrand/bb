@@ -58,7 +58,18 @@ bb pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshol
 bb pool token rotate --machine <id-or-name>
 bb pool bypass <thread-id> [--off]
 bb pool bypass get <thread-id>
+bb pool route issue --thread <thread-id> --actor <actor-id> --proof-stdin [--provider claude|codex] [--rotate] [--json]
+bb pool route revoke --actor <actor-id> --proof-stdin [--thread <thread-id>] [--generation <generation>] [--json]
+bb pool route list [--json]
 ```
+
+`bb pool route issue` mints a revocable token for one actor on one live thread
+so an external `claude` process can use the pool; it refuses an actor that
+already has a route unless `--rotate` is given. Issuing and revoking need proof
+that the caller acts for the thread: pipe that thread's own Account Pooler token
+(`ANTHROPIC_AUTH_TOKEN` inside a bb thread) to `--proof-stdin`. The forwarded
+thread id never authorizes anything, and an actor route is not proof. See the
+Account Pooler skill reference for the launcher script and its limits.
 
 Claude `--login` starts a ten-minute in-memory PKCE session, prints the browser
 sign-in URL and session ID, then exits. After sign-in, pipe the manual callback

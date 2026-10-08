@@ -584,7 +584,20 @@ function matchesStoredToken(
   return currentMatches || previousMatches;
 }
 
+const ACTOR_ROUTED_WRITE_INTERVAL_MS = 60_000;
+
+const actorRoutedSchema = z
+  .object({
+    threadId: z.string(),
+    actorId: z.string(),
+    hostId: z.string(),
+    provider: providerSchema,
+    routedAt: z.number(),
+  })
+  .strict();
+
 export class RoutingStore {
+  private readonly actorRoutedAt = new Map<string, number>();
   constructor(
     private readonly kv: PluginKvStorage,
     private readonly now: () => number = Date.now,
@@ -616,7 +629,53 @@ export class RoutingStore {
     else await this.kv.set(key, z.string().uuid().parse(accountId));
   }
 
+  async recordActorRouted(entry: {
+    threadId: string;
+    actorId: string;
+    hostId: string;
+    provider: PoolProvider;
+  }): Promise<void> {
+    const key = this.actorRoutedKey(entry);
+    const now = this.now();
+    const last = this.actorRoutedAt.get(key);
+    if (last !== undefined && now - last < ACTOR_ROUTED_WRITE_INTERVAL_MS) return;
+    this.actorRoutedAt.set(key, now);
+    await this.kv.set(key, { ...entry, routedAt: now });
+  }
+
+  async actorLastRoutedAt(entry: {
+    threadId: string;
+    actorId: string;
+    provider: PoolProvider;
+  }): Promise<number | null> {
+    const value = actorRoutedSchema.safeParse(
+      await this.kv.get(this.actorRoutedKey(entry)),
+    );
+    return value.success ? value.data.routedAt : null;
+  }
+
+  async removeActorRouted(filter: {
+    actorId: string;
+    threadId?: string;
+  }): Promise<void> {
+    for (const key of await this.kv.list("actor-routed:")) {
+      const value = actorRoutedSchema.safeParse(await this.kv.get(key));
+      if (
+        value.success &&
+        value.data.actorId === filter.actorId &&
+        (filter.threadId === undefined || value.data.threadId === filter.threadId)
+      ) {
+        this.actorRoutedAt.delete(key);
+        await this.kv.delete(key);
+      }
+    }
+  }
+
   async removeThread(threadId: string): Promise<void> {
+    for (const key of await this.kv.list(`actor-routed:${threadId}:`)) {
+      this.actorRoutedAt.delete(key);
+      await this.kv.delete(key);
+    }
     await Promise.all([
       this.kv.delete(`selection:claude:${threadId}`),
       this.kv.delete(`selection:codex:${threadId}`),
@@ -663,6 +722,14 @@ export class RoutingStore {
 
   private bypassKey(threadId: string): string {
     return `bypass:${z.string().min(1).parse(threadId)}`;
+  }
+
+  private actorRoutedKey(entry: {
+    threadId: string;
+    actorId: string;
+    provider: PoolProvider;
+  }): string {
+    return `actor-routed:${entry.threadId}:${entry.actorId}:${entry.provider}`;
   }
 
   private routedKey(threadId: string): string {

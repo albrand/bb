@@ -265,3 +265,93 @@ accounts or to each provider's own credentials.
 Proxied traffic authenticates with the nested token of the launching thread and
 is attributed to that thread's machine, so `bb pool status` on the parent
 attributes it to the parent host rather than to the nested instance.
+
+## Actor routes for external launchers
+
+An external launcher (a terminal, an IDE) that runs its own `claude` process can
+route it through the pool with a per-actor token bound to one live thread. The
+token is not a machine token: it works only for its thread, host, provider and
+actor, follows the thread's subscription choice, bypass and routing switches
+(checked on every request), and keeps its own conversation affinity per actor.
+
+```sh
+bb pool route issue --thread <thread-id> --actor <actor-id> --proof-stdin [--provider claude|codex] [--rotate] [--json]
+bb pool route revoke --actor <actor-id> --proof-stdin [--thread <thread-id>] [--generation <generation>] [--json]
+bb pool route list [--json]
+plugins/account-pool/scripts/pool-actor-launch.sh --thread <thread-id> [--actor <actor-id>] [--rotate] [--proof-env <VAR>] [--bb <bb-cli>] -- claude [args]
+```
+
+Issuing and revoking require proof that the caller acts for the thread. The
+caller pipes that thread's own live Account Pooler token, the one bb contributes
+to the thread's provider processes (`ANTHROPIC_AUTH_TOKEN` inside a bb thread),
+to `--proof-stdin`. The option is stdin-only, so the proof never reaches process
+arguments. The server accepts a thread or nested route token bound to that same
+thread. It refuses with one message any other thread's token, an actor route
+(actors cannot mint further actors), or a missing or unknown token. A revoke
+without `--thread` covers only the proven thread.
+
+The plugin CLI context's `threadId` is the caller-supplied `BB_THREAD_ID` value
+(apps/cli/src/context-env.ts:48, copied to the context at
+apps/server/src/routes/plugins.ts:560). It is unauthenticated metadata and never
+authorizes issuing; only the proof does. A caller that already holds a thread's
+pool token could use the pool directly, so issuing grants nothing beyond what
+that token already allows. The launcher reads the proof from
+`ANTHROPIC_AUTH_TOKEN` by default (`--proof-env` names another variable), pipes
+it to the CLI, and never exports it to the child.
+
+`issue` prints the token as the only stdout line. With `--json` it returns
+`token`, `generation`, `hubUrl`, route metadata and `launchEnv`. `generation` is
+a 16-hex-character, non-secret fingerprint derived on the server; it changes
+whenever the token is rotated. `launchEnv` is a list of `{name, value}` pairs
+without the token: the same non-secret variables the canonical Claude Code env
+contributor gives a thread (tool search, first-party assumption, and the 1-hour
+prompt cache only while a subscription account can serve Claude). Both come
+from one shared function, so they cannot drift. Capture the output with
+command substitution; never put the token in argv, a log, a file or a
+transcript. Issuing is exclusive by default: it is refused when the actor id
+already has a live route on the thread, and `--rotate` replaces that route
+(the old token stops working). It is also refused for an unknown, archived or
+deleted thread, a thread without an enrolled machine, a bypassed thread, or a
+provider that is disabled or has no usable account. After minting, the thread
+is read again; if its machine changed, it was archived, bypassed, or the
+provider stopped being servable, the minted route is revoked and the issue
+fails. `list` never prints tokens and shows each route's generation.
+
+`revoke --generation <g>` revokes only a route whose generation matches, so
+cleanup after one launch never removes a route another launch rotated in.
+Without `--generation` it revokes every matching route for the actor.
+
+Tokens stop working when the thread is archived or deleted (including the
+periodic sweep), on `revoke`, on `--rotate`, and ten minutes after the machine
+token rotates.
+
+The launcher runs the command as a child (no `exec`). It requires `node` to read
+the issuer response. It accepts the issuer's hub URL only when it is
+`http://127.0.0.1`, `http://localhost` or `http://[::1]` with a port and the
+plugin hub path; anything else (including any https URL) is refused before the
+command starts, the token is never exported, and the route it obtained is
+revoked. The child's environment is its inherited environment minus
+`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_BASE_URL` and the three launch-policy variables, plus exactly the
+issuer's `launchEnv`, the hub URL and the token. The default actor id is unique
+per launch (`launch:<random>`), so a live actor id is never reused; pass
+`--actor` with `--rotate` to take one over. TERM and HUP (and INT when stdin is
+not a terminal) are forwarded to the child's exact process id; nothing matches
+processes by name. On child exit, failure to launch, or a signal, the launcher
+revokes only the generation it obtained, so a newer route for the same actor
+stays valid, and returns the child's exit status. A failed revoke is reported on
+stderr and makes the launcher exit 1 even if the child succeeded. Issuance
+failure starts nothing and never falls back to direct credentials. Run plain
+`claude` for a direct route. An account choice is snapshotted at issue time;
+re-run `issue --rotate` to refresh it.
+
+The machine (`hostId`) is never caller input. `issue` takes only thread, actor,
+provider and `--rotate`. The host comes from bb's own thread record
+(`threads.get` with `include: "environment"`, field `environment.hostId`) and
+must appear in `hosts.list()`.
+
+Attribution is incomplete. The pool's usage and quota stores are keyed by
+account, not by actor, so per-actor usage is not recorded. The only per-actor
+record is last-routed evidence: the last time an actor route served a request,
+stored under `actor-routed:<thread>:<actor>:<provider>` (at most one write a
+minute) and shown by `route list`. Do not use it to bill or cap an actor.

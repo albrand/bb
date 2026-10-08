@@ -6,6 +6,7 @@ import {
 } from "./usage-contract.js";
 import fs from "node:fs/promises";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -424,12 +425,16 @@ async function createFixture(args: {
   apiKey?: string;
   priority?: number;
   beforePlugin?: (host: Fixture["host"]) => void;
+  loopbackBaseUrl?: string;
 }): Promise<Fixture> {
   const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-pool-"));
   const host = createFakePluginHost({
     pluginId: "account-pool",
     dataDir,
     sdk: sdkStubs(),
+    ...(args.loopbackBaseUrl === undefined
+      ? {}
+      : { loopbackBaseUrl: args.loopbackBaseUrl }),
   });
   await host.bb.storage.kv.set("config", {
     anthropicUpstreamBaseUrl: args.upstreamUrl,
@@ -10872,5 +10877,1005 @@ describe("Account Pool credential scoping", () => {
       ["ANTHROPIC_BASE_URL", ""],
       ["ANTHROPIC_AUTH_TOKEN", ""],
     ]);
+  });
+});
+
+describe("Actor route issuer", () => {
+  const sessionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const messageBody = JSON.stringify({
+    model: "claude-fable-5",
+    messages: [],
+    max_tokens: 1,
+    metadata: {
+      user_id: JSON.stringify({
+        account_uuid: "invalid-account-uuid",
+        device_id: "device",
+        parent_session_id: "parent",
+        session_id: sessionId,
+      }),
+    },
+  });
+
+  async function actorFixture(extra: { loopbackBaseUrl?: string; options?: AccountPoolPluginOptions; source?: "import" } = {}) {
+    const seen: string[] = [];
+    const upstream = await startUpstream((request, response) => {
+      seen.push(String(request.headers["x-api-key"]));
+      response.setHeader("content-type", "application/json");
+      response.end('{"ok":true}');
+    });
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      ...(extra.source === "import" ? {} : { apiKey: "sk-first" }),
+      ...extra,
+    });
+    const archived = new Set<string>();
+    const environments = new Map<string, string | null>();
+    const hooks: { onRecheck: (() => Promise<void>) | null } = { onRecheck: null };
+    let environmentReads = 0;
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId, include }) => {
+      if (include === "environment") {
+        environmentReads += 1;
+        if (environmentReads === 2) await hooks.onRecheck?.();
+      }
+      const hostId = environments.has(threadId)
+        ? environments.get(threadId)
+        : "host-one";
+      return {
+        ...makeThreadResponse({
+          id: threadId,
+          providerId: "claude-code",
+          archivedAt: archived.has(threadId) ? 1_000 : null,
+        }),
+        environment: hostId === null ? null : { hostId },
+      } as never;
+    });
+    const proofFor = async (thread: string) => {
+      const hostId = environments.has(thread) ? environments.get(thread) : "host-one";
+      if (hostId === null || hostId === undefined) return "";
+      return resolveToken(fixture.host, hostId, thread).catch(() => "");
+    };
+    const runCli = fixture.host.harness.behavior.runCli;
+    const cli = async (argv: string[], proof?: string) => {
+      const verb = argv[0] === "route" ? argv[1] : undefined;
+      if (verb !== "issue" && verb !== "revoke") return runCli(argv);
+      const threadAt = argv.indexOf("--thread");
+      const thread = threadAt === -1 ? undefined : argv[threadAt + 1];
+      const value = proof ?? (await proofFor(thread ?? "thread-x"));
+      return runCli([...argv, "--proof-stdin"], {
+        experimental_stdinInputs: { proof: value },
+      });
+    };
+    const issue = async (thread: string, actor: string, extra: string[] = []) =>
+      cli(["route", "issue", "--thread", thread, "--actor", actor, ...extra]);
+    const send = async (token: string, route = "/v1/messages") => {
+      const response = await fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        route,
+        { method: "POST", headers: authHeaders(token), body: messageBody },
+      );
+      await response.text();
+      return response.status;
+    };
+    const affinityKeys = () =>
+      (
+        fixture.host.bb.storage
+          .database()
+          .prepare("SELECT affinity_key FROM pool_affinity")
+          .all() as Array<{ affinity_key: string }>
+      ).map((row) => JSON.parse(row.affinity_key) as string[]);
+    const tokenOf = (result: { stdout: string }) => result.stdout.trim();
+    return { fixture, seen, archived, environments, hooks, issue, send, affinityKeys, tokenOf, cli, proofFor };
+  }
+
+  const policyNames = [
+    "ENABLE_TOOL_SEARCH",
+    "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+    "ENABLE_PROMPT_CACHING_1H",
+  ];
+  const launchEnvOf = async (result: { stdout: string }) =>
+    (JSON.parse(result.stdout) as { launchEnv: Array<{ name: string; value: string }> }).launchEnv;
+  const canonicalPolicyEnv = async (fixture: Awaited<ReturnType<typeof actorFixture>>["fixture"]) =>
+    (
+      await fixture.host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-x",
+        projectId: "project-one",
+        hostId: "host-one",
+      })
+    )
+      .filter((entry) => policyNames.includes(entry.name))
+      .map((entry) => ({ name: entry.name, value: entry.value }));
+
+  it("returns the canonical non-secret launch env for an API-key-only pool", async () => {
+    const { fixture, issue } = await actorFixture();
+    const result = await issue("thread-x", "actor-a", ["--json"]);
+    const launchEnv = await launchEnvOf(result);
+    expect(launchEnv).toEqual(await canonicalPolicyEnv(fixture));
+    expect(launchEnv.map((entry) => entry.name)).toEqual([
+      "ENABLE_TOOL_SEARCH",
+      "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+    ]);
+    const parsed = JSON.parse(result.stdout) as { token: string };
+    expect(JSON.stringify(launchEnv)).not.toContain(parsed.token);
+    expect(JSON.stringify(launchEnv)).not.toMatch(/ANTHROPIC_(BASE_URL|AUTH_TOKEN)/u);
+  });
+
+  it("returns the 1-hour cache variable for a subscription pool, matching the canonical contributor", async () => {
+    const { fixture, issue } = await actorFixture({
+      source: "import",
+      options: { importCredentials: async () => importedCredentials() },
+    });
+    const launchEnv = await launchEnvOf(await issue("thread-x", "actor-a", ["--json"]));
+    expect(launchEnv).toEqual(await canonicalPolicyEnv(fixture));
+    expect(launchEnv).toContainEqual({ name: "ENABLE_PROMPT_CACHING_1H", value: "1" });
+  });
+
+  it.each([
+    ["is archived", async (a: { archived: Set<string> }) => void a.archived.add("thread-x")],
+    ["moves to another machine", async (a: { environments: Map<string, string | null> }) => void a.environments.set("thread-x", "host-two")],
+    ["is bypassed", async (a: { fixture: Awaited<ReturnType<typeof actorFixture>>["fixture"] }) => void (await a.fixture.host.harness.behavior.callRpc("bypass.set", { threadId: "thread-x", bypassed: true }))],
+    ["loses its provider", async (a: { fixture: Awaited<ReturnType<typeof actorFixture>>["fixture"] }) => void (await a.fixture.host.harness.behavior.callRpc("routing.set", { provider: "claude", enabled: false }))],
+  ] as const)(
+    "revokes the minted route and refuses when the thread %s between minting and the re-check",
+    async (_name, mutate) => {
+      const actors = await actorFixture();
+      actors.hooks.onRecheck = () => mutate(actors as never);
+      const result = await actors.issue("thread-x", "actor-a");
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toBe("");
+      expect(JSON.parse((await actors.cli(["route", "list", "--json"])).stdout)).toEqual({ ok: true, routes: [] });
+    },
+  );
+
+  it("revokes only a matching generation and keeps a newer route", async () => {
+    const { issue, send, cli } = await actorFixture();
+    const first = JSON.parse((await issue("thread-x", "actor-a", ["--json"])).stdout) as { token: string; generation: string };
+    const second = JSON.parse((await issue("thread-x", "actor-a", ["--rotate", "--json"])).stdout) as { token: string; generation: string };
+    expect(second.generation).not.toBe(first.generation);
+    const stale = await cli(["route", "revoke", "--actor", "actor-a", "--thread", "thread-x", "--generation", first.generation, "--json"]);
+    expect(JSON.parse(stale.stdout)).toEqual({ ok: true, revoked: 0 });
+    expect(await send(second.token)).toBe(200);
+    const listed = JSON.parse((await cli(["route", "list", "--json"])).stdout) as { routes: Array<{ generation: string }> };
+    expect(listed.routes.map((route) => route.generation)).toEqual([second.generation]);
+    const current = await cli(["route", "revoke", "--actor", "actor-a", "--generation", second.generation, "--json"]);
+    expect(JSON.parse(current.stdout)).toEqual({ ok: true, revoked: 1 });
+    expect(await send(second.token)).toBe(401);
+    const malformed = await cli(["route", "revoke", "--actor", "actor-a", "--generation", "zz"]);
+    expect(malformed.exitCode).not.toBe(0);
+  });
+
+  it("prints only the token on stdout and routes through the pooled account", async () => {
+    const { fixture, seen, issue, send, tokenOf } = await actorFixture();
+    const result = await issue("thread-x", "elyra:term_1");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/^[A-Za-z0-9_-]{43}\n$/u);
+    expect(result.stderr ?? "").toBe("");
+    const token = tokenOf(result);
+    expect(token).not.toBe(fixture.key);
+    expect(await send(token)).toBe(200);
+    expect(seen).toEqual(["sk-first"]);
+    const again = await issue("thread-x", "elyra:term_1");
+    expect(again.exitCode).not.toBe(0);
+    expect(again.stdout).toBe("");
+    const json = JSON.parse(
+      (await issue("thread-x", "elyra:term_1", ["--rotate", "--json"])).stdout,
+    ) as Record<string, unknown>;
+    expect(json).toMatchObject({
+      ok: true,
+      token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      generation: expect.stringMatching(/^[a-f0-9]{16}$/u),
+      hubUrl: expect.stringContaining("/api/v1/plugins/account-pool/http"),
+      route: { threadId: "thread-x", actorId: "elyra:term_1", provider: "claude" },
+      launchEnv: expect.any(Array),
+    });
+    expect(json.token).not.toBe(token);
+    expect(json.generation).not.toContain(String(json.token));
+  });
+
+  it("gives two actors on one thread distinct tokens and distinct conversation affinity", async () => {
+    const { fixture, issue, send, affinityKeys, tokenOf } = await actorFixture();
+    const a = tokenOf(await issue("thread-x", "actor-a"));
+    const b = tokenOf(await issue("thread-x", "actor-b"));
+    expect(a).not.toBe(b);
+    const threadToken = await resolveToken(fixture.host, "host-one", "thread-x");
+    expect(await send(a)).toBe(200);
+    expect(await send(b)).toBe(200);
+    expect(await send(threadToken)).toBe(200);
+    const keys = affinityKeys();
+    expect(keys.map((key) => key.length).sort()).toEqual([4, 5, 5]);
+    expect(keys.filter((key) => key[3] === "actor-a")).toHaveLength(1);
+    expect(keys.filter((key) => key[3] === "actor-b")).toHaveLength(1);
+    expect(new Set(keys.map((key) => JSON.stringify(key))).size).toBe(3);
+    for (const key of keys) expect(key.slice(0, 3)).toEqual(["claude", "host-one", "thread-x"]);
+  });
+
+  it("follows the thread's explicit subscription and routing switches", async () => {
+    const { fixture, seen, issue, send, tokenOf } = await actorFixture();
+    const second = accountSchema.parse(
+      await fixture.host.harness.behavior.callRpc("account.add", {
+        provider: "claude",
+        source: { kind: "api-key", apiKey: "sk-second" },
+        label: "Second",
+        priority: 200,
+      }),
+    );
+    const configure =
+      fixture.host.harness.registrations.hooks["experimental_thread.configure"];
+    if (configure === null) throw new Error("configure hook is missing");
+    await configure({
+      thread: { id: "thread-pinned", providerId: "claude-code" },
+      data: { provider: "claude", accountId: second.id },
+    });
+    const pinned = tokenOf(await issue("thread-pinned", "actor-a"));
+    expect(await send(pinned)).toBe(200);
+    expect(seen).toEqual(["sk-second"]);
+    await fixture.host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-pinned",
+      bypassed: true,
+    });
+    expect(await send(pinned)).toBe(409);
+    expect((await issue("thread-pinned", "actor-b")).exitCode).not.toBe(0);
+    await fixture.host.harness.behavior.callRpc("bypass.set", {
+      threadId: "thread-pinned",
+      bypassed: false,
+    });
+    expect(await send(pinned)).toBe(200);
+    const automatic = tokenOf(await issue("thread-auto", "actor-a"));
+    await fixture.host.harness.behavior.callRpc("routing.set", {
+      provider: "claude",
+      enabled: false,
+    });
+    expect(await send(automatic)).toBe(409);
+    const refused = await issue("thread-auto", "actor-c");
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stdout).toBe("");
+  });
+
+  it("stops authenticating after revoke, rotate, and thread archive", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const a = tokenOf(await issue("thread-x", "actor-a"));
+    const b = tokenOf(await issue("thread-x", "actor-b"));
+    const onOtherThread = tokenOf(await issue("thread-y", "actor-a"));
+    expect(await send(a)).toBe(200);
+    const revoked = await cli(["route", "revoke", "--actor", "actor-a", "--thread", "thread-x", "--json"]);
+    expect(JSON.parse(revoked.stdout)).toEqual({ ok: true, revoked: 1 });
+    expect(await send(a)).toBe(401);
+    expect(await send(b)).toBe(200);
+    expect(await send(onOtherThread)).toBe(200);
+    const rotated = tokenOf(await issue("thread-x", "actor-b", ["--rotate"]));
+    expect(rotated).not.toBe(b);
+    expect(await send(b)).toBe(401);
+    expect(await send(rotated)).toBe(200);
+    await fixture.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-x", archivedAt: 1_000 }),
+    });
+    expect(await send(rotated)).toBe(401);
+    expect(await send(onOtherThread)).toBe(200);
+    await cli(["route", "revoke", "--actor", "actor-a", "--thread", "thread-y"]);
+    expect(await send(onOtherThread)).toBe(401);
+  });
+
+  it("issues and revokes only for the thread the caller proves, never from caller-selected metadata", async () => {
+    const { fixture, issue, send, tokenOf, cli, proofFor } = await actorFixture();
+    const proofA = await proofFor("thread-a");
+    const refusal = "No proof for thread thread-b";
+    const crossMint = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x", "--json"], proofA);
+    expect(crossMint.exitCode).not.toBe(0);
+    expect(crossMint.stdout).not.toMatch(/"token"/u);
+    expect(crossMint.stdout + crossMint.stderr).toContain(refusal);
+    for (const proof of ["", "x".repeat(43), "thread-b"]) {
+      const refused = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-x"], proof);
+      expect(refused.exitCode).not.toBe(0);
+      expect(refused.stdout).toBe("");
+    }
+    const actorB = tokenOf(await issue("thread-b", "actor-b"));
+    const chained = await cli(["route", "issue", "--thread", "thread-b", "--actor", "actor-y"], actorB);
+    expect(chained.exitCode).not.toBe(0);
+    expect(chained.stdout).toBe("");
+    const crossRevoke = await cli(["route", "revoke", "--actor", "actor-b", "--thread", "thread-b", "--json"], proofA);
+    expect(crossRevoke.exitCode).not.toBe(0);
+    const scoped = await cli(["route", "revoke", "--actor", "actor-b", "--json"], proofA);
+    expect(JSON.parse(scoped.stdout)).toEqual({ ok: true, revoked: 0 });
+    expect(await send(actorB)).toBe(200);
+    const argvProof = await fixture.host.harness.behavior.runCli([
+      "route", "issue", "--thread", "thread-a", "--actor", "actor-z", "--proof", proofA,
+    ]);
+    expect(argvProof.exitCode).not.toBe(0);
+    expect(argvProof.stdout).toBe("");
+    const own = await cli(["route", "issue", "--thread", "thread-a", "--actor", "actor-z"], proofA);
+    expect(own.exitCode).toBe(0);
+    expect(await send(tokenOf(own))).toBe(200);
+  });
+
+  it("rejects bogus, cross-provider, and unrelated tokens and leaves existing tokens alone", async () => {
+    const { fixture, issue, send, tokenOf } = await actorFixture();
+    const actor = tokenOf(await issue("thread-x", "actor-a"));
+    const thread = await resolveToken(fixture.host, "host-one", "thread-x");
+    expect(await send("A".repeat(43))).toBe(401);
+    expect(await send("short")).toBe(401);
+    expect(await send(actor, "/v1/responses")).toBe(401);
+    expect(await send(thread)).toBe(200);
+    expect(await send(fixture.key)).toBe(200);
+    await fixture.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-x", archivedAt: 1_000 }),
+    });
+    expect(await send(thread)).toBe(401);
+  });
+
+  it("refuses unknown, archived, hostless, unenrolled, and malformed requests", async () => {
+    const { archived, environments, issue, cli } = await actorFixture();
+    archived.add("thread-archived");
+    environments.set("thread-bare", null);
+    environments.set("thread-foreign", "host-unknown");
+    const unknown = async ({ threadId }: { threadId: string }) => {
+      throw Object.assign(new Error("missing"), {
+        status: 404,
+        code: "thread_not_found",
+        threadId,
+      });
+    };
+    for (const [thread, actor] of [
+      ["thread-archived", "actor-a"],
+      ["thread-bare", "actor-a"],
+      ["thread-foreign", "actor-a"],
+      ["thread-ok", "bad actor"],
+      ["thread-ok", ""],
+      ["thread_invalid.id", "actor-a"],
+    ] as const) {
+      const result = await issue(thread, actor);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toBe("");
+    }
+    const { fixture } = await actorFixture();
+    fixture.host.harness.sdk.stub("threads.get", unknown as never);
+    const missing = await fixture.host.harness.behavior.runCli([
+      "route", "issue", "--thread", "thread-missing", "--actor", "actor-a",
+    ]);
+    expect(missing.exitCode).not.toBe(0);
+    expect(missing.stdout).toBe("");
+    const none = await cli(["route", "list"]);
+    expect(none.stdout).toBe("No actor routes.\n");
+  });
+
+  it("lists routes without any token value and never logs a token", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const a = tokenOf(await issue("thread-x", "actor-a"));
+    const b = tokenOf(await issue("thread-x", "actor-b", ["--rotate"]));
+    const c = tokenOf(await issue("thread-y", "actor-a"));
+    await send(a);
+    await send(b);
+    await send(c);
+    const table = await cli(["route", "list"]);
+    const listed = await cli(["route", "list", "--json"]);
+    const revoked = await cli(["route", "revoke", "--actor", "actor-a"]);
+    const everything = [table.stdout, table.stderr ?? "", listed.stdout, revoked.stdout, revoked.stderr ?? ""].join("\n");
+    const resolved = await fixture.host.harness.behavior.resolveProviderEnv(
+      "claude-code",
+      { threadId: "thread-x", projectId: "project-one", hostId: "host-one" },
+    );
+    const threadToken = resolved.find((entry) => entry.name === "ANTHROPIC_AUTH_TOKEN")?.value;
+    for (const token of [a, b, c]) expect(everything).not.toContain(token);
+    expect(JSON.parse(listed.stdout)).toMatchObject({
+      ok: true,
+      routes: [
+        { actorId: "actor-a", threadId: "thread-x" },
+        { actorId: "actor-b", threadId: "thread-x" },
+        { actorId: "actor-a", threadId: "thread-y" },
+      ],
+    });
+    expect(table.stdout.trim().split("\n")).toHaveLength(3);
+    const logs = fixture.host.harness.logEntries.map((entry) => entry.message).join("\n");
+    expect(logs).toContain("actor actor-a");
+    for (const token of [a, b, c, fixture.key, ...(typeof threadToken === "string" ? [threadToken] : [])])
+      expect(logs).not.toContain(token);
+  });
+
+  it("refuses reuse of a live actor id by default, rotates only on request, and records last-routed evidence", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const first = tokenOf(await issue("thread-x", "actor-a"));
+    const reuse = await issue("thread-x", "actor-a");
+    expect(reuse.exitCode).not.toBe(0);
+    expect(reuse.stdout).toBe("");
+    expect(await send(first)).toBe(200);
+    const unknownFlag = await issue("thread-x", "actor-b", ["--exclusive"]);
+    expect(unknownFlag.exitCode).not.toBe(0);
+    expect(unknownFlag.stdout).toBe("");
+    const rotated = tokenOf(await issue("thread-x", "actor-a", ["--rotate"]));
+    expect(rotated).not.toBe(first);
+    expect(await send(first)).toBe(401);
+    expect(await send(rotated)).toBe(200);
+    await vi.waitFor(async () => {
+      const listed = JSON.parse((await cli(["route", "list", "--json"])).stdout) as {
+        routes: Array<{ lastRoutedAt: number | null }>;
+      };
+      expect(listed.routes[0]?.lastRoutedAt).toEqual(expect.any(Number));
+    });
+    const attribution = await fixture.host.bb.storage.kv.list("actor-routed:");
+    expect(attribution).toEqual(["actor-routed:thread-x:actor-a:claude"]);
+    const firstRevoke = await cli(["route", "revoke", "--actor", "actor-a", "--json"]);
+    const secondRevoke = await cli(["route", "revoke", "--actor", "actor-a", "--json"]);
+    expect(JSON.parse(firstRevoke.stdout)).toEqual({ ok: true, revoked: 1 });
+    expect(JSON.parse(secondRevoke.stdout)).toEqual({ ok: true, revoked: 0 });
+    expect(await fixture.host.bb.storage.kv.list("actor-routed:")).toEqual([]);
+    expect(await send(rotated)).toBe(401);
+  });
+
+  it("rejects a token minted before a machine token rotation once the grace period ends, and routes the new one", async () => {
+    let clock = 1_800_000_000_000;
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture({
+      options: { now: () => clock },
+    });
+    const before = tokenOf(await issue("thread-x", "actor-a"));
+    expect((await cli(["token", "rotate", "--machine", "host-one"])).exitCode).toBe(0);
+    expect(await send(before)).toBe(200);
+    const after = tokenOf(await issue("thread-x", "actor-a", ["--rotate"]));
+    expect(after).not.toBe(before);
+    expect(await send(after)).toBe(200);
+    clock += 10 * 60_000 + 1;
+    expect(await send(before)).toBe(401);
+    expect(await send(after)).toBe(200);
+    expect(fixture.key.length).toBeGreaterThan(0);
+  });
+
+  it("scopes tokens to their own machine and refuses threads on unenrolled machines", async () => {
+    const { environments, issue, send, tokenOf, cli } = await actorFixture();
+    environments.set("thread-two", "host-two");
+    environments.set("thread-foreign", "host-unknown");
+    const two = tokenOf(await issue("thread-two", "actor-a"));
+    expect(await send(two)).toBe(200);
+    const listed = JSON.parse((await cli(["route", "list", "--json"])).stdout) as {
+      routes: Array<{ hostId: string }>;
+    };
+    expect(listed.routes.map((route) => route.hostId)).toEqual(["host-two"]);
+    const foreign = await issue("thread-foreign", "actor-a");
+    expect(foreign.exitCode).not.toBe(0);
+    expect(foreign.stdout).toBe("");
+  });
+
+  it("refuses issue and 409s requests for an automatic route when the thread is bypassed or the provider is disabled", async () => {
+    const { fixture, issue, send, tokenOf } = await actorFixture();
+    const routingSet = (enabled: boolean) =>
+      fixture.host.harness.behavior.callRpc("routing.set", { provider: "claude", enabled });
+    const bypass = (bypassed: boolean) =>
+      fixture.host.harness.behavior.callRpc("bypass.set", { threadId: "thread-x", bypassed });
+    const token = tokenOf(await issue("thread-x", "actor-a"));
+    expect(await send(token)).toBe(200);
+    await bypass(true);
+    expect(await send(token)).toBe(409);
+    expect((await issue("thread-x", "actor-b")).exitCode).not.toBe(0);
+    await bypass(false);
+    expect(await send(token)).toBe(200);
+    await routingSet(false);
+    expect(await send(token)).toBe(409);
+    expect((await issue("thread-x", "actor-b")).exitCode).not.toBe(0);
+    await routingSet(true);
+    expect(await send(token)).toBe(200);
+  });
+
+  it("keeps every captured stream except the issue stdout free of the token", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const issued = await issue("thread-x", "actor-a", ["--json"]);
+    const token = (JSON.parse(issued.stdout) as { token: string }).token;
+    expect((await issue("thread-x", "actor-a")).exitCode).not.toBe(0);
+    await send(token);
+    const streams: string[] = [issued.stderr ?? ""];
+    for (const argv of [
+      ["route", "list"],
+      ["route", "list", "--json"],
+      ["route", "issue", "--thread", "thread-x", "--actor", "actor-a"],
+      ["route", "issue", "--thread", "thread-nope!", "--actor", "actor-a"],
+      ["route", "revoke", "--actor", "actor-a"],
+      ["route", "revoke", "--actor", "actor-a", "--json"],
+      ["status", "--json"],
+    ]) {
+      const result = await cli(argv);
+      streams.push(result.stdout, result.stderr ?? "");
+    }
+    streams.push(...fixture.host.harness.logEntries.map((entry) => entry.message));
+    expect(streams.length).toBeGreaterThan(10);
+    for (const stream of streams) expect(stream).not.toContain(token);
+  });
+});
+
+describe("Actor launcher end to end", () => {
+  const launcher = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../scripts/pool-actor-launch.sh",
+  );
+
+  async function harness(
+    args: { hubBase?: (base: string) => string; subscription?: boolean } = {},
+  ) {
+    let target: ReturnType<typeof createFakePluginHost> | null = null;
+    const cliRequests: Array<{ argv: string[]; stdinInputs: Record<string, string> }> = [];
+    const server = http.createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        void (async () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          const url = request.url ?? "/";
+          if (target === null) {
+            response.statusCode = 503;
+            response.end();
+            return;
+          }
+          if (url === "/__cli") {
+            const { argv, stdin } = JSON.parse(body) as {
+              argv: string[];
+              stdin?: Record<string, string>;
+            };
+            const result = await target.harness.behavior.runCli(
+              argv,
+              stdin === undefined ? undefined : { experimental_stdinInputs: stdin },
+            );
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify(result));
+            return;
+          }
+          if (url === "/api/v1/plugins/contributions") {
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify({
+              cliCommands: [{ pluginId: "account-pool", name: "pool", summary: "Account Pooler", commands: [] }],
+              mentionProviders: [],
+            }));
+            return;
+          }
+          if (url === "/api/v1/plugins/account-pool/cli" && request.method === "POST") {
+            const sent = JSON.parse(body) as {
+              argv: string[];
+              experimental_stdinInputs?: Record<string, string>;
+              threadId?: string;
+            };
+            cliRequests.push({ argv: sent.argv, stdinInputs: sent.experimental_stdinInputs ?? {} });
+            const result = await target.harness.behavior.runCli(sent.argv, {
+              ...(sent.experimental_stdinInputs === undefined
+                ? {}
+                : { experimental_stdinInputs: sent.experimental_stdinInputs }),
+              ...(sent.threadId === undefined ? {} : { threadId: sent.threadId }),
+            });
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify(result));
+            return;
+          }
+          const hubPrefix = "/api/v1/plugins/account-pool/http";
+          const hubResponse = await target.harness.behavior.fetchHttp(
+            request.method ?? "GET",
+            url.slice(hubPrefix.length),
+            {
+              method: request.method ?? "GET",
+              headers: Object.fromEntries(
+                Object.entries(request.headers).flatMap(([name, value]) =>
+                  typeof value === "string" ? [[name, value]] : [],
+                ),
+              ),
+              ...(body === "" ? {} : { body }),
+            },
+          );
+          response.statusCode = hubResponse.status;
+          response.setHeader("content-type", "application/json");
+          response.end(await hubResponse.text());
+        })().catch((error: unknown) => {
+          response.statusCode = 500;
+          response.end(String(error));
+        });
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    cleanups.push(
+      () => new Promise<void>((resolve) => server.close(() => resolve())),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("no port");
+    const base = `http://127.0.0.1:${address.port}`;
+    const seen: Array<{ key: string }> = [];
+    const upstream = await startUpstream((request, response) => {
+      seen.push({ key: String(request.headers["x-api-key"]) });
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        if (Buffer.concat(chunks).toString("utf8").includes('"stream":true')) {
+          response.setHeader("content-type", "text/event-stream");
+          const frames: Array<[string, unknown]> = [
+            ["message_start", { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "stub", content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } }],
+            ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+            ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "pooled-stub-reply" } }],
+            ["content_block_stop", { type: "content_block_stop", index: 0 }],
+            ["message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }],
+            ["message_stop", { type: "message_stop" }],
+          ];
+          response.end(frames.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join(""));
+          return;
+        }
+        response.setHeader("content-type", "application/json");
+        response.end('{"ok":true}');
+      });
+    });
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      ...(args.subscription === true
+        ? {
+            source: "import" as const,
+            options: { importCredentials: async () => importedCredentials() },
+          }
+        : { apiKey: "sk-pooled-account" }),
+      loopbackBaseUrl: args.hubBase?.(base) ?? base,
+    });
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      return {
+        ...makeThreadResponse({
+          id: threadId,
+          providerId: "claude-code",
+          archivedAt: threadId === "thread-archived" ? 1_000 : null,
+        }),
+        environment: { hostId: "host-one" },
+      } as never;
+    });
+    target = fixture.host;
+    const threadProof = await resolveToken(fixture.host, "host-one", "thread-e2e");
+    const work = await mkdtemp(path.join(tmpdir(), "bb-launcher-e2e-"));
+    cleanups.push(() => fs.rm(work, { recursive: true, force: true }));
+    const shimDir = path.join(work, "shim");
+    await fs.mkdir(shimDir);
+    await fs.writeFile(
+      path.join(shimDir, "bb"),
+      `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === "pool") args.shift();
+if (process.env.SHIM_FAIL_REVOKE === "1" && args[1] === "revoke") {
+  process.stderr.write("shim: revoke unavailable\\n");
+  process.exit(1);
+}
+// Like the bb CLI, an --<name>-stdin option is filled from stdin.
+const stdinOption = args.find((arg) => arg.endsWith("-stdin"));
+const readStdin = () => new Promise((resolve) => {
+  let data = "";
+  process.stdin.on("data", (chunk) => (data += chunk)).on("end", () => resolve(data));
+});
+(stdinOption === undefined ? Promise.resolve(undefined) : readStdin())
+  .then((value) => fetch(process.env.SHIM_CONTROL + "/__cli", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argv: args, ...(value === undefined ? {} : { stdin: { [stdinOption.slice(2, -"-stdin".length)]: value } }) }) }))
+  .then((r) => r.json())
+  .then((r) => {
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.stderr) process.stderr.write(r.stderr);
+    process.exit(r.exitCode);
+  })
+  .catch((e) => { process.stderr.write(String(e) + "\\n"); process.exit(99); });
+`,
+      { mode: 0o755 },
+    );
+    const tokenFile = path.join(work, "child-token.txt");
+    const marker = path.join(work, "child-ran.txt");
+    const childScript = path.join(work, "client.mjs");
+    await fs.writeFile(
+      childScript,
+      `import fs from "node:fs";
+fs.writeFileSync(${JSON.stringify(marker)}, "ran");
+if (process.env.ANTHROPIC_API_KEY !== undefined) process.exit(40);
+fs.writeFileSync(${JSON.stringify(tokenFile)}, process.env.ANTHROPIC_AUTH_TOKEN ?? "");
+const mode = process.argv[2] ?? "once";
+if (mode === "hang") { console.log("child-ready"); setInterval(() => {}, 1000); }
+else {
+  const response = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", {
+    method: "POST",
+    headers: { authorization: "Bearer " + process.env.ANTHROPIC_AUTH_TOKEN, "content-type": "application/json", "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-fable-5", messages: [], max_tokens: 1 }),
+  });
+  console.log("status=" + response.status + " tool_search=" + process.env.ENABLE_TOOL_SEARCH + " first_party=" + process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL + " cache1h=" + process.env.ENABLE_PROMPT_CACHING_1H + " oauth=" + (process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "unset"));
+  process.exit(response.status === 200 ? Number(process.argv[3] ?? 0) : 3);
+}
+`,
+    );
+    const run = (
+      args: string[],
+      env: Record<string, string> = {},
+      command: string[] = [process.execPath, childScript],
+      thread = "thread-e2e",
+    ) => {
+      const child = spawn(
+        "bash",
+        [launcher, "--thread", thread, ...args, "--", ...command],
+        {
+          env: {
+            ...process.env,
+            PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+            SHIM_CONTROL: base,
+            ANTHROPIC_API_KEY: "direct-credential-must-not-leak",
+            ANTHROPIC_AUTH_TOKEN: threadProof,
+            ...env,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      const done = new Promise<{ code: number | null; stdout: string; stderr: string }>(
+        (resolve) =>
+          child.on("close", (code) => resolve({ code, stdout, stderr })),
+      );
+      return { child, done, output: () => stdout };
+    };
+    const hubSend = async (token: string) => {
+      const response = await fetch(`${base}/api/v1/plugins/account-pool/http/v1/messages`, {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({ model: "claude-fable-5", messages: [], max_tokens: 1 }),
+      });
+      await response.text();
+      return response.status;
+    };
+    const readToken = () => fs.readFile(tokenFile, "utf8");
+    const listRoutes = async () =>
+      (JSON.parse((await fixture.host.harness.behavior.runCli(["route", "list", "--json"])).stdout) as {
+        routes: unknown[];
+      }).routes;
+    const threadCli = (argv: string[]) =>
+      fixture.host.harness.behavior.runCli([...argv, "--proof-stdin"], {
+        experimental_stdinInputs: { proof: threadProof },
+      });
+    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work, threadProof, threadCli, cliRequests };
+  }
+
+  it("runs the real launcher against the real issuer and revokes the route when the child exits", async () => {
+    const { seen, run, hubSend, readToken, listRoutes } = await harness();
+    const result = await run([]).done;
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "status=200 tool_search=true first_party=1 cache1h=undefined oauth=unset",
+    );
+    expect(seen).toEqual([{ key: "sk-pooled-account" }]);
+    const token = await readToken();
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(result.stdout + result.stderr).not.toContain(token);
+    expect(result.stdout + result.stderr).not.toContain("direct-credential-must-not-leak");
+    expect(await hubSend(token)).toBe(401);
+    expect(await listRoutes()).toEqual([]);
+  });
+
+  it("applies the 1-hour cache variable for a subscription pool and strips every inherited auth variable", async () => {
+    const { run, threadProof } = await harness({ subscription: true });
+    const result = await run(["--proof-env", "THREAD_POOL_PROOF"], {
+      THREAD_POOL_PROOF: threadProof,
+      ANTHROPIC_AUTH_TOKEN: "inherited-auth-must-not-win",
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:9/inherited",
+      CLAUDE_CODE_OAUTH_TOKEN: "inherited-oauth-must-not-leak",
+      ENABLE_PROMPT_CACHING_1H: "0",
+    }).done;
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "status=200 tool_search=true first_party=1 cache1h=1 oauth=unset",
+    );
+    expect(result.stdout + result.stderr).not.toContain("inherited-");
+  });
+
+  it("drops an inherited cache variable for an API-key-only pool", async () => {
+    const { run, threadProof } = await harness();
+    const result = await run(["--proof-env", "THREAD_POOL_PROOF"], { THREAD_POOL_PROOF: threadProof, ENABLE_PROMPT_CACHING_1H: "1", ANTHROPIC_AUTH_TOKEN: "inherited-auth-must-not-win" }).done;
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("cache1h=undefined");
+  });
+
+  it.each([
+    ["foreign https", (_base: string) => "https://example.com"],
+    ["lookalike host", (_base: string) => "http://127.0.0.1.evil.example:8080"],
+    ["foreign http host", (_base: string) => "http://192.0.2.10:8080"],
+    ["no port", (_base: string) => "http://localhost"],
+    ["wrong prefix on loopback", (base: string) => `${base}/elsewhere`],
+  ])("rejects a %s hub URL before starting the command and revokes the route it just obtained", async (_name, hubBase) => {
+    const { run, marker, tokenFile, listRoutes } = await harness({ hubBase });
+    const result = await run([]).done;
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("refusing the issuer response (hub-url)");
+    await expect(fs.stat(marker)).rejects.toThrow();
+    await expect(fs.stat(tokenFile)).rejects.toThrow();
+    expect(await listRoutes()).toEqual([]);
+  });
+
+  it("does not revoke a newer route that another launch rotated in when the first launch exits", async () => {
+    const { run, hubSend, listRoutes, work, threadCli } = await harness();
+    const release = path.join(work, "release-a");
+    const waitForFile =
+      "const f=process.argv[1];console.log('child-ready');setInterval(()=>{if(require('node:fs').existsSync(f))process.exit(0)},50)";
+    const launchA = run(["--actor", "shared-actor"], {}, [process.execPath, "-e", waitForFile, release]);
+    await vi.waitFor(() => expect(launchA.output()).toContain("child-ready"));
+    const rotated = JSON.parse(
+      (
+        await threadCli([
+          "route", "issue", "--thread", "thread-e2e", "--actor", "shared-actor", "--rotate", "--json",
+        ])
+      ).stdout,
+    ) as { token: string; generation: string };
+    await fs.writeFile(release, "go");
+    const ended = await launchA.done;
+    expect(ended.code).toBe(0);
+    expect(ended.stderr).not.toContain("FAILED");
+    expect(await hubSend(rotated.token)).toBe(200);
+    const routes = (await listRoutes()) as Array<{ generation: string }>;
+    expect(routes.map((route) => route.generation)).toEqual([rotated.generation]);
+  });
+
+  it("revokes when the command cannot be launched", async () => {
+    const { run, listRoutes } = await harness();
+    const result = await run([], {}, ["definitely-not-a-command-for-pool-launch"]).done;
+    expect(result.code).toBe(127);
+    expect(await listRoutes()).toEqual([]);
+  });
+
+  it("signals only its own child and never matches processes by name", async () => {
+    const { run, listRoutes } = await harness();
+    const script = "console.log('child-ready');setInterval(()=>{},1000)";
+    const decoy = spawn(process.execPath, ["-e", script], { stdio: "ignore" });
+    try {
+      const hanging = run([], {}, [process.execPath, "-e", script]);
+      await vi.waitFor(() => expect(hanging.output()).toContain("child-ready"));
+      hanging.child.kill("SIGTERM");
+      expect((await hanging.done).code).toBe(143);
+      expect(decoy.exitCode).toBeNull();
+      expect(decoy.signalCode).toBeNull();
+      expect(await listRoutes()).toEqual([]);
+    } finally {
+      decoy.kill("SIGKILL");
+    }
+    const source = await fs.readFile(launcher, "utf8");
+    expect(source).not.toMatch(/\b(pkill|pgrep|killall)\b/u);
+  });
+
+  it("returns the child's own status code", async () => {
+    const { run, hubSend, readToken, listRoutes } = await harness();
+    const result = await run([], {}, [process.execPath, "--input-type=module", "-e", "process.exit(5)"]).done;
+    expect(result.code).toBe(5);
+    expect(await listRoutes()).toEqual([]);
+    expect(readToken).toBeDefined();
+    expect(hubSend).toBeDefined();
+  });
+
+  it("exits non-zero when revocation fails even though the child succeeded", async () => {
+    const { run, listRoutes } = await harness();
+    const result = await run([], { SHIM_FAIL_REVOKE: "1" }).done;
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("FAILED to revoke");
+    expect(await listRoutes()).toHaveLength(1);
+  });
+
+  it("revokes when the launcher is terminated and forwards the signal to the child", async () => {
+    const { run, hubSend, readToken, listRoutes } = await harness();
+    const hanging = run([], {}, [process.execPath, "-e", "console.log('child-ready');setInterval(()=>{},1000)"]);
+    await vi.waitFor(() => expect(hanging.output()).toContain("child-ready"));
+    expect(await listRoutes()).toHaveLength(1);
+    hanging.child.kill("SIGTERM");
+    const ended = await hanging.done;
+    expect(ended.code).toBe(143);
+    expect(await listRoutes()).toEqual([]);
+    expect(readToken).toBeDefined();
+    expect(hubSend).toBeDefined();
+  });
+
+  it.skipIf(process.env.POOL_E2E_BB_CLI === undefined)(
+    "drives the real bb CLI: the proof travels on stdin, never in argv or the child env",
+    async () => {
+      const { base, run, hubSend, readToken, listRoutes, work, threadProof, cliRequests } = await harness();
+      const cliEnvDump = path.join(work, "cli-env.jsonl");
+      const realCli = path.join(work, "bb-recorded");
+      await fs.writeFile(
+        realCli,
+        `#!/bin/sh\n${JSON.stringify(process.execPath)} -e 'require("node:fs").appendFileSync(process.argv[1], JSON.stringify(process.env) + "\\n")' ${JSON.stringify(cliEnvDump)}\nexec ${JSON.stringify(process.env.POOL_E2E_BB_CLI ?? "")} "$@"\n`,
+        { mode: 0o755 },
+      );
+      const cliEnvs = async () =>
+        (await fs.readFile(cliEnvDump, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as Record<string, string>);
+      const envDump = path.join(work, "child-env.json");
+      const dumpEnv = `require("node:fs").writeFileSync(${JSON.stringify(envDump)}, JSON.stringify(process.env));`;
+      const preExported = {
+        proof: "pre-exported",
+        token: "pre-exported",
+        issued: "pre-exported",
+        hub_url: "pre-exported",
+        SHELLOPTS: "allexport",
+      };
+      const result = await run(
+        ["--bb", realCli, "--actor", "real-cli-actor"],
+        { BB_SERVER_URL: base, BB_THREAD_ID: "", ...preExported },
+        [process.execPath, "-e", dumpEnv],
+      ).done;
+      expect(result.code).toBe(0);
+      expect(result.stderr).not.toContain("FAILED");
+      expect(cliRequests.map((entry) => entry.argv.slice(0, 2))).toEqual([
+        ["route", "issue"],
+        ["route", "revoke"],
+      ]);
+      for (const entry of cliRequests) {
+        expect(entry.argv).toContain("--proof-stdin");
+        expect(entry.argv.join("\u0000")).not.toContain(threadProof);
+        expect(entry.stdinInputs).toEqual({ proof: threadProof });
+      }
+      const recorded = await cliEnvs();
+      expect(recorded).toHaveLength(2);
+      const carriers = (env: Record<string, string>, secret: string) =>
+        Object.entries(env)
+          .filter(([name, value]) => name.includes(secret) || value.includes(secret))
+          .map(([name]) => name);
+      for (const env of recorded) expect(carriers(env, threadProof)).toEqual([]);
+      const childEnv = JSON.parse(await fs.readFile(envDump, "utf8")) as Record<string, string>;
+      expect(carriers(childEnv, threadProof)).toEqual([]);
+      const actorToken = childEnv.ANTHROPIC_AUTH_TOKEN ?? "";
+      expect(actorToken).toMatch(/^.{43}$/u);
+      expect(actorToken === threadProof).toBe(false);
+      expect(carriers(childEnv, actorToken)).toEqual(["ANTHROPIC_AUTH_TOKEN"]);
+      for (const env of recorded) expect(carriers(env, actorToken)).toEqual([]);
+      expect(await hubSend(childEnv.ANTHROPIC_AUTH_TOKEN ?? "")).toBe(401);
+      expect(await listRoutes()).toEqual([]);
+      expect(readToken).toBeDefined();
+      const refused = await run(
+        ["--bb", realCli, "--actor", "real-cli-other"],
+        { BB_SERVER_URL: base, BB_THREAD_ID: "" },
+        [process.execPath, "-e", dumpEnv],
+        "thread-other",
+      ).done;
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain("No proof for thread thread-other");
+      expect(await listRoutes()).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.env.POOL_E2E_CLAUDE !== "1")(
+    "drives a real claude -p through the hub with network denied outside loopback",
+    async () => {
+      const { seen, run, hubSend, readToken, listRoutes, work } = await harness();
+      const profile =
+        '(version 1)(allow default)(deny network*)(allow network* (remote ip "localhost:*"))(allow network* (local ip "localhost:*"))';
+      const config = path.join(work, "claude-config");
+      await fs.mkdir(config);
+      const result = await run(
+        [],
+        {
+          CLAUDE_CONFIG_DIR: config,
+          HOME: work,
+          DISABLE_AUTOUPDATER: "1",
+          DISABLE_TELEMETRY: "1",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        },
+        ["sandbox-exec", "-p", profile, "claude", "-p", "say hi", "--model", "claude-fable-5"],
+      ).done;
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("pooled-stub-reply");
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((entry) => entry.key === "sk-pooled-account")).toBe(true);
+      expect(await listRoutes()).toEqual([]);
+      expect(hubSend).toBeDefined();
+      expect(readToken).toBeDefined();
+    },
+    120_000,
+  );
+
+  it("fails closed when issuance is refused and never starts the command", async () => {
+    const { run, marker, tokenFile } = await harness();
+    const result = await run([], {}, undefined, "thread-archived").done;
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("no fallback to direct auth");
+    await expect(fs.stat(marker)).rejects.toThrow();
+    await expect(fs.stat(tokenFile)).rejects.toThrow();
+  });
+
+  it("refuses to reuse a live actor id unless --rotate is given", async () => {
+    const { run, readToken, hubSend, threadCli } = await harness();
+    const existing = (
+      await threadCli([
+        "route", "issue", "--thread", "thread-e2e", "--actor", "shared-actor",
+      ])
+    ).stdout.trim();
+    const refused = await run(["--actor", "shared-actor"]).done;
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain("not starting the command");
+    expect(await hubSend(existing)).toBe(200);
+    const rotated = await run(["--actor", "shared-actor", "--rotate"]).done;
+    expect(rotated.code).toBe(0);
+    expect(await hubSend(existing)).toBe(401);
+    expect(await readToken()).not.toBe(existing);
   });
 });
