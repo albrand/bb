@@ -17,7 +17,12 @@ import {
   noopNotifier,
   updateQueuedThreadMessage,
 } from "../src/index.js";
-import { dropPluginEnabledFollowsDefaultColumn } from "./helpers/rewind.js";
+import {
+  dropIdleLifecycleIndexes,
+  dropPluginEnabledFollowsDefaultColumn,
+  dropQueuedMessageEditHeldUntilColumn,
+  rewindThreadPruningWork,
+} from "./helpers/rewind.js";
 
 const THREAD_DRAFTS_MIGRATION_TIMESTAMP = 1790322211064;
 const originalMigration = readFileSync(
@@ -64,7 +69,10 @@ it("lets a user edit and send a first-message draft that the original 0132 moved
       .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
       .run(THREAD_DRAFTS_MIGRATION_TIMESTAMP);
     db.$client.exec(originalMigration);
+    dropIdleLifecycleIndexes(db);
+    rewindThreadPruningWork(db);
     dropPluginEnabledFollowsDefaultColumn(db);
+    dropQueuedMessageEditHeldUntilColumn(db);
     db.$client
       .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
       .run(
@@ -179,7 +187,10 @@ it("restores a first-message draft from a same-provider thread's turn history wh
       .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
       .run(THREAD_DRAFTS_MIGRATION_TIMESTAMP);
     db.$client.exec(originalMigration);
+    dropIdleLifecycleIndexes(db);
+    rewindThreadPruningWork(db);
     dropPluginEnabledFollowsDefaultColumn(db);
+    dropQueuedMessageEditHeldUntilColumn(db);
     db.$client
       .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
       .run(
@@ -294,7 +305,10 @@ it("restores a first-message draft with the most recent same-provider turn's exe
       .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
       .run(THREAD_DRAFTS_MIGRATION_TIMESTAMP);
     db.$client.exec(originalMigration);
+    dropIdleLifecycleIndexes(db);
+    rewindThreadPruningWork(db);
     dropPluginEnabledFollowsDefaultColumn(db);
+    dropQueuedMessageEditHeldUntilColumn(db);
     db.$client
       .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
       .run(

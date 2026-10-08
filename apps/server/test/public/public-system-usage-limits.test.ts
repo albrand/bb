@@ -18,6 +18,12 @@ const USAGE_RESPONSE: ProviderUsageResponse = {
   },
   "claude-code": { status: "unauthenticated" },
   "acp-cursor": { status: "unauthenticated" },
+  "acp-opencode": {
+    status: "ok",
+    accountEmail: "opencode@example.com",
+    planLabel: "Pro",
+    windows: [{ label: "weekly", usedPercent: 18, resetsAt: null }],
+  },
 };
 
 const ALWAYS_VISIBLE_USAGE_RESPONSE: ProviderUsageResponse = {
@@ -81,7 +87,7 @@ describe("GET /api/v1/system/usage-limits", () => {
         sessionId: session.id,
         async handle(request) {
           await new Promise((resolve) => setTimeout(resolve, 10));
-          return handleUsageRequest(request);
+          return handleUsageRequest(request, true);
         },
       });
       const read = async (refresh = false) => {
@@ -97,16 +103,23 @@ describe("GET /api/v1/system/usage-limits", () => {
         ).length;
       try {
         await Promise.all(Array.from({ length: 8 }, read));
-        expect(count()).toBe(3);
+        expect(
+          responder.requests.flatMap((request) =>
+            request.command.type === "provider.usage"
+              ? [request.command.providerId]
+              : [],
+          ),
+        ).toEqual(["codex", "claude-code", "acp-cursor", "acp-opencode"]);
+        expect(count()).toBe(4);
         await read();
-        expect(count()).toBe(3);
+        expect(count()).toBe(4);
         await Promise.all(Array.from({ length: 8 }, () => read(true)));
-        expect(count()).toBe(6);
+        expect(count()).toBe(8);
         await read();
-        expect(count()).toBe(6);
+        expect(count()).toBe(8);
         harness.hub.notifyHost(host.id, ["host-connected"]);
         await read();
-        expect(count()).toBe(9);
+        expect(count()).toBe(12);
       } finally {
         responder.unregister();
       }
@@ -301,6 +314,46 @@ describe("GET /api/v1/system/usage-limits", () => {
         "acp-cursor",
         "acp-opencode",
       ]);
+    });
+  });
+
+  it("omits an installed provider when its runtime does not support usage and caches that result until refresh", async () => {
+    await withTestHarness(async (harness) => {
+      const primary = seedHostSession(harness.deps, { id: "host-primary" });
+      seedPrimaryHost(harness.deps, primary.host.id);
+      const responder = registerHostRpcResponder(harness, {
+        hostId: primary.host.id,
+        sessionId: primary.session.id,
+        handle: (request) =>
+          request.command.type === "provider.usage" &&
+          request.command.providerId === "acp-opencode"
+            ? { ok: true as const, result: { supported: false as const } }
+            : handleUsageRequest(request, true),
+      });
+      const read = async (refresh = false) => {
+        const response = await harness.app.request(
+          `/api/v1/system/usage-limits${refresh ? "?refresh=true" : ""}`,
+        );
+        expect(response.status).toBe(200);
+        expect(await readJson(response)).toEqual({
+          codex: USAGE_RESPONSE.codex,
+          "claude-code": USAGE_RESPONSE["claude-code"],
+          "acp-cursor": USAGE_RESPONSE["acp-cursor"],
+        });
+      };
+      const count = () =>
+        responder.requests.filter(
+          (request) =>
+            request.command.type === "provider.usage" &&
+            request.command.providerId === "acp-opencode",
+        ).length;
+
+      await read();
+      expect(count()).toBe(1);
+      await read();
+      expect(count()).toBe(1);
+      await read(true);
+      expect(count()).toBe(2);
     });
   });
 

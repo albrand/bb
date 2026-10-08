@@ -84,6 +84,7 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "hostsQueryKey",
     "projectPathsQueryKeyPrefix",
     "sidebarNavigationQueryKey",
+    "threadPendingInteractionsQueryKey",
     "threadPromptHistoryQueryKey",
     "threadQueryKey",
     "threadSearchQueryKeyPrefix",
@@ -94,6 +95,11 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "threadStoragePathsForThreadQueryKeyPrefix",
     "threadTimelineQueryKeyPrefix",
     "threadTimelineTurnSummaryDetailsQueryKeyPrefix",
+    "threadsQueryKey",
+  ],
+  "hooks/cache-owners/pending-thread-patches.ts": [
+    "sidebarNavigationQueryKey",
+    "threadQueryKey",
     "threadsQueryKey",
   ],
   "hooks/cache-owners/project-cache-owner.ts": [
