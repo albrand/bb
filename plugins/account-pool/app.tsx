@@ -247,7 +247,7 @@ function untilLabel(timestamp: number): string {
 function subscriptionState(
   account: AccountSummary,
   threshold: number,
-  nextAccountId: string | null,
+  nextAccountId: string | null | undefined,
 ): SubscriptionState {
   if (account.signInExpired)
     return {
@@ -289,6 +289,13 @@ function subscriptionState(
       tone: "text-subtle-foreground",
     };
   }
+  if (nextAccountId === undefined)
+    return {
+      label: "Checking…",
+      detail: null,
+      icon: null,
+      tone: "text-subtle-foreground",
+    };
   if (account.id === nextAccountId)
     return {
       label: "Next",
@@ -1106,7 +1113,9 @@ function AccountPoolSettings() {
   const [loginDone, setLoginDone] = useState<string | null>(null);
   const [pastedCode, setPastedCode] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
-  const [nextAccountId, setNextAccountId] = useState<string | null>(null);
+  const [nextAccountId, setNextAccountId] = useState<string | null | undefined>(
+    undefined,
+  );
   const [localLogins, setLocalLogins] = useState<LocalLogin[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [priority, setPriority] = useState("100");
@@ -1123,18 +1132,20 @@ function AccountPoolSettings() {
       const next = await rpc.call("status.get", null);
       writeCachedStatus(next);
       if (!mounted.current) return;
-      setStatus(next);
-      setStatusIsCached(false);
-      const pick =
+      const needsNextBinding =
         next.routing.claude &&
         next.accounts.some(
           (account) => account.provider === "claude" && account.enabled,
-        )
-          ? await rpc.call("routing.binding.next", { provider: "claude" }).then(
-              (result) => result.nextAccountId,
-              () => null,
-            )
-          : null;
+        );
+      setNextAccountId(needsNextBinding ? undefined : null);
+      setStatus(next);
+      setStatusIsCached(false);
+      const pick = needsNextBinding
+        ? await rpc.call("routing.binding.next", { provider: "claude" }).then(
+            (result) => result.nextAccountId,
+            () => null,
+          )
+        : null;
       if (mounted.current) setNextAccountId(pick);
     } catch (loadError) {
       if (mounted.current) setError(errorText(loadError));
@@ -1211,9 +1222,11 @@ function AccountPoolSettings() {
   }, [accountLabel, codexStep, loginDone, refresh, rpc]);
   const accounts = status?.accounts ?? [];
   const nextSubscriptionId =
-    nextAccountId === null
-      ? null
-      : (subscriptionRepresentative(accounts, nextAccountId)?.id ?? null);
+    nextAccountId === undefined
+      ? undefined
+      : nextAccountId === null
+        ? null
+        : (subscriptionRepresentative(accounts, nextAccountId)?.id ?? null);
   const enabledTwins = (account: AccountSummary) =>
     subscriptionMembers(accounts, account.id).filter(
       (member) => member.id !== account.id && member.enabled,
