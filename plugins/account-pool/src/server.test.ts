@@ -6,6 +6,7 @@ import {
 } from "./usage-contract.js";
 import fs from "node:fs/promises";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -424,12 +425,16 @@ async function createFixture(args: {
   apiKey?: string;
   priority?: number;
   beforePlugin?: (host: Fixture["host"]) => void;
+  loopbackBaseUrl?: string;
 }): Promise<Fixture> {
   const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-pool-"));
   const host = createFakePluginHost({
     pluginId: "account-pool",
     dataDir,
     sdk: sdkStubs(),
+    ...(args.loopbackBaseUrl === undefined
+      ? {}
+      : { loopbackBaseUrl: args.loopbackBaseUrl }),
   });
   await host.bb.storage.kv.set("config", {
     anthropicUpstreamBaseUrl: args.upstreamUrl,
@@ -10891,7 +10896,7 @@ describe("Actor route issuer", () => {
     },
   });
 
-  async function actorFixture() {
+  async function actorFixture(extra: { loopbackBaseUrl?: string; options?: AccountPoolPluginOptions } = {}) {
     const seen: string[] = [];
     const upstream = await startUpstream((request, response) => {
       seen.push(String(request.headers["x-api-key"]));
@@ -10902,6 +10907,7 @@ describe("Actor route issuer", () => {
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
       apiKey: "sk-first",
+      ...extra,
     });
     const archived = new Set<string>();
     const environments = new Map<string, string | null>();
@@ -11128,5 +11134,401 @@ describe("Actor route issuer", () => {
     expect(logs).toContain("actor actor-a");
     for (const token of [a, b, c, fixture.key, ...(typeof threadToken === "string" ? [threadToken] : [])])
       expect(logs).not.toContain(token);
+  });
+
+  it("is idempotent on repeat issue and revoke, refuses exclusive reuse, and records durable attribution", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const first = tokenOf(await issue("thread-x", "actor-a"));
+    expect(tokenOf(await issue("thread-x", "actor-a"))).toBe(first);
+    const reuse = await issue("thread-x", "actor-a", ["--exclusive"]);
+    expect(reuse.exitCode).not.toBe(0);
+    expect(reuse.stdout).toBe("");
+    const rotated = tokenOf(await issue("thread-x", "actor-a", ["--exclusive", "--rotate"]));
+    expect(rotated).not.toBe(first);
+    expect(await send(first)).toBe(401);
+    expect(await send(rotated)).toBe(200);
+    await vi.waitFor(async () => {
+      const listed = JSON.parse((await cli(["route", "list", "--json"])).stdout) as {
+        routes: Array<{ lastRoutedAt: number | null }>;
+      };
+      expect(listed.routes[0]?.lastRoutedAt).toEqual(expect.any(Number));
+    });
+    const attribution = await fixture.host.bb.storage.kv.list("actor-routed:");
+    expect(attribution).toEqual(["actor-routed:thread-x:actor-a:claude"]);
+    const firstRevoke = await cli(["route", "revoke", "--actor", "actor-a", "--json"]);
+    const secondRevoke = await cli(["route", "revoke", "--actor", "actor-a", "--json"]);
+    expect(JSON.parse(firstRevoke.stdout)).toEqual({ ok: true, revoked: 1 });
+    expect(JSON.parse(secondRevoke.stdout)).toEqual({ ok: true, revoked: 0 });
+    expect(await fixture.host.bb.storage.kv.list("actor-routed:")).toEqual([]);
+    expect(await send(rotated)).toBe(401);
+  });
+
+  it("rejects a token minted before a machine token rotation once the grace period ends, and routes the new one", async () => {
+    let clock = 1_800_000_000_000;
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture({
+      options: { now: () => clock },
+    });
+    const before = tokenOf(await issue("thread-x", "actor-a"));
+    expect((await cli(["token", "rotate", "--machine", "host-one"])).exitCode).toBe(0);
+    expect(await send(before)).toBe(200);
+    const after = tokenOf(await issue("thread-x", "actor-a"));
+    expect(after).not.toBe(before);
+    expect(await send(after)).toBe(200);
+    clock += 10 * 60_000 + 1;
+    expect(await send(before)).toBe(401);
+    expect(await send(after)).toBe(200);
+    expect(fixture.key.length).toBeGreaterThan(0);
+  });
+
+  it("scopes tokens to their own machine and refuses threads on unenrolled machines", async () => {
+    const { environments, issue, send, tokenOf, cli } = await actorFixture();
+    environments.set("thread-two", "host-two");
+    environments.set("thread-foreign", "host-unknown");
+    const two = tokenOf(await issue("thread-two", "actor-a"));
+    expect(await send(two)).toBe(200);
+    const listed = JSON.parse((await cli(["route", "list", "--json"])).stdout) as {
+      routes: Array<{ hostId: string }>;
+    };
+    expect(listed.routes.map((route) => route.hostId)).toEqual(["host-two"]);
+    const foreign = await issue("thread-foreign", "actor-a");
+    expect(foreign.exitCode).not.toBe(0);
+    expect(foreign.stdout).toBe("");
+  });
+
+  it("refuses issue and 409s requests for an automatic route when the thread is bypassed or the provider is disabled", async () => {
+    const { fixture, issue, send, tokenOf } = await actorFixture();
+    const routingSet = (enabled: boolean) =>
+      fixture.host.harness.behavior.callRpc("routing.set", { provider: "claude", enabled });
+    const bypass = (bypassed: boolean) =>
+      fixture.host.harness.behavior.callRpc("bypass.set", { threadId: "thread-x", bypassed });
+    const token = tokenOf(await issue("thread-x", "actor-a"));
+    expect(await send(token)).toBe(200);
+    await bypass(true);
+    expect(await send(token)).toBe(409);
+    expect((await issue("thread-x", "actor-b")).exitCode).not.toBe(0);
+    await bypass(false);
+    expect(await send(token)).toBe(200);
+    await routingSet(false);
+    expect(await send(token)).toBe(409);
+    expect((await issue("thread-x", "actor-b")).exitCode).not.toBe(0);
+    await routingSet(true);
+    expect(await send(token)).toBe(200);
+  });
+
+  it("keeps every captured stream except the issue stdout free of the token", async () => {
+    const { fixture, issue, send, tokenOf, cli } = await actorFixture();
+    const issued = await issue("thread-x", "actor-a", ["--json"]);
+    const token = (JSON.parse(issued.stdout) as { token: string }).token;
+    expect(tokenOf(await issue("thread-x", "actor-a"))).toBe(token);
+    await send(token);
+    const streams: string[] = [issued.stderr ?? ""];
+    for (const argv of [
+      ["route", "list"],
+      ["route", "list", "--json"],
+      ["route", "issue", "--thread", "thread-x", "--actor", "actor-a", "--exclusive"],
+      ["route", "issue", "--thread", "thread-nope!", "--actor", "actor-a"],
+      ["route", "revoke", "--actor", "actor-a"],
+      ["route", "revoke", "--actor", "actor-a", "--json"],
+      ["status", "--json"],
+    ]) {
+      const result = await cli(argv);
+      streams.push(result.stdout, result.stderr ?? "");
+    }
+    streams.push(...fixture.host.harness.logEntries.map((entry) => entry.message));
+    expect(streams.length).toBeGreaterThan(10);
+    for (const stream of streams) expect(stream).not.toContain(token);
+  });
+});
+
+describe("Actor launcher end to end", () => {
+  const launcher = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../scripts/pool-actor-launch.sh",
+  );
+
+  async function harness() {
+    let target: ReturnType<typeof createFakePluginHost> | null = null;
+    const server = http.createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        void (async () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          const url = request.url ?? "/";
+          if (target === null) {
+            response.statusCode = 503;
+            response.end();
+            return;
+          }
+          if (url === "/__cli") {
+            const argv = (JSON.parse(body) as { argv: string[] }).argv;
+            const result = await target.harness.behavior.runCli(argv);
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify(result));
+            return;
+          }
+          const hubPrefix = "/api/v1/plugins/account-pool/http";
+          const hubResponse = await target.harness.behavior.fetchHttp(
+            request.method ?? "GET",
+            url.slice(hubPrefix.length),
+            {
+              method: request.method ?? "GET",
+              headers: Object.fromEntries(
+                Object.entries(request.headers).flatMap(([name, value]) =>
+                  typeof value === "string" ? [[name, value]] : [],
+                ),
+              ),
+              ...(body === "" ? {} : { body }),
+            },
+          );
+          response.statusCode = hubResponse.status;
+          response.setHeader("content-type", "application/json");
+          response.end(await hubResponse.text());
+        })().catch((error: unknown) => {
+          response.statusCode = 500;
+          response.end(String(error));
+        });
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    cleanups.push(
+      () => new Promise<void>((resolve) => server.close(() => resolve())),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("no port");
+    const base = `http://127.0.0.1:${address.port}`;
+    const seen: Array<{ key: string }> = [];
+    const upstream = await startUpstream((request, response) => {
+      seen.push({ key: String(request.headers["x-api-key"]) });
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        if (Buffer.concat(chunks).toString("utf8").includes('"stream":true')) {
+          response.setHeader("content-type", "text/event-stream");
+          const frames: Array<[string, unknown]> = [
+            ["message_start", { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "stub", content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } }],
+            ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+            ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "pooled-stub-reply" } }],
+            ["content_block_stop", { type: "content_block_stop", index: 0 }],
+            ["message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }],
+            ["message_stop", { type: "message_stop" }],
+          ];
+          response.end(frames.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join(""));
+          return;
+        }
+        response.setHeader("content-type", "application/json");
+        response.end('{"ok":true}');
+      });
+    });
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      apiKey: "sk-pooled-account",
+      loopbackBaseUrl: base,
+    });
+    fixture.host.harness.sdk.stub("threads.get", async ({ threadId }) => {
+      return {
+        ...makeThreadResponse({
+          id: threadId,
+          providerId: "claude-code",
+          archivedAt: threadId === "thread-archived" ? 1_000 : null,
+        }),
+        environment: { hostId: "host-one" },
+      } as never;
+    });
+    target = fixture.host;
+    const work = await mkdtemp(path.join(tmpdir(), "bb-launcher-e2e-"));
+    cleanups.push(() => fs.rm(work, { recursive: true, force: true }));
+    const shimDir = path.join(work, "shim");
+    await fs.mkdir(shimDir);
+    await fs.writeFile(
+      path.join(shimDir, "bb"),
+      `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === "pool") args.shift();
+if (process.env.SHIM_FAIL_REVOKE === "1" && args[1] === "revoke") {
+  process.stderr.write("shim: revoke unavailable\\n");
+  process.exit(1);
+}
+fetch(process.env.SHIM_CONTROL + "/__cli", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argv: args }) })
+  .then((r) => r.json())
+  .then((r) => {
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.stderr) process.stderr.write(r.stderr);
+    process.exit(r.exitCode);
+  })
+  .catch((e) => { process.stderr.write(String(e) + "\\n"); process.exit(99); });
+`,
+      { mode: 0o755 },
+    );
+    const tokenFile = path.join(work, "child-token.txt");
+    const marker = path.join(work, "child-ran.txt");
+    const childScript = path.join(work, "client.mjs");
+    await fs.writeFile(
+      childScript,
+      `import fs from "node:fs";
+fs.writeFileSync(${JSON.stringify(marker)}, "ran");
+if (process.env.ANTHROPIC_API_KEY !== undefined) process.exit(40);
+fs.writeFileSync(${JSON.stringify(tokenFile)}, process.env.ANTHROPIC_AUTH_TOKEN ?? "");
+const mode = process.argv[2] ?? "once";
+if (mode === "hang") { console.log("child-ready"); setInterval(() => {}, 1000); }
+else {
+  const response = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", {
+    method: "POST",
+    headers: { authorization: "Bearer " + process.env.ANTHROPIC_AUTH_TOKEN, "content-type": "application/json", "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-fable-5", messages: [], max_tokens: 1 }),
+  });
+  console.log("status=" + response.status + " tool_search=" + process.env.ENABLE_TOOL_SEARCH + " first_party=" + process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL + " cache1h=" + process.env.ENABLE_PROMPT_CACHING_1H);
+  process.exit(response.status === 200 ? Number(process.argv[3] ?? 0) : 3);
+}
+`,
+    );
+    const run = (
+      args: string[],
+      env: Record<string, string> = {},
+      command: string[] = [process.execPath, childScript],
+      thread = "thread-e2e",
+    ) => {
+      const child = spawn(
+        "bash",
+        [launcher, "--thread", thread, ...args, "--", ...command],
+        {
+          env: {
+            ...process.env,
+            PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+            SHIM_CONTROL: base,
+            ANTHROPIC_API_KEY: "direct-credential-must-not-leak",
+            ...env,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      const done = new Promise<{ code: number | null; stdout: string; stderr: string }>(
+        (resolve) =>
+          child.on("close", (code) => resolve({ code, stdout, stderr })),
+      );
+      return { child, done, output: () => stdout };
+    };
+    const hubSend = async (token: string) => {
+      const response = await fetch(`${base}/api/v1/plugins/account-pool/http/v1/messages`, {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({ model: "claude-fable-5", messages: [], max_tokens: 1 }),
+      });
+      await response.text();
+      return response.status;
+    };
+    const readToken = () => fs.readFile(tokenFile, "utf8");
+    const listRoutes = async () =>
+      (JSON.parse((await fixture.host.harness.behavior.runCli(["route", "list", "--json"])).stdout) as {
+        routes: unknown[];
+      }).routes;
+    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work };
+  }
+
+  it("runs the real launcher against the real issuer and revokes the route when the child exits", async () => {
+    const { seen, run, hubSend, readToken, listRoutes } = await harness();
+    const result = await run([]).done;
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "status=200 tool_search=true first_party=1 cache1h=1",
+    );
+    expect(seen).toEqual([{ key: "sk-pooled-account" }]);
+    const token = await readToken();
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(result.stdout + result.stderr).not.toContain(token);
+    expect(result.stdout + result.stderr).not.toContain("direct-credential-must-not-leak");
+    expect(await hubSend(token)).toBe(401);
+    expect(await listRoutes()).toEqual([]);
+  });
+
+  it("returns the child's own status code", async () => {
+    const { run, hubSend, readToken, listRoutes } = await harness();
+    const result = await run([], {}, [process.execPath, "--input-type=module", "-e", "process.exit(5)"]).done;
+    expect(result.code).toBe(5);
+    expect(await listRoutes()).toEqual([]);
+    expect(readToken).toBeDefined();
+    expect(hubSend).toBeDefined();
+  });
+
+  it("exits non-zero when revocation fails even though the child succeeded", async () => {
+    const { run, listRoutes } = await harness();
+    const result = await run([], { SHIM_FAIL_REVOKE: "1" }).done;
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("FAILED to revoke");
+    expect(await listRoutes()).toHaveLength(1);
+  });
+
+  it("revokes when the launcher is terminated and forwards the signal to the child", async () => {
+    const { run, hubSend, readToken, listRoutes } = await harness();
+    const hanging = run([], {}, [process.execPath, "-e", "console.log('child-ready');setInterval(()=>{},1000)"]);
+    await vi.waitFor(() => expect(hanging.output()).toContain("child-ready"));
+    expect(await listRoutes()).toHaveLength(1);
+    hanging.child.kill("SIGTERM");
+    const ended = await hanging.done;
+    expect(ended.code).toBe(143);
+    expect(await listRoutes()).toEqual([]);
+    expect(readToken).toBeDefined();
+    expect(hubSend).toBeDefined();
+  });
+
+  it.skipIf(process.env.POOL_E2E_CLAUDE !== "1")(
+    "drives a real claude -p through the hub with network denied outside loopback",
+    async () => {
+      const { seen, run, hubSend, readToken, listRoutes, work } = await harness();
+      const profile =
+        '(version 1)(allow default)(deny network*)(allow network* (remote ip "localhost:*"))(allow network* (local ip "localhost:*"))';
+      const config = path.join(work, "claude-config");
+      await fs.mkdir(config);
+      const result = await run(
+        [],
+        {
+          CLAUDE_CONFIG_DIR: config,
+          HOME: work,
+          DISABLE_AUTOUPDATER: "1",
+          DISABLE_TELEMETRY: "1",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        },
+        ["sandbox-exec", "-p", profile, "claude", "-p", "say hi", "--model", "claude-fable-5"],
+      ).done;
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("pooled-stub-reply");
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((entry) => entry.key === "sk-pooled-account")).toBe(true);
+      expect(await listRoutes()).toEqual([]);
+      expect(hubSend).toBeDefined();
+      expect(readToken).toBeDefined();
+    },
+    120_000,
+  );
+
+  it("fails closed when issuance is refused and never starts the command", async () => {
+    const { run, marker, tokenFile } = await harness();
+    const result = await run([], {}, undefined, "thread-archived").done;
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("no fallback to direct auth");
+    await expect(fs.stat(marker)).rejects.toThrow();
+    await expect(fs.stat(tokenFile)).rejects.toThrow();
+  });
+
+  it("refuses to reuse a live actor id unless --rotate is given", async () => {
+    const { fixture, run, readToken, hubSend } = await harness();
+    const existing = (
+      await fixture.host.harness.behavior.runCli([
+        "route", "issue", "--thread", "thread-e2e", "--actor", "shared-actor",
+      ])
+    ).stdout.trim();
+    const refused = await run(["--actor", "shared-actor"]).done;
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain("not starting the command");
+    expect(await hubSend(existing)).toBe(200);
+    const rotated = await run(["--actor", "shared-actor", "--rotate"]).done;
+    expect(rotated.code).toBe(0);
+    expect(await hubSend(existing)).toBe(401);
+    expect(await readToken()).not.toBe(existing);
   });
 });

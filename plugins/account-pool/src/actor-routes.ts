@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { providerSchema, type PoolProvider } from "./contracts.js";
 import {
+  ActorRouteExistsError,
   actorIdSchema,
   type ActorRoute,
   type ThreadTokenStore,
@@ -15,6 +16,7 @@ export const actorRouteIssueInputSchema = z
     actorId: actorIdSchema,
     provider: providerSchema.default("claude"),
     rotate: z.boolean().default(false),
+    exclusive: z.boolean().default(false),
   })
   .strict();
 
@@ -47,6 +49,8 @@ export interface ActorRouteDeps {
     hostId: string,
     provider: PoolProvider,
   ) => Promise<void>;
+  lastRoutedAt: (route: ActorRoute) => Promise<number | null>;
+  forgetRouted: (actorId: string, threadId: string | null) => Promise<void>;
   onIssued: (route: ActorRoute, rotated: boolean) => void;
   onRevoked: (actorId: string, threadId: string | null, count: number) => void;
 }
@@ -95,9 +99,19 @@ export class ActorRouteIssuer {
       ),
     };
     const hostToken = await this.deps.hubTokens.forHost(hostId);
-    const token = await this.deps.threadTokens.forActor(route, hostToken, {
-      rotate: input.rotate,
-    });
+    let token: string;
+    try {
+      token = await this.deps.threadTokens.forActor(route, hostToken, {
+        rotate: input.rotate,
+        exclusive: input.exclusive,
+      });
+    } catch (error) {
+      if (error instanceof ActorRouteExistsError)
+        throw new ActorRouteError(
+          `Actor ${input.actorId} already has a route on thread ${input.threadId}; pass --rotate to replace it.`,
+        );
+      throw error;
+    }
     const after = await this.deps.getThread(input.threadId);
     if (after === null || after.archived) {
       await this.deps.threadTokens.revokeActor({
@@ -118,11 +132,17 @@ export class ActorRouteIssuer {
   ): Promise<{ revoked: number }> {
     const input = actorRouteRevokeInputSchema.parse(raw);
     const revoked = await this.deps.threadTokens.revokeActor(input);
+    await this.deps.forgetRouted(input.actorId, input.threadId ?? null);
     this.deps.onRevoked(input.actorId, input.threadId ?? null, revoked);
     return { revoked };
   }
 
-  list(): ActorRoute[] {
-    return this.deps.threadTokens.listActors();
+  async list(): Promise<Array<ActorRoute & { lastRoutedAt: number | null }>> {
+    return Promise.all(
+      this.deps.threadTokens.listActors().map(async (route) => ({
+        ...route,
+        lastRoutedAt: await this.deps.lastRoutedAt(route),
+      })),
+    );
   }
 }

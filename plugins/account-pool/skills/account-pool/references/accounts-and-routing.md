@@ -290,7 +290,31 @@ returns the same token; `--rotate` replaces it. `list` never prints tokens.
 
 Tokens stop working when the thread is archived or deleted (including the
 periodic sweep), on `revoke`, on `--rotate`, and ten minutes after the machine
-token rotates. The launcher script exits non-zero when issuance fails and never
-falls back to direct credentials; it unsets `ANTHROPIC_API_KEY` and
-`CLAUDE_CODE_OAUTH_TOKEN` for the child. Run plain `claude` for a direct route.
-An account choice is snapshotted at issue time; re-run `issue` to refresh it.
+token rotates.
+
+The launcher runs the command as a child (no `exec`) with the token only in the
+child's environment, defaults to a unique actor id per launch (`launch:<random>`),
+passes `--exclusive` so a live actor id is never reused (use `--rotate` to take
+it over), forwards TERM and HUP (and INT when stdin is not a terminal) to the
+child, revokes the route when the child exits or the launcher is signalled, and
+returns the child's exit status. A failed revoke is reported on stderr and makes
+the launcher exit 1 even if the child succeeded. Issuance failure starts nothing
+and never falls back to direct credentials. The child gets neither
+`ANTHROPIC_API_KEY` nor `CLAUDE_CODE_OAUTH_TOKEN`. Run plain `claude` for a
+direct route. An account choice is snapshotted at issue time; re-run `issue` to
+refresh it.
+
+The machine (`hostId`) is never caller input. `issue` takes only thread, actor,
+provider, `--rotate` and `--exclusive`. The host comes from bb's own thread
+record (`threads.get` with `include: "environment"`, field `environment.hostId`)
+and must appear in `hosts.list()`. The last time an actor route served a request
+is stored under `actor-routed:<thread>:<actor>:<provider>` (at most one write a
+minute) and shown by `route list`.
+
+Caller identity: the plugin CLI context's `threadId` is the caller-supplied
+`BB_THREAD_ID` environment value (apps/cli/src/context-env.ts:48, sent in the
+request body and copied to the context at apps/server/src/routes/plugins.ts:560).
+That route only runs the browser-origin guard (plugins.ts:200). bb exposes no
+authenticated caller identity and no user-versus-agent distinction, so issuance
+cannot be limited to the caller's own thread. Any local CLI caller can issue for
+any live, enrolled thread.

@@ -186,10 +186,13 @@ export function createAccountPoolPlugin(
       drainTimeoutMs: options.drainTimeoutMs,
       maxAffinityBindings: options.maxAffinityBindings,
       getParentRoute: proxyingParent,
-      onActorRequest: ({ provider, threadId, actorId }) =>
-        bb.log.debug(
-          `Account Pooler ${provider} request routed for thread ${threadId} actor ${actorId}.`,
-        ),
+      onActorRequest: ({ provider, hostId, threadId, actorId }) => {
+        routing
+          .recordActorRouted({ provider, hostId, threadId, actorId })
+          .catch(() =>
+            bb.log.warn("Account Pooler could not record an actor route."),
+          );
+      },
       onUpstreamError: (provider, error) =>
         bb.log.warn(
           `Account Pooler ${provider} transport failed: ${transportErrorCode(error)}.`,
@@ -378,6 +381,17 @@ export function createAccountPoolPlugin(
       canServe,
       hubUrl: () =>
         `${bb.server.loopbackBaseUrl.replace(/\/+$/u, "")}${HUB_BASE_PATH}`,
+      lastRoutedAt: (route) =>
+        routing.actorLastRoutedAt({
+          threadId: route.threadId,
+          actorId: route.actorId,
+          provider: route.provider,
+        }),
+      forgetRouted: (actorId, threadId) =>
+        routing.removeActorRouted({
+          actorId,
+          ...(threadId === null ? {} : { threadId }),
+        }),
       recordRouted: async (threadId, hostId, provider) => {
         if (provider === "claude") await routing.recordRouted(threadId, hostId);
       },

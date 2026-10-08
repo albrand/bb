@@ -1080,6 +1080,11 @@ export function registerPoolCli(
               type: "boolean",
               description: "Replace the actor's existing token",
             },
+            exclusive: {
+              type: "boolean",
+              description:
+                "Refuse when the actor already has a route on the thread (unless --rotate)",
+            },
             json: JSON_OPTION,
           },
           run: (input) =>
@@ -1092,6 +1097,7 @@ export function registerPoolCli(
                     ? {}
                     : { provider: input.options.provider }),
                   rotate: input.options.rotate === true,
+                  exclusive: input.options.exclusive === true,
                 });
                 return {
                   exitCode: 0,
@@ -1145,7 +1151,7 @@ export function registerPoolCli(
           options: { json: JSON_OPTION },
           run: (input) =>
             attempt(async () => {
-              const routes = actorRoutes.list();
+              const routes = await actorRoutes.list();
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -1155,7 +1161,7 @@ export function registerPoolCli(
                     : `${routes
                         .map(
                           (route) =>
-                            `${route.actorId}\t${route.threadId}\t${route.provider}\t${route.hostId}\t${route.accountId ?? "automatic"}`,
+                            `${route.actorId}\t${route.threadId}\t${route.provider}\t${route.hostId}\t${route.accountId ?? "automatic"}\t${route.lastRoutedAt ?? "never"}`,
                         )
                         .join("\n")}\n`,
               };

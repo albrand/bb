@@ -71,6 +71,8 @@ export type ThreadRoute = Omit<RouteRecord, "token" | "hostTokenDigest">;
 export type ActorRoute = Omit<ActorRouteRecord, "token" | "hostTokenDigest">;
 export type NestedRoute = Omit<NestedRouteRecord, "token" | "hostTokenDigest">;
 
+export class ActorRouteExistsError extends Error {}
+
 export type ThreadLookup = (
   threadId: string,
   signal?: AbortSignal,
@@ -248,7 +250,7 @@ export class ThreadTokenStore {
   async forActor(
     route: ActorRoute,
     hostToken: string,
-    options: { rotate?: boolean } = {},
+    options: { rotate?: boolean; exclusive?: boolean } = {},
   ): Promise<string> {
     const parsed = actorRouteSchema
       .omit({ token: true, hostTokenDigest: true })
@@ -259,6 +261,8 @@ export class ThreadTokenStore {
         throw new Error("Cannot mint a credential for an archived thread.");
       const key = this.actorKey(parsed, hostTokenDigest);
       const existing = this.actorRoutes.get(key);
+      if (existing !== undefined && options.exclusive === true && options.rotate !== true)
+        throw new ActorRouteExistsError("An actor route for this thread and actor already exists.");
       if (
         existing !== undefined &&
         options.rotate !== true &&
