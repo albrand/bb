@@ -1130,23 +1130,22 @@ function AccountPoolSettings() {
   const refresh = useCallback(async () => {
     try {
       const next = await rpc.call("status.get", null);
-      writeCachedStatus(next);
-      if (!mounted.current) return;
       const needsNextBinding =
         next.routing.claude &&
         next.accounts.some(
           (account) => account.provider === "claude" && account.enabled,
         );
-      setNextAccountId(needsNextBinding ? undefined : null);
-      setStatus(next);
-      setStatusIsCached(false);
       const pick = needsNextBinding
         ? await rpc.call("routing.binding.next", { provider: "claude" }).then(
             (result) => result.nextAccountId,
             () => null,
           )
         : null;
-      if (mounted.current) setNextAccountId(pick);
+      writeCachedStatus(next);
+      if (!mounted.current) return;
+      setStatus(next);
+      setStatusIsCached(false);
+      setNextAccountId(pick);
     } catch (loadError) {
       if (mounted.current) setError(errorText(loadError));
     }

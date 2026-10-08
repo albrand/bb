@@ -16,7 +16,10 @@ import type {
   AccountSummary,
   PoolStatus,
 } from "./src/contracts.js";
-import { ACCOUNT_POOL_CONFIG_CHANGED } from "./src/realtime.js";
+import {
+  ACCOUNT_POOL_ACCOUNTS_CHANGED,
+  ACCOUNT_POOL_CONFIG_CHANGED,
+} from "./src/realtime.js";
 
 const app = await loadPluginApp(() => import("./app"));
 afterEach(() => {
@@ -619,6 +622,56 @@ it("gives subscription and routing switches a 44px coarse-pointer hit area", asy
 });
 
 describe("Account Pool settings", () => {
+  it("keeps the resolved next account visible during a refresh", async () => {
+    const firstId = "11111111-1111-4111-8111-111111111111";
+    const secondId = "22222222-2222-4222-8222-222222222222";
+    const accounts = [
+      account({
+        id: firstId,
+        label: "First Claude",
+        email: "first@example.com",
+      }),
+      account({
+        id: secondId,
+        label: "Second Claude",
+        email: "second@example.com",
+      }),
+    ];
+    const refreshedBinding = deferred<{
+      nextAccountId: string | null;
+      reason: string;
+    }>();
+    let bindingCalls = 0;
+    const slot = render(accounts, {
+      "routing.binding.next": () => {
+        bindingCalls += 1;
+        return bindingCalls === 1
+          ? { nextAccountId: firstId, reason: "Most headroom." }
+          : refreshedBinding.promise;
+      },
+    });
+
+    const firstRow = (
+      await slot.findByRole("switch", { name: "Use First Claude" })
+    ).closest("div");
+    const secondRow = (
+      await slot.findByRole("switch", { name: "Use Second Claude" })
+    ).closest("div");
+    await waitFor(() => expect(firstRow?.textContent).toContain("Next"));
+
+    await slot.emitRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, {});
+    await waitFor(() => expect(bindingCalls).toBe(2));
+    expect(firstRow?.textContent).toContain("Next");
+    expect(firstRow?.textContent).not.toContain("Checking…");
+
+    refreshedBinding.resolve({
+      nextAccountId: secondId,
+      reason: "Most headroom.",
+    });
+    await waitFor(() => expect(secondRow?.textContent).toContain("Next"));
+    expect(firstRow?.textContent).toContain("Ready");
+  });
+
   it("keeps ready accounts neutral until the next Claude binding resolves", async () => {
     const next = deferred<{ nextAccountId: string | null; reason: string }>();
     const live = deferred<PoolStatus>();
