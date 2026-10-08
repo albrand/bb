@@ -16,7 +16,10 @@ import type {
   AccountSummary,
   PoolStatus,
 } from "./src/contracts.js";
-import { ACCOUNT_POOL_CONFIG_CHANGED } from "./src/realtime.js";
+import {
+  ACCOUNT_POOL_ACCOUNTS_CHANGED,
+  ACCOUNT_POOL_CONFIG_CHANGED,
+} from "./src/realtime.js";
 
 const app = await loadPluginApp(() => import("./app"));
 afterEach(() => {
@@ -619,6 +622,131 @@ it("gives subscription and routing switches a 44px coarse-pointer hit area", asy
 });
 
 describe("Account Pool settings", () => {
+  it("keeps the resolved next account visible during a refresh", async () => {
+    const firstId = "11111111-1111-4111-8111-111111111111";
+    const secondId = "22222222-2222-4222-8222-222222222222";
+    const accounts = [
+      account({
+        id: firstId,
+        label: "First Claude",
+        email: "first@example.com",
+      }),
+      account({
+        id: secondId,
+        label: "Second Claude",
+        email: "second@example.com",
+      }),
+    ];
+    const refreshedBinding = deferred<{
+      nextAccountId: string | null;
+      reason: string;
+    }>();
+    let bindingCalls = 0;
+    const slot = render(accounts, {
+      "routing.binding.next": () => {
+        bindingCalls += 1;
+        return bindingCalls === 1
+          ? { nextAccountId: firstId, reason: "Most headroom." }
+          : refreshedBinding.promise;
+      },
+    });
+
+    const firstRow = (
+      await slot.findByRole("switch", { name: "Use First Claude" })
+    ).closest("div");
+    const secondRow = (
+      await slot.findByRole("switch", { name: "Use Second Claude" })
+    ).closest("div");
+    await waitFor(() => expect(firstRow?.textContent).toContain("Next"));
+
+    await slot.emitRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, {});
+    await waitFor(() => expect(bindingCalls).toBe(2));
+    expect(firstRow?.textContent).toContain("Next");
+    expect(firstRow?.textContent).not.toContain("Checking…");
+
+    refreshedBinding.resolve({
+      nextAccountId: secondId,
+      reason: "Most headroom.",
+    });
+    await waitFor(() => expect(secondRow?.textContent).toContain("Next"));
+    expect(firstRow?.textContent).toContain("Ready");
+  });
+
+  it("keeps ready accounts neutral until the next Claude binding resolves", async () => {
+    const next = deferred<{ nextAccountId: string | null; reason: string }>();
+    const live = deferred<PoolStatus>();
+    const accounts = [
+      account({ id: GMAIL_ID, label: "Next Claude" }),
+      account({
+        id: "77777777-7777-4777-8777-777777777777",
+        label: "Used up Claude",
+        email: "used-up@example.com",
+        status: "exhausted",
+        sevenDayUtilization: 1,
+      }),
+      account({
+        id: "88888888-8888-4888-8888-888888888888",
+        label: "Disabled Claude",
+        email: "disabled@example.com",
+        enabled: false,
+        status: "disabled",
+      }),
+    ];
+    window.localStorage.setItem(
+      STATUS_CACHE_KEY,
+      JSON.stringify(status(accounts)),
+    );
+    const slot = render(accounts, {
+      "status.get": () => live.promise,
+      "routing.binding.next": () => next.promise,
+    });
+
+    const nextRow = (
+      await slot.findByRole("switch", { name: "Use Next Claude" })
+    ).closest("div");
+    expect(nextRow?.textContent).toContain("Checking…");
+    expect(nextRow?.textContent).not.toContain("Ready");
+    expect(slot.getByText("Used up")).toBeTruthy();
+    expect(slot.getByText("Off")).toBeTruthy();
+
+    live.resolve(status(accounts));
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "routing.binding.next",
+        input: { provider: "claude" },
+      }),
+    );
+    expect(nextRow?.textContent).toContain("Checking…");
+    next.resolve({ nextAccountId: GMAIL_ID, reason: "Most headroom." });
+    await waitFor(() => expect(nextRow?.textContent).toContain("Next"));
+    expect(slot.getByText("· most headroom")).toBeTruthy();
+  });
+
+  it("shows Ready when the next Claude binding lookup fails", async () => {
+    const slot = render([account({ id: GMAIL_ID, label: "Claude account" })], {
+      "routing.binding.next": () => Promise.reject(new Error("offline")),
+    });
+
+    expect(await slot.findByText("Ready")).toBeTruthy();
+    expect(slot.queryByText("Checking…")).toBeNull();
+  });
+
+  it("shows Ready immediately when Claude routing is off", async () => {
+    const live = status([account({ id: GMAIL_ID, label: "Claude account" })]);
+    live.routing.claude = false;
+    const slot = render([account({ id: GMAIL_ID, label: "Claude account" })], {
+      "status.get": () => live,
+      "routing.binding.next": () => {
+        throw new Error("binding lookup should not run");
+      },
+    });
+
+    await waitFor(() => expect(slot.getByText("Ready")).toBeTruthy());
+    expect(
+      slot.rpcCalls.some((call) => call.method === "routing.binding.next"),
+    ).toBe(false);
+  });
+
   it("renders cached accounts as refreshing until live status arrives, then caches it", async () => {
     window.localStorage.setItem(
       STATUS_CACHE_KEY,
