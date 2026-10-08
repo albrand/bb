@@ -11398,6 +11398,8 @@ describe("Actor launcher end to end", () => {
     args: { hubBase?: (base: string) => string; subscription?: boolean } = {},
   ) {
     let target: ReturnType<typeof createFakePluginHost> | null = null;
+    // Requests from the real bb CLI (POOL_E2E_BB_CLI), as the server sees them.
+    const cliRequests: Array<{ argv: string[]; stdinInputs: Record<string, string> }> = [];
     const server = http.createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -11419,6 +11421,32 @@ describe("Actor launcher end to end", () => {
               argv,
               stdin === undefined ? undefined : { experimental_stdinInputs: stdin },
             );
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify(result));
+            return;
+          }
+          // The two bb server routes the real bb CLI uses for plugin commands.
+          if (url === "/api/v1/plugins/contributions") {
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify({
+              cliCommands: [{ pluginId: "account-pool", name: "pool", summary: "Account Pooler", commands: [] }],
+              mentionProviders: [],
+            }));
+            return;
+          }
+          if (url === "/api/v1/plugins/account-pool/cli" && request.method === "POST") {
+            const sent = JSON.parse(body) as {
+              argv: string[];
+              experimental_stdinInputs?: Record<string, string>;
+              threadId?: string;
+            };
+            cliRequests.push({ argv: sent.argv, stdinInputs: sent.experimental_stdinInputs ?? {} });
+            const result = await target.harness.behavior.runCli(sent.argv, {
+              ...(sent.experimental_stdinInputs === undefined
+                ? {}
+                : { experimental_stdinInputs: sent.experimental_stdinInputs }),
+              ...(sent.threadId === undefined ? {} : { threadId: sent.threadId }),
+            });
             response.setHeader("content-type", "application/json");
             response.end(JSON.stringify(result));
             return;
@@ -11603,7 +11631,7 @@ else {
       fixture.host.harness.behavior.runCli([...argv, "--proof-stdin"], {
         experimental_stdinInputs: { proof: threadProof },
       });
-    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work, threadProof, threadCli };
+    return { base, seen, fixture, run, hubSend, readToken, listRoutes, marker, tokenFile, work, threadProof, threadCli, cliRequests };
   }
 
   it("runs the real launcher against the real issuer and revokes the route when the child exits", async () => {
@@ -11739,6 +11767,56 @@ else {
     expect(readToken).toBeDefined();
     expect(hubSend).toBeDefined();
   });
+
+  // POOL_E2E_BB_CLI is a real bb CLI executable (e.g. apps/cli/bin/bb built
+  // from this commit). It talks to this harness as its bb server.
+  it.skipIf(process.env.POOL_E2E_BB_CLI === undefined)(
+    "drives the real bb CLI: the proof travels on stdin, never in argv or the child env",
+    async () => {
+      const realCli = process.env.POOL_E2E_BB_CLI ?? "";
+      const { base, run, hubSend, readToken, listRoutes, work, threadProof, cliRequests } = await harness();
+      const envDump = path.join(work, "child-env.json");
+      const dumpEnv = `require("node:fs").writeFileSync(${JSON.stringify(envDump)}, JSON.stringify(process.env));`;
+      const result = await run(
+        ["--bb", realCli, "--actor", "real-cli-actor"],
+        { BB_SERVER_URL: base, BB_THREAD_ID: "" },
+        [process.execPath, "-e", dumpEnv],
+      ).done;
+      expect(result.code).toBe(0);
+      expect(result.stderr).not.toContain("FAILED");
+      // The real CLI sent exactly an issue then a revoke, each carrying the
+      // proof only as a stdin input, never as an argument.
+      expect(cliRequests.map((entry) => entry.argv.slice(0, 2))).toEqual([
+        ["route", "issue"],
+        ["route", "revoke"],
+      ]);
+      for (const entry of cliRequests) {
+        expect(entry.argv).toContain("--proof-stdin");
+        expect(entry.argv.join("\u0000")).not.toContain(threadProof);
+        expect(entry.stdinInputs).toEqual({ proof: threadProof });
+      }
+      // The child got its actor route, never the thread's proof.
+      const childEnv = JSON.parse(await fs.readFile(envDump, "utf8")) as Record<string, string>;
+      expect(Object.values(childEnv)).not.toContain(threadProof);
+      expect(childEnv.ANTHROPIC_AUTH_TOKEN).toMatch(/^.{43}$/u);
+      expect(childEnv.ANTHROPIC_AUTH_TOKEN).not.toBe(threadProof);
+      // Revoked on exit: the actor route no longer serves, nothing is listed.
+      expect(await hubSend(childEnv.ANTHROPIC_AUTH_TOKEN ?? "")).toBe(401);
+      expect(await listRoutes()).toEqual([]);
+      expect(readToken).toBeDefined();
+      // A caller holding only another thread's proof is refused through the
+      // same real CLI path, and the command never starts.
+      const refused = await run(
+        ["--bb", realCli, "--actor", "real-cli-other"],
+        { BB_SERVER_URL: base, BB_THREAD_ID: "" },
+        [process.execPath, "-e", dumpEnv],
+        "thread-other",
+      ).done;
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain("No proof for thread thread-other");
+      expect(await listRoutes()).toEqual([]);
+    },
+  );
 
   it.skipIf(process.env.POOL_E2E_CLAUDE !== "1")(
     "drives a real claude -p through the hub with network denied outside loopback",
