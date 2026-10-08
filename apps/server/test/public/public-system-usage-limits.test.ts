@@ -97,16 +97,23 @@ describe("GET /api/v1/system/usage-limits", () => {
         ).length;
       try {
         await Promise.all(Array.from({ length: 8 }, read));
-        expect(count()).toBe(3);
+        expect(
+          responder.requests.flatMap((request) =>
+            request.command.type === "provider.usage"
+              ? [request.command.providerId]
+              : [],
+          ),
+        ).toEqual(["codex", "claude-code", "pi", "acp-cursor"]);
+        expect(count()).toBe(4);
         await read();
-        expect(count()).toBe(3);
+        expect(count()).toBe(4);
         await Promise.all(Array.from({ length: 8 }, () => read(true)));
-        expect(count()).toBe(6);
+        expect(count()).toBe(8);
         await read();
-        expect(count()).toBe(6);
+        expect(count()).toBe(8);
         harness.hub.notifyHost(host.id, ["host-connected"]);
         await read();
-        expect(count()).toBe(9);
+        expect(count()).toBe(12);
       } finally {
         responder.unregister();
       }
