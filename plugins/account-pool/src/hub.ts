@@ -90,6 +90,12 @@ interface HubOptions {
   drainTimeoutMs: number;
   getParentRoute: () => ParentPool | null;
   onAccountsChanged: () => void;
+  onActorRequest: (info: {
+    provider: PoolProvider;
+    hostId: string;
+    threadId: string;
+    actorId: string;
+  }) => void;
   onUpstreamError: (provider: PoolProvider, error: unknown) => void;
   onOAuthRefresh: (
     provider: PoolProvider,
@@ -225,10 +231,13 @@ export class AccountPoolHub {
   ): Promise<Response> {
     const adapter = this.adapter(provider);
     const token = presentedToken(request);
-    const threadRoute = await this.options.threadTokens.authenticate(
+    const actorRoute = await this.options.threadTokens.authenticateActor(
       token,
       provider,
     );
+    const threadRoute: (ThreadRoute & { actorId?: string }) | null =
+      actorRoute ??
+      (await this.options.threadTokens.authenticate(token, provider));
     const hostId =
       threadRoute?.hostId ??
       (await this.options.threadTokens.authenticateNested(token))?.hostId ??
@@ -243,8 +252,8 @@ export class AccountPoolHub {
       );
     if (
       threadRoute !== null &&
-      threadRoute.accountId !== null &&
-      threadRoute.accountId !== undefined &&
+      (actorRoute !== null ||
+        (threadRoute.accountId !== null && threadRoute.accountId !== undefined)) &&
       this.options.routing !== null &&
       ((await this.options.routing.isBypassed(threadRoute.threadId)) ||
         !(await this.options.routing.isProviderEnabled(provider)))
@@ -253,6 +262,14 @@ export class AccountPoolHub {
         409,
         "Pooled routing is disabled for this conversation. Start a new turn to use its current routing settings.",
       );
+    }
+    if (actorRoute !== null) {
+      this.options.onActorRequest({
+        provider,
+        hostId: actorRoute.hostId,
+        threadId: actorRoute.threadId,
+        actorId: actorRoute.actorId,
+      });
     }
     const parent = this.options.getParentRoute();
     if (parent !== null) {
@@ -615,7 +632,7 @@ export class AccountPoolHub {
     body: Uint8Array,
     adapter: ProviderAdapter,
     hostId: string,
-    threadRoute: ThreadRoute | null = null,
+    threadRoute: (ThreadRoute & { actorId?: string }) | null = null,
   ): Promise<Response> {
     const signal = AbortSignal.any([request.signal, this.stopped.signal]);
     const attempted = new Set<string>();
@@ -650,12 +667,20 @@ export class AccountPoolHub {
         : JSON.stringify(
             threadRoute === null
               ? [adapter.provider, hostId, parsed.affinityId]
-              : [
-                  adapter.provider,
-                  hostId,
-                  threadRoute.threadId,
-                  parsed.affinityId,
-                ],
+              : threadRoute.actorId === undefined
+                ? [
+                    adapter.provider,
+                    hostId,
+                    threadRoute.threadId,
+                    parsed.affinityId,
+                  ]
+                : [
+                    adapter.provider,
+                    hostId,
+                    threadRoute.threadId,
+                    threadRoute.actorId,
+                    parsed.affinityId,
+                  ],
           );
     const parentAffinityKey =
       affinityKey === null || parsed.parentAffinityId === null
@@ -663,12 +688,20 @@ export class AccountPoolHub {
         : JSON.stringify(
             threadRoute === null
               ? [adapter.provider, hostId, parsed.parentAffinityId]
-              : [
-                  adapter.provider,
-                  hostId,
-                  threadRoute.threadId,
-                  parsed.parentAffinityId,
-                ],
+              : threadRoute.actorId === undefined
+                ? [
+                    adapter.provider,
+                    hostId,
+                    threadRoute.threadId,
+                    parsed.parentAffinityId,
+                  ]
+                : [
+                    adapter.provider,
+                    hostId,
+                    threadRoute.threadId,
+                    threadRoute.actorId,
+                    parsed.parentAffinityId,
+                  ],
           );
     try {
       while (attempted.size < candidateIds.size) {
@@ -1656,6 +1689,7 @@ export function createHub(options: {
   maxAffinityBindings?: number;
   getParentRoute?: () => ParentPool | null;
   onAccountsChanged?: () => void;
+  onActorRequest?: HubOptions["onActorRequest"];
   onUpstreamError?: (provider: PoolProvider, error: unknown) => void;
   onOAuthRefresh?: HubOptions["onOAuthRefresh"];
 }): AccountPoolHub {
@@ -1693,6 +1727,7 @@ export function createHub(options: {
     drainTimeoutMs: options.drainTimeoutMs ?? 60_000,
     getParentRoute: options.getParentRoute ?? (() => null),
     onAccountsChanged: options.onAccountsChanged ?? (() => {}),
+    onActorRequest: options.onActorRequest ?? (() => {}),
     onUpstreamError: options.onUpstreamError ?? (() => {}),
     onOAuthRefresh: options.onOAuthRefresh ?? (() => {}),
   });

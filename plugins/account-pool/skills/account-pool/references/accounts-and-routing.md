@@ -265,3 +265,32 @@ accounts or to each provider's own credentials.
 Proxied traffic authenticates with the nested token of the launching thread and
 is attributed to that thread's machine, so `bb pool status` on the parent
 attributes it to the parent host rather than to the nested instance.
+
+## Actor routes for external launchers
+
+An external launcher (a terminal, an IDE) that runs its own `claude` process can
+route it through the pool with a per-actor token bound to one live thread. The
+token is not a machine token: it works only for its thread, host, provider and
+actor, follows the thread's subscription choice, bypass and routing switches,
+and keeps its own conversation affinity per actor.
+
+```sh
+bb pool route issue --thread <thread-id> --actor <actor-id> [--provider claude|codex] [--rotate] [--json]
+bb pool route revoke --actor <actor-id> [--thread <thread-id>] [--json]
+bb pool route list [--json]
+plugins/account-pool/scripts/pool-actor-launch.sh --thread <thread-id> --actor <actor-id> -- claude [args]
+```
+
+`issue` prints the token as the only stdout line (with `--json`: `token`,
+`hubUrl`, and route metadata). Capture it with command substitution; never put
+it in argv, a log, a file or a transcript. Issuing is refused for an unknown,
+archived or deleted thread, a thread without an enrolled machine, a bypassed
+thread, or a provider that is disabled or has no usable account. Re-issuing
+returns the same token; `--rotate` replaces it. `list` never prints tokens.
+
+Tokens stop working when the thread is archived or deleted (including the
+periodic sweep), on `revoke`, on `--rotate`, and ten minutes after the machine
+token rotates. The launcher script exits non-zero when issuance fails and never
+falls back to direct credentials; it unsets `ANTHROPIC_API_KEY` and
+`CLAUDE_CODE_OAUTH_TOKEN` for the child. Run plain `claude` for a direct route.
+An account choice is snapshotted at issue time; re-run `issue` to refresh it.

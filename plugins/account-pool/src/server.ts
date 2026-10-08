@@ -17,6 +17,7 @@ import {
 } from "./contracts.js";
 import { draftSelectionSchema } from "./contracts.js";
 import { ThreadTokenStore, type ThreadLookup } from "./thread-tokens.js";
+import { ActorRouteIssuer } from "./actor-routes.js";
 import {
   AVAILABILITY_PATH,
   PARENT_TOKEN_ENV,
@@ -185,6 +186,10 @@ export function createAccountPoolPlugin(
       drainTimeoutMs: options.drainTimeoutMs,
       maxAffinityBindings: options.maxAffinityBindings,
       getParentRoute: proxyingParent,
+      onActorRequest: ({ provider, threadId, actorId }) =>
+        bb.log.debug(
+          `Account Pooler ${provider} request routed for thread ${threadId} actor ${actorId}.`,
+        ),
       onUpstreamError: (provider, error) =>
         bb.log.warn(
           `Account Pooler ${provider} transport failed: ${transportErrorCode(error)}.`,
@@ -332,7 +337,6 @@ export function createAccountPoolPlugin(
       createBindingReadRpcHandlers(operations),
       { experimental_discoverable: true },
     );
-    registerPoolCli(bb, operations, login, codexLogin, config);
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
       if (!(await operations.isRoutingEnabled(provider))) return false;
       if (proxyingParent() !== null && availability !== null) {
@@ -340,6 +344,53 @@ export function createAccountPoolPlugin(
       }
       return operations.hasUsableEnabledAccount(provider);
     };
+    const actorRoutes = new ActorRouteIssuer({
+      threadTokens,
+      hubTokens,
+      getThread: async (threadId) => {
+        try {
+          const thread = await bb.sdk.threads.get({
+            threadId,
+            include: "environment",
+          });
+          const environment = (
+            thread as { environment?: { hostId?: unknown } | null }
+          ).environment;
+          return {
+            archived: thread.archivedAt !== null || thread.deletedAt !== null,
+            hostId:
+              typeof environment?.hostId === "string"
+                ? environment.hostId
+                : null,
+          };
+        } catch (error) {
+          if (isThreadNotFound(error)) return null;
+          throw error;
+        }
+      },
+      enrolledHostIds: async () =>
+        (await bb.sdk.hosts.list()).map((host) => host.id),
+      isBypassed: (threadId) => routing.isBypassed(threadId),
+      resolveAccountId: async (threadId, provider) =>
+        proxyingParent() === null
+          ? await routing.selectedAccount(threadId, provider)
+          : null,
+      canServe,
+      hubUrl: () =>
+        `${bb.server.loopbackBaseUrl.replace(/\/+$/u, "")}${HUB_BASE_PATH}`,
+      recordRouted: async (threadId, hostId, provider) => {
+        if (provider === "claude") await routing.recordRouted(threadId, hostId);
+      },
+      onIssued: (route, rotated) =>
+        bb.log.info(
+          `Account Pooler ${rotated ? "rotated" : "issued"} ${route.provider} route for thread ${route.threadId} actor ${route.actorId}.`,
+        ),
+      onRevoked: (actorId, threadId, count) =>
+        bb.log.info(
+          `Account Pooler revoked ${count} route${count === 1 ? "" : "s"} for actor ${actorId}${threadId === null ? "" : ` on thread ${threadId}`}.`,
+        ),
+    });
+    registerPoolCli(bb, operations, login, codexLogin, config, actorRoutes);
     const markerEntries = (token: string): PoolEnvEntry[] => [
       {
         name: PARENT_URL_ENV,
