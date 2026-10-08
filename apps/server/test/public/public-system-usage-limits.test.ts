@@ -103,7 +103,7 @@ describe("GET /api/v1/system/usage-limits", () => {
               ? [request.command.providerId]
               : [],
           ),
-        ).toEqual(["codex", "claude-code", "pi", "acp-cursor"]);
+        ).toEqual(["codex", "claude-code", "acp-cursor", "acp-opencode"]);
         expect(count()).toBe(4);
         await read();
         expect(count()).toBe(4);
