@@ -160,7 +160,7 @@ describe("public provider installation routes", () => {
         sessionId: session.id,
         async handle(request) {
           await new Promise((resolve) => setTimeout(resolve, 10));
-          return handleProviderInstallationRpc(request);
+          return handleProviderInstallationRpc(request, true);
         },
       });
       const url = `${API}/hosts/${host.id}/provider-clis/status`;

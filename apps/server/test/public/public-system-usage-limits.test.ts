@@ -81,7 +81,7 @@ describe("GET /api/v1/system/usage-limits", () => {
         sessionId: session.id,
         async handle(request) {
           await new Promise((resolve) => setTimeout(resolve, 10));
-          return handleUsageRequest(request);
+          return handleUsageRequest(request, true);
         },
       });
       const read = async (refresh = false) => {

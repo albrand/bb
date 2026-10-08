@@ -1519,20 +1519,21 @@ function ThreadDetailViewInternal(
     reveal: openCompactDrawer,
     onCloseLastTab: secondaryPanelDrawerVisibility.closeDrawer,
   });
+  const { canStart: canStartTerminal, select: selectTerminal } = terminals;
   const startTerminalSession = useCallback(async (): Promise<string | null> => {
-    if (!terminals.canStart || !threadId) return null;
+    if (!canStartTerminal || !threadId) return null;
     try {
       const session = await createTerminal.mutateAsync({
         target: { kind: "thread", threadId },
         cols: 100,
         rows: 30,
       });
-      terminals.select(session.id);
+      selectTerminal(session.id);
       return session.id;
     } catch {
       return null;
     }
-  }, [createTerminal, terminals.canStart, terminals.select, threadId]);
+  }, [createTerminal, canStartTerminal, selectTerminal, threadId]);
   const appNavigationCapabilities = useMemo(
     () => ({
       openFilePreview: openLiveFilePreview,
