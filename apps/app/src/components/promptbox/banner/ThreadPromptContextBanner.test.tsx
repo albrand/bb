@@ -74,6 +74,41 @@ function makeGitSection(
 afterEach(cleanup);
 
 describe("ThreadPromptContextBanner", () => {
+  it.each([
+    { relationship: "parent", label: "Parent" },
+    { relationship: "fork", label: "Forked from" },
+    { relationship: "side-chat", label: "Side chat for" },
+  ] as const)(
+    "keeps $label context title text aligned",
+    ({ relationship, label }) => {
+      render(
+        <MemoryRouter>
+          <ThreadPromptContextBanner
+            gitSection={null}
+            gitSectionPending={false}
+            archivedSection={null}
+            environmentGoneSection={null}
+            parentThreadSection={{
+              parentThreadTitle: "Parent thread",
+              href: "/threads/thr_parent",
+              relationship,
+            }}
+            childThreadsSection={null}
+            pullRequestSection={null}
+            expandedSection={null}
+            onToggleSection={noop}
+          />
+        </MemoryRouter>,
+      );
+
+      const link = screen.getByRole("link", { name: "Parent thread" });
+      expect(link.parentElement?.textContent).toBe(`${label} Parent thread`);
+      expect(link.previousSibling?.textContent).toBe(" ");
+      expect(link.querySelector(".inline-block")).toBeNull();
+      expect(link.querySelector(".truncate")).not.toBeNull();
+    },
+  );
+
   it("shows shared workspace ownership only when multiple threads are attached", () => {
     const shared = renderToStaticMarkup(
       <ThreadPromptContextBanner
@@ -545,9 +580,9 @@ describe("ThreadPromptContextBanner", () => {
     const childThreadToggle = screen.getByRole("button", {
       name: /Card 31: mobile thread header/u,
     });
-    expect(childThreadToggle.querySelector("span.font-medium")?.className).toContain(
-      "flex-1",
-    );
+    expect(
+      childThreadToggle.querySelector("span.font-medium")?.className,
+    ).toContain("flex-1");
     expect(
       childThreadToggle.querySelector("span.font-medium > span")?.className,
     ).toContain("inline-block");

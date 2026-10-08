@@ -923,11 +923,13 @@ export function highlightedText(
 interface ThreadTitleMentionsProps {
   title: string;
   highlightRanges?: readonly ThreadTitleHighlightRange[];
+  inlineText?: boolean;
 }
 
 function ThreadTitleMentionsContent({
   title,
   highlightRanges = [],
+  inlineText = false,
 }: ThreadTitleMentionsProps) {
   const resources = useContext(ThreadTitleMentionResourcesContext);
   let offset = 0;
@@ -945,7 +947,10 @@ function ThreadTitleMentionsContent({
     ) : segment.resource === null || segment.serializedText === null ? (
       <span
         key={`${index}:text`}
-        className="inline-block max-w-full truncate whitespace-pre"
+        className={cn(
+          !inlineText && "inline-block max-w-full",
+          "truncate whitespace-pre",
+        )}
       >
         {highlightedText(segment.text, segmentOffset, highlightRanges)}
       </span>
@@ -963,12 +968,14 @@ function ThreadTitleMentionsContent({
 export function ThreadTitleMentions({
   title,
   highlightRanges,
+  inlineText,
 }: ThreadTitleMentionsProps) {
   return (
     <RawThreadMentionBatchProvider>
       <ThreadTitleMentionsContent
         title={title}
         highlightRanges={highlightRanges}
+        inlineText={inlineText}
       />
     </RawThreadMentionBatchProvider>
   );
@@ -980,6 +987,7 @@ interface ThreadTitleProps extends Omit<
 > {
   title: string;
   inline?: boolean;
+  inlineText?: boolean;
   tooltip?: boolean;
   highlightRanges?: readonly ThreadTitleHighlightRange[];
   ref?: Ref<HTMLSpanElement>;
@@ -988,6 +996,7 @@ interface ThreadTitleProps extends Omit<
 export function ThreadTitle({
   title,
   inline = false,
+  inlineText = false,
   tooltip = false,
   highlightRanges,
   className,
@@ -1000,7 +1009,11 @@ export function ThreadTitle({
       className={cn(!inline && "bb-thread-title", className)}
       title={tooltip ? displayTitle : undefined}
     >
-      <ThreadTitleMentions title={title} highlightRanges={highlightRanges} />
+      <ThreadTitleMentions
+        title={title}
+        highlightRanges={highlightRanges}
+        inlineText={inlineText}
+      />
     </span>
   );
 }
