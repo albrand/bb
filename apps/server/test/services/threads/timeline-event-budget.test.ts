@@ -1022,7 +1022,7 @@ describe("timeline event budget", () => {
       expect(live.timelinePage.historySnapshot).not.toBe(
         latest.timelinePage.historySnapshot,
       );
-      expect(live.timelinePage.olderRowsSourceSeqEnd).toBeLessThanOrEqual(
+      expect(live.timelinePage.olderRowsSourceSeqEnd ?? 0).toBeLessThanOrEqual(
         latest.maxSeq,
       );
       expect(
@@ -1049,15 +1049,14 @@ describe("timeline event budget", () => {
   });
 
   it.each([
-    { changedRows: "an older group", turns: [1, 2], rebuilds: false },
+    { changedRows: "an older group", turns: [1, 2] },
     {
       changedRows: "the omitted start of the newest group",
       turns: [1],
-      rebuilds: true,
     },
   ])(
     "merges a late completion that changes $changedRows",
-    async ({ turns, rebuilds }) => {
+    async ({ turns }) => {
       const harness = await createTestAppHarness({
         featureFlags: { ...defaultFeatureFlags, timelineWindowEventBudget: 5 },
       });
@@ -1184,9 +1183,9 @@ describe("timeline event budget", () => {
 
         const live = await read("");
 
-        expect(live.timelinePage.olderRowsSourceSeqEnd! > latest.maxSeq).toBe(
-          rebuilds,
-        );
+        expect(
+          live.timelinePage.olderRowsSourceSeqEnd ?? 0,
+        ).toBeLessThanOrEqual(latest.maxSeq);
         const merged = mergeLoadedTimelineWithLatest({
           current: buildLoadedTimelineState({
             latestWindowEndSequence: latest.maxSeq,
@@ -1198,7 +1197,10 @@ describe("timeline event budget", () => {
           latestTimeline: live,
           surfaceKey: thread.id,
         });
-        if (rebuilds) expect(merged.rows).toEqual(live.rows);
+        expect(merged.rows.map((row) => row.id)).toEqual(
+          rows.map((row) => row.id),
+        );
+        expect(merged.olderCursor).toBeNull();
         let reloadedRows = merged.rows;
         let reloadCursor = merged.olderCursor;
         while (reloadCursor) {

@@ -436,6 +436,37 @@ export function BottomAnchoredScrollBody({
     ],
   );
 
+  useLayoutEffect(() => {
+    const scrollArea = scrollAreaRef.current;
+    const anchor = pendingPrependAnchorRef.current;
+    if (!scrollArea || !anchor || scrollArea.scrollHeight <= anchor.scrollHeight)
+      return;
+    pendingPrependAnchorRef.current = null;
+    if (anchor.row) {
+      const row = findTimelineRowElement(scrollArea, anchor.row.id);
+      if (row) {
+        const delta = row.getBoundingClientRect().top - anchor.row.top;
+        if (Math.abs(delta) >= 0.5) scrollArea.scrollTop += delta;
+        prependPositionHoldRef.current = anchor.row;
+        if (prependPositionHoldTimerRef.current !== null)
+          window.clearTimeout(prependPositionHoldTimerRef.current);
+        prependPositionHoldTimerRef.current = window.setTimeout(
+          cancelPrependPositionHold,
+          PREPEND_POSITION_HOLD_MS,
+        );
+        restorePrependPosition();
+      } else {
+        scrollArea.scrollTop = anchor.scrollTop +
+          (scrollArea.scrollHeight - anchor.scrollHeight);
+      }
+    } else {
+      scrollArea.scrollTop = anchor.scrollTop +
+        (scrollArea.scrollHeight - anchor.scrollHeight);
+    }
+    setPrependAnchorRowId(null);
+    refreshMaxScrollOffset(scrollArea);
+  });
+
   const captureScrollAnchor = useCallback(() => {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return () => {};

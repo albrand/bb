@@ -112,7 +112,6 @@ import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { useFaviconBadge } from "@/lib/favicon-color-preference";
 import { shouldShowFaviconAttentionDot } from "./faviconAttentionDot";
 import { AppLayoutSidebar } from "./AppLayoutSidebar";
-import { useNavigationRailExperiment } from "@/components/sidebar/navigationRailExperiment";
 import { NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH } from "@/components/sidebar/navRailWidth";
 import { SidebarHistoryNavigationControls } from "@/components/sidebar/SidebarHistoryNavigationControls";
 import {
@@ -192,7 +191,6 @@ const sidebarOpenAtom = atomWithStorage<boolean>(
 );
 
 interface SidebarStateBridgeProps {
-  navigationRail: boolean;
   framed: boolean;
   children: ReactNode;
 }
@@ -200,11 +198,7 @@ interface SidebarStateBridgeProps {
 type SidebarResizeMouseEvent = ReactMouseEvent<HTMLDivElement>;
 type SidebarOpenChangeHandler = (open: boolean) => void;
 
-function SidebarStateBridge({
-  navigationRail,
-  framed,
-  children,
-}: SidebarStateBridgeProps) {
+function SidebarStateBridge({ framed, children }: SidebarStateBridgeProps) {
   const [open, setOpen] = useAtom(sidebarOpenAtom);
   const sidebarWidth = useAtomValue(sidebarWidthAtom);
   const sidebarLiveWidth = useAtomValue(sidebarLiveWidthAtom);
@@ -222,9 +216,7 @@ function SidebarStateBridge({
   return (
     <SidebarProvider
       width={`${sidebarLiveWidth ?? sidebarWidth}px`}
-      collapsedRailWidth={
-        navigationRail ? NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH : undefined
-      }
+      collapsedRailWidth={NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH}
       framed={framed}
       data-testid="app-layout-root"
       open={open}
@@ -500,7 +492,6 @@ export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const { appRoutePath, settingsRoutePath, toolsBackRoutePath } =
     useAppSettingsRouteMemory();
-  const navigationRail = useNavigationRailExperiment();
   const setRootComposeProjectId = useSetRootComposeProjectId();
   useEffect(
     () =>
@@ -843,10 +834,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             sections={sidebarNavigationQuery.data?.sections ?? []}
           >
             <ThreadActionsProvider>
-              <SidebarStateBridge
-                navigationRail={navigationRail}
-                framed={usesDesktopChrome && navigationRail}
-              >
+              <SidebarStateBridge framed={usesDesktopChrome}>
                 {backToAppRoutePath !== null && !isSidebarResizing ? (
                   <BackToAppCommandHandler routePath={backToAppRoutePath} />
                 ) : null}
@@ -861,12 +849,9 @@ export function AppLayout({ children }: AppLayoutProps) {
                           ? "skills"
                           : "app"
                   }
-                  navigationRail={navigationRail}
                   onResizeMouseDown={handleResizeMouseDown}
                   isResizing={isSidebarResizing}
-                  appRoutePath={appRoutePath}
                   settingsRoutePath={settingsRoutePath}
-                  toolsBackRoutePath={toolsBackRoutePath}
                 />
                 <SidebarInset>
                   <div

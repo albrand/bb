@@ -57,11 +57,6 @@ import {
   useSidebarSplitLayout,
   useSidebarThreadSplit,
 } from "./plugin-sidebar-split";
-import {
-  useSidebarNavigation,
-  useSidebarNavigationSplit,
-} from "./plugin-sidebar-navigation";
-import { SidebarNavigationIcon } from "@/components/sidebar/SidebarNavigationModel";
 import { useAppNavigationHost } from "./app-navigation-host";
 import { useCodeTheme } from "./plugin-code-theme";
 import { copyToClipboard } from "./clipboard";
@@ -100,9 +95,6 @@ export const pluginSdkAppImplementation = {
   experimental_useSidebarProjectActions: useSidebarProjectActions,
   experimental_useSidebarThreadPullRequest: useSidebarThreadPullRequest,
   experimental_useSidebarThreadSplit: useSidebarThreadSplit,
-  experimental_useSidebarNavigation: useSidebarNavigation,
-  experimental_useSidebarNavigationSplit: useSidebarNavigationSplit,
-  experimental_SidebarNavigationIcon: SidebarNavigationIcon,
   useSidebarThreadDraft,
   useSidebarThreadDraftIds,
   useSidebarThreadRowStatus,
