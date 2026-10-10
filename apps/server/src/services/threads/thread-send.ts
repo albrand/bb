@@ -3,6 +3,7 @@ import {
   getThread,
   requireThreadLifecycleEventApplied,
 } from "@bb/db";
+import { assertNotNativeTerminalThread } from "./native-terminal-guard.js";
 import type { DbConnection, DbTransaction, EnvironmentRow } from "@bb/db";
 import type {
   ClientTurnRequestId,
@@ -510,6 +511,7 @@ export async function sendThreadMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
 ): Promise<ThreadSendResult> {
+  assertNotNativeTerminalThread(deps.db, args.thread.id);
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
     await clearThreadContext(deps, {
       environment: args.environment,

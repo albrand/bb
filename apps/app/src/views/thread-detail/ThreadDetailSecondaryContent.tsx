@@ -41,6 +41,7 @@ type ThreadSecondaryPanelProps = Omit<
 interface ThreadDetailSecondaryContentProps {
   footer: ReactNode;
   header: ReactNode;
+  nativeTerminalMain: ReactNode | null;
   isMetadataLoading: boolean;
   isSecondaryPanelOpen: boolean;
   isConversationCollapsed: boolean;
@@ -66,6 +67,7 @@ export function ThreadDetailSecondaryContent(
 function ThreadDetailSecondaryContentBody({
   footer,
   header,
+  nativeTerminalMain,
   isMetadataLoading,
   isSecondaryPanelOpen,
   isConversationCollapsed,
@@ -124,7 +126,11 @@ function ThreadDetailSecondaryContentBody({
         drawerFallback={<ThreadMetadataLoadingSkeleton />}
         mainPanelId="thread-detail-timeline-panel"
         mainHeader={header}
-        main={<ThreadTimelinePane {...timeline} footer={footer} />}
+        main={
+          nativeTerminalMain ?? (
+            <ThreadTimelinePane {...timeline} footer={footer} />
+          )
+        }
         collapse={{
           active: isConversationCollapsed,
           onToggle: onToggleConversationCollapse,

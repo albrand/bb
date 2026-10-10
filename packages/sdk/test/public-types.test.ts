@@ -228,6 +228,7 @@ type ExpectedBbSdkKey =
   | "files"
   | "guide"
   | "hosts"
+  | "nativeTerminals"
   | "plugins"
   | "projects"
   | "providers"

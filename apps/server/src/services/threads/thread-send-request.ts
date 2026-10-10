@@ -1,4 +1,10 @@
 import { isStandaloneBuiltinClearCommand, type Thread } from "@bb/domain";
+import { isNativeTerminalThread } from "@bb/db";
+import { ApiError } from "../../errors.js";
+import {
+  nativeTerminalInitialPrompt,
+  sendNativeTerminalMessage,
+} from "./native-terminal-threads.js";
 import type {
   SendMessageRequest,
   SendMessageResponse,
@@ -18,6 +24,14 @@ export async function acceptThreadSendRequest(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
+  if (isNativeTerminalThread(deps.db, args.thread.id)) {
+    const text = nativeTerminalInitialPrompt(args.payload.input);
+    if (text === null) {
+      throw new ApiError(400, "invalid_request", "Message text is empty");
+    }
+    await sendNativeTerminalMessage(deps, { threadId: args.thread.id, text });
+    return { ok: true, delivery: "sent" };
+  }
   assertThreadHostAcceptsWork(deps.db, args.thread);
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
     const environment = await requireThreadCommandEnvironment(deps, {

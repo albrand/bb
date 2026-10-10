@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { DbConnection } from "./connection.js";
 import { ensureItemCompletionLookupIndex } from "./fork-item-completion-index.js";
 import { ensureThreadSpawnersTable } from "./fork-thread-spawners.js";
+import { ensureNativeTerminalThreadsTable } from "./fork-native-terminal-threads.js";
 import { restoreNativeThreadDraftsToDraftsQueue } from "./fork-restore-native-drafts.js";
 import {
   compatibleMigrationHashes,
@@ -1262,7 +1263,6 @@ function repairBranchLocalQueuedGroupingBeforeInitialThreadSections(
   markMigrationApplied(db, initialThreadSectionsMigration);
 }
 
-
 const STAGED_CONNECT_MACHINE_ID_COLUMN = "_bb_connect_machine_id_pending";
 const STAGED_THREAD_STORAGE_DELETED_AT_COLUMN =
   "_bb_thread_storage_deleted_at_pending";
@@ -1443,7 +1443,6 @@ function repairBranchLocalThreadTabsBeforePendingInteractionsMigration(
   applyMigrationStatements(db, pendingInteractionsMigration);
 }
 
-
 function warnAboutFutureAppliedMigrations(
   db: DbConnection,
   options: MigrateOptions,
@@ -1623,4 +1622,5 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
   validatePendingInteractionsSchema(db);
   ensureItemCompletionLookupIndex(db);
   ensureThreadSpawnersTable(db);
+  ensureNativeTerminalThreadsTable(db);
 }

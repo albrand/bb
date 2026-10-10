@@ -1,4 +1,11 @@
 import { memo } from "react";
+import { cn } from "@bb/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+import {
+  OPTION_BASE_CLASS_NAME,
+  OPTION_INTERACTIVE_CLASS_NAME,
+  OPTION_MUTED_CLASS_NAME,
+} from "@bb/shared-ui/option-display";
 import type {
   PermissionMode,
   ProviderOptionDescriptor,
@@ -59,7 +66,13 @@ export interface ExecutionPermissionConfig {
   supported: boolean;
 }
 
+export interface ExecutionNativeTerminalConfig {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
 export interface ExecutionControlsProps {
+  nativeTerminal?: ExecutionNativeTerminalConfig;
   providerRouting?: SystemProvidersQuery;
   provider: ExecutionProviderConfig;
   model: ExecutionModelConfig;
@@ -70,6 +83,7 @@ export interface ExecutionControlsProps {
 }
 
 export const ExecutionControls = memo(function ExecutionControls({
+  nativeTerminal,
   provider,
   providerRouting,
   model,
@@ -128,6 +142,27 @@ export const ExecutionControls = memo(function ExecutionControls({
           handoff={handoff}
         />
       ) : null}
+      {nativeTerminal === undefined ? null : (
+        <button
+          type="button"
+          aria-pressed={nativeTerminal.enabled}
+          data-native-terminal-toggle=""
+          disabled={disabled}
+          title="Run the provider's own claude or codex TUI in this thread's terminal instead of the chat view"
+          onClick={() => {
+            nativeTerminal.onChange(!nativeTerminal.enabled);
+          }}
+          className={cn(
+            OPTION_BASE_CLASS_NAME,
+            OPTION_INTERACTIVE_CLASS_NAME,
+            LIST_HOVER_TRANSITION,
+            !nativeTerminal.enabled && OPTION_MUTED_CLASS_NAME,
+            "font-normal",
+          )}
+        >
+          {nativeTerminal.enabled ? "Native terminal: on" : "Native terminal"}
+        </button>
+      )}
     </>
   );
 });

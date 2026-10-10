@@ -53,6 +53,35 @@ afterEach(() => {
 });
 
 describe("ExecutionControls", () => {
+  it("toggles native terminal mode only where the composer offers it", () => {
+    const onChange = vi.fn();
+    const { rerender } = renderExecutionControls({
+      ...makeExecutionControlsProps(),
+      nativeTerminal: { enabled: false, onChange },
+    });
+
+    const toggle = screen.getByRole("button", { name: "Native terminal" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <ExecutionControls
+        {...makeExecutionControlsProps()}
+        nativeTerminal={{ enabled: true, onChange }}
+      />,
+    );
+    const enabled = screen.getByRole("button", { name: "Native terminal: on" });
+    expect(enabled.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(enabled);
+    expect(onChange).toHaveBeenLastCalledWith(false);
+
+    rerender(<ExecutionControls {...makeExecutionControlsProps()} />);
+    expect(
+      screen.queryByRole("button", { name: /Native terminal/u }),
+    ).toBeNull();
+  });
+
   it("hides provider tabs when the provider is locked", () => {
     renderExecutionControls(makeExecutionControlsProps());
 

@@ -13,7 +13,11 @@ import { createThreadRequestSchema } from "@bb/server-contract";
 import { action, CliUsageError } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import { missingProjectHint } from "../../context-hints.js";
-import { requireTextInput, TEXT_FILE_HELP_SUFFIX } from "../../text-input.js";
+import {
+  requireTextInput,
+  resolveTextInput,
+  TEXT_FILE_HELP_SUFFIX,
+} from "../../text-input.js";
 import {
   resolveExplicitIdFlag,
   resolveContextThreadId,
@@ -77,6 +81,7 @@ interface ThreadSpawnCommandOptions {
   visibility?: string;
   sendAt?: string;
   pluginCreateData?: string;
+  native?: boolean;
 }
 
 export function looksLikePath(value: string): boolean {
@@ -407,6 +412,10 @@ export function registerSpawnCommand(
       "JSON value for an --environment-provider that declares inputs (`bb environment providers --json` shows the schema)",
     )
     .option("--send-at <when>", SEND_AT_HELP)
+    .option(
+      "--native",
+      "Run the claude or codex harness natively in the thread's terminal instead of the chat view; --prompt becomes its first message",
+    )
     .option("--origin-kind <kind>", "Thread origin: fork")
     .option("--source-thread <id>", "Source thread for a fork")
     .option(
@@ -415,12 +424,15 @@ export function registerSpawnCommand(
     )
     .action(
       action(async (opts: ThreadSpawnCommandOptions) => {
-        const prompt = await requireTextInput({
+        const textInputArgs = {
           file: opts.promptFile,
           fileLabel: "--prompt-file",
           inline: opts.prompt,
           inlineLabel: "--prompt <prompt>",
-        });
+        };
+        const prompt = opts.native
+          ? await resolveTextInput(textInputArgs)
+          : await requireTextInput(textInputArgs);
         const projectId = resolveExplicitIdFlag({
           flagName: "--project flag",
           value: opts.project,
@@ -588,16 +600,19 @@ export function registerSpawnCommand(
         let thread: Thread;
         try {
           const sdk = createCliBbSdk(getUrl());
-          const input = await uploadClientAttachmentInputs({
-            input: buildPromptInputs({
-              message: prompt,
-              plan: opts.plan,
-              files: opts.file,
-              images: opts.image,
-            }),
-            resolveProjectId: async () => projectId,
-            sdk,
-          });
+          const input =
+            prompt === undefined
+              ? []
+              : await uploadClientAttachmentInputs({
+                  input: buildPromptInputs({
+                    message: prompt,
+                    plan: opts.plan,
+                    files: opts.file,
+                    images: opts.image,
+                  }),
+                  resolveProjectId: async () => projectId,
+                  sdk,
+                });
           thread = await sdk.threads.spawn({
             origin: "cli",
             ...(pluginCreateData === undefined
@@ -627,6 +642,7 @@ export function registerSpawnCommand(
             ...(opts.sourceThread ? { sourceThreadId: opts.sourceThread } : {}),
             ...(sourceSeqEnd !== undefined ? { sourceSeqEnd } : {}),
             ...(sendAt !== undefined ? { sendAt } : {}),
+            ...(opts.native ? { nativeTerminal: true } : {}),
           });
         } catch (err: unknown) {
           throw prependErrorContext("Failed to create thread", err);

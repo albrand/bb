@@ -229,6 +229,7 @@ move and downloads the new server's bb-app package for its service.
 - `bb thread interactions answer`
 - `bb thread interactions respond`
 - `bb thread interactions deny`
+- `bb thread native`
 
 ## environment
 

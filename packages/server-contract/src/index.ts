@@ -2,6 +2,7 @@ export * from "./api-client.js";
 export * from "./api-types.js";
 export * from "./api/prompt-history-search.js";
 export * from "./api/spend.js";
+export * from "./api/native-terminal-threads.js";
 export * from "./api/thread-tabs.js";
 export * from "./common.js";
 export * from "./errors.js";

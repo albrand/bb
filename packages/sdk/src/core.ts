@@ -26,6 +26,10 @@ import type { BbRealtime } from "./realtime-types.js";
 import { createStatusArea, type StatusArea } from "./areas/status.js";
 import { createSkillsArea, type SkillsArea } from "./areas/skills.js";
 import { createSpendArea, type SpendArea } from "./areas/spend.js";
+import {
+  createNativeTerminalsArea,
+  type NativeTerminalsArea,
+} from "./areas/native-terminals.js";
 import { createThemeArea, type ThemeArea } from "./areas/theme.js";
 import { createSystemArea, type SystemArea } from "./areas/system.js";
 import { createTerminalsArea, type TerminalsArea } from "./areas/terminals.js";
@@ -55,6 +59,7 @@ export interface BbSdkAreas extends BbRealtime {
   files: FilesArea;
   hosts: HostsArea;
   projects: ProjectsArea;
+  nativeTerminals: NativeTerminalsArea;
   plugins: PluginsArea;
   providers: ProvidersArea;
   skills: SkillsArea;
@@ -91,6 +96,7 @@ export function createBbSdk(
       return realtime.subscribe(args);
     },
     projects: createProjectsArea(sdkContext),
+    nativeTerminals: createNativeTerminalsArea(sdkContext),
     plugins: createPluginsArea(sdkContext),
     providers: createProvidersArea(sdkContext),
     skills: createSkillsArea(sdkContext),

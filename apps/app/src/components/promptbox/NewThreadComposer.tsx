@@ -255,7 +255,13 @@ export function resolveSubmittedExecutionSources(
     : sources;
 }
 
+const NATIVE_TERMINAL_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  "claude-code",
+  "codex",
+]);
+
 export interface NewThreadComposerSubmission extends NewThreadRequest {
+  nativeTerminal?: boolean;
   pluginSubmission?: CreateThreadRequest["pluginSubmission"];
   experimental_pluginCreateData?: CreateThreadRequest["experimental_pluginCreateData"];
   sendAt?: number;
@@ -1361,6 +1367,7 @@ export function NewThreadComposer({
   const [isUploading, setIsUploading] = useState(false);
   const [isCopyingAttachments, setIsCopyingAttachments] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [nativeTerminalRequested, setNativeTerminalRequested] = useState(false);
   const pendingUploadCountRef = useRef(0);
   const isCopyingAttachmentsRef = useRef(false);
   const isSubmittingRef = useRef(false);
@@ -1542,6 +1549,11 @@ export function NewThreadComposer({
     [projectPromptHistory],
   );
   const promptInputEmpty = usePromptDraftInputEmpty(promptDraft);
+  const nativeTerminalAvailable =
+    selectedProviderId !== undefined &&
+    selectedProviderId !== null &&
+    NATIVE_TERMINAL_PROVIDER_IDS.has(selectedProviderId);
+  const nativeTerminal = nativeTerminalAvailable && nativeTerminalRequested;
   const submitProgrammaticallyRef = useRef<
     (
       options: ExperimentalComposerSubmitOptions,
@@ -1606,7 +1618,9 @@ export function NewThreadComposer({
   });
   const submitDisabledReason =
     submissionReadinessReason ??
-    (promptInputEmpty ? "Enter a prompt or attach a file." : null);
+    (promptInputEmpty && !nativeTerminal
+      ? "Enter a prompt or attach a file."
+      : null);
   const submitDraft = useCallback(
     async (
       blockedReason: string | null,
@@ -1618,7 +1632,7 @@ export function NewThreadComposer({
       if (
         blockedReason !== null ||
         submissionReadinessReason !== null ||
-        input.length === 0 ||
+        (input.length === 0 && !nativeTerminal) ||
         isSubmittingRef.current ||
         projectDefaultsUnavailable ||
         submissionEnvironment === null ||
@@ -1642,6 +1656,7 @@ export function NewThreadComposer({
         projectId,
         providerId: selectedProviderId,
         model: selectedThreadModel,
+        ...(nativeTerminal ? { nativeTerminal: true } : {}),
         reasoningLevel,
         permissionMode,
         ...(supportsServiceTier && serviceTier ? { serviceTier } : {}),
@@ -1681,6 +1696,7 @@ export function NewThreadComposer({
     [
       clearReuseEnvironment,
       executionInputSources,
+      nativeTerminal,
       onSubmit,
       permissionMode,
       projectDefaultsUnavailable,
@@ -2064,6 +2080,14 @@ export function NewThreadComposer({
             showChevronWhenDisabled: !locks.project,
           }}
           execution={{
+            ...(nativeTerminalAvailable
+              ? {
+                  nativeTerminal: {
+                    enabled: nativeTerminal,
+                    onChange: setNativeTerminalRequested,
+                  },
+                }
+              : {}),
             providerRouting: executionOptionsRouting,
             provider: {
               options: providerOptions,
@@ -2165,6 +2189,9 @@ export function NewThreadComposer({
       providerHostId,
       textEffects,
       serviceTierOptions,
+      nativeTerminal,
+      nativeTerminalAvailable,
+      setNativeTerminalRequested,
     ],
   );
 

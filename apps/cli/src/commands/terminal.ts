@@ -564,7 +564,7 @@ function terminalWebsocketUrl(args: {
   return url.href;
 }
 
-async function attachTerminal(args: {
+export async function attachTerminal(args: {
   baseUrl: string;
   terminalId: string;
 }): Promise<void> {
