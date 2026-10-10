@@ -35,6 +35,7 @@ const THREAD_QUEUED_MESSAGES_QUERY_KEY = "threadQueuedMessages";
 const THREAD_PROMPT_HISTORY_QUERY_KEY = "threadPromptHistory";
 const THREAD_PENDING_INTERACTIONS_QUERY_KEY = "threadPendingInteractions";
 const TERMINALS_QUERY_KEY = "terminals";
+const NATIVE_TERMINAL_THREAD_QUERY_KEY = "native-terminal-thread";
 const PROJECT_COMMANDS_QUERY_KEY = "projectCommands";
 const THREAD_STORAGE_FILES_QUERY_KEY = "threadStorageFiles";
 const THREAD_STORAGE_LOCATION_QUERY_KEY = "threadStorageLocation";
@@ -244,6 +245,10 @@ export type TerminalQueryScope =
   | { kind: "environment"; environmentId: string }
   | { kind: "host_path"; cwd?: string; hostId: string };
 type AllTerminalsQueryKeyPrefix = readonly [typeof TERMINALS_QUERY_KEY];
+type NativeTerminalThreadQueryKey = readonly [
+  typeof NATIVE_TERMINAL_THREAD_QUERY_KEY,
+  string,
+];
 type TerminalsQueryKey = readonly [
   typeof TERMINALS_QUERY_KEY,
   TerminalQueryScope,
@@ -791,6 +796,12 @@ export function terminalsQueryKey(
   scope: TerminalQueryScope,
 ): TerminalsQueryKey {
   return [TERMINALS_QUERY_KEY, scope];
+}
+
+export function nativeTerminalThreadQueryKey(
+  threadId: string,
+): NativeTerminalThreadQueryKey {
+  return [NATIVE_TERMINAL_THREAD_QUERY_KEY, threadId];
 }
 
 export function allTerminalsQueryKeyPrefix(): AllTerminalsQueryKeyPrefix {

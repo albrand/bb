@@ -1,14 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NativeTerminalThread } from "@bb/server-contract";
 import { sdk } from "@/lib/sdk";
-import { applyTerminalSessionUpsert } from "../cache-owners/terminal-cache-owner";
+import { applyNativeTerminalThreadView } from "../cache-owners/terminal-cache-owner";
 import { REALTIME_OWNED_STATIC_CACHE_QUERY_POLICY } from "./query-policies";
-
-const NATIVE_TERMINAL_THREAD_QUERY_KEY = "native-terminal-thread";
-
-export function nativeTerminalThreadQueryKey(threadId: string) {
-  return [NATIVE_TERMINAL_THREAD_QUERY_KEY, threadId] as const;
-}
+import { nativeTerminalThreadQueryKey } from "./query-keys";
 
 export function useNativeTerminalThread(threadId: string) {
   return useQuery<NativeTerminalThread | null>({
@@ -35,13 +30,7 @@ export function useOpenNativeTerminal() {
     mutationFn: (args: OpenNativeTerminalArgs) =>
       sdk.nativeTerminals.open(args),
     onSuccess: (view: NativeTerminalThread) => {
-      queryClient.setQueryData(
-        nativeTerminalThreadQueryKey(view.threadId),
-        view,
-      );
-      if (view.terminal !== null) {
-        applyTerminalSessionUpsert({ queryClient, session: view.terminal });
-      }
+      applyNativeTerminalThreadView({ queryClient, view });
     },
   });
 }

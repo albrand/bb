@@ -1,10 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type {
+  NativeTerminalThread,
   TerminalListResponse,
   TerminalSession,
 } from "@bb/server-contract";
 import {
   allTerminalsQueryKeyPrefix,
+  nativeTerminalThreadQueryKey,
   terminalsQueryKey,
   type TerminalQueryScope,
 } from "../queries/query-keys";
@@ -121,4 +123,22 @@ export function applyTerminalSessionClose({
   queryClient.invalidateQueries({
     queryKey: allTerminalsQueryKeyPrefix(),
   });
+}
+
+interface NativeTerminalThreadCacheArgs {
+  queryClient: QueryClient;
+  view: NativeTerminalThread;
+}
+
+export function applyNativeTerminalThreadView({
+  queryClient,
+  view,
+}: NativeTerminalThreadCacheArgs): void {
+  queryClient.setQueryData<NativeTerminalThread | null>(
+    nativeTerminalThreadQueryKey(view.threadId),
+    view,
+  );
+  if (view.terminal !== null) {
+    applyTerminalSessionUpsert({ queryClient, session: view.terminal });
+  }
 }

@@ -244,6 +244,7 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
   "hooks/cache-owners/system-version-cache-owner.ts": ["systemVersionQueryKey"],
   "hooks/cache-owners/terminal-cache-owner.ts": [
     "allTerminalsQueryKeyPrefix",
+    "nativeTerminalThreadQueryKey",
     "TerminalQueryScope",
     "terminalsQueryKey",
   ],
