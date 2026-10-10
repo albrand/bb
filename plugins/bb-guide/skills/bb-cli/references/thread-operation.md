@@ -107,6 +107,23 @@ hostId, providerId, projectId, parentThreadId, groupBy })`.
   the thread and closes its terminals once the grace elapses. Use
   `bb thread stop <thread-id>` when the run must end now.
 
+## Native Terminal Threads
+
+- `bb thread native <thread-id>` opens the native terminal of a thread created
+  with `bb thread spawn --native`. When the harness has exited, or the daemon
+  restarted and the terminal is gone, it starts a new terminal that resumes the
+  same session (`claude --resume <id>` or `codex resume <id>`). It prints the
+  harness, the native session id, and the terminal; `--attach` attaches this
+  terminal to it, and `--json` returns the record.
+- `bb thread tell <thread-id> --message "..."` pastes the text into the running
+  native terminal and presses Enter. It fails with
+  `native_terminal_not_running` when the harness is not running; reopen it with
+  `bb thread native` first.
+- A Codex native thread learns its session id from the rollout file Codex
+  writes for the thread's workspace. Two native Codex threads started in the
+  same workspace at the same moment stay unbound rather than guess; resume then
+  starts a fresh session.
+
 ## Inspecting Results
 
 - Use `bb thread search <query> [--limit <1-50>]` for sidebar search. Use

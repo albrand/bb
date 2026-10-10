@@ -1,4 +1,6 @@
 import { getPanelTabHistoryKey } from "@/components/secondary-panel/recentlyClosedPanelTabs";
+import { NativeThreadTerminalMain } from "@/components/thread/terminal/NativeThreadTerminalMain";
+import { useNativeTerminalThread } from "@/hooks/queries/native-terminal-queries";
 import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
 import { queueSplitDownload } from "@/lib/split-prefetch";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
@@ -666,6 +668,16 @@ function ThreadDetailViewInternal(
   const terminalsListQuery = useThreadTerminals(threadId, {
     enabled: isSecondaryPanelOpen,
   });
+  const nativeTerminalThreadQuery = useNativeTerminalThread(threadId);
+  const nativeTerminalThread = nativeTerminalThreadQuery.data ?? null;
+  const nativeTerminalId = nativeTerminalThread?.terminal?.id ?? null;
+  const visibleTerminalSessions = useMemo(
+    () =>
+      terminalsListQuery.data?.sessions.filter(
+        (session) => session.id !== nativeTerminalId,
+      ),
+    [nativeTerminalId, terminalsListQuery.data],
+  );
   const createTerminal = useCreateTerminal();
   const {
     activeBrowserTab,
@@ -692,7 +704,7 @@ function ThreadDetailViewInternal(
     retainedTerminalIds,
     storageFileExists: checkThreadStorageFileExists,
     storageFiles: threadStorageFiles,
-    terminalSessions: terminalsListQuery.data?.sessions,
+    terminalSessions: visibleTerminalSessions,
   });
   const panelBrowser = usePanelBrowser({
     available: isDesktopBrowserAvailable(),
@@ -854,7 +866,7 @@ function ThreadDetailViewInternal(
   const updateThread = useUpdateThread({
     errorMessage: "Failed to assign parent thread.",
   });
-  const loadedTerminalSessions = terminalsListQuery.data?.sessions;
+  const loadedTerminalSessions = visibleTerminalSessions;
   const terminalSessions = loadedTerminalSessions ?? EMPTY_TERMINAL_SESSIONS;
   const terminalsById = useMemo(
     () => new Map(terminalSessions.map((session) => [session.id, session])),
@@ -2771,6 +2783,18 @@ function ThreadDetailViewInternal(
         <AppNavigationHostProvider capabilities={appNavigationCapabilities}>
           <ThreadDetailSecondaryContent
             footer={composerFooter}
+            nativeTerminalMain={
+              nativeTerminalThread === null ? null : (
+                <NativeThreadTerminalMain
+                  onOpenLink={handleOpenTimelineLink}
+                  threadId={thread.id}
+                  threadIsProvisioning={
+                    thread.status === "pending" || thread.status === "starting"
+                  }
+                  view={nativeTerminalThread}
+                />
+              )
+            }
             header={timelineHeader}
             isMetadataLoading={environmentQuery.isLoading}
             isSecondaryPanelOpen={isSecondaryPanelOpen}

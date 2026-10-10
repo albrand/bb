@@ -23,6 +23,7 @@ export interface ThreadCreateServiceRequestInput {
    */
   sendAt?: CreateThreadRequest["sendAt"];
   input: PromptInput[];
+  nativeTerminal?: CreateThreadRequest["nativeTerminal"];
   pluginMetadata?: CreateThreadRequest["pluginMetadata"];
   pluginSubmission?: CreateThreadRequest["pluginSubmission"];
   experimental_pluginCreateData?: CreateThreadRequest["experimental_pluginCreateData"];

@@ -77,6 +77,13 @@ export function TerminalMobileControls({
         <div className="mb-1 flex gap-1">
           <Key
             {...keyProps}
+            label="Shift Tab"
+            onPress={() => onInput("\x1b[Z")}
+          >
+            ⇧Tab
+          </Key>
+          <Key
+            {...keyProps}
             label="Interrupt (Control C)"
             onPress={() => onInput("\x03")}
           >
@@ -89,6 +96,20 @@ export function TerminalMobileControls({
           >
             ^D
           </Key>
+          <Key {...keyProps} label="Page up" onPress={() => onInput("\x1b[5~")}>
+            PgUp
+          </Key>
+          <Key
+            {...keyProps}
+            label="Page down"
+            onPress={() => onInput("\x1b[6~")}
+          >
+            PgDn
+          </Key>
+        </div>
+      ) : null}
+      {expanded ? (
+        <div className="mb-1 flex gap-1">
           <Key {...keyProps} label="Home" onPress={() => onInput("\x1b[H")}>
             Home
           </Key>

@@ -49,6 +49,7 @@ export type BBSdkRealtimeSocketFactory = BbRealtimeSocketFactory;
 export type BBSdkRealtimeSocketMessageEvent = BbRealtimeSocketMessageEvent;
 export type BBSdkStatusArea = BbSdk["status"];
 export type BBSdkSkillsArea = BbSdk["skills"];
+export type BBSdkNativeTerminalsArea = BbSdk["nativeTerminals"];
 export type BBSdkSpendArea = BbSdk["spend"];
 export type BBSdkTerminalsArea = BbSdk["terminals"];
 export type BBSdkThread = ThreadGetResult;
@@ -68,6 +69,7 @@ export class BBSdk implements BbSdk {
   readonly files: BbSdk["files"];
   readonly guide: BbSdk["guide"];
   readonly hosts: BbSdk["hosts"];
+  readonly nativeTerminals: BbSdk["nativeTerminals"];
   readonly plugins: BbSdk["plugins"];
   readonly projects: BbSdk["projects"];
   readonly providers: BbSdk["providers"];
@@ -90,6 +92,7 @@ export class BBSdk implements BbSdk {
     this.files = sdk.files;
     this.guide = sdk.guide;
     this.hosts = sdk.hosts;
+    this.nativeTerminals = sdk.nativeTerminals;
     this.plugins = sdk.plugins;
     this.projects = sdk.projects;
     this.providers = sdk.providers;

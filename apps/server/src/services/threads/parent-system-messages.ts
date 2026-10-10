@@ -6,6 +6,7 @@ import {
   requireThreadLifecycleEventApplied,
   type DbTransaction,
 } from "@bb/db";
+import { isNativeTerminalThread } from "@bb/db";
 import type {
   PromptInput,
   PromptMentionResource,
@@ -439,7 +440,8 @@ export async function queueParentSystemMessage(
   if (
     !parentThread ||
     parentThread.archivedAt !== null ||
-    parentThread.deletedAt !== null
+    parentThread.deletedAt !== null ||
+    isNativeTerminalThread(deps.db, parentThread.id)
   ) {
     return false;
   }
@@ -529,6 +531,7 @@ export async function deliverParentSystemMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: DeliverParentSystemMessageArgs,
 ): Promise<boolean> {
+  if (isNativeTerminalThread(deps.db, args.parentThread.id)) return false;
   return withThreadSendGuard(args.parentThread.id, () =>
     deliverParentSystemMessageWithContextGuard(deps, args),
   );

@@ -1,5 +1,6 @@
 import type {
   ProviderNativeRoots,
+  ProviderNativeTerminal,
   AvailableModel,
   ExtensionKind,
   JsonValue,
@@ -52,6 +53,7 @@ export interface ProviderRegistration {
   nativeSkillRoots: ProviderNativeRoots;
   nativeCommandRoots: ProviderNativeRoots;
   resolvesNativeRoots: boolean;
+  nativeTerminal: ProviderNativeTerminal | null;
   deriveProviderOptions: (
     context: Omit<PluginProviderOptionsContext, "settings">,
   ) => Readonly<Record<string, JsonValue>>;
@@ -277,7 +279,9 @@ export function createProviderRegistryService(
     },
 
     revalidateInstalled(key, probe) {
-      const entry = installedStatusByHostId.get(key.hostId)?.get(key.providerId);
+      const entry = installedStatusByHostId
+        .get(key.hostId)
+        ?.get(key.providerId);
       if (
         entry === undefined ||
         entry.revalidating ||
@@ -291,7 +295,8 @@ export function createProviderRegistryService(
         installedStatusByHostId.get(key.hostId)?.get(key.providerId) === entry;
       return probe().then(
         (installed) => {
-          if (isCurrent()) this.rememberInstalled(key, Promise.resolve(installed));
+          if (isCurrent())
+            this.rememberInstalled(key, Promise.resolve(installed));
         },
         () => {
           if (isCurrent()) this.forgetInstalledKey(key);

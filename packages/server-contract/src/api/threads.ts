@@ -119,6 +119,7 @@ export const createThreadRequestSchema = z
     startedOnBehalfOf: startedOnBehalfOfSchema.nullable().default(null),
     originKind: threadOriginKindSchema.nullable().default(null),
     sendAt: z.number().int().nonnegative().optional(),
+    nativeTerminal: z.boolean().optional(),
     pluginSubmission: z
       .object({ pluginId: pluginIdSchema, data: jsonValueSchema })
       .optional(),
@@ -166,7 +167,34 @@ export const createThreadRequestSchema = z
         path: ["originPluginId"],
       });
     }
-    if (value.originKind === null && value.input.length === 0) {
+    if (value.nativeTerminal === true) {
+      for (const field of [
+        "sendAt",
+        "sourceThreadId",
+        "sourceSeqEnd",
+        "pluginSubmission",
+      ] as const) {
+        if (value[field] !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${field} is not supported for native terminal threads`,
+            path: [field],
+          });
+        }
+      }
+      if (value.originKind !== null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "originKind is not supported for native terminal threads",
+          path: ["originKind"],
+        });
+      }
+    }
+    if (
+      value.originKind === null &&
+      value.nativeTerminal !== true &&
+      value.input.length === 0
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "input must contain at least one entry",
@@ -620,10 +648,12 @@ export const threadSpendBreakdownSchema = z.object({
   totalTokens: z.number().nullable(),
 });
 
-export const threadSpendTurnBreakdownSchema = threadSpendBreakdownSchema.extend({
-  turnId: z.string(),
-  model: z.string().nullable(),
-});
+export const threadSpendTurnBreakdownSchema = threadSpendBreakdownSchema.extend(
+  {
+    turnId: z.string(),
+    model: z.string().nullable(),
+  },
+);
 
 export const threadSpendSummaryResponseSchema = z.object({
   historyComplete: z.boolean(),

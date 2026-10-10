@@ -78,6 +78,22 @@ export default function plugin(bb: BbPluginApi) {
       { id: "ultrafast", label: "Ultrafast" },
     ],
     composerActions: ["plan", "goal"],
+    experimental_nativeTerminal: {
+      executable: "codex",
+      modelArgs: ["-c", 'model="{model}"'],
+      sessionRoot: { env: "CODEX_HOME", home: ".codex" },
+      session: {
+        kind: "discovered",
+        resumeArgs: ["resume", "{sessionId}"],
+        transcripts: "sessions/{yyyy}/{mm}/{dd}/rollout-*.jsonl",
+        header: {
+          match: { type: "session_meta" },
+          id: "payload.id",
+          cwd: "payload.cwd",
+          startedAt: "payload.timestamp",
+        },
+      },
+    },
     deriveProviderOptions(context) {
       return {
         memoryEnabled: context.settings.memoryEnabled !== false,

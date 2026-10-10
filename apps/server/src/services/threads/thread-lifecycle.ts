@@ -1,4 +1,5 @@
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
+import { assertNotNativeTerminalThread } from "./native-terminal-guard.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import {
   providerEnvironmentHasPendingWork,
@@ -996,6 +997,7 @@ export async function prepareReadyThreadTurnCommand(
   deps: LoggedWorkSessionDeps,
   args: ThreadStartCommandArgs,
 ): Promise<PreparedReadyThreadTurnCommand> {
+  assertNotNativeTerminalThread(deps.db, args.thread.id);
   await ensureHostSessionReadyForWork(deps, {
     hostId: args.environment.hostId,
   });
@@ -1289,6 +1291,7 @@ export async function requestThreadStart(
   deps: CommandResultSideEffectsDeps,
   args: ThreadStartCommandArgs,
 ): Promise<void> {
+  assertNotNativeTerminalThread(deps.db, args.thread.id);
   await threadStartRequestDeduper.run(args.thread.id, () =>
     requestThreadStartOnce(deps, args),
   );

@@ -21,6 +21,17 @@ export {
   recordThreadSpawner,
 } from "./fork-thread-spawners.js";
 export {
+  consumeNativeTerminalThreadInitialPrompt,
+  createNativeTerminalThread,
+  getNativeTerminalThread,
+  isNativeTerminalThread,
+  listNativeTerminalThreadIds,
+  recordNativeTerminalThreadSessionId,
+  setNativeTerminalThreadTerminal,
+  type NativeTerminalThreadRecord,
+  type RecordNativeSessionIdResult,
+} from "./fork-native-terminal-threads.js";
+export {
   isSqliteForeignKeyConstraint,
   isSqliteUniqueConstraintOnColumns,
 } from "./sqlite-errors.js";

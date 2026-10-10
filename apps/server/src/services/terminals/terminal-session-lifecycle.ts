@@ -1,5 +1,8 @@
 import { emitPluginTerminalInput } from "../plugins/plugin-thread-events.js";
-import { resolveHostEnvironment } from "../hosts/host-environment.js";
+import {
+  mergeHostAndProviderEnvironment,
+  resolveHostEnvironment,
+} from "../hosts/host-environment.js";
 import { randomUUID } from "node:crypto";
 import {
   createTerminalSession,
@@ -13,6 +16,7 @@ import {
 } from "@bb/db";
 import type { TerminalSessionCloseReason } from "@bb/domain";
 import type {
+  HostDaemonContributedEnvEntry,
   HostDaemonDaemonWsMessage,
   HostDaemonServerWsMessage,
 } from "@bb/host-daemon-contract";
@@ -269,6 +273,7 @@ interface ListTerminalsArgs {
 
 interface CreateTerminalArgs {
   payload: CreateTerminalRequest;
+  extraContributedEnv?: HostDaemonContributedEnvEntry[];
 }
 
 interface GetTerminalArgs {
@@ -283,6 +288,7 @@ interface TerminalCreatePayload {
 }
 
 interface CreateTerminalForTargetArgs {
+  extraContributedEnv: HostDaemonContributedEnvEntry[];
   payload: TerminalCreatePayload;
   target: TerminalLaunchTarget;
   threadId: string | null;
@@ -693,6 +699,7 @@ export class TerminalSessionLifecycle {
         ? this.resolveThreadTerminalCreateTarget(target.threadId)
         : target;
     return this.createTerminalForTarget({
+      extraContributedEnv: args.extraContributedEnv ?? [],
       payload: args.payload,
       target: launchTarget,
       threadId: target.kind === "thread" ? target.threadId : null,
@@ -766,14 +773,17 @@ export class TerminalSessionLifecycle {
     const requestId = randomUUID();
     const openMessage: HostDaemonServerWsMessage = {
       type: "terminal.open",
-      contributedEnv: await resolveHostEnvironment(this.options, {
-        hostId: launchTarget.hostId,
-        projectId:
-          launchTarget.environmentId === null
-            ? null
-            : requireEnvironment(this.options.db, launchTarget.environmentId)
-                .projectId,
-      }),
+      contributedEnv: mergeHostAndProviderEnvironment(
+        await resolveHostEnvironment(this.options, {
+          hostId: launchTarget.hostId,
+          projectId:
+            launchTarget.environmentId === null
+              ? null
+              : requireEnvironment(this.options.db, launchTarget.environmentId)
+                  .projectId,
+        }),
+        args.extraContributedEnv,
+      ),
       requestId,
       terminalId: startingSession.id,
       ...(args.threadId !== null ? { threadId: args.threadId } : {}),
@@ -1588,10 +1598,7 @@ export class TerminalSessionLifecycle {
         return;
       case "visibility":
         if (this.outputAckSocketVisibility.has(args.socket)) {
-          this.outputAckSocketVisibility.set(
-            args.socket,
-            args.message.visible,
-          );
+          this.outputAckSocketVisibility.set(args.socket, args.message.visible);
         }
         this.outputFlow.setVisible(
           args.terminalId,

@@ -67,6 +67,17 @@ export default function plugin(bb: BbPluginApi) {
       iconTint: { light: "#D97757", dark: "#D97757" },
     },
     ...CLAUDE_NATIVE_ROOTS_DECLARATION,
+    experimental_nativeTerminal: {
+      executable: "claude",
+      modelArgs: ["--model", "{model}"],
+      sessionRoot: { env: "CLAUDE_CONFIG_DIR", home: ".claude" },
+      session: {
+        kind: "assigned",
+        startArgs: ["--session-id", "{sessionId}"],
+        resumeArgs: ["--resume", "{sessionId}"],
+        transcript: "projects/*/{sessionId}.jsonl",
+      },
+    },
     maintenance: { health: true, usage: true, installation: true },
     capabilities: {
       supportsServiceTier: true,

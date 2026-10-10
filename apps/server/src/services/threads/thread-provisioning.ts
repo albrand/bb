@@ -19,6 +19,7 @@ import {
 import type { StartedOnBehalfOf } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
+import { openNativeTerminalAfterProvisioning } from "./native-terminal-threads.js";
 import {
   appendClientTurnEvent,
   appendPreparedClientTurnRequestedEventWithNotificationInTransaction,
@@ -255,6 +256,7 @@ async function startThreadIfEnvironmentReady(
       environmentId: args.environment.id,
       threadId: args.thread.id,
     });
+    await openNativeTerminalAfterProvisioning(deps, args.thread.id);
     return;
   }
 
