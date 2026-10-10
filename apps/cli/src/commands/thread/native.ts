@@ -83,7 +83,7 @@ async function runNativeHarness(
   };
   const timer = launch.discoverCodexSession
     ? setInterval(() => {
-        void discover();
+        discover().catch(() => undefined);
       }, CODEX_DISCOVERY_INTERVAL_MS)
     : null;
 
