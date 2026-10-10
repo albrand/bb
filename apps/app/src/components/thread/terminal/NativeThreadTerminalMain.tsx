@@ -75,7 +75,7 @@ export function NativeThreadTerminalMain({
         data-no-sidebar-swipe=""
       >
         <LazyThreadTerminalPanel
-          autoFocus={paneIsFocused}
+          autoFocus={paneIsFocused && !isTouchDevice}
           isPanelOpen
           isPanelPersistedOpen
           onOpenLink={onOpenLink}

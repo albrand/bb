@@ -79,6 +79,7 @@ const timelineProbe = vi.hoisted(() => ({
   calls: new Map<string, number>(),
 }));
 const responsiveComposerProbe = vi.hoisted(() => ({ enabled: false }));
+const nativeTerminalPanes = vi.hoisted(() => new Set<string>());
 
 function HostedComposerScopeProbe({ threadId }: { threadId: string }) {
   const composerHost = usePluginComposerHost();
@@ -350,8 +351,18 @@ vi.mock("./LazyThreadDetailView", () => ({
           data-testid={`drag-${threadId}`}
           onPointerDown={(event) => pane?.beginPaneDrag?.(event, threadId)}
         />
+        {nativeTerminalPanes.has(threadId) ? (
+          <div data-native-terminal-thread="native-provider">
+            <textarea
+              className="xterm-helper-textarea"
+              data-testid={`xterm-${threadId}`}
+            />
+          </div>
+        ) : null}
         <div data-promptbox="">
-          {responsiveComposerProbe.enabled ? (
+          {nativeTerminalPanes.has(
+            threadId,
+          ) ? null : responsiveComposerProbe.enabled ? (
             <PluginComposerHostProvider value={composerHost}>
               <PromptBoxInternal
                 value={draft.text}
@@ -787,6 +798,7 @@ beforeEach(() => {
   timelineProbe.active = false;
   timelineProbe.calls.clear();
   responsiveComposerProbe.enabled = false;
+  nativeTerminalPanes.clear();
   threadStore.set("thr-a", { archivedAt: null, deletedAt: null });
   threadStore.set("thr-b", { archivedAt: null, deletedAt: null });
 });
@@ -2475,6 +2487,25 @@ describe("SplitThreadArea", () => {
       }
     },
   );
+
+  it("focuses the native terminal input of a terminal-native thread pane", async () => {
+    nativeTerminalPanes.add("thr-b");
+    renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: twoPaneLayout("pane-1"),
+    });
+    const source = await screen.findByTestId("draft-thr-a");
+    const terminalInput = screen.getByTestId("xterm-thr-b");
+    source.focus();
+    act(() => {
+      commandHandlers.get("pane.focus.next")?.();
+    });
+    await waitFor(() => expect(document.activeElement).toBe(terminalInput));
+    act(() => {
+      commandHandlers.get("pane.focus.previous")?.();
+    });
+    await waitFor(() => expect(document.activeElement).toBe(source));
+  });
 
   it("focuses plugin content controls instead of pane chrome", async () => {
     setPluginSlotRegistrations(

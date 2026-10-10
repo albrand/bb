@@ -34,7 +34,7 @@ export function useSendNativeTerminalMessage() {
     mutationFn: ({ text, threadId }: SendNativeTerminalMessageArgs) =>
       sdk.threads.send({
         threadId,
-        input: [{ type: "text", text }],
+        input: [{ type: "text", text, mentions: [] }],
         mode: "auto",
       }),
   });
