@@ -19,9 +19,9 @@ Spawning:
                                    multi-line or Markdown prompts: inside double quotes the shell
                                    runs `backticks` and $(...) before bb sees them
     --title <title>                Thread title
-    --native                       Run the provider's own claude or codex TUI in the thread's
-                                   terminal instead of the chat view (claude-code and codex
-                                   providers); --prompt becomes optional and is its first message
+    --native                       Run the provider's own CLI in the thread's terminal instead of
+                                   the chat view (providers that declare one, such as claude-code
+                                   and codex); --prompt becomes optional and is its first message
     --plugin-create-data <json>    Non-secret plugin creation configuration keyed by plugin ID.
                                    Applies before message admission. For Account Pooler:
                                    {"account-pool":{"provider":"claude","accountId":"<uuid>"}}
@@ -280,7 +280,7 @@ Opening threads and files in the app:
 
 Native terminal threads:
 
-  bb thread native [id] [--attach]         Open a --native thread's claude or codex terminal,
+  bb thread native [id] [--attach]         Open a --native thread's provider CLI terminal,
                                            resuming the same session when it has exited
 
   Tell on a native thread pastes the text into its running terminal and presses

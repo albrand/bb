@@ -8,10 +8,11 @@ the initial message's admission checks. Its SDK counterpart is
 `experimental_thread.configure` hook; unknown or disabled handlers fail creation.
 For subscription choices, use Account Pooler's documented account-pool entry.
 
-- `bb thread spawn --native --provider claude-code|codex` creates a native
-  terminal thread: bb provisions its environment, then runs the provider's own
-  `claude` or `codex` TUI in a terminal in that thread's workspace instead of
-  the chat view. `--prompt` is optional and becomes the harness's first message.
+- `bb thread spawn --native --provider <id>` creates a native terminal thread
+  for a provider that declares its own CLI (`claude-code` and `codex` do): bb
+  provisions its environment, then runs that CLI (`claude`, `codex`) in a
+  terminal in the thread's workspace instead of the chat view. `--prompt` is
+  optional and becomes the CLI's first message.
   The thread gets the provider's contributed env (Account Pooler included) and
   `BB_THREAD_ID`; it does not get bb's appended instructions, skill injection,
   or MCP wiring, so the harness runs with the user's own native config.

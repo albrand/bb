@@ -4,11 +4,14 @@ import {
   getNativeTerminalThread,
   recordNativeTerminalThreadSessionId,
   setNativeTerminalThreadTerminal,
-  type NativeTerminalHarness,
   type NativeTerminalThreadRecord,
   type getThread,
 } from "@bb/db";
-import { isActiveTerminalSessionStatus, type PromptInput } from "@bb/domain";
+import {
+  isActiveTerminalSessionStatus,
+  type PromptInput,
+  type ProviderNativeTerminal,
+} from "@bb/domain";
 import type {
   NativeTerminalLaunchSpec,
   NativeTerminalThread,
@@ -34,46 +37,50 @@ type ThreadRow = NonNullable<ReturnType<typeof getThread>>;
 const NATIVE_TERMINAL_DEFAULT_COLS = 120;
 const NATIVE_TERMINAL_DEFAULT_ROWS = 36;
 
-const HARNESS_BY_PROVIDER: Readonly<Record<string, NativeTerminalHarness>> = {
-  "claude-code": "claude",
-  codex: "codex",
-};
-
-const HARNESS_TITLES: Readonly<Record<NativeTerminalHarness, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-};
-
-const HARNESS_EXECUTABLES: Readonly<Record<NativeTerminalHarness, string>> = {
-  claude: "claude",
-  codex: "codex",
-};
-
 type NativeTerminalDeps = Pick<
   AppDeps,
-  "config" | "db" | "logger" | "terminalSessions"
+  "config" | "db" | "logger" | "providerRegistry" | "terminalSessions"
+>;
+
+type NativeTerminalViewDeps = Pick<
+  AppDeps,
+  "db" | "providerRegistry" | "terminalSessions"
 >;
 
 const pendingOpens = new Map<string, Promise<NativeTerminalThread>>();
 
-export function nativeTerminalHarnessForProvider(
-  providerId: string,
-): NativeTerminalHarness | null {
-  return HARNESS_BY_PROVIDER[providerId] ?? null;
+export interface NativeTerminalProvider {
+  displayName: string;
+  cli: ProviderNativeTerminal;
 }
 
-export function requireNativeTerminalHarness(
+export function findNativeTerminalProvider(
+  deps: Pick<AppDeps, "providerRegistry">,
   providerId: string,
-): NativeTerminalHarness {
-  const harness = nativeTerminalHarnessForProvider(providerId);
-  if (harness === null) {
+): NativeTerminalProvider | null {
+  const registration = deps.providerRegistry.get(providerId);
+  if (registration === null || registration.nativeTerminal === null) {
+    return null;
+  }
+  return {
+    displayName: registration.info.displayName,
+    cli: registration.nativeTerminal,
+  };
+}
+
+export function requireNativeTerminalProvider(
+  deps: Pick<AppDeps, "providerRegistry">,
+  providerId: string,
+): NativeTerminalProvider {
+  const provider = findNativeTerminalProvider(deps, providerId);
+  if (provider === null) {
     throw new ApiError(
       400,
       "invalid_request",
-      `Native terminal threads support the claude-code and codex providers, not ${providerId}`,
+      `Provider ${providerId} does not declare a native terminal`,
     );
   }
-  return harness;
+  return provider;
 }
 
 export function nativeTerminalInitialPrompt(
@@ -95,10 +102,10 @@ export function nativeTerminalInitialPrompt(
 }
 
 export function nativeTerminalLaunchCommand(args: {
-  harness: NativeTerminalHarness;
+  executable: string;
   threadId: string;
 }): string {
-  const executable = HARNESS_EXECUTABLES[args.harness];
+  const executable = args.executable;
   const env = `BB_THREAD_ID=${args.threadId}`;
   const wrapper = `"$BB_CLI" thread native-run ${args.threadId}`;
   return [
@@ -183,19 +190,23 @@ function readRecordTerminal(
 }
 
 function toNativeTerminalThread(
-  deps: Pick<AppDeps, "terminalSessions">,
+  deps: Pick<AppDeps, "providerRegistry" | "terminalSessions">,
   record: NativeTerminalThreadRecord,
+  terminal: TerminalSession | null = readRecordTerminal(deps, record),
 ): NativeTerminalThread {
   return {
     threadId: record.threadId,
-    harness: record.harness,
+    providerId: record.providerId,
+    displayName:
+      deps.providerRegistry.get(record.providerId)?.info.displayName ??
+      record.providerId,
     nativeSessionId: record.nativeSessionId,
-    terminal: readRecordTerminal(deps, record),
+    terminal,
   };
 }
 
 export function findNativeTerminalThreadView(
-  deps: Pick<AppDeps, "db" | "terminalSessions">,
+  deps: NativeTerminalViewDeps,
   threadId: string,
 ): NativeTerminalThread | null {
   requirePublicThread(deps.db, threadId);
@@ -204,7 +215,7 @@ export function findNativeTerminalThreadView(
 }
 
 export function getNativeTerminalThreadView(
-  deps: Pick<AppDeps, "db" | "terminalSessions">,
+  deps: NativeTerminalViewDeps,
   threadId: string,
 ): NativeTerminalThread {
   return toNativeTerminalThread(
@@ -231,6 +242,7 @@ async function openNativeTerminalOnce(
     return toNativeTerminalThread(deps, record);
   }
   const thread = requirePublicThread(deps.db, args.threadId);
+  const provider = requireNativeTerminalProvider(deps, record.providerId);
   if (thread.archivedAt !== null) {
     throw new ApiError(
       409,
@@ -260,12 +272,12 @@ async function openNativeTerminalOnce(
       start: {
         mode: "command",
         command: nativeTerminalLaunchCommand({
-          harness: record.harness,
+          executable: provider.cli.executable,
           threadId: thread.id,
         }),
       },
       target: { kind: "thread", threadId: thread.id },
-      title: HARNESS_TITLES[record.harness],
+      title: provider.displayName,
     },
     extraContributedEnv: providerEnv,
   });
@@ -273,12 +285,7 @@ async function openNativeTerminalOnce(
     threadId: thread.id,
     terminalSessionId: terminal.id,
   });
-  return {
-    threadId: record.threadId,
-    harness: record.harness,
-    nativeSessionId: record.nativeSessionId,
-    terminal,
-  };
+  return toNativeTerminalThread(deps, record, terminal);
 }
 
 export function openNativeTerminal(
@@ -310,13 +317,14 @@ export async function openNativeTerminalAfterProvisioning(
 }
 
 export function takeNativeTerminalLaunchSpec(
-  deps: Pick<AppDeps, "db">,
+  deps: Pick<AppDeps, "db" | "providerRegistry">,
   threadId: string,
 ): NativeTerminalLaunchSpec {
   const record = requireNativeTerminalThreadRecord(deps, threadId);
+  const provider = requireNativeTerminalProvider(deps, record.providerId);
   return {
     threadId: record.threadId,
-    harness: record.harness,
+    cli: provider.cli,
     nativeSessionId: record.nativeSessionId,
     initialPrompt: consumeNativeTerminalThreadInitialPrompt(deps.db, threadId),
     model: record.model,
@@ -324,7 +332,7 @@ export function takeNativeTerminalLaunchSpec(
 }
 
 export function recordNativeTerminalSession(
-  deps: Pick<AppDeps, "db" | "terminalSessions">,
+  deps: NativeTerminalViewDeps,
   args: { threadId: string; nativeSessionId: string },
 ): NativeTerminalThread {
   requireNativeTerminalThreadRecord(deps, args.threadId);

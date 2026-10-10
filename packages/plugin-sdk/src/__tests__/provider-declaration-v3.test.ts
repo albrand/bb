@@ -306,7 +306,8 @@ describe("provider declaration target-state fields", () => {
       ).models.childThreadModel,
     ).toBe("child-model");
     expect(
-      "childThreadModel" in validatePluginProviderDeclaration(declaration()).models,
+      "childThreadModel" in
+        validatePluginProviderDeclaration(declaration()).models,
     ).toBe(false);
   });
 
@@ -315,7 +316,9 @@ describe("provider declaration target-state fields", () => {
     (childThreadModel) => {
       expect(() =>
         validatePluginProviderDeclaration(
-          declaration({ models: { childThreadModel: childThreadModel as never } }),
+          declaration({
+            models: { childThreadModel: childThreadModel as never },
+          }),
         ),
       ).toThrow(/models\.childThreadModel must be a trimmed string/u);
     },
@@ -461,6 +464,74 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
           }),
         ),
       ).toThrow(/reportsTokenUsage must be a boolean/u);
+    });
+  });
+
+  describe("experimental_nativeTerminal", () => {
+    const assigned = {
+      executable: "my-agent",
+      modelArgs: ["--model", "{model}"],
+      sessionRoot: { env: "MY_AGENT_HOME", home: ".my-agent" },
+      session: {
+        kind: "assigned" as const,
+        startArgs: ["--session-id", "{sessionId}"],
+        resumeArgs: ["--resume", "{sessionId}"],
+        transcript: "sessions/*/{sessionId}.jsonl",
+      },
+    };
+
+    it("is accepted, carried through and frozen", () => {
+      const normalized = validatePluginProviderDeclaration(
+        declaration({ experimental_nativeTerminal: assigned }),
+      );
+      expect(normalized.experimental_nativeTerminal).toEqual(assigned);
+      expect(Object.isFrozen(normalized.experimental_nativeTerminal)).toBe(
+        true,
+      );
+      expect(
+        Object.isFrozen(normalized.experimental_nativeTerminal?.session),
+      ).toBe(true);
+    });
+
+    it("stays absent when a provider does not declare it", () => {
+      expect(
+        validatePluginProviderDeclaration(declaration()),
+      ).not.toHaveProperty("experimental_nativeTerminal");
+    });
+
+    it.each([
+      [
+        "an unknown argv token",
+        { ...assigned, modelArgs: ["--model", "{models}"] },
+        /experimental_nativeTerminal\.modelArgs may only use \{model\}/u,
+      ],
+      [
+        "resume argv without the session id",
+        {
+          ...assigned,
+          session: { ...assigned.session, resumeArgs: ["--continue"] },
+        },
+        /experimental_nativeTerminal\.session\.resumeArgs must pass \{sessionId\}/u,
+      ],
+      [
+        "a transcript that escapes the session root",
+        {
+          ...assigned,
+          session: { ...assigned.session, transcript: "../{sessionId}.jsonl" },
+        },
+        /experimental_nativeTerminal\.session\.transcript must be a relative path/u,
+      ],
+      [
+        "an executable path instead of a name",
+        { ...assigned, executable: "/usr/bin/my-agent" },
+        /experimental_nativeTerminal\.executable must be a bare executable name/u,
+      ],
+    ])("rejects %s", (_label, value, message) => {
+      expect(() =>
+        validatePluginProviderDeclaration(
+          declaration({ experimental_nativeTerminal: value }),
+        ),
+      ).toThrow(message);
     });
   });
 });

@@ -1001,6 +1001,37 @@ The per-root options and the symlink boundary rule are in
 the right vocabulary or whether a root should carry a shape like the
 resolver's answer does.
 
+## `PluginProviderDeclaration.experimental_nativeTerminal`
+
+**What it does.** Declares the provider's own interactive CLI so a thread can
+run it in a thread terminal (a native terminal thread) instead of a provider
+turn. It replaces the provider-id table the first native terminal
+implementation kept in core: the server, the bb CLI wrapper and the composer
+read the declaration, and `ProviderInfo.capabilities.supportsNativeTerminal`
+tells clients whether to offer the option. The declaration is data, not code:
+an executable, model argv, a session-file root (env override plus a
+home-relative default), and either an `assigned` session (bb picks a UUID;
+start and resume argv plus a transcript pattern that proves the session
+exists) or a `discovered` session (the CLI picks its id; bb reads the first
+JSON line of the matching transcript files and binds the one started in the
+thread workspace after launch). Validated at registration by
+`providerNativeTerminalSchema` in `@bb/domain`: bare executable name, at most
+16 arguments per list, only the documented tokens, relative patterns without
+dot segments. Core callers: `apps/server/src/services/threads/native-terminal-threads.ts`
+(provider lookup, terminal command, launch spec), `apps/cli/src/native-harness.ts`
+(argv and session discovery) and the new-thread composer's native terminal
+toggle. First-party declarations: `provider-claude-code` (`assigned`) and
+`provider-codex` (`discovered`).
+
+**Audit before stabilizing.** Confirm the two session strategies cover a
+third CLI without a new kind; decide whether the first-JSON-line header is
+the right discovery vocabulary or whether discovery belongs in the plugin's
+`bb.host` entry as a resolver, like `experimental_resolvesNativeRoots`;
+decide whether injected instructions, skills and MCP configuration should
+reach a native CLI through this declaration; and check that a host-specific
+session root (a moved config directory) is the env override's job rather
+than the declaration's.
+
 ## `PluginProviderDeclaration.experimental_nativeCommandRoots`
 
 **What it does.** Names the directories a provider's agent reads its own

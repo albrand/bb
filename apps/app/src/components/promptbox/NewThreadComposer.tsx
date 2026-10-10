@@ -91,7 +91,10 @@ import {
   type SidebarProject,
 } from "@/hooks/queries/project-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
-import { useSystemConfig } from "@/hooks/queries/system-queries";
+import {
+  useSystemConfig,
+  useSystemProviders,
+} from "@/hooks/queries/system-queries";
 import { useCommandSuggestions } from "@/hooks/useCommandSuggestions";
 import {
   usePromptDraftController,
@@ -254,11 +257,6 @@ export function resolveSubmittedExecutionSources(
     ? { ...sources, model: "explicit" }
     : sources;
 }
-
-const NATIVE_TERMINAL_PROVIDER_IDS: ReadonlySet<string> = new Set([
-  "claude-code",
-  "codex",
-]);
 
 export interface NewThreadComposerSubmission extends NewThreadRequest {
   nativeTerminal?: boolean;
@@ -1549,10 +1547,10 @@ export function NewThreadComposer({
     [projectPromptHistory],
   );
   const promptInputEmpty = usePromptDraftInputEmpty(promptDraft);
+  const agentProviders = useSystemProviders().data;
   const nativeTerminalAvailable =
-    selectedProviderId !== undefined &&
-    selectedProviderId !== null &&
-    NATIVE_TERMINAL_PROVIDER_IDS.has(selectedProviderId);
+    agentProviders?.find((provider) => provider.id === selectedProviderId)
+      ?.capabilities.supportsNativeTerminal === true;
   const nativeTerminal = nativeTerminalAvailable && nativeTerminalRequested;
   const submitProgrammaticallyRef = useRef<
     (

@@ -8,7 +8,6 @@ import {
   getEnvironment,
   getProjectSourceByHost,
   getThread,
-  type NativeTerminalHarness,
 } from "@bb/db";
 import type {
   ProjectExecutionDefaults,
@@ -73,7 +72,8 @@ import type { ThreadProvisionEnvironmentIntent } from "./thread-startup-store.js
 import {
   beginNativeTerminalThreadProvisioning,
   nativeTerminalInitialPrompt,
-  requireNativeTerminalHarness,
+  requireNativeTerminalProvider,
+  type NativeTerminalProvider,
 } from "./native-terminal-threads.js";
 import { resolveSystemProviderModels } from "../system/execution-options.js";
 import {
@@ -84,7 +84,7 @@ import {
 type ThreadCreateDeps = LoggedPendingInteractionWorkSessionDeps;
 
 interface NativeTerminalCreate {
-  harness: NativeTerminalHarness;
+  provider: NativeTerminalProvider;
   initialPrompt: string | null;
 }
 
@@ -428,9 +428,11 @@ async function createPendingThreadAndAttemptFirstDispatch(
     if (args.nativeTerminal !== null) {
       createNativeTerminalThread(deps.db, {
         threadId: thread.id,
-        harness: args.nativeTerminal.harness,
+        providerId: thread.providerId,
         nativeSessionId:
-          args.nativeTerminal.harness === "claude" ? randomUUID() : null,
+          args.nativeTerminal.provider.cli.session.kind === "assigned"
+            ? randomUUID()
+            : null,
         initialPrompt: args.nativeTerminal.initialPrompt,
         model:
           args.request.executionInputSources?.model === "client-preference"
@@ -795,7 +797,7 @@ export async function createThreadFromRequest(
   const nativeTerminal: NativeTerminalCreate | null =
     request.nativeTerminal === true
       ? {
-          harness: requireNativeTerminalHarness(request.providerId),
+          provider: requireNativeTerminalProvider(deps, request.providerId),
           initialPrompt: nativeTerminalInitialPrompt(request.input),
         }
       : null;

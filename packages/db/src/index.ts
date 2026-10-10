@@ -28,7 +28,6 @@ export {
   listNativeTerminalThreadIds,
   recordNativeTerminalThreadSessionId,
   setNativeTerminalThreadTerminal,
-  type NativeTerminalHarness,
   type NativeTerminalThreadRecord,
   type RecordNativeSessionIdResult,
 } from "./fork-native-terminal-threads.js";

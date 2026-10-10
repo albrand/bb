@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { terminalColsSchema, terminalRowsSchema } from "@bb/domain";
+import {
+  providerNativeTerminalSchema,
+  terminalColsSchema,
+  terminalRowsSchema,
+} from "@bb/domain";
 import { terminalSessionSchema } from "./terminals.js";
-
-export const nativeTerminalHarnessSchema = z.enum(["claude", "codex"]);
-export type NativeTerminalHarnessName = z.infer<
-  typeof nativeTerminalHarnessSchema
->;
 
 export const nativeTerminalThreadSchema = z.object({
   threadId: z.string().min(1),
-  harness: nativeTerminalHarnessSchema,
+  providerId: z.string().min(1),
+  displayName: z.string().min(1),
   nativeSessionId: z.string().min(1).nullable(),
   terminal: terminalSessionSchema.nullable(),
 });
@@ -27,7 +27,7 @@ export type OpenNativeTerminalRequest = z.infer<
 
 export const nativeTerminalLaunchSpecSchema = z.object({
   threadId: z.string().min(1),
-  harness: nativeTerminalHarnessSchema,
+  cli: providerNativeTerminalSchema,
   nativeSessionId: z.string().min(1).nullable(),
   initialPrompt: z.string().min(1).nullable(),
   model: z.string().min(1).nullable(),

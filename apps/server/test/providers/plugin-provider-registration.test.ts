@@ -60,6 +60,7 @@ describe("buildPluginProviderRegistration", () => {
         supportsFork: true,
         supportsSessionRewind: true,
         modelCatalogScope: "workspace",
+        supportsNativeTerminal: false,
         permissionModes: ["accept-edits", "full"],
       },
       composerActions: [

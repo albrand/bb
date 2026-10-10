@@ -255,7 +255,7 @@ describe("native terminal threads", () => {
     expect(types).not.toContain("client/thread/start");
 
     const record = getNativeTerminalThread(fixture.harness.db, thread.id);
-    expect(record?.harness).toBe("claude");
+    expect(record?.providerId).toBe("claude-code");
     expect(record?.nativeSessionId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(record?.terminalSessionId).toBe(open.terminalId);
 
@@ -284,7 +284,8 @@ describe("native terminal threads", () => {
       await readJson(await postJson(fixture, launchPath, {})),
     );
     expect(first.initialPrompt).toBe("Fix the flaky test");
-    expect(first.harness).toBe("claude");
+    expect(first.cli.executable).toBe("claude");
+    expect(first.cli.session.kind).toBe("assigned");
     expect(first.nativeSessionId).not.toBeNull();
     expect(second.initialPrompt).toBeNull();
     expect(second.nativeSessionId).toBe(first.nativeSessionId);

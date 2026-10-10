@@ -12,11 +12,6 @@ import {
 } from "@/hooks/queries/native-terminal-queries";
 import { useThreadTerminals } from "@/hooks/queries/thread-terminal-queries";
 
-const HARNESS_LABELS: Record<NativeTerminalThread["harness"], string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-};
-
 interface NativeThreadTerminalMainProps {
   onOpenLink?: MarkdownPreviewLinkHandler;
   threadId: string;
@@ -58,7 +53,7 @@ export function NativeThreadTerminalMain({
     terminalsQuery.data?.sessions.find((entry) => entry.id === terminalId) ??
     view.terminal;
   const state = resolveNativeTerminalState({ session, threadIsProvisioning });
-  const harnessLabel = HARNESS_LABELS[view.harness];
+  const providerLabel = view.displayName;
   const { refetch } = nativeQuery;
   const terminalsUpdatedAt = terminalsQuery.dataUpdatedAt;
 
@@ -71,7 +66,7 @@ export function NativeThreadTerminalMain({
     return (
       <div
         className="flex h-full min-h-0 min-w-0 flex-col"
-        data-native-terminal-thread={view.harness}
+        data-native-terminal-thread={view.providerId}
       >
         <LazyThreadTerminalPanel
           autoFocus
@@ -89,9 +84,9 @@ export function NativeThreadTerminalMain({
     return (
       <div
         className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground"
-        data-native-terminal-thread={view.harness}
+        data-native-terminal-thread={view.providerId}
       >
-        Preparing the workspace for {harnessLabel}…
+        Preparing the workspace for {providerLabel}…
       </div>
     );
   }
@@ -99,10 +94,10 @@ export function NativeThreadTerminalMain({
   return (
     <div
       className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-sm"
-      data-native-terminal-thread={view.harness}
+      data-native-terminal-thread={view.providerId}
     >
       <p className="font-medium text-foreground">
-        {harnessLabel} session ended
+        {providerLabel} session ended
         {state.exitCode !== null && state.exitCode !== 0
           ? ` (exit ${state.exitCode})`
           : ""}

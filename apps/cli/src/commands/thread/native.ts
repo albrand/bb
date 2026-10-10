@@ -5,13 +5,13 @@ import { action, CliExitError } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import { requireThreadIdOrSelf } from "../../context-env.js";
 import {
-  findCodexRolloutSession,
+  findNativeSession,
   resolveNativeHarnessLaunch,
 } from "../../native-harness.js";
 import { outputJson } from "../helpers.js";
 import { attachTerminal } from "../terminal.js";
 
-const CODEX_DISCOVERY_INTERVAL_MS = 2_000;
+const SESSION_DISCOVERY_INTERVAL_MS = 2_000;
 const FORWARDED_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
 const SWALLOWED_SIGNALS = ["SIGINT", "SIGQUIT"] as const;
 
@@ -32,7 +32,7 @@ function describeNativeThread(view: NativeTerminalThread): string {
       ? "no terminal"
       : `terminal ${view.terminal.id} (${view.terminal.status})`;
   const session = view.nativeSessionId ?? "not yet known";
-  return `${view.harness} session ${session}, ${terminal}`;
+  return `${view.displayName} session ${session}, ${terminal}`;
 }
 
 async function runNativeHarness(
@@ -56,12 +56,13 @@ async function runNativeHarness(
     });
   }
 
-  let recorded = !launch.discoverCodexSession;
+  let recorded = !launch.discoverSession;
   const discover = async (): Promise<void> => {
     if (recorded) return;
-    let match: ReturnType<typeof findCodexRolloutSession>;
+    let match: ReturnType<typeof findNativeSession>;
     try {
-      match = findCodexRolloutSession({
+      match = findNativeSession({
+        cli: spec.cli,
         cwd,
         env: process.env,
         launchedAtMs,
@@ -81,10 +82,10 @@ async function runNativeHarness(
       recorded = false;
     }
   };
-  const timer = launch.discoverCodexSession
+  const timer = launch.discoverSession
     ? setInterval(() => {
         discover().catch(() => undefined);
-      }, CODEX_DISCOVERY_INTERVAL_MS)
+      }, SESSION_DISCOVERY_INTERVAL_MS)
     : null;
 
   const exitCode = await new Promise<number>((resolve, reject) => {
@@ -105,7 +106,7 @@ export function registerNativeCommands(
   parent
     .command("native [threadId]")
     .description(
-      "Open the native terminal of a thread created with `bb thread spawn --native`, resuming its claude or codex session when it has exited",
+      "Open the native terminal of a thread created with `bb thread spawn --native`, resuming its native CLI session when it has exited",
     )
     .option("--self", "Target the current thread (BB_THREAD_ID)")
     .option("--attach", "Attach this terminal to the native session")
@@ -142,7 +143,7 @@ export function registerNativeCommands(
   parent
     .command("native-run <threadId>", { hidden: true })
     .description(
-      "Run a native thread's claude or codex harness in this terminal (bb launches this inside the thread's terminal)",
+      "Run a native thread's provider CLI in this terminal (bb launches this inside the thread's terminal)",
     )
     .option("--probe", "Exit successfully without running anything")
     .option("--json", "Print the probe result as JSON")

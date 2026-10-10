@@ -132,6 +132,25 @@ resolved skills and commands, each in the order given — and a later root with
 the same path is dropped, so a resolved root that repeats a declared one is
 listed under the declared root's identity.
 
+`experimental_nativeTerminal` (see api_to_audit.md) declares the provider's
+own interactive CLI for native terminal threads, whose main surface is that
+CLI in a thread terminal instead of a provider turn. Declaring it sets
+`ProviderInfo.capabilities.supportsNativeTerminal`, which offers the native
+terminal option; core never names a provider for it. The declaration is data
+the bb CLI runs on the thread's host: the `executable`, `modelArgs` placed
+first when the thread has a model (`{model}`), the `sessionRoot` (an `env`
+override, else `home` under the host home), and how the session id is
+obtained. With `"assigned"`, bb picks a UUID, starts the CLI with
+`startArgs` and the first prompt, and relaunches with `resumeArgs` once the
+`transcript` pattern names an existing file. With `"discovered"`, the CLI
+picks its id; bb starts it with only the first prompt, then reads the first
+JSON line of each `transcripts` file (`{yyyy}`, `{mm}`, `{dd}` cover the
+launch day and the day before), keeps those whose `header.match` fields equal
+the given strings, and binds the single one whose `header.cwd` is the thread
+workspace and whose `header.startedAt` follows the launch; later launches use
+`resumeArgs`. `*` matches within one path segment, and `{sessionId}` is the
+only token in session argv.
+
 Rules:
 
 - Capabilities project to exactly one client shape, `ProviderInfo`.

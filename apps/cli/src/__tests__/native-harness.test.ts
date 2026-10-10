@@ -2,16 +2,18 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ProviderNativeTerminal } from "@bb/domain";
 import type { NativeTerminalLaunchSpec } from "@bb/server-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  findCodexRolloutSession,
+  findNativeSession,
   resolveNativeHarnessLaunch,
 } from "../native-harness.js";
 
@@ -28,12 +30,41 @@ function tempHome(): string {
   return root;
 }
 
+const ASSIGNED_CLI: ProviderNativeTerminal = {
+  executable: "claude",
+  modelArgs: ["--model", "{model}"],
+  sessionRoot: { env: "CLAUDE_CONFIG_DIR", home: ".claude" },
+  session: {
+    kind: "assigned",
+    startArgs: ["--session-id", "{sessionId}"],
+    resumeArgs: ["--resume", "{sessionId}"],
+    transcript: "projects/*/{sessionId}.jsonl",
+  },
+};
+
+const DISCOVERED_CLI: ProviderNativeTerminal = {
+  executable: "codex",
+  modelArgs: ["-c", 'model="{model}"'],
+  sessionRoot: { env: "CODEX_HOME", home: ".codex" },
+  session: {
+    kind: "discovered",
+    resumeArgs: ["resume", "{sessionId}"],
+    transcripts: "sessions/{yyyy}/{mm}/{dd}/rollout-*.jsonl",
+    header: {
+      match: { type: "session_meta" },
+      id: "payload.id",
+      cwd: "payload.cwd",
+      startedAt: "payload.timestamp",
+    },
+  },
+};
+
 function spec(
   overrides: Partial<NativeTerminalLaunchSpec>,
 ): NativeTerminalLaunchSpec {
   return {
     threadId: "thr_native",
-    harness: "claude",
+    cli: ASSIGNED_CLI,
     nativeSessionId: "6f1c2a8e-7d1b-4a55-9f0e-1c2d3e4f5a6b",
     initialPrompt: null,
     model: null,
@@ -95,7 +126,7 @@ describe("resolveNativeHarnessLaunch", () => {
         "6f1c2a8e-7d1b-4a55-9f0e-1c2d3e4f5a6b",
         "fix the build",
       ],
-      discoverCodexSession: false,
+      discoverSession: false,
     });
   });
 
@@ -137,24 +168,32 @@ describe("resolveNativeHarnessLaunch", () => {
   it("launches codex fresh and asks for session discovery until an id is known", () => {
     expect(
       resolveNativeHarnessLaunch(
-        spec({ harness: "codex", nativeSessionId: null, initialPrompt: "go" }),
+        spec({
+          cli: DISCOVERED_CLI,
+          nativeSessionId: null,
+          initialPrompt: "go",
+        }),
         { HOME: tempHome() },
       ),
-    ).toEqual({ command: "codex", args: ["go"], discoverCodexSession: true });
+    ).toEqual({ command: "codex", args: ["go"], discoverSession: true });
     expect(
       resolveNativeHarnessLaunch(
-        spec({ harness: "codex", nativeSessionId: "abc-123", model: "gpt-6" }),
+        spec({
+          cli: DISCOVERED_CLI,
+          nativeSessionId: "abc-123",
+          model: "gpt-6",
+        }),
         { HOME: tempHome() },
       ),
     ).toEqual({
       command: "codex",
-      args: ["resume", "-c", 'model="gpt-6"', "abc-123"],
-      discoverCodexSession: false,
+      args: ["-c", 'model="gpt-6"', "resume", "abc-123"],
+      discoverSession: false,
     });
   });
 });
 
-describe("findCodexRolloutSession", () => {
+describe("findNativeSession", () => {
   it("finds the rollout started in this worktree after launch", () => {
     const home = tempHome();
     const launchedAtMs = Date.now();
@@ -177,7 +216,8 @@ describe("findCodexRolloutSession", () => {
       timestamp: new Date(launchedAtMs - 60_000),
     });
     expect(
-      findCodexRolloutSession({
+      findNativeSession({
+        cli: DISCOVERED_CLI,
         cwd: "/work/thread-a/",
         env: { HOME: home },
         launchedAtMs,
@@ -201,7 +241,8 @@ describe("findCodexRolloutSession", () => {
       });
     }
     expect(
-      findCodexRolloutSession({
+      findNativeSession({
+        cli: DISCOVERED_CLI,
         cwd: "/work/shared",
         env: { HOME: home },
         launchedAtMs,
@@ -228,7 +269,8 @@ describe("findCodexRolloutSession", () => {
     });
     try {
       expect(
-        findCodexRolloutSession({
+        findNativeSession({
+          cli: DISCOVERED_CLI,
           cwd: "/work/locked",
           env: { HOME: home },
           launchedAtMs,
@@ -243,9 +285,35 @@ describe("findCodexRolloutSession", () => {
     }
   });
 
+  it("ignores session files whose header does not match the declaration", () => {
+    const home = tempHome();
+    const launchedAtMs = Date.now();
+    const file = writeRollout({
+      home,
+      id: "44444444-aaaa-bbbb-cccc-000000000001",
+      cwd: "/work/mismatch",
+      timestamp: new Date(launchedAtMs + 500),
+    });
+    const original = readFileSync(file, "utf8");
+    writeFileSync(
+      file,
+      original.replace('"type":"session_meta"', '"type":"turn_context"'),
+    );
+    expect(
+      findNativeSession({
+        cli: DISCOVERED_CLI,
+        cwd: "/work/mismatch",
+        env: { HOME: home },
+        launchedAtMs,
+        nowMs: launchedAtMs + 1_000,
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
   it("reports none when codex has not written a rollout yet", () => {
     expect(
-      findCodexRolloutSession({
+      findNativeSession({
+        cli: DISCOVERED_CLI,
         cwd: "/work/none",
         env: { HOME: tempHome() },
         launchedAtMs: Date.now(),

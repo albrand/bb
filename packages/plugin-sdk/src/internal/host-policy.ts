@@ -22,7 +22,9 @@ import {
   normalizeProviderNativeRoots,
   providerNativeRootsInputSchema,
   providerNativeRootsSchema,
+  providerNativeTerminalSchema,
   type ProviderNativeRoots,
+  type ProviderNativeTerminal,
 } from "@bb/domain";
 import { PLUGIN_CLI_OUTPUT_MAX_BYTES } from "../backend-contract.js";
 import type {
@@ -862,6 +864,29 @@ function validateProviderEnvPassthrough(
   return Object.freeze([...seen]);
 }
 
+function validateProviderNativeTerminal(
+  providerId: string,
+  value: unknown,
+): ProviderNativeTerminal {
+  const parsed = providerNativeTerminalSchema.safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue?.path.length ? `.${issue.path.join(".")}` : "";
+    throw new Error(
+      `provider "${providerId}" experimental_nativeTerminal${where} ${issue?.message ?? "is invalid"}`,
+    );
+  }
+  return deepFreeze(parsed.data);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null) {
+    for (const entry of Object.values(value)) deepFreeze(entry);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function validateProviderNativeRoots(
   providerId: string,
   field: "experimental_nativeSkillRoots" | "experimental_nativeCommandRoots",
@@ -1189,10 +1214,12 @@ export type NormalizedPluginProviderDeclaration = Omit<
   | "experimental_nativeSkillRoots"
   | "experimental_nativeCommandRoots"
   | "experimental_resolvesNativeRoots"
+  | "experimental_nativeTerminal"
 > & {
   readonly experimental_nativeSkillRoots?: ProviderNativeRoots;
   readonly experimental_nativeCommandRoots?: ProviderNativeRoots;
   readonly experimental_resolvesNativeRoots: boolean;
+  readonly experimental_nativeTerminal?: ProviderNativeTerminal;
   readonly completedTurnDisplay: PluginProviderCompletedTurnDisplay;
   readonly maintenance: {
     readonly health: boolean;
@@ -1232,6 +1259,7 @@ const READ_EXPERIMENTAL_PROVIDER_DECLARATION_FIELDS: ReadonlySet<string> =
     "experimental_nativeSkillRoots",
     "experimental_nativeCommandRoots",
     "experimental_resolvesNativeRoots",
+    "experimental_nativeTerminal",
   ]);
 
 const RENAMED_PROVIDER_FIELDS_SDK_VERSION = "0.4.16";
@@ -1492,6 +1520,13 @@ export function validatePluginProviderDeclaration(
           "experimental_nativeCommandRoots",
           declaration.experimental_nativeCommandRoots,
         );
+  const nativeTerminal =
+    declaration.experimental_nativeTerminal === undefined
+      ? undefined
+      : validateProviderNativeTerminal(
+          id,
+          declaration.experimental_nativeTerminal,
+        );
   const resolvesNativeRoots = declaration.experimental_resolvesNativeRoots;
   if (
     resolvesNativeRoots !== undefined &&
@@ -1544,6 +1579,9 @@ export function validatePluginProviderDeclaration(
       ? {}
       : { experimental_nativeCommandRoots: nativeCommandRoots }),
     experimental_resolvesNativeRoots: resolvesNativeRoots ?? false,
+    ...(nativeTerminal === undefined
+      ? {}
+      : { experimental_nativeTerminal: nativeTerminal }),
     ...(deriveProviderOptions === undefined
       ? {}
       : { deriveProviderOptions: deriveProviderOptions }),
@@ -2251,9 +2289,7 @@ export interface NormalizedPluginEnvironmentProvider {
     PluginEnvironmentProviderDeclaration["experimental_existingPath"]
   > | null;
   create: PluginEnvironmentProviderDeclaration["create"];
-  restore: NonNullable<
-    PluginEnvironmentProviderDeclaration["restore"]
-  > | null;
+  restore: NonNullable<PluginEnvironmentProviderDeclaration["restore"]> | null;
   remove: PluginEnvironmentProviderDeclaration["remove"];
   policy: import("../environment-provider.js").PluginEnvironmentProviderPolicy;
 }
@@ -2606,10 +2642,9 @@ export function runPluginStorageMigrations(
     database.exec("ALTER TABLE _bb_migrations ADD COLUMN statement_hash TEXT");
   }
   const rows = database
-    .prepare<
-      [],
-      { id: number; statement_hash: string | null }
-    >("SELECT id, statement_hash FROM _bb_migrations ORDER BY id")
+    .prepare<[], { id: number; statement_hash: string | null }>(
+      "SELECT id, statement_hash FROM _bb_migrations ORDER BY id",
+    )
     .all();
   const applied = new Map<number, string | null>();
   for (const row of rows) applied.set(row.id, row.statement_hash);
