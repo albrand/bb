@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Button } from "@bb/shared-ui/button";
+import { useMediaQuery } from "@bb/shared-ui/hooks/use-media-query";
 import type {
   NativeTerminalThread,
   TerminalSession,
@@ -11,6 +12,8 @@ import {
   useOpenNativeTerminal,
 } from "@/hooks/queries/native-terminal-queries";
 import { useThreadTerminals } from "@/hooks/queries/thread-terminal-queries";
+import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
+import { NativeTerminalPromptBar } from "./NativeTerminalPromptBar";
 
 interface NativeThreadTerminalMainProps {
   onOpenLink?: MarkdownPreviewLinkHandler;
@@ -54,6 +57,8 @@ export function NativeThreadTerminalMain({
     view.terminal;
   const state = resolveNativeTerminalState({ session, threadIsProvisioning });
   const providerLabel = view.displayName;
+  const paneIsFocused = useOptionalPaneContext()?.isFocused ?? true;
+  const isTouchDevice = useMediaQuery("(pointer: coarse)");
   const { refetch } = nativeQuery;
   const terminalsUpdatedAt = terminalsQuery.dataUpdatedAt;
 
@@ -67,15 +72,22 @@ export function NativeThreadTerminalMain({
       <div
         className="flex h-full min-h-0 min-w-0 flex-col"
         data-native-terminal-thread={view.providerId}
+        data-no-sidebar-swipe=""
       >
         <LazyThreadTerminalPanel
-          autoFocus
+          autoFocus={paneIsFocused}
           isPanelOpen
           isPanelPersistedOpen
           onOpenLink={onOpenLink}
           target={{ kind: "thread", threadId }}
           terminalId={state.terminalId}
         />
+        {isTouchDevice ? (
+          <NativeTerminalPromptBar
+            providerLabel={providerLabel}
+            threadId={threadId}
+          />
+        ) : null}
       </div>
     );
   }

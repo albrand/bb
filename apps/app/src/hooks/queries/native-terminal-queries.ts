@@ -20,6 +20,26 @@ interface OpenNativeTerminalArgs {
   threadId: string;
 }
 
+interface SendNativeTerminalMessageArgs {
+  text: string;
+  threadId: string;
+}
+
+export function useSendNativeTerminalMessage() {
+  return useMutation({
+    meta: {
+      errorMessage: "Failed to send to the native session.",
+      lifecycleOperation: "send_message",
+    },
+    mutationFn: ({ text, threadId }: SendNativeTerminalMessageArgs) =>
+      sdk.threads.send({
+        threadId,
+        input: [{ type: "text", text }],
+        mode: "auto",
+      }),
+  });
+}
+
 export function useOpenNativeTerminal() {
   const queryClient = useQueryClient();
   return useMutation({

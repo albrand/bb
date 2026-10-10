@@ -443,6 +443,13 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         focusPaneComposer(composer);
         return document.activeElement === composer;
       }
+      const nativeTerminalInput = root.querySelector<HTMLElement>(
+        "[data-native-terminal-thread] .xterm-helper-textarea",
+      );
+      if (nativeTerminalInput) {
+        nativeTerminalInput.focus({ preventScroll: true });
+        return document.activeElement === nativeTerminalInput;
+      }
       return false;
     };
     const frame = requestAnimationFrame(() => {
