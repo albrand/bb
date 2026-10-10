@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -207,6 +208,39 @@ describe("findCodexRolloutSession", () => {
         nowMs: launchedAtMs + 1_000,
       }).kind,
     ).toBe("ambiguous");
+  });
+
+  it("skips a rollout it cannot open instead of throwing", () => {
+    const home = tempHome();
+    const launchedAtMs = Date.now();
+    const locked = writeRollout({
+      home,
+      id: "33333333-aaaa-bbbb-cccc-000000000001",
+      cwd: "/work/locked",
+      timestamp: new Date(launchedAtMs + 500),
+    });
+    chmodSync(locked, 0o000);
+    writeRollout({
+      home,
+      id: "33333333-aaaa-bbbb-cccc-000000000002",
+      cwd: "/work/locked",
+      timestamp: new Date(launchedAtMs + 500),
+    });
+    try {
+      expect(
+        findCodexRolloutSession({
+          cwd: "/work/locked",
+          env: { HOME: home },
+          launchedAtMs,
+          nowMs: launchedAtMs + 1_000,
+        }),
+      ).toEqual({
+        kind: "unique",
+        sessionId: "33333333-aaaa-bbbb-cccc-000000000002",
+      });
+    } finally {
+      chmodSync(locked, 0o600);
+    }
   });
 
   it("reports none when codex has not written a rollout yet", () => {

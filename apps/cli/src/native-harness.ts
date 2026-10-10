@@ -117,7 +117,12 @@ function sessionDayDirs(root: string, times: readonly number[]): string[] {
 }
 
 function readFirstLine(filePath: string): string | null {
-  const fd = openSync(filePath, "r");
+  let fd: number;
+  try {
+    fd = openSync(filePath, "r");
+  } catch {
+    return null;
+  }
   try {
     const chunks: Buffer[] = [];
     let total = 0;

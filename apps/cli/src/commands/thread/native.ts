@@ -59,12 +59,17 @@ async function runNativeHarness(
   let recorded = !launch.discoverCodexSession;
   const discover = async (): Promise<void> => {
     if (recorded) return;
-    const match = findCodexRolloutSession({
-      cwd,
-      env: process.env,
-      launchedAtMs,
-      nowMs: Date.now(),
-    });
+    let match: ReturnType<typeof findCodexRolloutSession>;
+    try {
+      match = findCodexRolloutSession({
+        cwd,
+        env: process.env,
+        launchedAtMs,
+        nowMs: Date.now(),
+      });
+    } catch {
+      return;
+    }
     if (match.kind !== "unique") return;
     recorded = true;
     try {
