@@ -1,10 +1,7 @@
 import { useEffect } from "react";
 import { Button } from "@bb/shared-ui/button";
 import { useMediaQuery } from "@bb/shared-ui/hooks/use-media-query";
-import type {
-  NativeTerminalThread,
-  TerminalSession,
-} from "@bb/server-contract";
+import type { NativeTerminalThread } from "@bb/server-contract";
 import { LazyThreadTerminalPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
 import type { MarkdownPreviewLinkHandler } from "@/components/ui/markdown-link";
 import {
@@ -14,32 +11,16 @@ import {
 import { useThreadTerminals } from "@/hooks/queries/thread-terminal-queries";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
 import { NativeTerminalPromptBar } from "./NativeTerminalPromptBar";
+import {
+  resolveNativeTerminalSession,
+  resolveNativeTerminalState,
+} from "./native-terminal-state";
 
 interface NativeThreadTerminalMainProps {
   onOpenLink?: MarkdownPreviewLinkHandler;
   threadId: string;
   threadIsProvisioning: boolean;
   view: NativeTerminalThread;
-}
-
-type NativeTerminalState =
-  | { kind: "preparing" }
-  | { kind: "live"; terminalId: string }
-  | { kind: "ended"; exitCode: number | null };
-
-function resolveNativeTerminalState(args: {
-  session: TerminalSession | null;
-  threadIsProvisioning: boolean;
-}): NativeTerminalState {
-  if (args.session === null) {
-    return args.threadIsProvisioning
-      ? { kind: "preparing" }
-      : { kind: "ended", exitCode: null };
-  }
-  if (args.session.status === "exited") {
-    return { kind: "ended", exitCode: args.session.exitCode };
-  }
-  return { kind: "live", terminalId: args.session.id };
 }
 
 export function NativeThreadTerminalMain({
@@ -51,10 +32,12 @@ export function NativeThreadTerminalMain({
   const terminalsQuery = useThreadTerminals(threadId);
   const nativeQuery = useNativeTerminalThread(threadId);
   const openNative = useOpenNativeTerminal();
-  const terminalId = view.terminal?.id ?? null;
-  const session =
-    terminalsQuery.data?.sessions.find((entry) => entry.id === terminalId) ??
-    view.terminal;
+  const session = resolveNativeTerminalSession({
+    listedSessions: terminalsQuery.data?.sessions,
+    listUpdatedAt: terminalsQuery.dataUpdatedAt,
+    view,
+    viewUpdatedAt: nativeQuery.dataUpdatedAt,
+  });
   const state = resolveNativeTerminalState({ session, threadIsProvisioning });
   const providerLabel = view.displayName;
   const paneIsFocused = useOptionalPaneContext()?.isFocused ?? true;
