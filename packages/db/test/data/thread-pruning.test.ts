@@ -65,6 +65,28 @@ function seed(
     .run();
   markThreadPruningWork(f.db, [f.thread.id]);
 }
+function seedMany(
+  f: Fixture,
+  rows: Array<{ sequence: number; values?: Partial<typeof events.$inferInsert> }>,
+) {
+  f.db
+    .insert(events)
+    .values(
+      rows.map(({ sequence, values = {} }) => ({
+        id: `${f.thread.id}-${sequence}`,
+        threadId: f.thread.id,
+        sequence,
+        scopeKind: "turn" as const,
+        turnId: "turn",
+        type: "provider/rateLimits/updated" as const,
+        data: JSON.stringify({ rateLimits: { providerId: "codex" } }),
+        createdAt: 1,
+        ...values,
+      })),
+    )
+    .run();
+  markThreadPruningWork(f.db, [f.thread.id]);
+}
 function seedWindow(
   f: Fixture,
   from: number,
@@ -527,19 +549,24 @@ describe("thread pruning", () => {
     const f = setup();
     try {
       f.db.transaction(() => {
-        for (let i = 1; i <= 510; i++)
-          seed(f, i, {
-            type: "item/backgroundTask/progress",
-            itemId: `task-${i}`,
-          });
+        seedMany(
+          f,
+          Array.from({ length: 510 }, (_, index) => ({
+            sequence: index + 1,
+            values: {
+              type: "item/backgroundTask/progress",
+              itemId: "task",
+            },
+          })),
+        );
         seed(f, 511, {
           type: "item/backgroundTask/progress",
-          itemId: "task-1",
+          itemId: "task",
         });
         seed(f, 512, { type: "turn/completed" });
       });
       cycle(f, "resolved-items");
-      expect(sequences(f)).not.toContain(1);
+      expect(sequences(f).filter((sequence) => sequence <= 510)).toEqual([]);
       expect(sequences(f)).toContain(511);
       seed(f, 513, { type: "item/agentMessage/delta", itemId: "message" });
       seed(f, 514, { type: "item/agentMessage/delta", itemId: "message" });
