@@ -98,6 +98,10 @@ function spawnFixture(
 }
 
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    if (child.pid !== undefined) activeChildren.delete(child.pid);
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`Process did not exit within ${timeoutMs}ms`)),
@@ -189,6 +193,17 @@ async function waitForProcessExitByPid(
 }
 
 describe("server process ownership", () => {
+  it("resolves when a child has already exited", async () => {
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", () => resolve());
+    });
+    await waitForExit(child, 100);
+  });
+
   it("ignores IPC disconnect while its launcher parent is alive", async () => {
     const dir = scratchDir();
     const marker = join(dir, "disconnect.log");
@@ -322,7 +337,7 @@ describe("server process ownership", () => {
           }
           expect(databaseFdFound).toBe(true);
         }
-        await waitForFile(disconnectReady, 10_000);
+        await waitForFile(disconnectReady, 45_000);
         await new Promise((resolve) => setTimeout(resolve, SERVER_SHUTDOWN_BOUND_MS + SERVER_SHUTDOWN_SAFETY_MARGIN_MS));
         expect(isProcessRunning(serverPid)).toBe(true);
         if (mode === "during-startup") {

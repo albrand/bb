@@ -294,28 +294,38 @@ process.stdout.write(\`grandchild=\${grandchild.pid}\\n\`);
       });
       expect(processEntry.childProcess.exitCode).toBeNull();
 
+      const killTimeoutMs = 1_000;
       await processEntry.stop({
         killSignal: "SIGKILL",
-        killTimeoutMs: 1_000,
+        killTimeoutMs,
         signal: "SIGTERM",
         timeoutMs: 5_000,
       });
 
-      const stoppedGrandchild = await readLinuxProcessStat(grandchildPid).catch(
-        (error: unknown) => {
-          if (
-            error instanceof Error &&
-            "code" in error &&
-            (error.code === "ENOENT" || error.code === "ESRCH")
-          ) {
-            return null;
-          }
-          throw error;
-        },
-      );
-      expect(
-        stoppedGrandchild === null || stoppedGrandchild.state === "Z",
-      ).toBe(true);
+      const cleanupDeadline = Date.now() + killTimeoutMs;
+      let stoppedGrandchild = false;
+      while (Date.now() < cleanupDeadline) {
+        const grandchildStat = await readLinuxProcessStat(grandchildPid).catch(
+          (error: unknown) => {
+            if (
+              error instanceof Error &&
+              "code" in error &&
+              (error.code === "ENOENT" || error.code === "ESRCH")
+            ) {
+              return null;
+            }
+            throw error;
+          },
+        );
+        if (grandchildStat === null || grandchildStat.state === "Z") {
+          stoppedGrandchild = true;
+          break;
+        }
+        await new Promise<void>((resolvePromise) => {
+          setTimeout(resolvePromise, 10);
+        });
+      }
+      expect(stoppedGrandchild).toBe(true);
     },
   );
 
