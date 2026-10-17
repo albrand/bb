@@ -98,10 +98,12 @@ running. A runtime record without a healthy server does not prevent startup.
 
 Server and host-daemon output goes directly to `logs/server-stdio.log` and
 `logs/host-daemon-stdio.log` under the data directory, including startup errors
-and console output. These files append across restarts; they are separate from
-the rotating application logs. The launcher prints status and log locations
-without forwarding service output to the terminal, so a stalled terminal cannot
-block service logging. To follow output with the default data directory:
+and console output. The named log is a hard-link view of the newest writer
+segment. Each writer owns separate segments; every segment is capped at 10 MiB,
+and the five newest completed segments are retained across that log family.
+The launcher prints status and log locations without forwarding service output
+to the terminal, so a stalled terminal cannot block service logging. To follow
+the newest segment with the default data directory:
 
 ```bash
 tail -F ~/.bb/logs/server-stdio.log ~/.bb/logs/host-daemon-stdio.log

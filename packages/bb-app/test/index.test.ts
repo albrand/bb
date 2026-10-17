@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -2424,11 +2425,19 @@ describe("bb-app launcher", () => {
           code: 0,
           signal: null,
         });
-        expect(
-          readFileSync(join(logDir, `${logName}-stdio.log`), "utf8").trim(),
-        ).toBe(
-          "missing|missing|missing|missing|missing|missing|missing|missing|missing|1|user-key",
-        );
+        await expect
+          .poll(
+            () => {
+              const logPath = join(logDir, `${logName}-stdio.log`);
+              return existsSync(logPath)
+                ? readFileSync(logPath, "utf8").trim()
+                : undefined;
+            },
+            { timeout: 5_000 },
+          )
+          .toBe(
+            "missing|missing|missing|missing|missing|missing|missing|missing|missing|1|user-key",
+          );
       } finally {
         rmSync(scratch, { recursive: true, force: true });
       }
