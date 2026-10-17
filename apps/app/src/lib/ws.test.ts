@@ -194,6 +194,34 @@ describe("WebSocketManager subscriptions", () => {
       },
     ]);
   });
+
+  it("resends the active device-handoff view on reconnect, but does not send an empty view", () => {
+    const { manager, socket } = createConnectedManager();
+
+    manager.setDeviceHandoffView("thread-1");
+    expect(readClientMessages(socket)).toEqual([
+      { type: "device-handoff-view", threadId: "thread-1" },
+    ]);
+    socket.sentMessages.length = 0;
+
+    manager.setDeviceHandoffView(null);
+    expect(readClientMessages(socket)).toEqual([
+      { type: "device-handoff-view", threadId: null },
+    ]);
+    socket.sentMessages.length = 0;
+
+    manager.setDeviceHandoffView(null);
+    expect(readClientMessages(socket)).toEqual([]);
+
+    manager.setDeviceHandoffView("thread-1");
+    socket.sentMessages.length = 0;
+    socket.close();
+    socket.open();
+
+    expect(readClientMessages(socket)).toEqual([
+      { type: "device-handoff-view", threadId: "thread-1" },
+    ]);
+  });
 });
 
 describe("WebSocketManager thread-open signals", () => {

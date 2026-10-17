@@ -214,7 +214,10 @@ export function createReauthCoordinator(
           body: `This host has no desktop session, so bb cannot open a browser. Run the sign-in on host ${run.hostId}.`,
           canRetry: false,
         });
-        cooldowns.set(loginKey(run.providerId, run.hostId), now() + COOLDOWN_MS);
+        cooldowns.set(
+          loginKey(run.providerId, run.hostId),
+          now() + COOLDOWN_MS,
+        );
         return;
       }
       publish("failed", {
@@ -243,10 +246,14 @@ export function createReauthCoordinator(
   async function runLogin(run: RunningLogin): Promise<void> {
     const key = loginKey(run.providerId, run.hostId);
     try {
-      const adopted = await findRunningLoginTerminal(run.providerId, run.hostId);
-      const terminalId =
-        adopted ??
-        (
+      const adopted = await findRunningLoginTerminal(
+        run.providerId,
+        run.hostId,
+      );
+      let terminalId = adopted;
+      if (terminalId === null) {
+        const systemConfig = await bb.sdk.system.config();
+        terminalId = (
           await bb.sdk.terminals.create({
             cols: TERMINAL_COLS,
             rows: TERMINAL_ROWS,
@@ -254,10 +261,15 @@ export function createReauthCoordinator(
             title: loginTerminalTitle(run.providerId),
             start: {
               mode: "command",
-              command: loginTerminalCommand(run.providerId),
+              command: loginTerminalCommand(
+                run.providerId,
+                systemConfig.primaryHostId === run.hostId &&
+                  systemConfig.primaryHostPlatform === "darwin",
+              ),
             },
           })
         ).id;
+      }
       await watchLogin(run, terminalId);
     } catch (error) {
       bb.log.warn(
@@ -295,7 +307,11 @@ export function createReauthCoordinator(
       return { started: false, reason: "already-running" };
     }
     const cooldownUntil = cooldowns.get(key);
-    if (!ignoreCooldown && cooldownUntil !== undefined && now() < cooldownUntil) {
+    if (
+      !ignoreCooldown &&
+      cooldownUntil !== undefined &&
+      now() < cooldownUntil
+    ) {
       return { started: false, reason: "cooling-down" };
     }
     cooldowns.delete(key);

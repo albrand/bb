@@ -133,6 +133,14 @@ function writeWithCopyCommand({ text, html }: ClipboardContent): boolean {
 export async function copyToClipboard(
   content: ClipboardContent,
 ): Promise<boolean> {
+  if (
+    content.html === undefined &&
+    getBbDesktopInfo()?.writeClipboard === undefined &&
+    (typeof navigator === "undefined" ||
+      typeof navigator.clipboard?.writeText !== "function")
+  ) {
+    return writeWithCopyCommand(content);
+  }
   return (
     (await writeWithDesktopClipboard(content)) ||
     (await writeWithClipboardApi(content)) ||

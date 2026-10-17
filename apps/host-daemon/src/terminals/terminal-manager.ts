@@ -238,6 +238,7 @@ interface ShutdownTerminalArgs {
 
 interface BuildTerminalEnvArgs {
   shellEnv: NodeJS.ProcessEnv;
+  threadId?: string;
   terminalId: string;
 }
 
@@ -472,6 +473,7 @@ function buildTerminalEnv(args: BuildTerminalEnvArgs): NodeJS.ProcessEnv {
     PROMPT_EOL_MARK: "",
     TERM: "xterm-256color",
   };
+  if (args.threadId !== undefined) env.BB_THREAD_ID = args.threadId;
   delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }
@@ -866,6 +868,7 @@ export class TerminalManager {
         message.contributedEnv,
         buildTerminalEnv({
           shellEnv: this.options.runtimeManager.getShellEnv(),
+          threadId: message.threadId,
           terminalId: message.terminalId,
         }),
       );

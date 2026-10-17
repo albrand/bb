@@ -822,6 +822,22 @@ export class TerminalSessionLifecycle {
     return this.toTerminalSession(session);
   }
 
+  setDeviceHandoffAttention(terminalId: string, pending: boolean): void {
+    const session = getTerminalById(this.options.db, terminalId);
+    if (!session || session.status !== "running") return;
+    if (pending) {
+      this.recordTerminalAttention({
+        source: "api",
+        terminalId,
+        kind: "osc-9",
+        title: "Link waiting for this device",
+        body: "",
+      });
+      return;
+    }
+    this.clearTerminalAttention(terminalId);
+  }
+
   private recordTerminalAttention(
     attention:
       | (Omit<TerminalAttentionState, "at" | "seq"> & {

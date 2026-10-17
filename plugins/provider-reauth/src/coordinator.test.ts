@@ -29,6 +29,8 @@ interface HarnessOptions {
   existingTerminals?: TerminalRecord[];
   threadProviderId?: string;
   environmentId?: string | null;
+  primaryHostId?: string | null;
+  primaryHostPlatform?: "darwin" | "linux" | "windows" | null;
   terminalScript?: (terminal: TerminalRecord, poll: number) => void;
 }
 
@@ -43,7 +45,9 @@ function createHarness(options: HarnessOptions = {}) {
   let created = 0;
 
   function nextStatus(queue: string[]): string {
-    return queue.length > 1 ? (queue.shift() ?? "unknown") : (queue[0] ?? "unknown");
+    return queue.length > 1
+      ? (queue.shift() ?? "unknown")
+      : (queue[0] ?? "unknown");
   }
 
   const sdk: CreateFakePluginHostOptions["sdk"] = {
@@ -65,6 +69,14 @@ function createHarness(options: HarnessOptions = {}) {
       get: async () => ({ id: ENVIRONMENT_ID, hostId: HOST_ID }),
     },
     system: {
+      config: async () => ({
+        primaryHostId:
+          options.primaryHostId === undefined ? HOST_ID : options.primaryHostId,
+        primaryHostPlatform:
+          options.primaryHostPlatform === undefined
+            ? "darwin"
+            : options.primaryHostPlatform,
+      }),
       providerStates: async () => ({
         providers: [
           {
@@ -101,7 +113,8 @@ function createHarness(options: HarnessOptions = {}) {
       },
       get: async (args: unknown) =>
         terminals.find(
-          (terminal) => terminal.id === (args as { terminalId: string }).terminalId,
+          (terminal) =>
+            terminal.id === (args as { terminalId: string }).terminalId,
         ),
       close: async (args: unknown) => {
         const terminalId = (args as { terminalId: string }).terminalId;
@@ -163,6 +176,35 @@ beforeEach(() => {
 });
 
 describe("provider re-auth coordinator", () => {
+  it("starts callback-free sign-in when the target is not the primary host", async () => {
+    const harness = createHarness({
+      primaryHostId: "host-primary",
+      claudeStatuses: ["unauthenticated", "ready"],
+    });
+
+    await harness.coordinator.start({
+      providerId: "claude-code",
+      hostId: HOST_ID,
+    });
+    await harness.coordinator.whenSettled();
+
+    expect(harness.terminals[0]?.command).toBe("exec claude auth login");
+  });
+
+  it("uses Codex device auth when the primary host has no desktop OS session", async () => {
+    const harness = createHarness({
+      primaryHostPlatform: "linux",
+      codexStatuses: ["unauthenticated", "ready"],
+    });
+
+    await harness.coordinator.start({ providerId: "codex", hostId: HOST_ID });
+    await harness.coordinator.whenSettled();
+
+    expect(harness.terminals[0]?.command).toBe(
+      "exec codex login --device-auth",
+    );
+  });
+
   it("opens one guarded sign-in for a signed-out Claude Code and resumes the turns that failed", async () => {
     const harness = createHarness({
       claudeStatuses: ["unauthenticated", "unauthenticated", "ready"],
@@ -223,9 +265,9 @@ describe("provider re-auth coordinator", () => {
       (entry) => entry.message,
     );
     expect(logged.some((message) => message.includes("msToReady="))).toBe(true);
-    expect(
-      JSON.stringify(harness.notifications()).includes("msToReady"),
-    ).toBe(false);
+    expect(JSON.stringify(harness.notifications()).includes("msToReady")).toBe(
+      false,
+    );
   });
 
   it("does not open a sign-in on a host with no desktop session, and holds off afterwards", async () => {

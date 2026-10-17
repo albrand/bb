@@ -59,7 +59,7 @@ describe("bb guide command output", () => {
 
     const errorOutput = collectLogLines(vi.mocked(console.error)).join("\n");
     expect(errorOutput).toContain("Unknown command group 'nope'.");
-    expect(errorOutput).toContain("Command groups: browser, status");
+    expect(errorOutput).toContain("Command groups: device, browser, status");
   }, 30_000);
 
   it("bb guide terminals renders the terminals chapter", async () => {

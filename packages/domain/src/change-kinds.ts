@@ -159,10 +159,24 @@ export const pingMessageSchema = z.object({
   type: z.literal("ping"),
 });
 
+const deviceHandoffClientMessageSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("device-handoff-view"),
+      threadId: z.string().min(1).nullable(),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("device-handoff-ack"), id: z.string().min(1) })
+    .strict(),
+]);
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
   subscribeMessageSchema,
   unsubscribeMessageSchema,
   pingMessageSchema,
+  deviceHandoffClientMessageSchema.options[0],
+  deviceHandoffClientMessageSchema.options[1],
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 

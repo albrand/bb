@@ -134,6 +134,9 @@ This index lists every command path that the core CLI registers, including alias
 ## terminal
 
 - `bb terminal`
+- `bb device`
+- `bb device copy`
+- `bb device open`
 - `bb terminal list`
 - `bb terminal notify`
 - `bb terminal attention`
@@ -232,6 +235,7 @@ This index lists every command path that the core CLI registers, including alias
 - `bb thread row-status list`
 - `bb thread progress`
 - `bb thread progress clear`
+
 ## environment
 
 - `bb environment`

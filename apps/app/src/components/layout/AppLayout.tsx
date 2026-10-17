@@ -37,6 +37,8 @@ import {
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import { CommandPalette } from "@/components/commands/CommandPalette";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { DeviceHandoffSheet } from "@/components/device-handoff/DeviceHandoffSheet";
+import { useDeviceHandoffQueue } from "@/components/device-handoff/useDeviceHandoffQueue";
 import {
   resolveAutomationBreadcrumbs,
   resolvePluginsWorkspaceHeaderMeta,
@@ -472,6 +474,9 @@ export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
   const { projectId, threadId, isThreadView, isArchivedView, isRootView } =
     useRouteState();
+  const deviceHandoffQueue = useDeviceHandoffQueue(
+    isThreadView ? (threadId ?? null) : null,
+  );
   const [resourceRouteLabel, setResourceRouteLabel] = useAtom(
     resourceRouteLabelAtom,
   );
@@ -904,6 +909,13 @@ export function AppLayout({ children }: AppLayoutProps) {
                 projectId={projectId ?? null}
               />
               <NotificationCenter />
+              <DeviceHandoffSheet
+                signal={deviceHandoffQueue.signal}
+                position={deviceHandoffQueue.position}
+                count={deviceHandoffQueue.count}
+                onDismiss={deviceHandoffQueue.dismiss}
+                onShown={deviceHandoffQueue.acknowledgeShown}
+              />
               {quickCreateProject.projectPathDialog.target === null ? null : (
                 <Suspense fallback={null}>
                   <ProjectPathDialog

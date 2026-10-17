@@ -1,0 +1,94 @@
+#!/bin/sh
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF=$1
+shift
+
+find_real() {
+  wanted=$1
+  old_ifs=$IFS
+  IFS=:
+  for directory in ${PATH-}; do
+    [ -n "$directory" ] || directory=.
+    resolved_directory=$(CDPATH= cd -- "$directory" 2>/dev/null && pwd)
+    [ "$resolved_directory" = "$SCRIPT_DIR" ] && continue
+    candidate=$directory/$wanted
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+      IFS=$old_ifs
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  IFS=$old_ifs
+  return 1
+}
+
+if [ "$SELF" = pbcopy ]; then
+  umask 077
+  temporary=$(mktemp "${TMPDIR:-/tmp}/bb-pbcopy.XXXXXX") || exit 1
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  cat > "$temporary" || exit 1
+  real=$(find_real pbcopy || true)
+  real_status=0
+  if [ -n "$real" ]; then
+    "$real" < "$temporary"
+    real_status=$?
+  fi
+  "$SCRIPT_DIR/bb" device copy < "$temporary" >/dev/null 2>&1
+  handoff_status=$?
+  if [ "$handoff_status" -eq 0 ]; then
+    exit 0
+  fi
+  if [ -n "$real" ]; then
+    exit "$real_status"
+  fi
+  printf '%s\n' 'bb device copy failed and no native pbcopy is available' >&2
+  exit "$handoff_status"
+fi
+
+has_url=0
+handoff_status=0
+for argument in "$@"; do
+  case "$argument" in
+    http://*|https://*)
+      has_url=1
+      "$SCRIPT_DIR/bb" device open "$argument" >/dev/null 2>&1
+      status=$?
+      if [ "$status" -ne 0 ]; then
+        handoff_status=$status
+      fi
+      ;;
+  esac
+done
+
+if [ "$has_url" -eq 1 ]; then
+  platform=$(uname -s 2>/dev/null || true)
+  if [ "$platform" = Darwin ]; then
+    real=$(find_real open || true)
+  elif [ -n "${DISPLAY-}${WAYLAND_DISPLAY-}" ]; then
+    real=$(find_real xdg-open || true)
+  else
+    real=
+  fi
+  if [ "$handoff_status" -eq 0 ]; then
+    if [ -n "$real" ]; then
+      "$real" "$@" >/dev/null 2>&1 || true
+    fi
+    exit 0
+  fi
+  if [ -n "$real" ]; then
+    exec "$real" "$@"
+  fi
+  printf '%s\n' 'bb device open failed and no native URL opener is available' >&2
+  exit "$handoff_status"
+fi
+
+case "$SELF" in
+  open) real=$(find_real open || true) ;;
+  xdg-open) real=$(find_real xdg-open || true) ;;
+  *) real=$(find_real xdg-open || find_real open || find_real sensible-browser || true) ;;
+esac
+
+if [ -n "$real" ]; then
+  exec "$real" "$@"
+fi
+exit 127

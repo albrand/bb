@@ -22,6 +22,10 @@ import {
   type TestAiServiceResponse,
 } from "./api/system.js";
 import {
+  deviceHandoffRequestSchema,
+  type DeviceHandoffRequest,
+} from "./api/device-handoff.js";
+import {
   desktopBrowserHostRequestSchema,
   desktopBrowserScopeSchema,
   desktopBrowserCreateRequestSchema,
@@ -480,6 +484,16 @@ type PathThreadInteractionId = {
 };
 
 export const publicApiRoutes = {
+  deviceHandoff: {
+    request: defineRoute({
+      path: "/device-handoff",
+      method: "post",
+      request: jsonRequest<EmptyInput, DeviceHandoffRequest>(
+        deviceHandoffRequestSchema,
+      ),
+      response: jsonResponse<{ delivered: number }>(),
+    }),
+  },
   promptHistory: {
     list: defineRoute({
       path: "/prompt-history",

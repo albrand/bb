@@ -627,6 +627,9 @@ export function prepareRuntimeShellEnv(
     BB_CLI: bbExecutablePath,
     BB_SERVER_URL: options.serverUrl,
   };
+  if (process.platform !== "win32") {
+    shellEnv.BROWSER = resolve(options.bbExecutableDirectory, "bb-browser");
+  }
   assignIfDefined({
     key: "BB_HOST_DAEMON_PORT",
     target: shellEnv,

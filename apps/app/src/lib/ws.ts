@@ -6,6 +6,9 @@ import {
   realtimeSubscriptionTargetKey,
   threadOpenSignalLenientSchema,
   threadPaneActionSignalLenientSchema,
+  deviceHandoffSignalLenientSchema,
+  deviceHandoffExpiredSignalLenientSchema,
+  deviceHandoffAcknowledgedSignalLenientSchema,
   threadTimelineSignalLenientSchema,
 } from "@bb/server-contract";
 import type {
@@ -17,6 +20,9 @@ import type {
   ThreadOpenSignal,
   ThreadPaneActionSignal,
   ThreadTimelineSignal,
+  DeviceHandoffSignal,
+  DeviceHandoffExpiredSignal,
+  DeviceHandoffAcknowledgedSignal,
 } from "@bb/server-contract";
 import { buildBrowserWebSocketUrl } from "./dev-websocket-url";
 import {
@@ -29,6 +35,12 @@ type ThreadOpenCallback = (signal: ThreadOpenSignal) => void;
 type ThreadPaneActionCallback = (signal: ThreadPaneActionSignal) => void;
 type PluginSignalCallback = (signal: PluginSignal) => void;
 type ThreadTimelineCallback = (signal: ThreadTimelineSignal) => void;
+type DeviceHandoffCallback = (
+  signal:
+    | DeviceHandoffSignal
+    | DeviceHandoffExpiredSignal
+    | DeviceHandoffAcknowledgedSignal,
+) => void;
 export type WebSocketConnectedEvent =
   | { reconnected: false }
   | {
@@ -85,6 +97,8 @@ export class WebSocketManager {
   private threadPaneActionCallbacks = new Set<ThreadPaneActionCallback>();
   private pluginSignalCallbacks = new Set<PluginSignalCallback>();
   private threadTimelineCallbacks = new Set<ThreadTimelineCallback>();
+  private deviceHandoffCallbacks = new Set<DeviceHandoffCallback>();
+  private activeDeviceHandoffThreadId: string | null = null;
   private pendingOpenFileByThreadId = new Map<string, ThreadOpenFile>();
   private connectedCallbacks = new Set<ConnectedCallback>();
   private connectionStateCallbacks = new Set<ConnectionStateCallback>();
@@ -131,6 +145,12 @@ export class WebSocketManager {
       this.startPingLoop();
       for (const subscription of this.subscriptions.values()) {
         this.sendMessage({ type: "subscribe", target: subscription.target });
+      }
+      if (this.activeDeviceHandoffThreadId !== null) {
+        this.sendMessage({
+          type: "device-handoff-view",
+          threadId: this.activeDeviceHandoffThreadId,
+        });
       }
       const event: WebSocketConnectedEvent = reconnected
         ? { reconnected, disconnectedAt: disconnectedAt ?? Date.now() }
@@ -352,6 +372,32 @@ export class WebSocketManager {
       return;
     }
 
+    const deviceHandoff = deviceHandoffSignalLenientSchema.safeParse(parsed);
+    if (deviceHandoff.success) {
+      if (deviceHandoff.data.expiresAt > Date.now()) {
+        for (const cb of this.deviceHandoffCallbacks) cb(deviceHandoff.data);
+      }
+      return;
+    }
+
+    const deviceHandoffExpired =
+      deviceHandoffExpiredSignalLenientSchema.safeParse(parsed);
+    if (deviceHandoffExpired.success) {
+      for (const cb of this.deviceHandoffCallbacks) {
+        cb(deviceHandoffExpired.data);
+      }
+      return;
+    }
+
+    const deviceHandoffAcknowledged =
+      deviceHandoffAcknowledgedSignalLenientSchema.safeParse(parsed);
+    if (deviceHandoffAcknowledged.success) {
+      for (const cb of this.deviceHandoffCallbacks) {
+        cb(deviceHandoffAcknowledged.data);
+      }
+      return;
+    }
+
     const threadOpen = threadOpenSignalLenientSchema.safeParse(parsed);
     if (threadOpen.success) {
       if (threadOpen.data.file !== null) {
@@ -453,6 +499,24 @@ export class WebSocketManager {
     return () => {
       this.threadTimelineCallbacks.delete(callback);
     };
+  }
+
+  onDeviceHandoff(callback: DeviceHandoffCallback): () => void {
+    this.deviceHandoffCallbacks.add(callback);
+    return () => this.deviceHandoffCallbacks.delete(callback);
+  }
+
+  setDeviceHandoffView(threadId: string | null): void {
+    const previousThreadId = this.activeDeviceHandoffThreadId;
+    this.activeDeviceHandoffThreadId = threadId;
+    if (threadId === null && previousThreadId === null) {
+      return;
+    }
+    this.sendMessage({ type: "device-handoff-view", threadId });
+  }
+
+  acknowledgeDeviceHandoff(id: string): void {
+    this.sendMessage({ type: "device-handoff-ack", id });
   }
 
   onThreadOpen(callback: ThreadOpenCallback): () => void {

@@ -6,6 +6,7 @@ export type TerminalShellEvent =
   | { type: "title"; title: string };
 
 const MAX_OSC_PAYLOAD_LENGTH = 4096;
+const OSC_52_MAX_TEXT_BYTES = 1024 * 1024;
 const terminalCurrentCwds = new Map<string, string>();
 
 export function setTerminalCurrentCwd(terminalId: string, cwd: string): void {
@@ -156,4 +157,47 @@ export function registerTerminalShellOscHandlers(
     dispose: () =>
       registrations.forEach((registration) => registration.dispose()),
   };
+}
+
+export function parseTerminalOsc52Copy(payload: string): string | null {
+  if (
+    payload.length > Math.ceil(OSC_52_MAX_TEXT_BYTES / 3) * 4 + 4 ||
+    !payload.startsWith("c;")
+  ) {
+    return null;
+  }
+  const encoded = payload.slice(2);
+  if (encoded === "?" || encoded.length === 0) return null;
+  try {
+    const binary = atob(encoded);
+    if (binary.length > OSC_52_MAX_TEXT_BYTES) return null;
+    const bytes = Uint8Array.from(binary, (character) =>
+      character.charCodeAt(0),
+    );
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export function registerTerminalOsc52Handler(
+  terminal: {
+    parser: {
+      registerOscHandler(
+        identifier: number,
+        callback: (data: string) => boolean,
+      ): { dispose(): void };
+    };
+  },
+  onCopy: (text: string) => void,
+  shouldIgnore: () => boolean,
+): { dispose(): void } {
+  const registration = terminal.parser.registerOscHandler(52, (payload) => {
+    if (shouldIgnore()) return true;
+    const text = parseTerminalOsc52Copy(payload);
+    if (text === null) return true;
+    onCopy(text);
+    return true;
+  });
+  return { dispose: () => registration.dispose() };
 }

@@ -45,6 +45,12 @@ export function onClientSocketMessage(
     case "ping":
       socket.send(JSON.stringify(PONG_MESSAGE));
       break;
+    case "device-handoff-view":
+      deps.hub.setDeviceHandoffView(socket, parsed.threadId);
+      break;
+    case "device-handoff-ack":
+      deps.hub.acknowledgeDeviceHandoff(socket, parsed.id);
+      break;
     default: {
       const _exhaustive: never = parsed;
       throw new Error(`Unhandled client message: ${_exhaustive}`);

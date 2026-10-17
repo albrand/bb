@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parseTerminalShellOsc,
   clearTerminalCurrentCwd,
@@ -8,9 +8,38 @@ import {
   shouldUseTerminalCwdTitle,
   terminalSpawnCwd,
   setTerminalCurrentCwd,
+  parseTerminalOsc52Copy,
+  registerTerminalOsc52Handler,
 } from "./terminal-shell-state";
 
 describe("terminal shell OSC state", () => {
+  it("offers OSC 52 copy payloads and ignores queries and retained replays", () => {
+    expect(parseTerminalOsc52Copy("c;b2s=")).toBe("ok");
+    expect(parseTerminalOsc52Copy("c;?")).toBeNull();
+    expect(parseTerminalOsc52Copy("p;b2s=")).toBeNull();
+
+    let handler: ((data: string) => boolean) | undefined;
+    let isReplay = true;
+    const onCopy = vi.fn();
+    const dispose = registerTerminalOsc52Handler(
+      {
+        parser: {
+          registerOscHandler(_identifier, callback) {
+            handler = callback;
+            return { dispose: () => {} };
+          },
+        },
+      },
+      onCopy,
+      () => isReplay,
+    );
+    expect(handler?.("c;b2s=")).toBe(true);
+    expect(onCopy).not.toHaveBeenCalled();
+    isReplay = false;
+    expect(handler?.("c;b2s=")).toBe(true);
+    expect(onCopy).toHaveBeenCalledWith("ok");
+    dispose.dispose();
+  });
   it("parses OSC 7 local file URLs and normalizes their paths", () => {
     expect(parseTerminalShellOsc(7, "file://localhost/tmp/a/../b")).toEqual({
       type: "cwd",
