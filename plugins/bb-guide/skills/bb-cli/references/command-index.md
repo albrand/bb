@@ -15,6 +15,14 @@ This index lists every command path that the core CLI registers, including alias
 - `bb settings ai-services show`
 - `bb settings ai-services set`
 - `bb settings ai-services test`
+- `bb settings writing`
+- `bb settings writing show`
+- `bb settings writing set`
+- `bb settings writing vocabulary`
+- `bb settings writing vocabulary add`
+- `bb settings writing vocabulary remove`
+- `bb settings writing correct`
+- `bb settings writing transcribe`
 - `bb settings cli-command`
 - `bb settings cli-command show`
 - `bb settings cli-command install`

@@ -1419,6 +1419,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Provide the models that write bb's titles, commit messages, and transcripts. With this, a plugin can:",
         bullets: [
           "Write thread titles and commit messages with any model",
+          "Correct typing and format dictation in the native composer",
           "Transcribe voice input from the microphone button",
           "Appear as a choice in Settings → AI services",
         ],

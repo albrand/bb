@@ -2052,8 +2052,10 @@ export interface PluginAiServiceDeclaration {
   /** Shown in the picker; 1-64 characters. */
   readonly displayName: string;
   /**
-   * Answer one prompt with plain text. Offered for thread titles and commit
-   * messages. Declare `complete`, `transcribe`, or both.
+   * Answer one prompt with plain text. Offered for thread titles, commit
+   * messages, and writing assistance (JSON edit proposals and dictation
+   * formatting, validated by bb before use). Declare `complete`,
+   * `transcribe`, or both.
    */
   readonly complete?: (
     prompt: string,

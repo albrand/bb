@@ -66,9 +66,7 @@ export function NativeThreadTerminalMain({
         data-no-sidebar-swipe=""
       >
         <NativeTerminalWaitingBanner
-          prompts={nativeTerminalWaitingPrompts(
-            interactionsQuery.data ?? [],
-          )}
+          prompts={nativeTerminalWaitingPrompts(interactionsQuery.data ?? [])}
           providerLabel={providerLabel}
         />
         <LazyThreadTerminalPanel
@@ -79,13 +77,11 @@ export function NativeThreadTerminalMain({
           target={{ kind: "thread", threadId }}
           terminalId={state.terminalId}
         />
-        {isTouchDevice ? (
-          <NativeTerminalPromptBar
-            projectId={projectId}
-            providerLabel={providerLabel}
-            threadId={threadId}
-          />
-        ) : null}
+        <NativeTerminalPromptBar
+          projectId={projectId}
+          providerLabel={providerLabel}
+          threadId={threadId}
+        />
       </div>
     );
   }

@@ -175,22 +175,22 @@ change the host-daemon protocol.
 
 ## Common Keys
 
-| Key                            | Set with                                           | When to set             | Used for                                                                                                                                                                                                                     |
-| ------------------------------ | -------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BB_APP_URL`                   | `bb-app config`                                    | Optional for remote use | Human-facing app URL used for generated links, allowed browser origins, and the allowed DNS hostname for requests. Leave empty for local-only use. Live when set with `bb-app config`.                                       |
-| `BB_EXTERNAL_URL`              | `bb-app env`, or environment                       | Startup-only            | Internet-facing HTTPS base URL for generated public links; the fallback for `machineServerUrl`.                                                                                                                              |
-| `BB_MARKETPLACE_URL`           | `bb-app env`, or environment                       | Startup-only testing    | Manifest URL of the reserved `bb-community` marketplace. Default `https://getbb.app/marketplace/v2/marketplace.json` (falls back to v1 on 404); a custom URL is requested without fallback. Changes only `bb-community`.     |
-| `BB_SERVER_URL`                | `bb-app config`                                    | Remote CLI/host use     | Server targeted by the standalone `bb` CLI and `host-daemon` commands on this machine. Defaults to `http://127.0.0.1:38886`. It does not change where `npx bb-app` binds.                                                    |
-| `BB_SERVER_BIND_HOST`          | `bb-app env`, environment, or `--server-bind-host` | Startup-only            | Server listener host: `127.0.0.1` (default) or `0.0.0.0`. Not a `bb-app config` key. See [Startup Flags](#startup-flags).                                                                                                    |
-| `BB_SERVER_PORT`               | `bb-app env`, environment, or `--server-port`      | Startup-only            | HTTP listener port. Defaults to `38886`.                                                                                                                                                                                     |
-| `BB_HOST_DAEMON_PORT`          | `bb-app env`, environment, or `--host-daemon-port` | Startup-only            | Local host-daemon API port. Defaults to `38887`.                                                                                                                                                                             |
-| `BB_LOG_LEVEL`                 | `bb-app config`                                    | Startup-only debugging  | `trace`, `debug`, `info`, `warn`, `error`, or `fatal`.                                                                                                                                                                       |
-| `BB_TELEMETRY`                 | `bb-app env`, or environment                       | Startup-only            | `false` always disables anonymous usage telemetry, overriding the `telemetryEnabled` setting.                                                                                                                                |
+| Key                            | Set with                                           | When to set             | Used for                                                                                                                                                                                                                                                                   |
+| ------------------------------ | -------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BB_APP_URL`                   | `bb-app config`                                    | Optional for remote use | Human-facing app URL used for generated links, allowed browser origins, and the allowed DNS hostname for requests. Leave empty for local-only use. Live when set with `bb-app config`.                                                                                     |
+| `BB_EXTERNAL_URL`              | `bb-app env`, or environment                       | Startup-only            | Internet-facing HTTPS base URL for generated public links; the fallback for `machineServerUrl`.                                                                                                                                                                            |
+| `BB_MARKETPLACE_URL`           | `bb-app env`, or environment                       | Startup-only testing    | Manifest URL of the reserved `bb-community` marketplace. Default `https://getbb.app/marketplace/v2/marketplace.json` (falls back to v1 on 404); a custom URL is requested without fallback. Changes only `bb-community`.                                                   |
+| `BB_SERVER_URL`                | `bb-app config`                                    | Remote CLI/host use     | Server targeted by the standalone `bb` CLI and `host-daemon` commands on this machine. Defaults to `http://127.0.0.1:38886`. It does not change where `npx bb-app` binds.                                                                                                  |
+| `BB_SERVER_BIND_HOST`          | `bb-app env`, environment, or `--server-bind-host` | Startup-only            | Server listener host: `127.0.0.1` (default) or `0.0.0.0`. Not a `bb-app config` key. See [Startup Flags](#startup-flags).                                                                                                                                                  |
+| `BB_SERVER_PORT`               | `bb-app env`, environment, or `--server-port`      | Startup-only            | HTTP listener port. Defaults to `38886`.                                                                                                                                                                                                                                   |
+| `BB_HOST_DAEMON_PORT`          | `bb-app env`, environment, or `--host-daemon-port` | Startup-only            | Local host-daemon API port. Defaults to `38887`.                                                                                                                                                                                                                           |
+| `BB_LOG_LEVEL`                 | `bb-app config`                                    | Startup-only debugging  | `trace`, `debug`, `info`, `warn`, `error`, or `fatal`.                                                                                                                                                                                                                     |
+| `BB_TELEMETRY`                 | `bb-app env`, or environment                       | Startup-only            | `false` always disables anonymous usage telemetry, overriding the `telemetryEnabled` setting.                                                                                                                                                                              |
 | `BB_SKIP_ONBOARDING`           | Environment                                        | Startup-only            | Default false. `1` marks first-run setup completed at startup when it is not yet, so the setup screen is skipped. Settings → General can still replay it. `pnpm dev`, `pnpm start:worktree`, and `pnpm desktop:worktree` default it to `1`; an explicit `0` retains setup. |
-| `BB_PERF_DIAGNOSTICS`          | `bb-app env`, environment, or `--perf-diagnostics` | Startup-only            | Default false. Permits the `performanceDiagnostics` experiment; see [Experiments](#experiments).                                                                                                                             |
-| `BB_CLI_ERROR_LOG`             | Environment of the `bb` process                    | Optional                | `0` stops the CLI recording failed invocations (command path, error code, no argument values) to `<dataDir>/logs/cli-errors.jsonl`. See `bb guide overview`.                                                                 |
-| `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and proxies to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key. |
-| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent hub. Both parent variables must be well formed or proxying stays off.                                                                                                |
+| `BB_PERF_DIAGNOSTICS`          | `bb-app env`, environment, or `--perf-diagnostics` | Startup-only            | Default false. Permits the `performanceDiagnostics` experiment; see [Experiments](#experiments).                                                                                                                                                                           |
+| `BB_CLI_ERROR_LOG`             | Environment of the `bb` process                    | Optional                | `0` stops the CLI recording failed invocations (command path, error code, no argument values) to `<dataDir>/logs/cli-errors.jsonl`. See `bb guide overview`.                                                                                                               |
+| `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and proxies to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key.                                               |
+| `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent hub. Both parent variables must be well formed or proxying stays off.                                                                                                                                              |
 
 BB accepts request hosts that are `localhost`, IP addresses (including LAN and
 Tailscale IPs), or the hostname in `BB_APP_URL`. For a custom DNS name or
@@ -276,8 +276,9 @@ readiness was observed, not that authentication succeeded; `new_thread_submit`
 ## AI services
 
 Thread titles (and the branch names built from them), commit messages, and
-voice transcripts come from AI services that plugins register. Each task
-(`thread-title`, `commit-message`, `voice`) is `automatic` (default), `off`,
+voice transcripts come from AI services that plugins register, as do dictation
+formatting and typing corrections in the native terminal composer. Each task
+(`thread-title`, `commit-message`, `voice`, `writing`) is `automatic` (default), `off`,
 or a service id; set it in Settings → AI services or with
 `bb settings ai-services set <task> <value> [--plugin <plugin-id>]` (see
 `bb guide customization`). Automatic tries bb cloud (the `bb-ai` plugin, for a
@@ -291,6 +292,78 @@ it fails, titles fall back to the start of the prompt and commits to
 The removed `BB_INFERENCE`, `BB_INFERENCE_FALLBACK`, and `BB_TRANSCRIPTION`
 keys are ignored with a warning in `~/.bb/config.json`, and `bb-app config set`
 refuses them.
+
+Writing assistance: the native terminal composer has a microphone and typing assistance. Dictation
+records phrase by phrase: each pause ends a short clip that is transcribed by the
+`voice` service and then punctuated and formatted by the `writing` service, so
+no recording is re-uploaded and raw audio is not kept. The server measures each
+clip from its encoded audio (WebM or Ogg with Opus, MP4 or M4A with AAC, MP3, or
+WAV): the longer of its summed audio frames and the playback timeline its
+timestamps describe, so a gap between timestamps counts as recorded time (for
+WAV, only the declared audio data counts, not metadata after it). Only that
+measured length counts against `dailyDictationMinutes`; the request carries no
+client-reported length. A clip it cannot measure, an empty one, or one longer
+than 120 seconds is refused before transcription. A formatted phrase that
+adds words the speaker did not say, changes a number, or drops a protected
+term is discarded in favor of the plain transcript. Typing assistance sends
+only finished sentences that changed, with up to 500 characters of preceding
+text, after about a second of idle time.
+
+Settings (stored server-side; also `bb settings writing`):
+
+| Setting                 | Default     | Meaning                                                                                                                                              |
+| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                  | `prompt`    | `prompt`, `developer`, `natural`, `polished`, `verbatim`, `literal-code`                                                                             |
+| `typingCorrection`      | `automatic` | `automatic` applies only the fixes listed below and suggests the rest; `suggest`; `off`                                                              |
+| `dictationFormatting`   | `true`      | Format dictated phrases; off inserts transcripts as heard                                                                                            |
+| `vocabulary`            | `[]`        | Up to 200 terms sent as spelling hints with each request                                                                                             |
+| `dailyCorrectionLimit`  | `300`       | Writing requests per UTC day before assistance pauses                                                                                                |
+| `dailyDictationMinutes` | `60`        | Dictated minutes per UTC day before dictation stops; bb cloud also caps each account at $0.50 of AI usage per day, about 80 minutes of transcription |
+
+Automatic typing correction applies an edit by itself only when its meaning cannot
+change, whatever the AI service reports: capitalization and spacing inside a
+sentence that already ends with . ! or ?, removing a word typed twice with only spaces between
+when it is one of these words, which never stand twice in a row: the, a, an, I, we, they, he, she, our, your, their, of, and, or, but, if, and the Portuguese o, os, a, as, um, uma, de, da, dos, das, em, na, nas, e, ou, eu, ele, ela, nós, por, com (any
+other repeat can be meant and is only suggested: very very, had had, that that, not not, her her as in
+tell her her access, in in as in log in in five minutes, para para, and a pair split by punctuation
+such as so did I. I left), verb or article
+agreement from a fixed list (is/are/am, isn't/aren't, hasn't/haven't,
+doesn't/don't and a/an; changes to or from be, was/were, has/have and does/do
+are only suggested, since a verb's mood can change the meaning: "He be working",
+"If he were there", "I insist that she have the key"), and accents on a fixed list of Portuguese words that are
+not words without them (nao, voce, tambem, entao, amanha). Spelling fixes, a
+missing final period, capitalization or spacing in text that does not end a
+sentence (such as a bare `return true`), other punctuation (commas, question marks), homophones such as its/it's, and tense or
+plural changes are offered as suggestions. Code, paths, identifiers and
+vocabulary terms are never edited, and on a line containing any of
+= ; { } ( ) < > [ ] $ ` | \ / # or -- every change, even capitalization, is
+only suggested. Dictation formatting follows the same rule:
+if the formatter changes a spoken word into another word, other than one of
+those accent restorations, the transcript is inserted
+as heard. Vocabulary terms are sent to transcription as hints, which make the
+expected spelling more likely but do not guarantee it; formatting may change
+their case or punctuation
+("next js" to "Next.js") but never their letters, since without a dictionary a
+misheard name cannot be told from a real word ("public" is never rewritten as
+a similar term). Formatting may leave out only fillers (um, uh, er, ah, hmm and
+similar), a spoken self-correction (no wait, I mean, scratch that, actually,
+quer dizer, na verdade and the like) together with the words just before it
+that it replaces (at most six, and no more than were said after it; a phrase
+that replaces nothing, as in "no wait is required", is not a correction), one of those words said twice with only spaces between (never another word, such as very, had, that, is, her or in, and never across punctuation), spoken symbol names in literal-code
+mode, and the spoken numbers and connectors (and, then, next, finally, e,
+depois, então) of a numbered list; leaving out any other word, a negation
+outside a self-correction phrase, or the minus sign of a number ("-5" never
+becomes "5"), inserts the transcript as heard. The spoken words must also keep the order they were said in,
+and no word, accented or not, may appear more times than it was said ("nao"
+never becomes "Não não."). A question stays a question: a
+sentence the transcript ended with a question mark keeps it, one it ended with
+a period or exclamation mark (including the full-width forms) is never turned into a question, and the tags né
+and eh are kept ("vai funcionar, né?" never becomes "Vai funcionar."). Only
+speech the transcript left unpunctuated may be punctuated as a question.
+
+Usage counts and the cost estimate use list prices and are not a bill: bb
+cloud has its own daily limit, and Codex uses the primary machine's Codex
+login. Typing and sending never wait for assistance.
 
 bb accepts voice recordings up to 25 MB; a service may set a lower limit, and
 Codex transcribes up to 20 MB and bb cloud up to 10 MB. With a ChatGPT
@@ -729,22 +802,22 @@ ui_preference_conflict`. Read and write them with `bb settings ui
 list|get|set|reset` or `sdk.system.uiPreferences` (see
 `bb guide customization`).
 
-| Key                           | Value                                                                                                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sidebar.organizationMode`           | `project`, `chronological`, or `machine`                                                                         |
-| `sidebar.threadGrouping.environment` | `auto`, `true`, or `false`                                                                                       |
-| `sidebar.chronologicalSort`          | `updated`, `created`, `alpha`, or `none`                                                                         |
-| `sidebar.sectionOrder`               | Section id list for **By project**                                                                               |
-| `sidebar.manualSectionOrder`         | Section id list for **Manually**                                                                                 |
-| `sidebar.machineSectionOrder`        | Section id list for **By machine**                                                                               |
-| `sidebar.hiddenGroups`               | Legacy project, custom section, and machine ids migrated once into the Thread list plugin                        |
-| `sidebar.threadListProvider`  | Plugin key or `__automatic__` (default): the first installed thread list plugin other than the bundled `thread-list/thread-list`, else the bundled one |
-| `sidebar.navigationProvider`  | Plugin key or `__automatic__` (default): the first navigation from a plugin other than the bundled Navigation plugin, else its `navigation/rail`       |
-| `sidebar.pluginPanelOrder`    | Navigation destination order                                                                                                                           |
-| `sidebar.visiblePluginPanels` | Navigation destinations shown, or `null` for every destination                                                                                         |
-| `sidebar.footerOrder`         | Footer action order                                                                                                                                    |
-| `sidebar.hiddenFooterItems`   | Footer actions moved into More                                                                                                                         |
-| `infoPanel.collapsedSections` | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
+| Key                                  | Value                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sidebar.organizationMode`           | `project`, `chronological`, or `machine`                                                                                                               |
+| `sidebar.threadGrouping.environment` | `auto`, `true`, or `false`                                                                                                                             |
+| `sidebar.chronologicalSort`          | `updated`, `created`, `alpha`, or `none`                                                                                                               |
+| `sidebar.sectionOrder`               | Section id list for **By project**                                                                                                                     |
+| `sidebar.manualSectionOrder`         | Section id list for **Manually**                                                                                                                       |
+| `sidebar.machineSectionOrder`        | Section id list for **By machine**                                                                                                                     |
+| `sidebar.hiddenGroups`               | Legacy project, custom section, and machine ids migrated once into the Thread list plugin                                                              |
+| `sidebar.threadListProvider`         | Plugin key or `__automatic__` (default): the first installed thread list plugin other than the bundled `thread-list/thread-list`, else the bundled one |
+| `sidebar.navigationProvider`         | Plugin key or `__automatic__` (default): the first navigation from a plugin other than the bundled Navigation plugin, else its `navigation/rail`       |
+| `sidebar.pluginPanelOrder`           | Navigation destination order                                                                                                                           |
+| `sidebar.visiblePluginPanels`        | Navigation destinations shown, or `null` for every destination                                                                                         |
+| `sidebar.footerOrder`                | Footer action order                                                                                                                                    |
+| `sidebar.hiddenFooterItems`          | Footer actions moved into More                                                                                                                         |
+| `infoPanel.collapsedSections`        | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
 
 A legacy `__builtin__` thread list selection resolves to the bundled plugin.
 Footer IDs are `builtin:settings` (top list layout only), `builtin:mobile`,

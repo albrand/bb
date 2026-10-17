@@ -183,6 +183,7 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "terminalsQueryKey",
     "threadsQueryKey",
     "uiPreferencesQueryKey",
+    "writingAssistanceQueryKey",
   ],
   "hooks/cache-owners/skills-cache-effects.ts": ["projectSkillsQueryKey"],
   "hooks/cache-owners/system-cache-effects.ts": [
@@ -240,6 +241,7 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
   "hooks/cache-owners/system-config-cache-owner.ts": [
     "systemAiServicesQueryKey",
     "systemConfigQueryKey",
+    "writingAssistanceQueryKey",
   ],
   "hooks/cache-owners/system-version-cache-owner.ts": ["systemVersionQueryKey"],
   "hooks/cache-owners/terminal-cache-owner.ts": [

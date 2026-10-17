@@ -1,4 +1,5 @@
 import {
+  AI_TEXT_TASKS,
   aiServiceStatusSchema,
   type AiServiceStatus,
   type AiTask,
@@ -43,9 +44,7 @@ interface CreateAiServiceRegistryArgs {
 
 export function aiServiceTasks(service: NormalizedPluginAiService): AiTask[] {
   return [
-    ...(service.complete === null
-      ? []
-      : (["thread-title", "commit-message"] as const)),
+    ...(service.complete === null ? [] : AI_TEXT_TASKS),
     ...(service.transcribe === null ? [] : (["voice"] as const)),
   ];
 }

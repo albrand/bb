@@ -66,6 +66,7 @@ import { SETTINGS_PLUGIN_ROUTE_PATH } from "@/lib/route-paths";
 import { PluginSettingsPage } from "@/components/plugin/PluginSettings";
 import { FileOpenersSettingsSection } from "@/components/settings/FileOpenersSettingsSection";
 import { VoiceInputSettingsSection } from "@/components/settings/VoiceInputSettingsSection";
+import { WritingAssistanceSettingsSection } from "@/components/settings/WritingAssistanceSettingsSection";
 import { ContentMeasureSetting } from "@/components/settings/ContentMeasureSetting";
 import { AiServicesSettingsSection } from "@/components/settings/AiServicesSettingsSection";
 import { CommunitySettingsSection } from "@/components/settings/CommunitySettingsSection";
@@ -1467,6 +1468,7 @@ export function SettingsView() {
         <CliCommandSettingsSection />
         <CliSkillsSettingsSection />
         <VoiceInputSettingsSection />
+        <WritingAssistanceSettingsSection />
         <PrivacySettingsSection
           telemetryEnabled={generalSettings.telemetryEnabled}
           onTelemetryEnabledChange={(enabled) =>

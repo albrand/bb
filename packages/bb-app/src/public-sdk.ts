@@ -51,6 +51,7 @@ export type BBSdkStatusArea = BbSdk["status"];
 export type BBSdkSkillsArea = BbSdk["skills"];
 export type BBSdkNativeTerminalsArea = BbSdk["nativeTerminals"];
 export type BBSdkSpendArea = BbSdk["spend"];
+export type BBSdkWritingAssistanceArea = BbSdk["writingAssistance"];
 export type BBSdkTerminalsArea = BbSdk["terminals"];
 export type BBSdkThread = ThreadGetResult;
 export type BBSdkThreadsArea = BbSdk["threads"];
@@ -75,6 +76,7 @@ export class BBSdk implements BbSdk {
   readonly providers: BbSdk["providers"];
   readonly skills: BbSdk["skills"];
   readonly spend: BbSdk["spend"];
+  readonly writingAssistance: BbSdk["writingAssistance"];
   readonly status: BbSdk["status"];
   readonly system: BbSdk["system"];
   readonly terminals: BbSdk["terminals"];
@@ -98,6 +100,7 @@ export class BBSdk implements BbSdk {
     this.providers = sdk.providers;
     this.skills = sdk.skills;
     this.spend = sdk.spend;
+    this.writingAssistance = sdk.writingAssistance;
     this.status = sdk.status;
     this.system = sdk.system;
     this.terminals = sdk.terminals;

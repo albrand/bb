@@ -53,6 +53,14 @@ const AI_TASK_ROWS: readonly AiTaskRow[] = [
     offDescription: "Hides the microphone.",
     testTask: null,
   },
+  {
+    task: "writing",
+    label: "Writing assistance",
+    hint: "Formats dictation and corrects typing in the composer.",
+    offDescription:
+      "Dictation is inserted as transcribed; typing is not corrected.",
+    testTask: "writing",
+  },
 ];
 
 function serviceKey(service: Pick<SystemAiService, "id" | "pluginId">): string {

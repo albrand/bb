@@ -82,6 +82,7 @@ export const APP_COMMAND_IDS = [
   "terminal.attention.next",
   "composer.focus",
   "composer.searchPromptHistory",
+  "composer.dictation.toggle",
   "modelPicker.toggle",
   "modelPicker.cycleModel",
   "modelPicker.cycleModelBackward",

@@ -1,0 +1,263 @@
+{
+  "dictation": [
+    {
+      "id": "en-enumeration",
+      "voice": "Samantha",
+      "script": "first check authentication second verify the refresh tokens third add integration tests",
+      "reference": "1. Check authentication. 2. Verify the refresh tokens. 3. Add integration tests.",
+      "mustKeep": [],
+      "expectList": true
+    },
+    {
+      "id": "en-question",
+      "voice": "Samantha",
+      "script": "I think the access token expires too early could this explain the unauthorized response",
+      "reference": "I think the access token expires too early. Could this explain the unauthorized response?",
+      "mustKeep": [],
+      "expectList": false
+    },
+    {
+      "id": "en-negation",
+      "voice": "Samantha",
+      "script": "do not run the migration on production until the backup finishes",
+      "reference": "Do not run the migration on production until the backup finishes.",
+      "mustKeep": ["not"],
+      "expectList": false
+    },
+    {
+      "id": "en-self-correction",
+      "voice": "Samantha",
+      "script": "we should deploy on monday no wait on tuesday",
+      "reference": "We should deploy on Tuesday.",
+      "mustKeep": ["tuesday"],
+      "expectList": false
+    },
+    {
+      "id": "en-fillers",
+      "voice": "Samantha",
+      "script": "um so uh the build is failing on the linux runner",
+      "reference": "So the build is failing on the Linux runner.",
+      "mustKeep": ["failing", "linux"],
+      "expectList": false
+    },
+    {
+      "id": "en-numbers",
+      "voice": "Samantha",
+      "script": "set the timeout to three thousand milliseconds and retry five times",
+      "reference": "Set the timeout to 3000 milliseconds and retry five times.",
+      "mustKeep": ["timeout", "retry"],
+      "expectList": false
+    },
+    {
+      "id": "en-prompt",
+      "voice": "Samantha",
+      "script": "please refactor the payment service so it retries failed webhooks with exponential backoff but keep the public API unchanged",
+      "reference": "Please refactor the payment service so it retries failed webhooks with exponential backoff, but keep the public API unchanged.",
+      "mustKeep": ["unchanged", "backoff"],
+      "expectList": false
+    },
+    {
+      "id": "en-long",
+      "voice": "Samantha",
+      "script": "when the user signs in we create a session and store it in redis then the gateway checks the session on every request and if the session is missing it returns a four oh one but right now the mobile app keeps the old token after logout so we need to clear it on the client and also revoke it on the server",
+      "reference": "When the user signs in, we create a session and store it in Redis. Then the gateway checks the session on every request, and if the session is missing it returns a 401. But right now the mobile app keeps the old token after logout, so we need to clear it on the client and also revoke it on the server.",
+      "mustKeep": ["revoke", "logout"],
+      "expectList": false
+    },
+    {
+      "id": "pt-basic",
+      "voice": "Luciana",
+      "script": "precisamos corrigir o fluxo de login antes do deploy de sexta",
+      "reference": "Precisamos corrigir o fluxo de login antes do deploy de sexta.",
+      "mustKeep": ["precisamos", "sexta"],
+      "expectList": false
+    },
+    {
+      "id": "pt-negation",
+      "voice": "Luciana",
+      "script": "não apague o arquivo de configuração do servidor",
+      "reference": "Não apague o arquivo de configuração do servidor.",
+      "mustKeep": ["não"],
+      "expectList": false
+    },
+    {
+      "id": "pt-enumeration",
+      "voice": "Luciana",
+      "script": "primeiro revisar o código segundo rodar os testes terceiro abrir o pull request",
+      "reference": "1. Revisar o código. 2. Rodar os testes. 3. Abrir o pull request.",
+      "mustKeep": ["testes"],
+      "expectList": true
+    },
+    {
+      "id": "pt-question",
+      "voice": "Luciana",
+      "script": "você consegue verificar por que o build está falhando",
+      "reference": "Você consegue verificar por que o build está falhando?",
+      "mustKeep": ["falhando"],
+      "expectList": false
+    },
+    {
+      "id": "pt-self-correction",
+      "voice": "Luciana",
+      "script": "vamos usar o redis quer dizer o postgres para guardar as sessões",
+      "reference": "Vamos usar o Postgres para guardar as sessões.",
+      "mustKeep": ["postgres"],
+      "expectList": false
+    },
+    {
+      "id": "mixed-code-switch",
+      "voice": "Luciana",
+      "script": "precisamos corrigir o refresh token antes do deploy",
+      "reference": "Precisamos corrigir o refresh token antes do deploy.",
+      "mustKeep": ["refresh", "token", "deploy"],
+      "expectList": false
+    },
+    {
+      "id": "mixed-status-code",
+      "voice": "Luciana",
+      "script": "o endpoint de login está retornando quatrocentos e um quando o token expira",
+      "reference": "O endpoint de login está retornando 401 quando o token expira.",
+      "mustKeep": ["endpoint", "token", "expira"],
+      "expectList": false
+    },
+    {
+      "id": "en-no-translation",
+      "voice": "Samantha",
+      "script": "check if the cache is warm before the benchmark starts",
+      "reference": "Check if the cache is warm before the benchmark starts.",
+      "mustKeep": ["cache", "benchmark"],
+      "expectList": false
+    }
+  ],
+  "correction": [
+    {
+      "id": "agreement-and-typo",
+      "text": "The user are authenticated before acessing the endpoint.",
+      "expectFixed": [
+        ["are", "is"],
+        ["acessing", "accessing"]
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "typo-receive",
+      "text": "Please recieve the payload and validate it.",
+      "expectFixed": [["recieve", "receive"]],
+      "forbidden": []
+    },
+    {
+      "id": "identifier-protected",
+      "text": "Call refreshTokn() before fetchUser in auth.ts.",
+      "expectFixed": [],
+      "forbidden": ["refreshTokn()", "fetchUser", "auth.ts"]
+    },
+    {
+      "id": "path-protected",
+      "text": "Update src/utils/parseDate.ts so it handles UTC.",
+      "expectFixed": [],
+      "forbidden": ["src/utils/parseDate.ts", "UTC"]
+    },
+    {
+      "id": "negation-kept",
+      "text": "The function should not cache results between requests.",
+      "expectFixed": [],
+      "forbidden": ["not"]
+    },
+    {
+      "id": "asr-word-suggest-only",
+      "text": "The authentication talking expires after an hour.",
+      "expectFixed": [],
+      "forbidden": ["talking"]
+    },
+    {
+      "id": "numbers-protected",
+      "text": "Set the limit to 3000 requests per minute and keep 5 retries.",
+      "expectFixed": [],
+      "forbidden": ["3000", "5"]
+    },
+    {
+      "id": "url-protected",
+      "text": "See https://example.com/docs/api-reference for details.",
+      "expectFixed": [],
+      "forbidden": ["https://example.com/docs/api-reference"]
+    },
+    {
+      "id": "version-protected",
+      "text": "Upgrade react to 18.3.1 and rerun the tests.",
+      "expectFixed": [],
+      "forbidden": ["18.3.1"]
+    },
+    {
+      "id": "capitalization",
+      "text": "we need to fix this today. the deploy is blocked.",
+      "expectFixed": [
+        ["we", "We"],
+        ["the", "The"]
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "informal-no-rewrite",
+      "text": "gonna need u to check the logs asap",
+      "expectFixed": [],
+      "forbidden": ["gonna", "u"]
+    },
+    {
+      "id": "pt-accents",
+      "text": "Voce pode verificar a configuracao do servidor?",
+      "expectFixed": [
+        ["Voce", "Você"],
+        ["configuracao", "configuração"]
+      ],
+      "forbidden": []
+    },
+    {
+      "id": "pt-negation-kept",
+      "text": "Não remova a validação do formulário de login.",
+      "expectFixed": [],
+      "forbidden": ["Não"]
+    },
+    {
+      "id": "pt-branch-protected",
+      "text": "Precisamos fazer o merge da branch feature/login amanha.",
+      "expectFixed": [["amanha", "amanhã"]],
+      "forbidden": ["feature/login", "merge"]
+    },
+    {
+      "id": "mixed-no-translation",
+      "text": "O webhook falha quando o payload chega vazio.",
+      "expectFixed": [],
+      "forbidden": ["webhook", "payload"]
+    },
+    {
+      "id": "code-fence-ignored",
+      "text": "Run `pnpm tset` and paste the output.",
+      "expectFixed": [],
+      "forbidden": ["`pnpm tset`"]
+    },
+    {
+      "id": "constant-protected",
+      "text": "Raise MAX_RETRYS to ten for the importer.",
+      "expectFixed": [],
+      "forbidden": ["MAX_RETRYS"]
+    },
+    {
+      "id": "requirement-not-added",
+      "text": "Add tests for the login form.",
+      "expectFixed": [],
+      "forbidden": ["tests", "login", "form"]
+    },
+    {
+      "id": "double-word",
+      "text": "Check the the cache before the deploy.",
+      "expectFixed": [["the the", "the"]],
+      "forbidden": []
+    },
+    {
+      "id": "its-agreement",
+      "text": "The service returns it's status code on every call.",
+      "expectFixed": [["it's", "its"]],
+      "forbidden": []
+    }
+  ]
+}

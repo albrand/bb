@@ -320,6 +320,16 @@ import {
   type SpendRollupResponse,
 } from "./api/spend.js";
 import {
+  writingAssistanceSettingsUpdateSchema,
+  writingCorrectionRequestSchema,
+  type DictationSegmentForm,
+  type DictationSegmentResponse,
+  type WritingAssistanceSettingsUpdate,
+  type WritingAssistanceView,
+  type WritingCorrectionRequest,
+  type WritingCorrectionResponse,
+} from "./api/writing-assistance.js";
+import {
   callNativeTerminalAgentToolRequestSchema,
   nativeTerminalLaunchQuerySchema,
   openNativeTerminalRequestSchema,
@@ -2024,6 +2034,37 @@ export const publicApiRoutes = {
       method: "post",
       request: jsonRequest<EmptyInput, SpendAssessment>(spendAssessmentSchema),
       response: jsonResponse<SpendAssessment>(),
+    }),
+  },
+
+  writingAssistance: {
+    view: defineRoute({
+      path: "/writing-assistance",
+      method: "get",
+      request: noRequest(),
+      response: jsonResponse<WritingAssistanceView>(),
+    }),
+    updateSettings: defineRoute({
+      path: "/writing-assistance/settings",
+      method: "put",
+      request: jsonRequest<EmptyInput, WritingAssistanceSettingsUpdate>(
+        writingAssistanceSettingsUpdateSchema,
+      ),
+      response: jsonResponse<WritingAssistanceView>(),
+    }),
+    correct: defineRoute({
+      path: "/writing-assistance/corrections",
+      method: "post",
+      request: jsonRequest<EmptyInput, WritingCorrectionRequest>(
+        writingCorrectionRequestSchema,
+      ),
+      response: jsonResponse<WritingCorrectionResponse>(),
+    }),
+    dictationSegment: defineRoute({
+      path: "/writing-assistance/dictation-segments",
+      method: "post",
+      request: formRequest<EmptyInput, DictationSegmentForm>(),
+      response: jsonResponse<DictationSegmentResponse>(),
     }),
   },
   system: {

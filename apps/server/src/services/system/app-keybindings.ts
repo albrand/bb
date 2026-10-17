@@ -307,6 +307,12 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     composerWithoutModal,
   ),
   binding(
+    "composer.dictation.toggle",
+    "d",
+    { mod: true, shift: true },
+    mainWithoutModal,
+  ),
+  binding(
     "modelPicker.toggle",
     "m",
     { mod: true, shift: true },
