@@ -18,11 +18,16 @@ vi.mock("@/lib/sdk", async (importOriginal) => {
     ...actual,
     sdk: {
       ...actual.sdk,
+      threads: {
+        ...actual.sdk.threads,
+        experimental_updateRowState: vi.fn(),
+      },
       terminals: {
         ...actual.sdk.terminals,
         list: vi.fn(),
         close: vi.fn(),
         create: vi.fn(),
+        rename: vi.fn(),
       },
     },
   };
@@ -58,6 +63,64 @@ afterEach(() => {
 });
 
 describe("two split panes each holding a terminal", () => {
+  it("writes terminal progress through the existing thread row-state contract", async () => {
+    vi.mocked(sdk.terminals.list).mockResolvedValue({
+      sessions: [session("term_a", "running")],
+    });
+    vi.mocked(sdk.threads.experimental_updateRowState).mockResolvedValue({
+      statuses: {},
+      progress: { value: 0.75 },
+    });
+
+    const { wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => useThreadTerminalController(paneArgs("term_a")),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.activeSession?.id).toBe("term_a"));
+    act(() => result.current.handleActiveTerminalProgressChange(0.75));
+
+    await waitFor(() =>
+      expect(sdk.threads.experimental_updateRowState).toHaveBeenCalledWith({
+        threadId: "thr_1",
+        action: "progress-set",
+        progress: { value: 0.75 },
+      }),
+    );
+    act(() => result.current.handleActiveTerminalProgressChange(null));
+    await waitFor(() =>
+      expect(sdk.threads.experimental_updateRowState).toHaveBeenLastCalledWith({
+        threadId: "thr_1",
+        action: "progress-clear",
+      }),
+    );
+  });
+
+  it("accepts subsequent OSC process title changes", async () => {
+    const current = session("term_a", "running");
+    current.title = "vim";
+    const renamed = { ...current, title: "bash" };
+    vi.mocked(sdk.terminals.list).mockResolvedValue({ sessions: [current] });
+    vi.mocked(sdk.terminals.rename).mockResolvedValue(renamed);
+
+    const { wrapper } = createQueryClientTestHarness();
+    const { result } = renderHook(
+      () => useThreadTerminalController(paneArgs("term_a")),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.activeSession?.title).toBe("vim"));
+    act(() => result.current.handleActiveTerminalTitleChange("bash"));
+
+    await waitFor(() =>
+      expect(sdk.terminals.rename).toHaveBeenCalledWith({
+        terminalId: "term_a",
+        title: "bash",
+      }),
+    );
+  });
+
   it("does not close the other pane's terminal when both disconnect", async () => {
     const running = [
       session("term_a", "running"),

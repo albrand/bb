@@ -37,6 +37,7 @@ function controller(
     activeSession: session,
     handleActiveTerminalSessionChange: () => undefined,
     handleActiveTerminalTitleChange: () => undefined,
+    handleActiveTerminalProgressChange: () => undefined,
     handleActiveTerminalCwdChange: () => undefined,
     handleActiveTerminalUserInput: () => undefined,
     handleCreateTerminal: () => undefined,

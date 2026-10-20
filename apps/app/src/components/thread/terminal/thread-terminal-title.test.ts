@@ -17,28 +17,28 @@ describe("terminal title normalization", () => {
     expect(normalizeTerminalTitle({ title: `${prefix}𠮷tail` })).toBe(prefix);
   });
 
-  it("ignores shell path titles without changing the terminal title", () => {
+  it("uses the shell path leaf as the live terminal title", () => {
     expect(
       normalizeTerminalTitle({
         title:
           "michael@Michaels-MacBook-Pro:~/.bb-dev/worktrees/env_gj4ep9emi8/bb",
       }),
-    ).toBeNull();
+    ).toBe("bb");
   });
 
-  it("ignores shell path titles with whitespace after the host separator", () => {
+  it("uses the shell path leaf when the host separator has whitespace", () => {
     expect(
       normalizeTerminalTitle({
         title: "root@do-1: ~/.bb/worktrees/env_4gfkk8evua/bb",
       }),
-    ).toBeNull();
+    ).toBe("bb");
   });
 
-  it("ignores short shell path titles", () => {
+  it("uses a short shell path title", () => {
     expect(
       normalizeTerminalTitle({
         title: "michael@host:~/bb",
       }),
-    ).toBeNull();
+    ).toBe("bb");
   });
 });

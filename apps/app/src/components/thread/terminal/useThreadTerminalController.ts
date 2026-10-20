@@ -4,6 +4,7 @@ import type {
   TerminalCreateTarget,
   TerminalSession,
 } from "@bb/server-contract";
+import { sdk } from "@/lib/sdk";
 import {
   terminalQueryScopeForTarget,
   useCloseTerminal,
@@ -63,6 +64,7 @@ export interface ThreadTerminalController {
   handleActiveTerminalCwdChange: (cwd: string) => void;
   handleActiveTerminalSessionChange: (session: TerminalSession) => void;
   handleActiveTerminalTitleChange: ThreadTerminalTitleChangeHandler;
+  handleActiveTerminalProgressChange: (progress: number | null) => void;
   handleActiveTerminalUserInput: ThreadTerminalActionHandler;
   handleCreateTerminal: ThreadTerminalActionHandler;
   handleSelectTerminal: ThreadTerminalIdHandler;
@@ -606,6 +608,23 @@ export function useThreadTerminalController({
     dirtyTerminalIdsRef.current.add(activeTerminalId);
   }, [activeTerminalId]);
 
+  const handleActiveTerminalProgressChange = useCallback(
+    (progress: number | null) => {
+      const threadId = activeSession?.threadId;
+      if (!threadId) return;
+      const request =
+        progress === null
+          ? { threadId, action: "progress-clear" as const }
+          : {
+              threadId,
+              action: "progress-set" as const,
+              progress: { value: progress },
+            };
+      void sdk.threads.experimental_updateRowState(request).catch(() => undefined);
+    },
+    [activeSession?.threadId],
+  );
+
   const handleActiveTerminalTitleChange: ThreadTerminalTitleChangeHandler =
     useCallback(
       (title) => {
@@ -614,19 +633,6 @@ export function useThreadTerminalController({
         }
         const normalizedTitle = normalizeTerminalTitle({ title });
         if (!normalizedTitle || normalizedTitle === activeSession.title) {
-          return;
-        }
-        if (
-          userSetTerminalTitlesRef.current.has(activeSession.id) ||
-          !shouldUseTerminalCwdTitle({
-            currentTitle: activeSession.title,
-            defaultTitle: ["bash", "zsh", "fish"].includes(activeSession.title)
-              ? activeSession.title
-              : "",
-            previousCwdTitle:
-              terminalCwdTitlesRef.current.get(activeSession.id) ?? null,
-          })
-        ) {
           return;
         }
         userSetTerminalTitlesRef.current.add(activeSession.id);
@@ -691,6 +697,7 @@ export function useThreadTerminalController({
     handleActiveTerminalCwdChange,
     handleActiveTerminalSessionChange,
     handleActiveTerminalTitleChange,
+    handleActiveTerminalProgressChange,
     handleActiveTerminalUserInput,
     handleCreateTerminal,
     handleSelectTerminal,

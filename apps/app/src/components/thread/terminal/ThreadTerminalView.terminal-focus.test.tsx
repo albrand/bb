@@ -340,6 +340,49 @@ describe("ThreadTerminalView terminal focus boundary", () => {
     });
   });
 
+  it("reports hidden visibility when its panel closes while the document stays visible", async () => {
+    vi.stubGlobal("WebSocket", TestTerminalSocket);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      measureText: (text: string) => ({ width: text.length * 9 }),
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(108);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(90);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(108);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(90);
+
+    const props = {
+      autoFocus: false,
+      isPanelOpen: true,
+      session: makeTerminalSession({ id: "term_panel_visibility" }),
+    };
+    const view = render(
+      <MemoryRouter>
+        <AppCommandProvider>
+          <ThreadTerminalView {...props} />
+        </AppCommandProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        testState.socketMessages.map((message) => JSON.parse(message)),
+      ).toContainEqual({ type: "visibility", visible: true });
+    });
+    view.rerender(
+      <MemoryRouter>
+        <AppCommandProvider>
+          <ThreadTerminalView {...props} isPanelOpen={false} />
+        </AppCommandProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        testState.socketMessages.map((message) => JSON.parse(message)),
+      ).toContainEqual({ type: "visibility", visible: false });
+    });
+  });
+
   it("waits for fit dimensions before settling the initial main-pane layout", async () => {
     vi.stubGlobal("WebSocket", TestTerminalSocket);
     vi.stubGlobal(

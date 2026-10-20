@@ -59,6 +59,7 @@ export function ThreadTerminalContent({
       onSelectionAddToChat={onSelectionAddToChat}
       onSessionChange={controller.handleActiveTerminalSessionChange}
       onTitleChange={controller.handleActiveTerminalTitleChange}
+      onProgressChange={controller.handleActiveTerminalProgressChange}
       onCwdChange={controller.handleActiveTerminalCwdChange}
       onUserInput={controller.handleActiveTerminalUserInput}
       session={controller.activeSession}
