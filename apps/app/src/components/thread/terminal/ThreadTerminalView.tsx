@@ -47,6 +47,12 @@ import {
   observeLayoutSignals,
   watchTerminalLayoutSettled,
 } from "./terminal-layout-settle";
+import {
+  recordTerminalInputEnqueued,
+  recordTerminalInputWebSocketSent,
+  recordTerminalOutputReceived,
+  recordTerminalOutputRendered,
+} from "./terminal-latency-diagnostics.js";
 import { TerminalLinkOpenDialog } from "./TerminalLinkOpenDialog";
 import { TerminalAttentionPane } from "./TerminalAttentionPane";
 import { TerminalMobileControls } from "./TerminalMobileControls";
@@ -466,6 +472,8 @@ interface WriteTerminalSessionStatusNoticeArgs {
 interface TerminalOutputWriteArgs {
   data: string | Uint8Array;
   isReplay: boolean;
+  terminalId?: string;
+  receivedAt?: number;
   onParsed: () => void;
   replayWriteState: TerminalReplayWriteState;
   terminal: XTermTerminal;
@@ -478,8 +486,9 @@ interface TerminalOutputWriteArgs {
 
 interface ForwardTerminalDataArgs {
   data: string;
+  inputEventAt?: number;
   isUserInput: boolean;
-  onInput: (dataBase64: string) => void;
+  onInput: (dataBase64: string, inputEventAt?: number) => void;
   onUserInput?: () => void;
   replayWriteState: TerminalReplayWriteState;
   sessionStatus: TerminalSession["status"];
@@ -512,10 +521,12 @@ type TerminalSessionStatusNoticeRef = {
 interface HandleTerminalServerMessageArgs {
   acknowledgeOutput: (nextSeq: number) => void;
   message: TerminalServerMessage;
+  terminalId?: string;
   onReplayComplete: () => void;
   onSessionChange?: (session: TerminalSession) => void;
   replayNextSeq: number | null;
   replayWriteState: TerminalReplayWriteState;
+  outputReceivedAt?: number;
   setReplayNextSeq: (nextSeq: number | null) => void;
   terminal: XTermTerminal;
   pipeline?: ReturnType<typeof createTerminalOutputPipeline>;
@@ -525,6 +536,7 @@ interface HandleTerminalServerMessageArgs {
   >;
   allowAttachedGrid?: boolean;
   onReplayStart?: (session: TerminalSession) => void;
+  shouldProcessOutput?: () => boolean;
 }
 
 function encodeBytesBase64(bytes: Uint8Array): string {
@@ -557,6 +569,7 @@ export function encodeTerminalInputChunks(value: string): string[] {
 
 export function forwardTerminalData({
   data,
+  inputEventAt,
   isUserInput,
   onInput,
   onUserInput,
@@ -575,7 +588,7 @@ export function forwardTerminalData({
   }
 
   for (const dataBase64 of encodeTerminalInputChunks(input)) {
-    onInput(dataBase64);
+    onInput(dataBase64, inputEventAt);
   }
   onUserInput?.();
 }
@@ -742,12 +755,15 @@ export function captureTerminalContextMenuState({
 export function writeTerminalOutput({
   data,
   isReplay,
+  terminalId = "",
+  receivedAt,
   onParsed,
   replayWriteState,
   terminal,
   pipeline,
   replayPipeline,
 }: TerminalOutputWriteArgs): void {
+  const frameReceivedAt = receivedAt ?? performance.now();
   const bytes =
     typeof data === "string" ? new TextEncoder().encode(data) : data;
   const write = (callback: () => void, applyMarkerGrids: boolean) => {
@@ -755,7 +771,14 @@ export function writeTerminalOutput({
     else terminal.write(data, callback);
   };
   if (!isReplay) {
-    write(onParsed, true);
+    write(() => {
+      recordTerminalOutputRendered(
+        terminalId,
+        frameReceivedAt,
+        performance.now(),
+      );
+      onParsed();
+    }, true);
     return;
   }
 
@@ -763,11 +786,21 @@ export function writeTerminalOutput({
   write(() => {
     if (!replayPipeline) {
       replayWriteState.suppressedWriteCount -= 1;
+      recordTerminalOutputRendered(
+        terminalId,
+        frameReceivedAt,
+        performance.now(),
+      );
       onParsed();
       return;
     }
     replayPipeline.push(bytes, () => {
       replayWriteState.suppressedWriteCount -= 1;
+      recordTerminalOutputRendered(
+        terminalId,
+        frameReceivedAt,
+        performance.now(),
+      );
       onParsed();
     });
   }, false);
@@ -776,17 +809,23 @@ export function writeTerminalOutput({
 export function handleTerminalServerMessage({
   acknowledgeOutput,
   message,
+  terminalId = "",
   onReplayComplete,
   onSessionChange,
   replayNextSeq,
   replayWriteState,
+  outputReceivedAt,
   setReplayNextSeq,
   terminal,
   pipeline,
   replayPipeline,
   allowAttachedGrid = true,
   onReplayStart,
+  shouldProcessOutput,
 }: HandleTerminalServerMessageArgs): void {
+  if (message.type === "output" && shouldProcessOutput?.() === false) {
+    return;
+  }
   switch (message.type) {
     case "attached":
       if (message.replayStartSeq < message.nextSeq) {
@@ -814,6 +853,8 @@ export function handleTerminalServerMessage({
       writeTerminalOutput({
         data: decodeBase64Bytes(message.chunk.dataBase64),
         isReplay: replayNextSeq !== null && message.chunk.seq < replayNextSeq,
+        terminalId,
+        receivedAt: outputReceivedAt,
         onParsed: () => {
           acknowledgeOutput(nextSeq);
           if (
@@ -916,9 +957,9 @@ export function ThreadTerminalView({
     typeof observeTerminalWebglVisibility
   > | null>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
-  const compositionInputGuardRef = useRef<
-    ReturnType<typeof suppressDuplicateTerminalCompositionInput> | null
-  >(null);
+  const compositionInputGuardRef = useRef<ReturnType<
+    typeof suppressDuplicateTerminalCompositionInput
+  > | null>(null);
   const promptLinesRef = useRef<number[]>([]);
   const hoveredTerminalLinkRef = useRef<TerminalLinkTarget | null>(null);
   const pointerStartPointRef = useRef<SelectionAnchorPoint | null>(null);
@@ -1268,10 +1309,18 @@ export function ThreadTerminalView({
     let containerHasSize = hasVisibleTerminalSize({
       containerElement: container,
     });
+    let terminalVisible =
+      document.visibilityState === "visible" && containerHasSize;
+    let lastParsedOutputNextSeq = 0;
     const reportDocumentVisibility = () => {
-      transport?.setVisible(
-        document.visibilityState === "visible" && containerHasSize,
-      );
+      const nextVisible =
+        document.visibilityState === "visible" && containerHasSize;
+      if (terminalVisible === nextVisible) return;
+      terminalVisible = nextVisible;
+      transport?.setVisible(nextVisible);
+      if (nextVisible) {
+        transport?.replayOutputFrom(lastParsedOutputNextSeq);
+      }
     };
 
     async function mountTerminal(
@@ -1564,6 +1613,7 @@ export function ThreadTerminalView({
       let reconnecting = false;
       let repaintAfterReconnect = false;
       let reconnectingNoticeVisible = false;
+      let outputFrameReceivedAt = 0;
       const clearConnectionNoticeTimeout = () => {
         if (connectionNoticeTimeout !== null) {
           clearTimeout(connectionNoticeTimeout);
@@ -1571,6 +1621,14 @@ export function ThreadTerminalView({
         }
       };
       const activeTransport = new TerminalWebSocketTransport({
+        terminalId: session.id,
+        now: () => performance.now(),
+        onInputEnqueued: recordTerminalInputEnqueued,
+        onInputSent: recordTerminalInputWebSocketSent,
+        onOutputFrameReceived: (terminalId, timestamp) => {
+          outputFrameReceivedAt = timestamp;
+          recordTerminalOutputReceived(terminalId, timestamp);
+        },
         onRepaintNudgeSizeReleased: (size) => {
           const nextSize = nextSharedTerminalSize(sharedSize, size, false);
           if (nextSize !== null) {
@@ -1635,6 +1693,9 @@ export function ThreadTerminalView({
             message.type === "attached" ||
             message.type === "session-updated"
           ) {
+            if (message.type === "attached") {
+              lastParsedOutputNextSeq = message.replayStartSeq;
+            }
             const { cols, rows } = message.session;
             const isOwnNudgeEcho =
               message.type === "session-updated" &&
@@ -1659,8 +1720,15 @@ export function ThreadTerminalView({
           }
           handleTerminalServerMessage({
             acknowledgeOutput: (nextSeq) =>
-              activeTransport.acknowledgeOutput(nextSeq),
+              {
+                lastParsedOutputNextSeq = Math.max(
+                  lastParsedOutputNextSeq,
+                  nextSeq,
+                );
+                activeTransport.acknowledgeOutput(nextSeq);
+              },
             message,
+            terminalId: session.id,
             onReplayComplete: () => {
               replayCompleted = true;
               outputPipeline?.setGrid(
@@ -1680,6 +1748,7 @@ export function ThreadTerminalView({
             onSessionChange: onSessionChangeRef.current,
             replayNextSeq,
             replayWriteState,
+            outputReceivedAt: outputFrameReceivedAt,
             onReplayStart: () => {
               replayPreview?.dispose();
               replayCompleted = false;
@@ -1709,6 +1778,7 @@ export function ThreadTerminalView({
             pipeline: outputPipeline ?? undefined,
             replayPipeline: replayPreview ?? undefined,
             allowAttachedGrid: !markerGridActive,
+            shouldProcessOutput: () => terminalVisible,
           });
         },
         onSequenceGap: () => {
@@ -1789,8 +1859,8 @@ export function ThreadTerminalView({
           }),
         requestFrame: (callback) => window.requestAnimationFrame(callback),
       });
-      const sendTerminalInput = (dataBase64: string) =>
-        activeTransport.sendInput(dataBase64);
+      const sendTerminalInput = (dataBase64: string, inputEventAt?: number) =>
+        activeTransport.sendInput(dataBase64, inputEventAt);
       handleFileDropRef.current = (files) => {
         const desktop = window.bbDesktop;
         handleTerminalFileDrop({
@@ -1838,6 +1908,7 @@ export function ThreadTerminalView({
       });
       terminalInputForwarding = attachTerminalInputForwarding({
         onData: (data, isUserInput) => {
+          const inputEventAt = isUserInput ? performance.now() : undefined;
           if (controlActiveRef.current) {
             data = applyTerminalControl(data);
             controlActiveRef.current = false;
@@ -1845,6 +1916,7 @@ export function ThreadTerminalView({
           }
           forwardTerminalData({
             data,
+            inputEventAt,
             isUserInput,
             onInput: sendTerminalInput,
             onUserInput: onUserInputRef.current,

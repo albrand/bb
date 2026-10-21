@@ -68,6 +68,7 @@ function createHarness(
   const overflow = vi.fn<(maxBytes: number) => void>();
   const urls: string[] = [];
   const transport = new TerminalWebSocketTransport({
+    terminalId: "term_1",
     createSocket: (url) => {
       urls.push(url);
       const socket = new FakeTerminalBrowserSocket();
@@ -120,6 +121,34 @@ afterEach(() => {
 });
 
 describe("TerminalWebSocketTransport", () => {
+  it("records enqueue and actual socket send times for queued and immediate input", () => {
+    let timestamp = 100;
+    const inputEnqueued = vi.fn();
+    const inputSent = vi.fn();
+    const harness = createHarness({
+      now: () => timestamp++,
+      onInputEnqueued: inputEnqueued,
+      onInputSent: inputSent,
+    });
+    const queuedInput = Buffer.from("queued").toString("base64");
+    const immediateInput = Buffer.from("immediate").toString("base64");
+
+    harness.transport.start();
+    expect(harness.transport.sendInput(queuedInput, 95)).toBe(true);
+    harness.sockets[0]?.open();
+    expect(harness.transport.sendInput(immediateInput, 104)).toBe(true);
+
+    expect(inputEnqueued.mock.calls).toEqual([
+      ["term_1", 100, 95],
+      ["term_1", 103, 104],
+    ]);
+    expect(inputSent.mock.calls).toEqual([
+      ["term_1", 100, 102],
+      ["term_1", 103, 104],
+    ]);
+    harness.transport.dispose();
+  });
+
   it("reports visible state when a socket opens", () => {
     const harness = createHarness();
 
@@ -210,6 +239,54 @@ describe("TerminalWebSocketTransport", () => {
       "ws://example.test/ws/terminals/term-1?sinceSeq=0&outputAcks=1&resizeAcks=1",
       "ws://example.test/ws/terminals/term-1?sinceSeq=1&outputAcks=1&resizeAcks=1",
     ]);
+    harness.transport.dispose();
+  });
+
+  it("replays output from the last parsed sequence when a hidden terminal returns", () => {
+    const harness = createHarness();
+    harness.transport.start();
+    harness.sockets[0]?.open();
+    harness.sockets[0]?.receive({
+      type: "output",
+      chunk: { seq: 0, dataBase64: Buffer.from("first").toString("base64") },
+    });
+    harness.sockets[0]?.receive({
+      type: "output",
+      chunk: { seq: 1, dataBase64: Buffer.from("hidden").toString("base64") },
+    });
+
+    harness.transport.replayOutputFrom(1);
+
+    expect(harness.sockets[0]?.closeCalls).toHaveLength(1);
+    expect(harness.urls[1]).toContain("sinceSeq=1");
+    harness.sockets[1]?.open();
+    harness.sockets[1]?.receive({
+      type: "output",
+      chunk: { seq: 1, dataBase64: Buffer.from("hidden").toString("base64") },
+    });
+
+    expect(
+      harness.messages
+        .filter((message) => message.type === "output")
+        .map((message) => message.chunk.seq),
+    ).toEqual([0, 1, 1]);
+    harness.transport.dispose();
+  });
+
+  it("includes the terminal ID in output frame timing callbacks", () => {
+    const outputReceived = vi.fn();
+    const harness = createHarness({
+      now: () => 42,
+      onOutputFrameReceived: outputReceived,
+    });
+    harness.transport.start();
+    harness.sockets[0]?.open();
+    harness.sockets[0]?.receive({
+      type: "output",
+      chunk: { seq: 0, dataBase64: Buffer.from("frame").toString("base64") },
+    });
+
+    expect(outputReceived).toHaveBeenCalledWith("term_1", 42);
     harness.transport.dispose();
   });
 

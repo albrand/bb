@@ -70,10 +70,12 @@ interface RepaintNudgeInFlight {
 
 interface PendingTerminalInput {
   bytes: number;
+  enqueuedAt: number;
   payload: string;
 }
 
 export interface TerminalWebSocketTransportOptions {
+  terminalId?: string;
   createSocket?: CreateTerminalBrowserSocket;
   drainPollMs?: number;
   heartbeatIntervalMs?: number;
@@ -82,6 +84,17 @@ export interface TerminalWebSocketTransportOptions {
   now?: () => number;
   onConnectionState?: (state: TerminalSocketConnectionState) => void;
   onInputOverflow?: (maxBytes: number) => void;
+  onInputEnqueued?: (
+    terminalId: string,
+    timestamp: number,
+    inputEventAt?: number,
+  ) => void;
+  onInputSent?: (
+    terminalId: string,
+    enqueuedAt: number,
+    sentAt: number,
+  ) => void;
+  onOutputFrameReceived?: (terminalId: string, timestamp: number) => void;
   onInvalidMessage?: () => void;
   onMessage: (message: TerminalServerMessage) => void;
   onRepaintNudgeSizeReleased?: (size: { cols: number; rows: number }) => void;
@@ -171,9 +184,14 @@ export class TerminalWebSocketTransport {
     this.options.onConnectionState?.("closed");
   }
 
-  sendInput(dataBase64: string): boolean {
+  sendInput(dataBase64: string, inputEventAt?: number): boolean {
+    const tracksInputTiming =
+      this.options.onInputEnqueued !== undefined ||
+      this.options.onInputSent !== undefined;
+    const enqueuedAt = tracksInputTiming ? this.now() : 0;
     const pending = {
       bytes: getTerminalBase64DecodedByteLength(dataBase64),
+      enqueuedAt,
       payload: JSON.stringify({
         type: "input",
         dataBase64,
@@ -186,11 +204,25 @@ export class TerminalWebSocketTransport {
       socketBufferedAmount(socket) <= this.socketHighWaterBytes &&
       this.pendingInputs.length === 0
     ) {
-      if (this.trySend(socket, pending.payload)) {
+      this.options.onInputEnqueued?.(
+        this.options.terminalId ?? "",
+        enqueuedAt,
+        inputEventAt,
+      );
+      const onSent = this.options.onInputSent
+        ? (sentAt: number) =>
+            this.options.onInputSent?.(
+              this.options.terminalId ?? "",
+              enqueuedAt,
+              sentAt,
+            )
+        : undefined;
+      if (this.trySend(socket, pending.payload, onSent)) {
         return true;
       }
+      return this.enqueueInput(pending, inputEventAt, true);
     }
-    return this.enqueueInput(pending);
+    return this.enqueueInput(pending, inputEventAt);
   }
 
   acknowledgeOutput(nextSeq: number): void {
@@ -236,6 +268,25 @@ export class TerminalWebSocketTransport {
         this.sendResizeMessage(socket, this.lastResize);
       }
     }
+  }
+
+  replayOutputFrom(nextSeq: number): void {
+    if (this.disposed || this.terminalEnded || nextSeq < 0) {
+      return;
+    }
+    this.nextOutputSeq = nextSeq;
+    this.pendingOutputAckNextSeq = null;
+    const socket = this.socket;
+    if (socket === null) {
+      this.connect("reconnecting");
+      return;
+    }
+    this.socket = null;
+    this.stopHeartbeat();
+    this.clearDrainTimeout();
+    this.clearRepaintTimeout();
+    socket.close();
+    this.connect("reconnecting");
   }
 
   sendResize(cols: number, rows: number): void {
@@ -502,6 +553,7 @@ export class TerminalWebSocketTransport {
     if (this.disposed || this.socket !== socket || typeof raw !== "string") {
       return;
     }
+    const receivedAt = this.options.onOutputFrameReceived ? this.now() : 0;
     let decoded: unknown;
     try {
       decoded = JSON.parse(raw);
@@ -545,6 +597,10 @@ export class TerminalWebSocketTransport {
         this.options.onSequenceGap?.(this.nextOutputSeq, message.chunk.seq);
       }
       this.nextOutputSeq = message.chunk.seq + 1;
+      this.options.onOutputFrameReceived?.(
+        this.options.terminalId ?? "",
+        receivedAt,
+      );
     }
     if (message.type === "exited") {
       this.terminalEnded = true;
@@ -606,13 +662,24 @@ export class TerminalWebSocketTransport {
     }, delay);
   }
 
-  private enqueueInput(pending: PendingTerminalInput): boolean {
+  private enqueueInput(
+    pending: PendingTerminalInput,
+    inputEventAt?: number,
+    alreadyRecorded = false,
+  ): boolean {
     if (this.pendingInputBytes + pending.bytes > this.inputQueueMaxBytes) {
       this.options.onInputOverflow?.(this.inputQueueMaxBytes);
       return false;
     }
     this.pendingInputs.push(pending);
     this.pendingInputBytes += pending.bytes;
+    if (!alreadyRecorded) {
+      this.options.onInputEnqueued?.(
+        this.options.terminalId ?? "",
+        pending.enqueuedAt,
+        inputEventAt,
+      );
+    }
     this.scheduleDrain();
     return true;
   }
@@ -628,7 +695,21 @@ export class TerminalWebSocketTransport {
       socketBufferedAmount(socket) <= this.socketHighWaterBytes
     ) {
       const pending = this.pendingInputs[0];
-      if (!pending || !this.trySend(socket, pending.payload)) {
+      if (
+        !pending ||
+        !this.trySend(
+          socket,
+          pending.payload,
+          this.options.onInputSent
+            ? (sentAt) =>
+                this.options.onInputSent?.(
+                  this.options.terminalId ?? "",
+                  pending.enqueuedAt,
+                  sentAt,
+                )
+            : undefined,
+        )
+      ) {
         break;
       }
       this.pendingInputs.shift();
@@ -639,12 +720,18 @@ export class TerminalWebSocketTransport {
     }
   }
 
-  private trySend(socket: TerminalBrowserSocket, payload: string): boolean {
+  private trySend(
+    socket: TerminalBrowserSocket,
+    payload: string,
+    onSent?: (sentAt: number) => void,
+  ): boolean {
     if (socket.readyState !== SOCKET_OPEN) {
       return false;
     }
     try {
+      const sentAt = onSent === undefined ? undefined : this.now();
       socket.send(payload);
+      if (onSent !== undefined && sentAt !== undefined) onSent(sentAt);
       return true;
     } catch {
       try {
