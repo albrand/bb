@@ -7,6 +7,7 @@ import {
   cancelEnvironmentHook,
 } from "./command-handlers/environment-hook.js";
 import {
+  TERMINAL_DATA_PLANE_PROBE_IPC_VERSION,
   providerCliInstallEventSchema,
   type DesktopBrowserCommand,
   type DesktopBrowserResult,
@@ -665,7 +666,7 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.write_file": writeHostFile,
   "terminal-data-plane.probe": async (_command, options) => ({
     dataSocket: options.terminalDataSocket !== undefined,
-    ipcVersion: 1,
+    ipcVersion: TERMINAL_DATA_PLANE_PROBE_IPC_VERSION,
   }),
   "terminal-data-plane.connect": async (command, options) => ({
     connected:

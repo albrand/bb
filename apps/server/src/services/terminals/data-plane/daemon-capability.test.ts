@@ -80,9 +80,9 @@ describe("DaemonDataPlaneCapabilities", () => {
     });
   });
 
-  it("routes a daemon that answers the probe positively through the data socket", async () => {
+  it("routes a daemon with the current probe IPC version through the data socket", async () => {
     const { capabilities } = createCapabilities(async () =>
-      capableDaemonAnswer(),
+      capableDaemonAnswer({ dataSocket: true, ipcVersion: 1 }),
     );
     await expect(capabilities.negotiate(ARGS)).resolves.toBe("data-socket");
     expect(capabilities.modeFor(ARGS.daemonSessionId)).toBe("data-socket");

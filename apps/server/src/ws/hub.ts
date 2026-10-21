@@ -885,6 +885,7 @@ export class NotificationHub implements DbNotifier {
   sendTerminalClientMessage(
     terminalId: string,
     message: TerminalServerMessage,
+    excludedSocket?: HubSocket,
   ): void {
     const sockets = this.terminalClientSocketsById.get(terminalId);
     if (!sockets) {
@@ -893,6 +894,9 @@ export class NotificationHub implements DbNotifier {
 
     const payload = JSON.stringify(terminalServerMessageSchema.parse(message));
     for (const socket of [...sockets]) {
+      if (socket === excludedSocket) {
+        continue;
+      }
       this.sendOrQueueTerminalPayload(socket, payload);
     }
   }

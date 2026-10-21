@@ -98,23 +98,43 @@ function createRoom(): TwoClientRoom {
         restores += 1;
       }
       hub.recordTerminalClientSize(TERMINAL_ID, ownerSocket, size, Date.now());
-      settle();
-      if ("seq" in message && typeof message.seq === "number") {
-        emit({ type: "resize-applied", seq: message.seq });
+      const seq = Reflect.get(message, "seq");
+      settle(ownerSocket, size, typeof seq === "number" ? seq : undefined);
+      if (typeof seq === "number") {
+        emit({ type: "resize-applied", seq });
       }
     },
   };
 
-  const settle = (): void => {
+  const settle = (
+    source: typeof ownerSocket | typeof peerSocket,
+    reported: { cols: number; rows: number },
+    seq?: number,
+  ): void => {
     const shared = hub.terminalSharedSize(TERMINAL_ID, Date.now());
     if (shared === null) {
       return;
     }
-    if (shared.cols === pty.cols && shared.rows === pty.rows) {
-      return;
+    const changed = shared.cols !== pty.cols || shared.rows !== pty.rows;
+    if (changed) {
+      pty = shared;
     }
-    pty = shared;
-    emit({ type: "session-updated", session: session(shared.cols, shared.rows) });
+    if (
+      source === peerSocket ||
+      (source === ownerSocket &&
+        seq === undefined &&
+        changed &&
+        (reported.cols !== shared.cols || reported.rows !== shared.rows))
+    ) {
+      emit({ type: "session-updated", session: session(shared.cols, shared.rows) });
+    }
+    if (source === ownerSocket && changed && seq !== undefined) {
+      emit({
+        type: "session-updated",
+        session: session(shared.cols, shared.rows),
+        resizeSeq: seq,
+      });
+    }
   };
 
   const emit = (message: unknown): void => {
@@ -132,7 +152,7 @@ function createRoom(): TwoClientRoom {
         return;
       }
       const reported = { cols: message.session.cols, rows: message.session.rows };
-      if (!transport.consumeRepaintNudgeEcho(reported)) {
+      if (!transport.consumeRepaintNudgeEcho(reported, message.resizeSeq)) {
         shared = reported.cols;
         track();
       }
@@ -181,7 +201,7 @@ function createRoom(): TwoClientRoom {
         { cols, rows },
         Date.now(),
       );
-      settle();
+      settle(peerSocket, { cols, rows });
     },
     ptySize: () => pty,
     restoresSentByOwner: () => restores,
@@ -220,12 +240,12 @@ describe("repaint nudge with a second client on the same terminal", () => {
     room.transport.dispose();
   });
 
-  it("applies a peer size that is exactly the nudge size once the window closes, instead of dropping it as the echo", () => {
+  it("applies a peer size that is exactly the nudge size when it is reported", () => {
     const room = createRoom();
     room.start();
     room.advance(100);
     room.peerResizes(FITTED.cols - 1, FITTED.rows);
-    expect(room.viewCols()).toBe(FITTED.cols);
+    expect(room.viewCols()).toBe(FITTED.cols - 1);
 
     room.advance(300);
     expect(room.restoresSentByOwner()).toBe(1);
@@ -274,7 +294,7 @@ describe("repaint nudge with a second client on the same terminal", () => {
     room.transport.dispose();
   });
 
-  it("never applies the nudge size when the fit shrinks between nudge and restore and a peer sits exactly at the nudge size", () => {
+  it("follows a peer at the nudge size and then the owner's smaller fit", () => {
     const room = createRoom();
     room.start();
     room.advance(100);
@@ -283,7 +303,7 @@ describe("repaint nudge with a second client on the same terminal", () => {
     room.fit(100);
     room.advance(2000);
 
-    expect(room.viewHistory).not.toContain(FITTED.cols - 1);
+    expect(room.viewHistory).toContain(FITTED.cols - 1);
     expect(room.ptySize().cols).toBe(100);
     expect(room.viewCols()).toBe(100);
     room.transport.dispose();

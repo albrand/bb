@@ -66,6 +66,7 @@ interface RepaintNudgeInFlight {
   ignored: { cols: number; rows: number } | null;
   nudge: { cols: number; rows: number };
   nudgeSeq: number;
+  restoreRequested: boolean;
 }
 
 interface PendingTerminalInput {
@@ -253,6 +254,15 @@ export class TerminalWebSocketTransport {
       this.repaintNudgeInFlight = null;
       return;
     }
+    const inFlight = this.repaintNudgeInFlight;
+    if (
+      inFlight !== null &&
+      this.resizeAcksConfirmed &&
+      this.ackedResizeSeq < inFlight.nudgeSeq
+    ) {
+      inFlight.restoreRequested = true;
+      return;
+    }
     const sent = this.sendResizeMessage(socket, { cols, rows }, (seq) =>
       this.setRepaintFinalSeq(seq),
     );
@@ -330,6 +340,7 @@ export class TerminalWebSocketTransport {
                 ignored: null,
                 nudge: nudgeSize,
                 nudgeSeq,
+                restoreRequested: false,
               };
       });
       this.repaintTimeout = setTimeout(() => {
@@ -343,6 +354,15 @@ export class TerminalWebSocketTransport {
           this.repaintNudgeInFlight = null;
           return;
         }
+        const inFlight = this.repaintNudgeInFlight;
+        if (
+          inFlight !== null &&
+          this.resizeAcksConfirmed &&
+          this.ackedResizeSeq < inFlight.nudgeSeq
+        ) {
+          inFlight.restoreRequested = true;
+          return;
+        }
         this.sendResizeMessage(socket, current, (restoreSeq) =>
           this.setRepaintFinalSeq(restoreSeq),
         );
@@ -350,18 +370,22 @@ export class TerminalWebSocketTransport {
     }, 0);
   }
 
-  consumeRepaintNudgeEcho(size: { cols: number; rows: number }): boolean {
+  consumeRepaintNudgeEcho(
+    size: { cols: number; rows: number },
+    resizeSeq?: number,
+  ): boolean {
     const inFlight = this.repaintNudgeInFlight;
     if (inFlight === null) {
       return false;
     }
     if (
       !inFlight.echoTaken &&
+      (!this.resizeAcksConfirmed || resizeSeq === inFlight.nudgeSeq) &&
       size.cols === inFlight.nudge.cols &&
       size.rows === inFlight.nudge.rows
     ) {
       inFlight.echoTaken = true;
-      inFlight.ignored = size;
+      inFlight.ignored = inFlight.restoreRequested ? null : size;
       return true;
     }
     inFlight.ignored = null;
@@ -376,6 +400,20 @@ export class TerminalWebSocketTransport {
     }
     if (this.ackedResizeSeq >= inFlight.nudgeSeq) {
       inFlight.echoTaken = true;
+    }
+    if (inFlight.restoreRequested && this.ackedResizeSeq >= inFlight.nudgeSeq) {
+      inFlight.restoreRequested = false;
+      const socket = this.socket;
+      const size = this.lastResize;
+      if (
+        socket !== null &&
+        socket.readyState === SOCKET_OPEN &&
+        size !== null
+      ) {
+        this.sendResizeMessage(socket, size, (restoreSeq) =>
+          this.setRepaintFinalSeq(restoreSeq),
+        );
+      }
     }
     if (inFlight.finalSeq === null || this.ackedResizeSeq < inFlight.finalSeq) {
       return;

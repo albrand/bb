@@ -625,7 +625,7 @@ describe("TerminalWebSocketTransport", () => {
       const ack = (seq: number) =>
         opened.socket.receive({ type: "resize-applied", seq });
       const echo = (size: { cols: number; rows: number }) =>
-        opened.harness.transport.consumeRepaintNudgeEcho(size);
+        opened.harness.transport.consumeRepaintNudgeEcho(size, 1);
       return { ...opened, ack, echo };
     }
 
@@ -657,16 +657,31 @@ describe("TerminalWebSocketTransport", () => {
     });
 
     it("tags the nudge and the restore with increasing seq once the server confirmed resize acks", async () => {
-      const { harness, socket } = openAckedHarness(100, 30);
+      const { harness, socket, ack } = openAckedHarness(100, 30);
 
       harness.transport.requestRepaint();
       await vi.advanceTimersByTimeAsync(0);
+      ack(1);
       vi.advanceTimersByTime(400);
 
       expect(socket.sent.slice(-2)).toEqual([
         resizeFrame(99, 30, 1),
         resizeFrame(100, 30, 2),
       ]);
+      harness.transport.dispose();
+    });
+
+    it("waits for the nudge to be applied before restoring the full size", async () => {
+      const { harness, socket, ack } = openAckedHarness(51, 47);
+
+      harness.transport.requestRepaint();
+      await vi.advanceTimersByTimeAsync(0);
+      vi.advanceTimersByTime(400);
+
+      expect(socket.sent.slice(-1)).toEqual([resizeFrame(50, 47, 1)]);
+      ack(1);
+
+      expect(socket.sent.slice(-1)).toEqual([resizeFrame(51, 47, 2)]);
       harness.transport.dispose();
     });
 
@@ -694,11 +709,12 @@ describe("TerminalWebSocketTransport", () => {
     });
 
     it("keeps the restore after a peer resized in the window so this client's own size does not stay narrowed", async () => {
-      const { harness, socket, echo } = openAckedHarness(100, 30);
+      const { harness, socket, ack, echo } = openAckedHarness(100, 30);
 
       harness.transport.requestRepaint();
       await vi.advanceTimersByTimeAsync(0);
       expect(echo({ cols: 44, rows: 20 })).toBe(false);
+      ack(1);
       vi.advanceTimersByTime(400);
 
       expect(socket.sent.at(-1)).toBe(resizeFrame(100, 30, 2));
@@ -819,11 +835,12 @@ describe("TerminalWebSocketTransport", () => {
     });
 
     it("does not send the obsolete restore after the fitted size changed", async () => {
-      const { harness, socket } = openAckedHarness(100, 30);
+      const { harness, socket, ack } = openAckedHarness(100, 30);
 
       harness.transport.requestRepaint();
       await vi.advanceTimersByTimeAsync(0);
       harness.transport.sendResize(80, 24);
+      ack(1);
       const sentBefore = socket.sent.length;
       vi.advanceTimersByTime(5000);
 

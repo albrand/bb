@@ -6,7 +6,7 @@ import {
 } from "@bb/server-contract";
 import { z } from "zod";
 
-export const TERMINAL_DATA_PLANE_IPC_VERSION = 1;
+export const TERMINAL_DATA_PLANE_IPC_VERSION = 2;
 export const TERMINAL_DATA_PLANE_PENDING_REPLAY_BUFFER_BYTES = 1024 * 1024;
 export const TERMINAL_DATA_PLANE_CHILD_PENDING_IPC_BYTES = 1024 * 1024;
 export const TERMINAL_DATA_PLANE_RELAY_PAUSE_BYTES = 2 * 1024 * 1024;
@@ -48,8 +48,10 @@ const browserControlClientMessageSchema = terminalClientMessageSchema.refine(
 
 const browserReplyServerMessageSchema = terminalServerMessageSchema.refine(
   (message) =>
-    message.type === "features" || message.type === "resize-applied",
-  "Only features and resize-applied server messages are replies to one browser attach",
+    message.type === "features" ||
+    message.type === "resize-applied" ||
+    (message.type === "session-updated" && message.resizeSeq !== undefined),
+  "Only attach-specific terminal messages are replies to one browser attach",
 );
 
 const browserSendServerMessageSchema = terminalServerMessageSchema.refine(

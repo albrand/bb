@@ -295,6 +295,7 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("session-updated"),
       session: terminalSessionSchema,
+      resizeSeq: z.number().int().positive().optional(),
     })
     .strict(),
   z

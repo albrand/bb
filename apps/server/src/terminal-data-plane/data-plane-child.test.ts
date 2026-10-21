@@ -781,6 +781,16 @@ describe("terminal data plane child", () => {
       attachId: "a1",
       message: { type: "resize-applied", seq: 4 },
     });
+    main(harness, {
+      v,
+      type: "browser.reply",
+      attachId: "a1",
+      message: {
+        type: "session-updated",
+        session: { ...session, cols: 39 },
+        resizeSeq: 5,
+      },
+    });
     expect(named.sent).toEqual([]);
 
     replay(harness, { attachId: "a1", terminalId: "term_a", nextSeq: 0 });
@@ -802,8 +812,14 @@ describe("terminal data plane child", () => {
       "attached",
       "resize-applied",
       "session-updated",
+      "session-updated",
       "features",
     ]);
+    expect(named.frames()[2]).toEqual({
+      type: "session-updated",
+      session: { ...session, cols: 39 },
+      resizeSeq: 5,
+    });
     expect(other.frames().map((frame) => frame.type)).toEqual([
       "attached",
       "session-updated",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const TERMINAL_DATA_PLANE_PROBE_TIMEOUT_MS = 3_000;
+export const TERMINAL_DATA_PLANE_PROBE_IPC_VERSION = 1;
 
 export const terminalDataPlaneProbeCommandSchema = z
   .object({

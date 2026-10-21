@@ -47,14 +47,22 @@ class InlineTuiPty {
     private readonly echoAfterDraw = false,
   ) {}
 
-  resize(cols: number, rows: number): void {
+  resize(cols: number, rows: number, resizeSeq?: number): void {
     this.width = cols;
     if (this.echoAfterDraw) {
       this.draw();
-      this.deliver({ type: "session-updated", session: session(cols, rows) });
+      this.deliver({
+        type: "session-updated",
+        session: session(cols, rows),
+        ...(resizeSeq === undefined ? {} : { resizeSeq }),
+      });
       return;
     }
-    this.deliver({ type: "session-updated", session: session(cols, rows) });
+    this.deliver({
+      type: "session-updated",
+      session: session(cols, rows),
+      ...(resizeSeq === undefined ? {} : { resizeSeq }),
+    });
     this.draw();
   }
 
@@ -162,13 +170,27 @@ async function cleanReferenceScreen(): Promise<string> {
 describe("replay repaint nudge", () => {
   it("leaves a full-width inline TUI exactly as a clean draw after the return nudge", async () => {
     const terminal = newTerminal();
+    let sharedSize: { cols: number; rows: number } | null = null;
+    let transport: TerminalWebSocketTransport;
     const pty = new InlineTuiPty((message) => {
       if (message.type === "session-updated") {
-        const display = terminalDisplaySize(
-          { cols: FITTED_COLS, rows: FITTED_ROWS },
-          { cols: message.session.cols, rows: message.session.rows },
+        const reported = {
+          cols: message.session.cols,
+          rows: message.session.rows,
+        };
+        const next = nextSharedTerminalSize(
+          sharedSize,
+          reported,
+          transport.consumeRepaintNudgeEcho(reported, message.resizeSeq),
         );
-        terminal.resize(display.cols, display.rows);
+        if (next !== null) {
+          sharedSize = next;
+          const display = terminalDisplaySize(
+            { cols: FITTED_COLS, rows: FITTED_ROWS },
+            sharedSize,
+          );
+          terminal.resize(display.cols, display.rows);
+        }
       }
       const data = decodeChunk(message);
       if (data !== null) {
@@ -176,7 +198,7 @@ describe("replay repaint nudge", () => {
       }
     });
     const socket = new FakeSocket();
-    const transport = new TerminalWebSocketTransport({
+    transport = new TerminalWebSocketTransport({
       createSocket: () => socket,
       onMessage: () => undefined,
       shouldReconnect: () => false,
@@ -185,21 +207,39 @@ describe("replay repaint nudge", () => {
     transport.sendResize(FITTED_COLS, FITTED_ROWS);
     transport.start();
     socket.onopen?.(new Event("open"));
+    socket.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ type: "features", resizeAcks: true }),
+      }),
+    );
     transport.markLayoutSettled();
 
     pty.draw();
     transport.requestRepaint();
     let applied = 0;
-    for (let step = 0; step < 10; step += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 70));
+    await vi.waitFor(
+      () => {
       for (const resize of socket.resizes.slice(applied)) {
-        pty.resize(resize.cols, resize.rows);
+        pty.resize(resize.cols, resize.rows, resize.seq);
+        if (resize.seq !== undefined) {
+          socket.onmessage?.(
+            new MessageEvent("message", {
+              data: JSON.stringify({ type: "resize-applied", seq: resize.seq }),
+            }),
+          );
+        }
       }
       applied = socket.resizes.length;
-    }
+        expect(socket.resizes.at(-1)).toMatchObject({
+          cols: FITTED_COLS,
+          rows: FITTED_ROWS,
+        });
+      },
+      { interval: 70 },
+    );
     await writeAndWait(terminal, "");
 
-    expect(socket.resizes.at(-1)).toEqual({
+    expect(socket.resizes.at(-1)).toMatchObject({
       cols: FITTED_COLS,
       rows: FITTED_ROWS,
     });
@@ -251,7 +291,7 @@ function createViewHarness(): ViewHarness {
       const next = nextSharedTerminalSize(
         sharedSize,
         reported,
-        transport.consumeRepaintNudgeEcho(reported),
+        transport.consumeRepaintNudgeEcho(reported, message.resizeSeq),
       );
       if (next !== null) {
         sharedSize = next;
@@ -280,7 +320,7 @@ function createViewHarness(): ViewHarness {
   const applySizes = async (): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     for (const resize of socket.resizes.slice(applied)) {
-      pty.resize(resize.cols, resize.rows);
+      pty.resize(resize.cols, resize.rows, resize.seq);
       if (resize.seq !== undefined) {
         socket.onmessage?.(
           new MessageEvent("message", {
@@ -382,7 +422,7 @@ function createFitChangeRoom(delayReports = false): FitChangeRoom {
       const next = nextSharedTerminalSize(
         sharedSize,
         reported,
-        transport.consumeRepaintNudgeEcho(reported),
+        transport.consumeRepaintNudgeEcho(reported, message.resizeSeq),
       );
       if (next !== null) {
         applyShared(next);
@@ -407,17 +447,21 @@ function createFitChangeRoom(delayReports = false): FitChangeRoom {
     }
     deliver(message);
   };
-  const hub = (): void => {
+  const hub = (peerOrigin = false, resizeSeq?: number): void => {
     const shared = peerCols === null ? own : Math.min(own, peerCols);
-    if (shared !== pty) {
+    if (shared !== pty || peerOrigin) {
       pty = shared;
-      emit({ type: "session-updated", session: session(shared, FITTED_ROWS) });
+      emit({
+        type: "session-updated",
+        session: session(shared, FITTED_ROWS),
+        ...(peerOrigin || resizeSeq === undefined ? {} : { resizeSeq }),
+      });
     }
   };
   const syncOwn = (): void => {
     for (const resize of socket.resizes.slice(delivered)) {
       own = resize.cols;
-      hub();
+      hub(false, resize.seq);
       if (resize.seq !== undefined) {
         emit({ type: "resize-applied", seq: resize.seq });
       }
@@ -452,7 +496,7 @@ function createFitChangeRoom(delayReports = false): FitChangeRoom {
     },
     peer: (cols) => {
       peerCols = cols;
-      hub();
+      hub(true);
     },
     ptyCols: () => pty,
     terminal,
@@ -480,7 +524,7 @@ describe("page terminal when the fitted size changes between nudge and restore",
     room.transport.dispose();
   });
 
-  it("never takes the nudge size when the fit shrinks and a peer sits exactly at the nudge size", () => {
+  it("follows a peer at the nudge size and then the owner's smaller fit", () => {
     const room = createFitChangeRoom();
     room.advance(100);
     room.peer(FITTED_COLS - 1);
@@ -488,7 +532,7 @@ describe("page terminal when the fitted size changes between nudge and restore",
     room.fit(30);
     room.advance(2000);
 
-    expect(room.widths).not.toContain(FITTED_COLS - 1);
+    expect(room.widths).toContain(FITTED_COLS - 1);
     expect(room.ptyCols()).toBe(30);
     expect(room.terminal.cols).toBe(30);
     room.transport.dispose();

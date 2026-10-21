@@ -1,10 +1,10 @@
 import {
+  TERMINAL_DATA_PLANE_PROBE_IPC_VERSION,
   TERMINAL_DATA_PLANE_PROBE_TIMEOUT_MS,
   terminalDataPlaneProbeResultSchema,
   type HostDaemonOnlineRpcRequestMessage,
   type HostDaemonOnlineRpcResponseMessage,
 } from "@bb/host-daemon-contract";
-import { TERMINAL_DATA_PLANE_IPC_VERSION } from "../../../terminal-data-plane/ipc-contract.js";
 import type { TerminalDataPlaneRouteMode } from "../../../terminal-data-plane/ipc-contract.js";
 
 export interface DaemonCapabilityRpcPort {
@@ -73,7 +73,7 @@ export class DaemonDataPlaneCapabilities {
     if (
       !parsed.success ||
       !parsed.data.dataSocket ||
-      parsed.data.ipcVersion !== TERMINAL_DATA_PLANE_IPC_VERSION
+      parsed.data.ipcVersion !== TERMINAL_DATA_PLANE_PROBE_IPC_VERSION
     ) {
       return "main-relay";
     }

@@ -1638,7 +1638,10 @@ export function ThreadTerminalView({
             const { cols, rows } = message.session;
             const isOwnNudgeEcho =
               message.type === "session-updated" &&
-              activeTransport.consumeRepaintNudgeEcho({ cols, rows });
+              activeTransport.consumeRepaintNudgeEcho(
+                { cols, rows },
+                message.resizeSeq,
+              );
             latestPtyGrid = { cols, rows };
             updateGridVisibility();
             const nextSize = nextSharedTerminalSize(

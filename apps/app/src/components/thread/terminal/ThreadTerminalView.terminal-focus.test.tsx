@@ -11,6 +11,7 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TerminalWebSocketTransport } from "@bb/client-core";
 import { decodeBase64Bytes } from "@/lib/base64-bytes";
 import { makeTerminalSession } from "@/test/fixtures/terminal-sessions";
 import { wsManager } from "@/lib/ws";
@@ -23,10 +24,12 @@ import { ThreadTerminalView } from "./ThreadTerminalView";
 const testState = vi.hoisted(() => ({
   calls: [] as string[],
   clearAttention: vi.fn(),
+  deferSocketOpen: false,
   mediaQueryListeners: new Set<() => void>(),
   touchEnabled: false,
   toastError: vi.fn(),
   sockets: [] as TestTerminalSocket[],
+  socketCreated: null as (() => void) | null,
   socketMessages: [] as string[],
   socketUrls: [] as string[],
 }));
@@ -41,14 +44,27 @@ class TestTerminalSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onopen: ((event: Event) => void) | null = null;
   readyState = TestTerminalSocket.CONNECTING;
+  readonly opened: Promise<void>;
+  readonly sent: string[] = [];
+  private resolveOpened!: () => void;
 
   constructor(url: string) {
     testState.socketUrls.push(url);
     testState.sockets.push(this);
-    queueMicrotask(() => {
-      this.readyState = TestTerminalSocket.OPEN;
-      this.onopen?.(new Event("open"));
+    testState.socketCreated?.();
+    testState.socketCreated = null;
+    this.opened = new Promise((resolve) => {
+      this.resolveOpened = resolve;
     });
+    if (!testState.deferSocketOpen) {
+      queueMicrotask(() => this.open());
+    }
+  }
+
+  open(): void {
+    this.readyState = TestTerminalSocket.OPEN;
+    this.onopen?.(new Event("open"));
+    this.resolveOpened();
   }
 
   close(): void {
@@ -61,6 +77,7 @@ class TestTerminalSocket {
   }
 
   send(data: string): void {
+    this.sent.push(data);
     testState.socketMessages.push(data);
   }
 
@@ -148,6 +165,7 @@ function Handler() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   Reflect.set(wsManager, "deviceHandoffClientToken", null);
   vi.unstubAllGlobals();
@@ -159,6 +177,8 @@ afterEach(() => {
   }
   testState.calls.length = 0;
   testState.sockets.length = 0;
+  testState.socketCreated = null;
+  testState.deferSocketOpen = false;
   testState.socketMessages.length = 0;
   testState.socketUrls.length = 0;
   testState.clearAttention.mockReset();
@@ -828,6 +848,24 @@ describe("ThreadTerminalView terminal focus boundary", () => {
         return { cols: 51, rows: 47 };
       },
     );
+    const markLayoutSettled =
+      TerminalWebSocketTransport.prototype.markLayoutSettled;
+    let resolveLayoutSettled!: () => void;
+    const layoutSettled = new Promise<void>((resolve) => {
+      resolveLayoutSettled = resolve;
+    });
+    vi.spyOn(
+      TerminalWebSocketTransport.prototype,
+      "markLayoutSettled",
+    ).mockImplementation(function (this: TerminalWebSocketTransport) {
+      markLayoutSettled.call(this);
+      resolveLayoutSettled();
+    });
+    let resolveSocketCreated!: () => void;
+    const socketCreated = new Promise<void>((resolve) => {
+      resolveSocketCreated = resolve;
+    });
+    testState.socketCreated = resolveSocketCreated;
 
     render(
       <MemoryRouter>
@@ -846,20 +884,34 @@ describe("ThreadTerminalView terminal focus boundary", () => {
       </MemoryRouter>,
     );
 
+    await socketCreated;
+    const socket = testState.sockets[0]!;
+    await Promise.all([socket.opened, layoutSettled]);
+    const initialResizes = testState.socketMessages
+      .map(
+        (message) =>
+          JSON.parse(message) as {
+            cols?: number;
+            rows?: number;
+            type?: string;
+          },
+      )
+      .filter((message) => message.type === "resize");
+    expect(initialResizes).toEqual([{ type: "resize", cols: 51, rows: 47 }]);
     await waitFor(
-      () => {
-        const resizes = testState.socketMessages
-          .map(
-            (message) =>
-              JSON.parse(message) as {
-                cols?: number;
-                rows?: number;
-                type?: string;
-              },
-          )
-          .filter((message) => message.type === "resize");
-        expect(resizes).toEqual([{ type: "resize", cols: 51, rows: 47 }]);
-      },
+      () =>
+        expect(
+          testState.socketMessages
+            .map(
+              (message) =>
+                JSON.parse(message) as {
+                  cols?: number;
+                  rows?: number;
+                  type?: string;
+                },
+            )
+            .filter((message) => message.type === "resize"),
+        ).toEqual([{ type: "resize", cols: 51, rows: 47 }]),
       { timeout: 6_000 },
     );
     const session = makeTerminalSession({
@@ -874,7 +926,24 @@ describe("ThreadTerminalView terminal focus boundary", () => {
       replayStartSeq: 0,
       nextSeq: 0,
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(
+      () =>
+        expect(
+          testState.socketMessages
+            .map(
+              (message) =>
+                JSON.parse(message) as {
+                  cols?: number;
+                  rows?: number;
+                  type?: string;
+                },
+            )
+            .filter((message) => message.type === "resize"),
+        ).toEqual([{ type: "resize", cols: 51, rows: 47 }]),
+      { timeout: 6_000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
       testState.socketMessages
         .map(
@@ -888,33 +957,64 @@ describe("ThreadTerminalView terminal focus boundary", () => {
         .filter((message) => message.type === "resize"),
     ).toEqual([{ type: "resize", cols: 51, rows: 47 }]);
 
+    testState.deferSocketOpen = true;
     testState.sockets[0]?.disconnect();
     await waitFor(() => expect(testState.sockets).toHaveLength(2));
-    testState.sockets[1]?.receive({
+    const reconnectedSocket = testState.sockets[1]!;
+    vi.useFakeTimers();
+    reconnectedSocket.open();
+    await reconnectedSocket.opened;
+    reconnectedSocket.receive({ type: "features", resizeAcks: true });
+    reconnectedSocket.receive({
       type: "attached",
       session,
       replayStartSeq: 0,
       nextSeq: 0,
     });
-    await waitFor(
-      () => {
-        const resizes = testState.socketMessages
-          .map(
-            (message) =>
-              JSON.parse(message) as {
-                cols?: number;
-                rows?: number;
-                type?: string;
-              },
-          )
-          .filter((message) => message.type === "resize");
-        expect(resizes.slice(-2)).toEqual([
-          { type: "resize", cols: 50, rows: 47 },
-          { type: "resize", cols: 51, rows: 47 },
-        ]);
-      },
-      { timeout: 6_000 },
-    );
+    const socketResizes = () =>
+      reconnectedSocket.sent
+        .map(
+          (message) =>
+            JSON.parse(message) as {
+              cols?: number;
+              rows?: number;
+              seq?: number;
+              type?: string;
+            },
+        )
+        .filter((message) => message.type === "resize");
+    await vi.waitFor(() => {
+      expect(socketResizes()).toContainEqual({
+        type: "resize",
+        cols: 50,
+        rows: 47,
+        seq: 1,
+      });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(socketResizes().at(-1)).toEqual({
+      type: "resize",
+      cols: 50,
+      rows: 47,
+      seq: 1,
+    });
+    reconnectedSocket.receive({ type: "resize-applied", seq: 1 });
+    expect(socketResizes().at(-1)).toEqual({
+      type: "resize",
+      cols: 51,
+      rows: 47,
+      seq: 2,
+    });
+    expect(
+      socketResizes()
+        .slice(-2)
+        .map(({ type, cols, rows }) => ({ type, cols, rows })),
+    ).toEqual([
+      { type: "resize", cols: 50, rows: 47 },
+      { type: "resize", cols: 51, rows: 47 },
+    ]);
   }, 15_000);
 
   it("suppresses terminal-scoped shortcuts from the real xterm input", async () => {

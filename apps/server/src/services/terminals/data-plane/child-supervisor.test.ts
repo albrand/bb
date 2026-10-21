@@ -107,7 +107,11 @@ describe("DataPlaneChildSupervisor", () => {
     const child = children[0];
     child?.becomeReady();
     child?.emit("message", { v: V, type: "browser.attached" });
-    child?.emit("message", { v: 2, type: "browser.attached", attachId: "a" });
+    child?.emit("message", {
+      v: V + 1,
+      type: "browser.attached",
+      attachId: "a",
+    });
     child?.emit("message", { v: V, type: "browser.attached", attachId: "a" });
     expect(messages).toEqual([{ v: V, type: "browser.attached", attachId: "a" }]);
     expect(logger.warn).toHaveBeenCalledTimes(2);
