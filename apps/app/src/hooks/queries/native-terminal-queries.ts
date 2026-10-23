@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PromptInput } from "@bb/domain";
 import type { NativeTerminalThread } from "@bb/server-contract";
+import { LazyThreadTerminalPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
+import { preloadTerminalModules } from "@/components/thread/terminal/terminal-modules";
 import { sdk } from "@/lib/sdk";
 import { applyNativeTerminalThreadView } from "../cache-owners/terminal-cache-owner";
 import { REALTIME_OWNED_STATIC_CACHE_QUERY_POLICY } from "./query-policies";
@@ -9,7 +11,14 @@ import { nativeTerminalThreadQueryKey } from "./query-keys";
 export function useNativeTerminalThread(threadId: string) {
   return useQuery<NativeTerminalThread | null>({
     queryKey: nativeTerminalThreadQueryKey(threadId),
-    queryFn: ({ signal }) => sdk.nativeTerminals.get({ threadId, signal }),
+    queryFn: async ({ signal }) => {
+      const view = await sdk.nativeTerminals.get({ threadId, signal });
+      if (view !== null) {
+        void LazyThreadTerminalPanel.preload();
+        preloadTerminalModules();
+      }
+      return view;
+    },
     enabled: threadId.length > 0,
     ...REALTIME_OWNED_STATIC_CACHE_QUERY_POLICY,
   });
