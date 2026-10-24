@@ -1,3 +1,8 @@
+import {
+  realtimeSubscriptionTargetKey,
+  type PluginReadSubscriptionTarget,
+} from "@bb/domain";
+import { logPluginBuildWarnings } from "./plugin-log.js";
 import type { MachineEnrollmentService } from "../machines/machine-services.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -1234,11 +1239,17 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
           : "plugin source is newer than dist/app.js";
         logger.info(`plugin ${row.id}: rebuilding frontend bundle (${reason})`);
         try {
-          await buildPluginApp(
+          const app = await buildPluginApp(
             row.rootDir,
             deps.appVersion,
             await getPluginBuildToolchain(deps),
           );
+          logPluginBuildWarnings({
+            dataDir: deps.dataDir,
+            logger,
+            pluginId: row.id,
+            warnings: app.migrationWarnings,
+          });
           setDevBuildProblem(row.id, "frontend", null);
         } catch (error) {
           const message =
@@ -1636,6 +1647,38 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
       getLoopbackBaseUrl: () => boundLoopbackBaseUrl,
       rpcCaller: rpcCallers.issue(row.id),
       invalidateRpc: (tags) => deps.hub.notifyPluginChanged(row.id, tags),
+      whileRpcWatched: (method, handler) => {
+        const active = new Map<string, AbortController>();
+        const isWatchedRead = (target: PluginReadSubscriptionTarget) =>
+          target.pluginId === row.id && target.method === method;
+        const stop = deps.hub.onWatchedTargets(["plugin-read"], (change) => {
+          for (const target of change.stopped.filter(isWatchedRead)) {
+            const key = realtimeSubscriptionTargetKey(target);
+            active.get(key)?.abort();
+            active.delete(key);
+          }
+          for (const target of change.started.filter(isWatchedRead)) {
+            const controller = new AbortController();
+            active.set(realtimeSubscriptionTargetKey(target), controller);
+            void Promise.resolve()
+              .then(() => {
+                if (!controller.signal.aborted)
+                  return handler(target.read, controller.signal);
+              })
+              .catch((error: unknown) => {
+                if (!controller.signal.aborted)
+                  deps.logger.warn(
+                    `Plugin ${row.id} watched RPC failed: ${String(error)}`,
+                  );
+              });
+          }
+        });
+        return () => {
+          stop();
+          for (const controller of active.values()) controller.abort();
+          active.clear();
+        };
+      },
       publishSignal: (channel, payload) => {
         deps.hub.notifyPluginSignal(row.id, channel, payload);
       },

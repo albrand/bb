@@ -272,11 +272,6 @@ app sockets the request was sent to; it does not confirm receipt or application.
 - `bb environment update`
 - `bb environment commit`
 - `bb environment archive-threads`
-- `bb environment pull-request`
-- `bb environment pull-request show`
-- `bb environment pull-request ready`
-- `bb environment pull-request draft`
-- `bb environment pull-request merge`
 
 ## file
 

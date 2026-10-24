@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent } from "@testing-library/react";
 import { memo, useState } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
+import { createRpcQueryHooks } from "../../internal/rpc-query-host.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -16,7 +24,10 @@ import {
 } from "../../rpc-contract.js";
 import { renderSlot } from "../app.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 it("updates selected load state without rendering unchanged rows again", async () => {
   const rendered = vi.fn();
@@ -210,9 +221,12 @@ it.each(["success", "write-failure", "read-failure", "refusal"] as const)(
     expect(slot.getByText("two:2/2")).toBeTruthy();
     await slot.experimental_invalidateRpc(["row:a"]);
     expect(slot.getByText("one:2/2")).toBeTruthy();
+    if (outcome === "read-failure") vi.useFakeTimers();
     await act(async () => {
       release();
+      if (outcome === "read-failure") await vi.advanceTimersByTimeAsync(10_000);
     });
+    vi.useRealTimers();
     if (outcome === "success") {
       await slot.findByText("acknowledged:idle:0");
       expect(slot.getByText("one:2/2")).toBeTruthy();
@@ -303,12 +317,17 @@ it(
         issues: [{ path: ["id"], message: "Missing" }],
       });
     };
+    vi.useFakeTimers();
     const slot = renderSlot(
       { component: Probe },
       {},
       { rpc: { detail: refuse, rows: refuse } },
     );
     fireEvent.click(slot.getByText("Read"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    vi.useRealTimers();
     for (const index of [0, 1, 2]) {
       await slot.findByText(
         `${index}:not_found:Gone:Missing:id`,
@@ -318,3 +337,65 @@ it(
     }
   },
 );
+it("retains plain and keyed watched reads until their consumers disable them", async () => {
+  const client = new QueryClient();
+  const releases: ReturnType<typeof vi.fn>[] = [];
+  const watch = vi.fn(() => {
+    const release = vi.fn();
+    releases.push(release);
+    return release;
+  });
+  const host = {
+    pluginId: "demo",
+    queryClient: client,
+    subscribe: () => () => {},
+    watch,
+    call: async (_plugin: string, method: string) =>
+      method === "rows" ? { a: 1, b: 2 } : { ready: true },
+  };
+  const contract = defineRpcContract({
+    read: {
+      input: z.object({ v: z.number() }),
+      output: z.object({ ready: z.boolean() }),
+    },
+    rows: {
+      input: z.object({ keys: z.array(z.string()) }),
+      output: z.record(z.string(), z.number()),
+    },
+  });
+  const hooks = createRpcQueryHooks(() => host);
+  const probe = renderHook(
+    ({ enabled }) => {
+      const plain = hooks.experimental_useRpcQuery({
+        contract,
+        method: "read",
+        input: { v: 1 },
+        enabled,
+      });
+      hooks.experimental_useRpcKeyedQuery({
+        contract,
+        method: "rows",
+        keys: ["a", "b"],
+        enabled,
+      });
+      return plain;
+    },
+    { initialProps: { enabled: true } },
+  );
+  try {
+    await waitFor(() => expect(watch).toHaveBeenCalledTimes(3));
+    expect(watch.mock.calls).toEqual(
+      expect.arrayContaining([
+        ["demo", "read", { input: { v: 1 } }],
+        ["demo", "rows", { key: "a" }],
+        ["demo", "rows", { key: "b" }],
+      ]),
+    );
+    expect(probe.result.current.data).toEqual({ ready: true });
+    probe.rerender({ enabled: false });
+    for (const release of releases) expect(release).toHaveBeenCalledOnce();
+  } finally {
+    probe.unmount();
+    client.clear();
+  }
+});

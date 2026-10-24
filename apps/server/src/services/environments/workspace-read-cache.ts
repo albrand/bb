@@ -53,7 +53,6 @@ export class EnvironmentReadCache<
 }
 
 const WORKSPACE_STATUS_CACHE_TTL_MS = 3_000;
-const WORKSPACE_PULL_REQUEST_CACHE_TTL_MS = 10_000;
 
 interface WorkspaceReadCachesDeps {
   hub: {
@@ -71,9 +70,6 @@ export class WorkspaceReadCaches {
   readonly status: EnvironmentReadCache<
     HostDaemonOnlineRpcResult<"workspace.status">
   >;
-  readonly pullRequest: EnvironmentReadCache<
-    HostDaemonOnlineRpcResult<"workspace.pull_request">
-  >;
 
   constructor(deps: WorkspaceReadCachesDeps) {
     const now = deps.now ?? Date.now;
@@ -82,17 +78,13 @@ export class WorkspaceReadCaches {
       now,
       ttlMs: WORKSPACE_STATUS_CACHE_TTL_MS,
     });
-    this.pullRequest = new EnvironmentReadCache({
-      now,
-      ttlMs: WORKSPACE_PULL_REQUEST_CACHE_TTL_MS,
-    });
     deps.hub.onChangedMessage((message) => {
       this.handleChangedMessage(message);
     });
   }
 
   private get caches(): EnvironmentReadCacheInvalidation[] {
-    return [this.status, this.pullRequest, this.diffFiles];
+    return [this.status, this.diffFiles];
   }
 
   invalidateEnvironment(environmentId: string): void {
@@ -117,9 +109,6 @@ export class WorkspaceReadCaches {
       }
       this.diffFiles.invalidateEnvironment(message.id);
       this.status.invalidateEnvironment(message.id);
-      if (relevantChanges.some((change) => change !== "work-status-changed")) {
-        this.pullRequest.invalidateEnvironment(message.id);
-      }
       return;
     }
     if (

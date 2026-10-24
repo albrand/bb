@@ -101,6 +101,7 @@ import {
   validatePluginEnvironmentProviderDeclaration,
   validatePluginMachineProviderDeclaration,
   providerAlreadyRegisteredMessage,
+  providerDeclarationIconRefusal,
   providerIconRefusalMessage,
   undeclaredIconProblem,
   validateProviderEnvContribution,
@@ -217,6 +218,7 @@ export interface PluginWebSocketRouteRecord {
 }
 
 export interface PluginRpcHandler {
+  whileWatched?: boolean;
   declarations: ContractTagDeclarations<unknown, unknown>;
   publication: ReturnType<typeof publishRpcMethod>;
   inputSchema: StandardSchemaV1;
@@ -525,6 +527,10 @@ export function createPluginApi(options: {
    */
   rpcCaller: PluginRpcCallerCredential;
   invalidateRpc: (tags: readonly string[] | null) => void;
+  whileRpcWatched?: (
+    method: string,
+    handler: Parameters<PluginRpc["experimental_whileWatched"]>[1],
+  ) => () => void;
   publishSignal: (channel: string, payload: unknown) => void;
   settingsChanged: () => void;
   reportNeedsConfiguration: (message: string) => void;
@@ -883,6 +889,17 @@ export function createPluginApi(options: {
   };
 
   const rpc: PluginRpc = {
+    experimental_whileWatched(method, handler) {
+      assertLive();
+      const record = rpcHandlers.get(method);
+      if (!record) throw new Error(`Unknown RPC method: ${method}`);
+      if (record.whileWatched)
+        throw new Error(`RPC producer already registered: ${method}`);
+      if (!options.whileRpcWatched)
+        throw new Error("RPC watching is unavailable");
+      record.whileWatched = true;
+      disposeHooks.push(options.whileRpcWatched(method, handler));
+    },
     experimental_invalidate(tags) {
       assertLive();
       optionsInvalidate(rpcInvalidationTags.parse(tags));
@@ -942,12 +959,13 @@ export function createPluginApi(options: {
   const providerRegistrations = createStagedRegistrations({
     validate: (declaration: PluginProviderDeclaration) => {
       const normalized = validatePluginProviderDeclaration(declaration);
-      const problem =
-        normalized.icon === undefined
-          ? null
-          : undeclaredIconProblem(pluginId, declaredIconNames, normalized.icon);
-      if (problem !== null) {
-        throw new Error(providerIconRefusalMessage(normalized.id, problem));
+      const refusal = providerDeclarationIconRefusal(
+        pluginId,
+        declaredIconNames,
+        normalized,
+      );
+      if (refusal !== null) {
+        throw new Error(refusal);
       }
       return normalized;
     },

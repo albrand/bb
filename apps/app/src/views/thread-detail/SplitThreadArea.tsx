@@ -435,13 +435,6 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     const focus = () => {
       if (!root.isConnected || root.getAttribute("aria-hidden") === "true")
         return false;
-      const composer = root.querySelector<HTMLElement>(
-        "[data-promptbox] [contenteditable='true'], [data-promptbox] textarea:not(:disabled)",
-      );
-      if (composer) {
-        focusPaneComposer(composer);
-        return document.activeElement === composer;
-      }
       const nativeTerminalInput = root.querySelector<HTMLElement>(
         "[data-native-terminal-thread] .xterm-helper-textarea",
       );
@@ -449,7 +442,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         nativeTerminalInput.focus({ preventScroll: true });
         return document.activeElement === nativeTerminalInput;
       }
-      return false;
+      return focusPaneComposer(root) && root.contains(document.activeElement);
     };
     const frame = requestAnimationFrame(() => {
       if (focus()) {

@@ -881,6 +881,14 @@ export interface PluginHttp {
 }
 
 export interface PluginRpc {
+  /** Run a producer once per distinct watched read until its last client leaves. Register after the method. Abort stops the producer on unwatch or plugin disposal. */
+  experimental_whileWatched(
+    method: string,
+    handler: (
+      read: { input: JsonValue } | { key: string },
+      signal: AbortSignal,
+    ) => void | Promise<void>,
+  ): void;
   /** Refresh reads whose contract tags overlap this nonempty list. */
   experimental_invalidate(tags: readonly string[]): void;
   /** Refresh every read of this plugin, including untagged reads. */
@@ -1373,6 +1381,12 @@ export interface PluginProviderOptionDescriptor {
   id: string;
   label: string;
   description?: string;
+  /** Host glyph name (`"Zap"`) or declared icon (`"<pluginId>/<name>"`, an
+   * entry of this plugin's `bb.branding.experimental_icons`; any other plugin
+   * id or an undeclared name fails the load) shown beside a selected service
+   * tier. Host glyphs draw filled. Ignored for reasoning levels. Defaults to
+   * `"Zap"`. */
+  experimental_icon?: string;
 }
 
 /**

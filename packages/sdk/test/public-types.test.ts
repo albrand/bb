@@ -261,11 +261,7 @@ type ExpectedEnvironmentsKey =
   | "diffFiles"
   | "diffPatch"
   | "get"
-  | "markPullRequestDraft"
-  | "markPullRequestReady"
-  | "mergePullRequest"
   | "paths"
-  | "pullRequest"
   | "status"
   | "update";
 

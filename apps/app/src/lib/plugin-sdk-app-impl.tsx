@@ -1,7 +1,11 @@
 import { ProviderIcon } from "@/components/plugin/ProviderIcon";
 import { Icon } from "@bb/shared-ui/icon";
 import { useCallback, useMemo } from "react";
-import type { MarkdownProps, PluginSdkApp } from "@get-bb/plugin-sdk";
+import type {
+  ExperimentalInfoListRowProps,
+  MarkdownProps,
+  PluginSdkApp,
+} from "@get-bb/plugin-sdk";
 import { PluginDiff } from "@/components/plugin/PluginDiff";
 import { PluginBranchPicker } from "@/components/plugin/PluginBranchPicker";
 import {
@@ -9,6 +13,31 @@ import {
   usePluginCheckoutState,
 } from "@/components/plugin/usePluginBranchPickerState";
 import { PluginNewThreadComposer } from "@/components/plugin/PluginNewThreadComposer";
+import { useComposerRendererApi } from "@/components/promptbox/ComposerBox";
+import {
+  ComposerRoot,
+  useComposerContributions,
+} from "@/components/promptbox/composer-root";
+import {
+  useComposerCommandSearch,
+  useComposerMentionSearch,
+} from "@/components/promptbox/composer-search";
+import { VoiceInputButton } from "@/components/promptbox/VoiceInputButton";
+import { VoiceRecordingBar } from "@/components/promptbox/VoiceRecordingBar";
+import { FailedVoiceRecordings } from "@/components/promptbox/FailedVoiceRecordings";
+import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
+import { ImageLightbox } from "@/components/ui/image-lightbox";
+import { ComposerMentionIcon } from "@/components/promptbox/mentions/PromptMentionIcon";
+import {
+  describePromptMention,
+  promptMentionClipboardAttributes,
+  readPromptMentionClipboard,
+} from "@/components/promptbox/mentions/prompt-mention-pill";
+import { PluginIcon } from "@/components/plugin/PluginIcon";
+import {
+  ThreadTitle as ThreadTitleText,
+  useThreadTitleDisplayText,
+} from "@/components/thread/ThreadTitleMentions";
 import { VoiceInputTextarea } from "@/components/promptbox/VoiceInputTextarea";
 import { PluginProviderModelPicker } from "@/components/plugin/PluginProviderModelPicker";
 import { PluginPermissionModePicker } from "@/components/plugin/PluginPermissionModePicker";
@@ -62,10 +91,14 @@ import {
   useSidebarSplitLayout,
   useSidebarThreadSplit,
 } from "./plugin-sidebar-split";
+import { useExperiment } from "./plugin-experiments";
 import { useAppNavigationHost } from "./app-navigation-host";
 import {
   experimental_PluginRpcCallError,
   experimental_THREAD_ACTION_GROUPS,
+  experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
+  experimental_THREAD_INFO_ROW_GROUPS,
+  experimental_THREAD_INFO_SECTION_GROUPS,
 } from "@get-bb/plugin-sdk";
 import {
   ThreadActionsContextMenu,
@@ -84,6 +117,24 @@ import {
   useSidebarNavigationSplit,
 } from "./plugin-sidebar-navigation";
 import { SidebarNavigationIcon } from "@/components/sidebar/SidebarNavigationModel";
+import {
+  InfoList,
+  InfoListRow,
+  InfoSection,
+} from "@/components/secondary-panel/info/info-list";
+import { DetailRow } from "@/components/ui/detail-card";
+
+function PluginInfoListRow({
+  onSelect,
+  ...props
+}: ExperimentalInfoListRowProps) {
+  return (
+    <InfoListRow
+      {...props}
+      target={onSelect === undefined ? null : { kind: "button", onSelect }}
+    />
+  );
+}
 
 function useArchiveEnvironmentThreads(): (
   environmentId: string,
@@ -103,6 +154,24 @@ export const pluginSdkAppImplementation = {
   experimental_useFixedTabTarget,
   useComposer,
   useComposers,
+  experimental_useComposerRenderer: useComposerRendererApi,
+  experimental_useThreadTitleDisplayText: useThreadTitleDisplayText,
+  experimental_useComposerContributions: useComposerContributions,
+  experimental_useComposerMentionSearch: useComposerMentionSearch,
+  experimental_useComposerCommandSearch: useComposerCommandSearch,
+  experimental_ComposerRoot: ComposerRoot,
+  experimental_VoiceInputButton: VoiceInputButton,
+  experimental_VoiceRecordingBar: VoiceRecordingBar,
+  experimental_FailedVoiceRecordings: FailedVoiceRecordings,
+  experimental_ShortcutHint: AppCommandShortcutHint,
+  experimental_ImageLightbox: ImageLightbox,
+  experimental_PromptMentionIcon: ComposerMentionIcon,
+  experimental_describePromptMention: describePromptMention,
+  experimental_promptMentionClipboardAttributes:
+    promptMentionClipboardAttributes,
+  experimental_readPromptMentionClipboard: readPromptMentionClipboard,
+  experimental_PluginIcon: PluginIcon,
+  experimental_ThreadTitleText: ThreadTitleText,
   useComposerView,
   useRealtime,
   useRealtimeConnectionState,
@@ -124,6 +193,10 @@ export const pluginSdkAppImplementation = {
   experimental_useCheckoutState: usePluginCheckoutState,
   experimental_SourceCode: PluginSourceCode,
   experimental_Diff: PluginDiff,
+  experimental_InfoSection: InfoSection,
+  experimental_DetailRow: DetailRow,
+  experimental_InfoList: InfoList,
+  experimental_InfoListRow: PluginInfoListRow,
   experimental_useSidebarThreads: useSidebarThreads,
   experimental_useSidebarThreadActions: useSidebarThreadActions,
   experimental_useSidebarProjectActions: useSidebarProjectActions,
@@ -134,8 +207,11 @@ export const pluginSdkAppImplementation = {
   experimental_ThreadActionsContextMenu: ThreadActionsContextMenu,
   experimental_PluginRpcCallError,
   experimental_THREAD_ACTION_GROUPS,
-  experimental_useSidebarThreadPullRequest: useSidebarThreadPullRequest,
+  experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
+  experimental_THREAD_INFO_ROW_GROUPS,
+  experimental_THREAD_INFO_SECTION_GROUPS,
   experimental_useSidebarThreadSplit: useSidebarThreadSplit,
+  experimental_useExperiment: useExperiment,
   experimental_useSidebarNavigation: useSidebarNavigation,
   experimental_useSidebarNavigationSplit: useSidebarNavigationSplit,
   experimental_SidebarNavigationIcon: SidebarNavigationIcon,
@@ -155,6 +231,10 @@ export const pluginSdkAppImplementation = {
   experimental_copyToClipboard: copyToClipboard,
   experimental_saveFile: saveFile,
 } satisfies PluginSdkApp;
+
+export const retiredPluginSdkAppMembers = {
+  experimental_useSidebarThreadPullRequest: useSidebarThreadPullRequest,
+};
 
 function PluginMarkdown({
   content,

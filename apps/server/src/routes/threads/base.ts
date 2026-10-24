@@ -22,7 +22,7 @@ import {
   listSpendRollupRows,
   listThreadsWithPendingInteractionState,
   markThreadDeleted,
-  listLifecycleThreadTree,
+  listThreadDeletionTree,
   listPluginThreadMetadata,
   queuedThreadMessages,
   listThreadAncestors,
@@ -946,7 +946,7 @@ export function registerThreadBaseRoutes(
       deps,
       thread,
     });
-    const dependents = listLifecycleThreadTree(deps.db, thread.id);
+    const dependents = listThreadDeletionTree(deps.db, thread.id);
     markThreadDeleted(deps.db, deps.hub, { threadId: thread.id });
     for (const dependent of dependents) {
       const deleted = getThread(deps.db, dependent.id);

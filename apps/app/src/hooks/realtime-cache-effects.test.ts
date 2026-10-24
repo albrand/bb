@@ -1,9 +1,9 @@
 import {
   CORE_TAG_SCOPE,
+  pluginTagScope,
   runTaggedRead,
   taggedQueryOptions,
 } from "@bb/query-tags";
-import { environmentPullRequestTag } from "@bb/server-contract";
 import { machineEnvironmentQueryKey } from "./queries/query-keys";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryObserver } from "@tanstack/react-query";
@@ -27,7 +27,6 @@ import {
   archivedThreadsListQueryKey,
   environmentDiffFilesQueryKey,
   environmentDiffPatchQueryKey,
-  environmentPullRequestQueryKey,
   environmentQueryKey,
   environmentWorkStatusQueryKey,
   hostPathExistenceQueryKey,
@@ -263,9 +262,9 @@ describe("resuming released watches", () => {
       otherEnvironment: observe(
         environmentWorkStatusQueryKey("env-other", "main"),
       ),
-      pullRequest: observe(["pull-request", "env-1"], {
-        scope: CORE_TAG_SCOPE,
-        tag: environmentPullRequestTag("env-1"),
+      pluginRead: observe(["plugin-rpc", "usage", "getUsage"], {
+        scope: pluginTagScope("usage"),
+        tag: "usage",
       }),
     };
     try {
@@ -280,7 +279,12 @@ describe("resuming released watches", () => {
       effects.handleResumed([
         { kind: "environment-detail", environmentId: "env-1" },
         { kind: "thread-detail", threadId: "thr_1" },
-        { kind: "environment-pull-request", environmentId: "env-1" },
+        {
+          kind: "plugin-read",
+          pluginId: "usage",
+          method: "getUsage",
+          read: { input: null },
+        },
         { kind: "thread-list" },
       ]);
       await vi.advanceTimersByTimeAsync(500);
@@ -288,7 +292,7 @@ describe("resuming released watches", () => {
       expect(reads.environment.queryFn).toHaveBeenCalled();
       expect(reads.threadEnvironment.queryFn).toHaveBeenCalled();
       expect(reads.otherEnvironment.queryFn).not.toHaveBeenCalled();
-      expect(reads.pullRequest.queryFn).toHaveBeenCalledTimes(1);
+      expect(reads.pluginRead.queryFn).toHaveBeenCalledTimes(1);
     } finally {
       for (const read of Object.values(reads)) read.stop();
       effects.dispose();
@@ -304,14 +308,14 @@ describe("core tag reconnect refresh", () => {
       visibility: createFakeVisibility(),
     });
     let value = 1;
-    const queryKey = environmentPullRequestQueryKey("env-1");
+    const queryKey = ["core-tagged-read"];
     const observer = new QueryObserver(client, {
       queryKey,
       staleTime: Infinity,
       refetchOnWindowFocus: false,
       ...taggedQueryOptions<number>(client, queryKey, {
         scope: CORE_TAG_SCOPE,
-        tagsOf: () => [environmentPullRequestTag("env-1")],
+        tagsOf: () => ["core-tagged-read"],
       }),
       queryFn: ({ queryKey: key }) =>
         runTaggedRead(client, key, async () => value),
@@ -1544,57 +1548,6 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it.each(["thread detail", "sidebar navigation"] as const)(
-    "refetches the active environment pull request from %s when a turn completes",
-    async (cacheSource) => {
-      vi.useFakeTimers();
-      const { effects, queryClient } = createRealtimeEffectsTestContext();
-      const pullRequestKey = environmentPullRequestQueryKey("env-1");
-      const nextPullRequest = {
-        outcome: "available",
-        pullRequest: { number: 42 },
-      };
-      const pullRequestQueryFn = vi.fn(async () => nextPullRequest);
-      if (cacheSource === "thread detail") {
-        queryClient.setQueryData(threadQueryKey("thr_1"), {
-          environmentId: "env-1",
-          id: "thr_1",
-        });
-      } else {
-        queryClient.setQueryData(sidebarNavigationQueryKey(), {
-          personalProject: { threads: [] },
-          projects: [
-            {
-              threads: [{ environmentId: "env-1", id: "thr_1" }],
-            },
-          ],
-        });
-      }
-      queryClient.setQueryData(pullRequestKey, { outcome: "absent" });
-      const pullRequestObserver = new QueryObserver(queryClient, {
-        queryFn: pullRequestQueryFn,
-        queryKey: pullRequestKey,
-        staleTime: Infinity,
-      });
-      const unsubscribePullRequest = pullRequestObserver.subscribe(() => {});
-
-      effects.handleChanged({
-        type: "changed",
-        entity: "thread",
-        id: "thr_1",
-        metadata: { eventTypes: ["turn/completed"] },
-        changes: ["events-appended"],
-      });
-      await vi.advanceTimersByTimeAsync(50);
-
-      expect(pullRequestQueryFn).toHaveBeenCalledTimes(1);
-      expect(queryClient.getQueryData(pullRequestKey)).toEqual(nextPullRequest);
-
-      unsubscribePullRequest();
-      effects.dispose();
-    },
-  );
-
   it("invalidates cached thread search results when environment metadata changes", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
@@ -1842,37 +1795,6 @@ describe("createRealtimeCacheEffects", () => {
 
     unsubscribeDiffFiles();
     unsubscribeWorkStatus();
-    effects.dispose();
-  });
-
-  it("does not refetch the environment pull request for work-status changes", async () => {
-    vi.useFakeTimers();
-    const { effects, queryClient } = createRealtimeEffectsTestContext();
-    const pullRequestKey = environmentPullRequestQueryKey("env-1");
-    const pullRequestQueryFn = vi.fn(async () => ({ outcome: "absent" }));
-    const pullRequestObserver = new QueryObserver(queryClient, {
-      queryFn: pullRequestQueryFn,
-      queryKey: pullRequestKey,
-      staleTime: Infinity,
-    });
-    const unsubscribePullRequest = pullRequestObserver.subscribe(() => {});
-    await vi.advanceTimersByTimeAsync(0);
-    pullRequestQueryFn.mockClear();
-
-    effects.handleChanged({
-      type: "changed",
-      entity: "environment",
-      id: "env-1",
-      changes: ["work-status-changed"],
-    });
-    await vi.advanceTimersByTimeAsync(500);
-
-    expect(pullRequestQueryFn).not.toHaveBeenCalled();
-    expect(queryClient.getQueryState(pullRequestKey)?.isInvalidated).toBe(
-      false,
-    );
-
-    unsubscribePullRequest();
     effects.dispose();
   });
 

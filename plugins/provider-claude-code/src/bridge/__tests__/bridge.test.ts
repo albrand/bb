@@ -9543,7 +9543,10 @@ describe("canonical skills/configure", () => {
     const rootB = join(stagedRoot, "b", "skills");
     for (const root of [rootA, rootB]) {
       mkdirSync(join(root, "demo"), { recursive: true });
-      writeFileSync(join(root, "demo", "SKILL.md"), "---\nname: demo\n---\n");
+      writeFileSync(
+        join(root, "demo", "SKILL.md"),
+        `---\nname: demo\n---\n${root}\n`,
+      );
     }
 
     try {

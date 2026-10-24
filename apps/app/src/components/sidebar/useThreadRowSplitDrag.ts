@@ -5,18 +5,21 @@ import { useRouteNavigate } from "@/components/ui/app-route-anchor";
 import type { SplitSide } from "@/lib/split-layout";
 import { notifyPaneLimit } from "@/lib/split-layout/notifyPaneLimit";
 import { openThreadInSplit } from "@/lib/split-layout/openThreadInSplit";
+import type { DroppedThreadMention } from "@/lib/thread-mention-drop";
 import { beginSidebarPaneContentSplitDrag } from "./usePaneContentSplitDrag";
 
 interface UseThreadRowSplitDragArgs {
   projectId: string;
   threadId: string;
   title: string;
+  mentionThreads?: readonly DroppedThreadMention[];
 }
 
 export function useThreadRowSplitDrag({
   projectId,
   threadId,
   title,
+  mentionThreads,
 }: UseThreadRowSplitDragArgs): {
   onPointerDown: ((event: ReactPointerEvent<HTMLElement>) => void) | undefined;
   openInSplit: (side?: SplitSide) => void;
@@ -36,9 +39,10 @@ export function useThreadRowSplitDrag({
         navigate,
         content: { kind: "thread", projectId, threadId },
         label: title,
+        mentionThreads,
       });
     },
-    [navigate, projectId, store, threadId, title],
+    [mentionThreads, navigate, projectId, store, threadId, title],
   );
 
   const openInSplit = useCallback(

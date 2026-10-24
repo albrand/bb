@@ -4,7 +4,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { transcribeVoiceInput } from "@/lib/api";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
-import type { PromptBoxHandle } from "./PromptBoxInternal";
+import type { PromptBoxHandle } from "./ComposerBox";
 import { usePromptVoice } from "./usePromptVoice";
 import type { PromptDraftState } from "@bb/client-core";
 
@@ -32,6 +32,25 @@ const voiceInput = {
   download: vi.fn(),
 };
 
+function createPromptBoxRef() {
+  const deliverTranscript = vi.fn();
+  const playCompletionTransition = vi.fn();
+  return {
+    promptBoxRef: {
+      current: {
+        focusEnd: vi.fn(),
+        voice: {
+          textBeforeCursor: vi.fn(() => null),
+          deliverTranscript,
+          playCompletionTransition,
+        },
+      } satisfies PromptBoxHandle,
+    },
+    deliverTranscript,
+    playCompletionTransition,
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -47,19 +66,8 @@ describe("usePromptVoice", () => {
     });
     vi.mocked(transcribeVoiceInput).mockResolvedValue({ text: "Transcript" });
 
-    const playVoiceCompletionTransition = vi.fn();
-    const insertTextAtCursor = vi.fn();
-    const promptBoxRef = {
-      current: {
-        captureHeightForLayoutChange: vi.fn(),
-        focusEnd: vi.fn(),
-        getTextBeforeCursor: vi.fn(),
-        insertTextAtCursor,
-        openPromptHistorySearch: vi.fn(() => true),
-        sendVoiceTranscript: vi.fn(),
-        playVoiceCompletionTransition,
-      } satisfies PromptBoxHandle,
-    };
+    const { promptBoxRef, deliverTranscript, playCompletionTransition } =
+      createPromptBoxRef();
 
     renderHook(() => usePromptVoice(promptBoxRef, undefined, null));
     const options = vi.mocked(useVoiceInput).mock.calls[0]?.[0];
@@ -68,8 +76,8 @@ describe("usePromptVoice", () => {
     });
 
     await expect(transcription).resolves.toBe("Transcript");
-    expect(playVoiceCompletionTransition).not.toHaveBeenCalled();
-    expect(insertTextAtCursor).not.toHaveBeenCalled();
+    expect(playCompletionTransition).not.toHaveBeenCalled();
+    expect(deliverTranscript).not.toHaveBeenCalled();
   });
 
   it("sends only a successful send transcript, never a cancelled or add-to-draft transcript", () => {
@@ -80,19 +88,7 @@ describe("usePromptVoice", () => {
       isProcessing: false,
       isListening: true,
     });
-    const insertTextAtCursor = vi.fn();
-    const sendVoiceTranscript = vi.fn();
-    const promptBoxRef = {
-      current: {
-        captureHeightForLayoutChange: vi.fn(),
-        focusEnd: vi.fn(),
-        getTextBeforeCursor: vi.fn(),
-        insertTextAtCursor,
-        openPromptHistorySearch: vi.fn(() => true),
-        sendVoiceTranscript,
-        playVoiceCompletionTransition: vi.fn(),
-      } satisfies PromptBoxHandle,
-    };
+    const { promptBoxRef, deliverTranscript } = createPromptBoxRef();
     const { result } = renderHook(() => usePromptVoice(promptBoxRef, undefined, null));
     const options = vi.mocked(useVoiceInput).mock.calls[0]?.[0];
     act(() => {
@@ -101,22 +97,20 @@ describe("usePromptVoice", () => {
     });
     expect(voiceInput.stop).toHaveBeenCalledTimes(2);
     act(() => options?.onTranscript("first transcript", "send"));
-    expect(sendVoiceTranscript).toHaveBeenCalledExactlyOnceWith(
-      "first transcript",
-    );
+    expect(deliverTranscript).toHaveBeenCalledExactlyOnceWith("first transcript", "send");
     act(() => {
       result.current.send();
       result.current.cancel();
       options?.onTranscript("cancelled transcript", "insert");
     });
-    expect(sendVoiceTranscript).toHaveBeenCalledOnce();
-    expect(insertTextAtCursor).toHaveBeenCalledWith("cancelled transcript");
+    expect(deliverTranscript).toHaveBeenCalledTimes(2);
+    expect(deliverTranscript).toHaveBeenLastCalledWith("cancelled transcript", "insert");
     act(() => {
       result.current.stop();
       options?.onTranscript("draft transcript", "insert");
     });
-    expect(insertTextAtCursor).toHaveBeenCalledWith("draft transcript");
-    expect(sendVoiceTranscript).toHaveBeenCalledOnce();
+    expect(deliverTranscript).toHaveBeenLastCalledWith("draft transcript", "insert");
+    expect(deliverTranscript).toHaveBeenCalledTimes(3);
   });
 
   it("does not carry send intent into another recording after transcription fails", () => {
@@ -128,19 +122,7 @@ describe("usePromptVoice", () => {
       isProcessing: false,
       isListening: state === "recording",
     }));
-    const insertTextAtCursor = vi.fn();
-    const sendVoiceTranscript = vi.fn();
-    const promptBoxRef = {
-      current: {
-        captureHeightForLayoutChange: vi.fn(),
-        focusEnd: vi.fn(),
-        getTextBeforeCursor: vi.fn(),
-        insertTextAtCursor,
-        openPromptHistorySearch: vi.fn(() => true),
-        sendVoiceTranscript,
-        playVoiceCompletionTransition: vi.fn(),
-      } satisfies PromptBoxHandle,
-    };
+    const { promptBoxRef, deliverTranscript } = createPromptBoxRef();
     const { result, rerender } = renderHook(() => usePromptVoice(promptBoxRef, undefined, null));
     const options = vi.mocked(useVoiceInput).mock.calls[0]?.[0];
     act(() => result.current.send());
@@ -149,10 +131,7 @@ describe("usePromptVoice", () => {
     state = "recording";
     rerender();
     act(() => options?.onTranscript("later transcript", "insert"));
-    expect(sendVoiceTranscript).not.toHaveBeenCalled();
-    expect(insertTextAtCursor).toHaveBeenCalledExactlyOnceWith(
-      "later transcript",
-    );
+    expect(deliverTranscript).toHaveBeenCalledExactlyOnceWith("later transcript", "insert");
   });
 
   it("does not submit into a replacement composer after navigating away", () => {
@@ -163,24 +142,13 @@ describe("usePromptVoice", () => {
       isProcessing: false,
       isListening: true,
     });
-    const sendVoiceTranscript = vi.fn();
-    const promptBoxRef = {
-      current: {
-        captureHeightForLayoutChange: vi.fn(),
-        focusEnd: vi.fn(),
-        getTextBeforeCursor: vi.fn(),
-        insertTextAtCursor: vi.fn(),
-        openPromptHistorySearch: vi.fn(() => true),
-        sendVoiceTranscript,
-        playVoiceCompletionTransition: vi.fn(),
-      } satisfies PromptBoxHandle,
-    };
+    const { promptBoxRef, deliverTranscript } = createPromptBoxRef();
     const { result, unmount } = renderHook(() => usePromptVoice(promptBoxRef, undefined, null));
     const options = vi.mocked(useVoiceInput).mock.calls[0]?.[0];
     act(() => result.current.send());
     unmount();
     options?.onTranscript("late transcript", "send");
-    expect(sendVoiceTranscript).not.toHaveBeenCalled();
+    expect(deliverTranscript).not.toHaveBeenCalled();
   });
   it.each(["send", "stop"] as const)(
     "preserves %s intent for the originating draft after navigating away",
@@ -192,18 +160,7 @@ describe("usePromptVoice", () => {
         isProcessing: false,
         isListening: true,
       });
-      const sendVoiceTranscript = vi.fn();
-      const promptBoxRef = {
-        current: {
-          captureHeightForLayoutChange: vi.fn(),
-          focusEnd: vi.fn(),
-          getTextBeforeCursor: vi.fn(),
-          insertTextAtCursor: vi.fn(),
-          openPromptHistorySearch: vi.fn(() => true),
-          sendVoiceTranscript,
-          playVoiceCompletionTransition: vi.fn(),
-        } satisfies PromptBoxHandle,
-      };
+      const { promptBoxRef, deliverTranscript } = createPromptBoxRef();
       let draft: PromptDraftState = {
         text: "Existing",
         mentions: [],
@@ -228,8 +185,7 @@ describe("usePromptVoice", () => {
       draft = { ...draft, text: "Existing and later edits" };
       await options?.onTranscript("late transcript", action === "send" ? "send" : "insert");
       expect(draft.text).toBe("Existing and later edits late transcript");
-      expect(sendVoiceTranscript).not.toHaveBeenCalled();
-      expect(promptBoxRef.current.insertTextAtCursor).not.toHaveBeenCalled();
+      expect(deliverTranscript).not.toHaveBeenCalled();
       expect(submit).toHaveBeenCalledTimes(action === "send" ? 1 : 0);
     },
   );

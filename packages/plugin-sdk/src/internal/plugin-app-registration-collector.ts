@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { z } from "zod";
 import type {
+  ExperimentalTabRegistration,
   ComposerCustomization,
   ExperimentalAppOverlayRegistration,
   ExperimentalCodeFenceRendererRegistration,
@@ -12,6 +13,7 @@ import type {
   PluginAppDefinition,
   PluginContentScriptRegistration,
   PluginDiffRendererRegistration,
+  ExperimentalComposerRegistration,
   PluginEnvironmentProviderInputsRegistration,
   PluginMachineProviderInputsRegistration,
   PluginFileOpenerRegistration,
@@ -28,14 +30,16 @@ import type {
   PluginSettingsSectionRegistration,
   PluginSidebarFooterActionRegistration,
   PluginSourceCodeRendererRegistration,
+  ExperimentalThreadContextSegmentRegistration,
   PluginThreadHeaderActionRegistration,
+  ExperimentalThreadInfoRowRegistration,
+  ExperimentalThreadInfoSectionRegistration,
   PluginThreadActionRegistration,
   ExperimentalPluginBrowserToolbarActionRegistration,
   ExperimentalSidebarHeaderProps,
   ExperimentalSidebarNavigationPlacement,
   ExperimentalSidebarNavigationRegistration,
   PluginThreadListRegistration,
-  PluginThreadPanelActionRegistration,
   PluginTimelineRendererRegistration,
 } from "@get-bb/plugin-sdk";
 import {
@@ -151,9 +155,34 @@ class SidebarFooterCollector implements ExperimentalSidebarFooter {
   }
 }
 
-type PluginNavPanelFixedTabRegistration = NonNullable<
-  PluginNavPanelRegistration["fixedTabs"]
->[number];
+export interface LegacyThreadPanelActionRegistration {
+  id: string;
+  title: string;
+  icon?: string;
+  component: ComponentType<
+    import("@get-bb/plugin-sdk").ExperimentalThreadActionTabProps
+  >;
+  layout?: "padded" | "flush";
+  run?(
+    context: import("@get-bb/plugin-sdk").ExperimentalThreadTabActionContext,
+  ): void | Promise<void>;
+}
+
+export type LegacyNavPanelRegistration = PluginNavPanelRegistration & {
+  fixedTabs?: readonly PluginNavPanelFixedTabRegistration[];
+};
+
+type PluginNavPanelFixedTabRegistration = {
+  id: string;
+  panelId: string;
+  title: string;
+  icon: string;
+  component: ComponentType<import("@get-bb/plugin-sdk").PluginNavPanelProps>;
+  layout?: "padded" | "flush";
+  experimental_target?: import("@get-bb/plugin-sdk").ExperimentalFixedTabTargetContract<
+    import("@get-bb/plugin-sdk").JsonValue
+  >;
+};
 
 const NAV_PANEL_REGISTRATION_KEYS = {
   id: true,
@@ -166,7 +195,7 @@ const NAV_PANEL_REGISTRATION_KEYS = {
   experimental_usePageTitle: true,
   experimental_sidebar: true,
   headerContent: true,
-} satisfies Record<keyof PluginNavPanelRegistration, true>;
+} satisfies Record<keyof PluginNavPanelRegistration | "fixedTabs", true>;
 
 const RENAMED_NAV_PANEL_KEYS: ReadonlyMap<string, string> = new Map([
   ["experimental_fixedTabs", 'was renamed to "fixedTabs" in SDK 0.4.16'],
@@ -263,8 +292,9 @@ export interface CollectedPluginAppRegistrations {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
-  navPanels: PluginNavPanelRegistration[];
-  threadPanelActions: PluginThreadPanelActionRegistration[];
+  navPanels: LegacyNavPanelRegistration[];
+  tabs: ExperimentalTabRegistration[];
+  threadPanelActions: LegacyThreadPanelActionRegistration[];
   newThreadPanelActions: PluginNewThreadPanelActionRegistration[];
   composerCustomizations: ComposerCustomization[];
   pendingInteractions: PluginPendingInteractionRegistration[];
@@ -273,11 +303,15 @@ export interface CollectedPluginAppRegistrations {
   threadLists: PluginThreadListRegistration[];
   experimentalSidebarNavigations: CollectedSidebarNavigationRegistration[];
   threadHeaderActions: PluginThreadHeaderActionRegistration[];
+  threadContextSegments: ExperimentalThreadContextSegmentRegistration[];
+  threadInfoRows: ExperimentalThreadInfoRowRegistration[];
+  threadInfoSections: ExperimentalThreadInfoSectionRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
   browserToolbarActions: ExperimentalPluginBrowserToolbarActionRegistration[];
   fileOpeners: PluginFileOpenerRegistration[];
   sourceCodeRenderers: PluginSourceCodeRendererRegistration[];
   diffRenderers: PluginDiffRendererRegistration[];
+  composers: ExperimentalComposerRegistration[];
   messageDirectives: PluginMessageDirectiveRegistration[];
   codeFenceRenderers: ExperimentalCodeFenceRendererRegistration[];
   messageActions: PluginMessageActionRegistration[];
@@ -292,6 +326,17 @@ export interface CollectedPluginAppRegistrations {
 
 export interface CollectedSidebarNavigationRegistration extends ExperimentalSidebarNavigationRegistration {
   placement: ExperimentalSidebarNavigationPlacement;
+}
+
+function requireOptionalOrder(
+  kind: string,
+  order: number | undefined,
+): { order?: number } {
+  if (order === undefined) return {};
+  if (!Number.isFinite(order)) {
+    throw new Error(`${kind}: "order" must be a finite number`);
+  }
+  return { order };
 }
 
 function collectTitledComponent<C>(
@@ -378,7 +423,17 @@ export function collectPluginAppRegistrations(
     settingsSections: [],
     appOverlays: [],
     navPanels: [],
-    threadPanelActions: [],
+    tabs: [],
+    get threadPanelActions() {
+      return this.tabs.filter(
+        (
+          tab,
+        ): tab is Extract<
+          ExperimentalTabRegistration,
+          { context: { kind: "thread" }; availability: "action" }
+        > => tab.context.kind === "thread" && tab.availability === "action",
+      );
+    },
     newThreadPanelActions: [],
     composerCustomizations: [],
     pendingInteractions: [],
@@ -387,11 +442,15 @@ export function collectPluginAppRegistrations(
     threadLists: [],
     experimentalSidebarNavigations: [],
     threadHeaderActions: [],
+    threadContextSegments: [],
+    threadInfoRows: [],
+    threadInfoSections: [],
     threadActions: [],
     browserToolbarActions: [],
     fileOpeners: [],
     sourceCodeRenderers: [],
     diffRenderers: [],
+    composers: [],
     messageDirectives: [],
     codeFenceRenderers: [],
     messageActions: [],
@@ -409,7 +468,7 @@ export function collectPluginAppRegistrations(
     settingsSection: new Set<string>(),
     appOverlay: new Set<string>(),
     navPanel: new Set<string>(),
-    threadPanelAction: new Set<string>(),
+    tab: new Set<string>(),
     newThreadPanelAction: new Set<string>(),
     composerCustomization: new Set<string>(),
     composerPopup: new Set<string>(),
@@ -419,11 +478,15 @@ export function collectPluginAppRegistrations(
     sidebarNavigation: new Set<string>(),
     sidebarHeader: new Set<string>(),
     threadHeaderAction: new Set<string>(),
+    threadContextSegment: new Set<string>(),
+    threadInfoRow: new Set<string>(),
+    threadInfoSection: new Set<string>(),
     threadAction: new Set<string>(),
     browserToolbarAction: new Set<string>(),
     fileOpener: new Set<string>(),
     sourceCodeRenderer: new Set<string>(),
     diffRenderer: new Set<string>(),
+    composer: new Set<string>(),
     messageDirective: new Set<string>(),
     codeFenceRenderer: new Set<string>(),
     codeFenceLanguage: new Set<string>(),
@@ -435,6 +498,77 @@ export function collectPluginAppRegistrations(
     machineProviderInputs: new Set<string>(),
     contentScript: new Set<string>(),
   };
+
+  function collectTab(value: unknown, legacy = false): void {
+    const registration = value as ExperimentalTabRegistration;
+    const kind = "slots.experimental_tab";
+    const id = requireSlotId(kind, registration?.id);
+    const context = registration.context;
+    if (context?.kind !== "thread" && context?.kind !== "nav-panel") {
+      throw new Error(`${kind}: context must be thread or nav-panel`);
+    }
+    if (context.kind === "nav-panel") requireSlotId(kind, context.panelId);
+    const availability = registration.availability;
+    if (availability !== "fixed" && availability !== "action") {
+      throw new Error(`${kind}: availability must be fixed or action`);
+    }
+    requireUniqueId(
+      kind,
+      seenIds.tab,
+      `${context.kind}/${context.kind === "nav-panel" ? context.panelId : ""}/${id}`,
+    );
+    if (
+      registration.useVisible !== undefined &&
+      typeof registration.useVisible !== "function"
+    ) {
+      throw new Error(`${kind}: useVisible must be a function`);
+    }
+    if (
+      availability === "fixed" &&
+      (registration.run !== undefined || registration.params !== undefined)
+    ) {
+      throw new Error(`${kind}: run and params require action availability`);
+    }
+    const target = registration.experimental_target;
+    if (
+      target !== undefined &&
+      (context.kind !== "nav-panel" ||
+        availability !== "fixed" ||
+        typeof target?.validate !== "function")
+    ) {
+      throw new Error(
+        `${kind}: experimental_target requires a nav-panel fixed tab and a validate function`,
+      );
+    }
+    const validated = {
+      ...registration,
+      ...collectPanelAction<
+        ExperimentalTabRegistration["component"],
+        ExperimentalTabRegistration["run"]
+      >(kind, new Set(), {
+        ...registration,
+        icon:
+          legacy && registration.icon === "" ? undefined : registration.icon,
+      }),
+      icon:
+        legacy && registration.icon === ""
+          ? ""
+          : requireNonEmptyString(kind, "icon", registration.icon),
+      ...(registration.tooltip === undefined
+        ? {}
+        : {
+            tooltip: requireNonEmptyString(
+              kind,
+              "tooltip",
+              registration.tooltip,
+            ),
+          }),
+      ...(availability === "action" && registration.params !== undefined
+        ? { params: z.json().parse(registration.params) }
+        : {}),
+    };
+    collected.tabs.push(validated as ExperimentalTabRegistration);
+  }
 
   function collectCommand(
     kind: string,
@@ -489,6 +623,27 @@ export function collectPluginAppRegistrations(
   const legacySidebarHeaders: ComponentType<ExperimentalSidebarHeaderProps>[] =
     [];
   const legacySlotAliases = {
+    threadPanelAction(registration: LegacyThreadPanelActionRegistration) {
+      try {
+        const action = collectPanelAction(
+          "slots.threadPanelAction",
+          new Set(),
+          registration,
+        );
+        collectTab(
+          {
+            ...action,
+            icon: action.icon ?? "",
+            context: { kind: "thread" },
+            availability: "action",
+          },
+          true,
+        );
+      } catch (error) {
+        onWarning(`Legacy threadPanelAction ignored: ${String(error)}`);
+      }
+    },
+
     experimental_sidebarHeader(registration: LegacySidebarHeaderRegistration) {
       legacySidebarHeaders.push(
         collectTitledComponent(
@@ -589,78 +744,54 @@ export function collectPluginAppRegistrations(
             `${kind}: "experimental_usePageTitle" must be a React hook function when set`,
           );
         }
-        const fixedTabs: PluginNavPanelFixedTabRegistration[] = (() => {
-          if (registration.fixedTabs === undefined) return [];
-          if (!Array.isArray(registration.fixedTabs)) {
-            throw new Error(`${kind}: "fixedTabs" must be an array when set`);
-          }
-          const seenFixedTabIds = new Set<string>();
-          return registration.fixedTabs.map((value, index) => {
-            const fixedTabKind = `${kind}.fixedTabs[${index}]`;
-            const fixedTab = value as Record<string, unknown> | null;
-            const id = requireSlotId(fixedTabKind, fixedTab?.id);
-            requireUniqueId(fixedTabKind, seenFixedTabIds, id);
-            const layout = fixedTab?.layout;
-            if (
-              layout !== undefined &&
-              layout !== "padded" &&
-              layout !== "flush"
-            ) {
-              throw new Error(
-                `${fixedTabKind}: "layout" must be "padded" or "flush" when set`,
-              );
-            }
-            const fixedTabPanelId = requireNonEmptyString(
-              fixedTabKind,
-              "panelId",
-              fixedTab?.panelId,
-            );
-            if (fixedTabPanelId !== panelId) {
-              throw new Error(
-                `${fixedTabKind}: "panelId" must match its containing navPanel id ${JSON.stringify(panelId)}`,
-              );
-            }
-            const experimentalTarget = fixedTab?.experimental_target;
-            if (
-              experimentalTarget !== undefined &&
-              (typeof experimentalTarget !== "object" ||
-                experimentalTarget === null ||
-                typeof Reflect.get(experimentalTarget, "validate") !==
-                  "function")
-            ) {
-              throw new Error(
-                `${fixedTabKind}: "experimental_target.validate" must be a function when set`,
-              );
-            }
-            return {
+        const legacy = registration as PluginNavPanelRegistration & {
+          fixedTabs?: readonly PluginNavPanelFixedTabRegistration[];
+        };
+        const fixedTabs: PluginNavPanelFixedTabRegistration[] = [];
+        if (
+          legacy.fixedTabs !== undefined &&
+          !Array.isArray(legacy.fixedTabs)
+        ) {
+          onWarning("Legacy navPanel.fixedTabs ignored: expected an array");
+        }
+        for (const value of Array.isArray(legacy.fixedTabs)
+          ? legacy.fixedTabs
+          : []) {
+          try {
+            const id = requireSlotId(kind, value?.id);
+            const tab: PluginNavPanelFixedTabRegistration = {
               id,
-              panelId: fixedTabPanelId,
-              title: requireNonEmptyString(
-                fixedTabKind,
-                "title",
-                fixedTab?.title,
-              ),
-              icon: requireNonEmptyString(fixedTabKind, "icon", fixedTab?.icon),
-              component: requireComponent<
-                PluginNavPanelFixedTabRegistration["component"]
-              >(fixedTabKind, fixedTab?.component),
-              ...(layout === undefined ? {} : { layout }),
-              ...(experimentalTarget === undefined
-                ? {}
-                : {
-                    experimental_target:
-                      experimentalTarget as PluginNavPanelFixedTabRegistration["experimental_target"],
-                  }),
+              panelId,
+              title: requireNonEmptyString(kind, "title", value.title ?? id),
+              icon: typeof value.icon === "string" ? value.icon : "",
+              component: requireComponent(kind, value.component),
+              ...(value.layout === "flush" ? { layout: "flush" } : {}),
+              ...(typeof value.experimental_target?.validate === "function"
+                ? { experimental_target: value.experimental_target }
+                : {}),
             };
-          });
-        })();
+            collectTab(
+              {
+                ...tab,
+                context: { kind: "nav-panel", panelId },
+                availability: "fixed",
+              },
+              true,
+            );
+            fixedTabs.push(tab);
+          } catch (error) {
+            onWarning(
+              `Legacy navPanel.fixedTabs entry ignored: ${String(error)}`,
+            );
+          }
+        }
         collected.navPanels.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
           icon: requireNonEmptyString(kind, "icon", registration.icon),
           path,
+          ...(fixedTabs.length === 0 ? {} : { fixedTabs }),
           component: requireComponent(kind, registration.component),
-          ...(fixedTabs.length > 0 ? { fixedTabs } : {}),
           ...(registration.experimental_useBadge !== undefined
             ? {
                 experimental_useBadge: registration.experimental_useBadge,
@@ -680,14 +811,8 @@ export function collectPluginAppRegistrations(
             : {}),
         });
       },
-      threadPanelAction(registration) {
-        collected.threadPanelActions.push(
-          collectPanelAction(
-            "slots.threadPanelAction",
-            seenIds.threadPanelAction,
-            registration,
-          ),
-        );
+      experimental_tab(registration: unknown) {
+        collectTab(registration);
       },
       experimental_newThreadPanelAction(registration) {
         collected.newThreadPanelActions.push(
@@ -772,6 +897,66 @@ export function collectPluginAppRegistrations(
           component: requireComponent(kind, registration.component),
         });
       },
+      experimental_threadContextSegment(registration) {
+        const kind = "slots.experimental_threadContextSegment";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadContextSegment, id);
+        const optionalComponent = (field: "action" | "details") => {
+          const value = registration[field];
+          if (value === undefined) return {};
+          if (typeof value !== "function") {
+            throw new Error(
+              `${kind}: "${field}" must be a React component function`,
+            );
+          }
+          return { [field]: value };
+        };
+        if (typeof registration.summary !== "function") {
+          throw new Error(
+            `${kind}: "summary" must be a React component function`,
+          );
+        }
+        if (
+          registration.useVisible !== undefined &&
+          typeof registration.useVisible !== "function"
+        ) {
+          throw new Error(`${kind}: "useVisible" must be a function`);
+        }
+        collected.threadContextSegments.push({
+          id,
+          title: requireNonEmptyString(kind, "title", registration.title),
+          group: requireNonEmptyString(kind, "group", registration.group),
+          ...requireOptionalOrder(kind, registration.order),
+          summary: registration.summary,
+          ...optionalComponent("action"),
+          ...optionalComponent("details"),
+          ...(registration.useVisible !== undefined
+            ? { useVisible: registration.useVisible }
+            : {}),
+        });
+      },
+      experimental_threadInfoRow(registration) {
+        const kind = "slots.experimental_threadInfoRow";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadInfoRow, id);
+        collected.threadInfoRows.push({
+          id,
+          group: requireNonEmptyString(kind, "group", registration.group),
+          ...requireOptionalOrder(kind, registration.order),
+          component: requireComponent(kind, registration.component),
+        });
+      },
+      experimental_threadInfoSection(registration) {
+        const kind = "slots.experimental_threadInfoSection";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadInfoSection, id);
+        collected.threadInfoSections.push({
+          id,
+          group: requireNonEmptyString(kind, "group", registration.group),
+          ...requireOptionalOrder(kind, registration.order),
+          component: requireComponent(kind, registration.component),
+        });
+      },
       experimental_threadAction(registration) {
         const kind = "slots.experimental_threadAction";
         const id = requireSlotId(kind, registration?.id);
@@ -785,20 +970,12 @@ export function collectPluginAppRegistrations(
         ) {
           throw new Error(`${kind}: "useData" must be a function`);
         }
-        if (
-          registration.order !== undefined &&
-          !Number.isFinite(registration.order)
-        ) {
-          throw new Error(`${kind}: "order" must be a finite number`);
-        }
         collected.threadActions.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
           icon: requireNonEmptyString(kind, "icon", registration.icon),
           group: requireNonEmptyString(kind, "group", registration.group),
-          ...(registration.order !== undefined
-            ? { order: registration.order }
-            : {}),
+          ...requireOptionalOrder(kind, registration.order),
           ...(registration.useData !== undefined
             ? { useData: registration.useData }
             : {}),
@@ -857,6 +1034,15 @@ export function collectPluginAppRegistrations(
           collectTitledComponent(
             "slots.experimental_diffRenderer",
             seenIds.diffRenderer,
+            registration,
+          ),
+        );
+      },
+      experimental_composer(registration) {
+        collected.composers.push(
+          collectTitledComponent(
+            "slots.experimental_composer",
+            seenIds.composer,
             registration,
           ),
         );

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 import { useEffect } from "react";
-import { act, cleanup, render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerComposerPlugin } from "@/test/fixtures/composer-plugin";
+import { ComposerTestProviders } from "@/test/fixtures/composer-test-providers";
 import { defaultAppSettings, pluginCommandId } from "@bb/domain";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
 import {
   AppCommandProvider,
   useAppCommandContext,
@@ -21,10 +21,8 @@ import {
   PluginComposerHostProvider,
   type PluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
-import {
-  INERT_TYPEAHEAD_COMMAND_CONFIG,
-  PromptBoxInternal,
-} from "./PromptBoxInternal";
+import { ComposerBox } from "./ComposerBox";
+import { testTypeaheadConfig } from "@/test/fixtures/composer-search";
 
 const SHORTCUT = {
   mod: false,
@@ -43,6 +41,15 @@ vi.mock("@/hooks/queries/system-queries", () => ({
           command: "composer.focus",
           desktopOnly: false,
           shortcut: { ...SHORTCUT, key: "c" },
+          when: {
+            all: ["mainSurface", "promptAvailable"],
+            none: ["modalOpen", "terminalFocus", "browserFocus"],
+          },
+        },
+        {
+          command: "composer.searchPromptHistory",
+          desktopOnly: false,
+          shortcut: { ...SHORTCUT, key: "r" },
           when: {
             all: ["mainSurface", "promptAvailable"],
             none: ["modalOpen", "terminalFocus", "browserFocus"],
@@ -83,10 +90,12 @@ function Composer({
   composerKey,
   role,
   onFocusCommand,
+  searchHistory = false,
 }: {
   composerKey: string;
   role: "primary" | "secondary";
   onFocusCommand(): void;
+  searchHistory?: boolean;
 }) {
   const host: PluginComposerHost = {
     scope: { kind: "new-thread", projectId: null },
@@ -103,7 +112,8 @@ function Composer({
         data-app-composer=""
         data-app-composer-role={role}
       >
-        <PromptBoxInternal
+        <ComposerBox
+          surface="thread"
           value=""
           mentionRanges={[]}
           onChange={vi.fn()}
@@ -111,16 +121,17 @@ function Composer({
           onFocusCommand={onFocusCommand}
           autoFocus={false}
           mentionMenuPlacement="bottom"
-          typeahead={{
-            mention: {
-              results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
-              isLoading: false,
-              isRefreshing: false,
-              isError: false,
-              onQueryChange: vi.fn(),
-            },
-            command: INERT_TYPEAHEAD_COMMAND_CONFIG,
-          }}
+          typeahead={testTypeaheadConfig()}
+          history={
+            searchHistory
+              ? {
+                  currentDraft: EMPTY_DRAFT,
+                  entries: [],
+                  onSelectEntry: () => {},
+                  promptHistorySearch: { projectId: "project-main" },
+                }
+              : undefined
+          }
         />
       </div>
     </PluginComposerHostProvider>
@@ -142,11 +153,11 @@ function RunnerProbe({
   return null;
 }
 
-function renderComposers() {
+function renderComposers({ searchHistory = false } = {}) {
   const focused: string[] = [];
   const runner: { current: AppCommandRunner | null } = { current: null };
   const view = render(
-    <MemoryRouter>
+    <ComposerTestProviders>
       <AppCommandProvider>
         <PromptAvailable />
         <RunnerProbe
@@ -158,6 +169,7 @@ function renderComposers() {
           composerKey="main"
           role="primary"
           onFocusCommand={() => focused.push("main")}
+          searchHistory={searchHistory}
         />
         <Composer
           composerKey="side"
@@ -169,7 +181,7 @@ function renderComposers() {
           Terminal
         </div>
       </AppCommandProvider>
-    </MemoryRouter>,
+    </ComposerTestProviders>,
   );
   const editorIn = (composerKey: string) => {
     const editor = view
@@ -198,6 +210,10 @@ function press(target: HTMLElement, key: string): KeyboardEvent {
 afterEach(() => {
   cleanup();
   resetPluginSlotStoreForTest();
+});
+
+beforeEach(async () => {
+  await registerComposerPlugin();
 });
 
 describe("composer commands", () => {
@@ -238,6 +254,17 @@ describe("composer commands", () => {
 
     expect(runs).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("opens prompt search with Ctrl+R only in the focused composer that has history search", () => {
+    const { editorIn } = renderComposers({ searchHistory: true });
+
+    press(editorIn("side"), "r");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    press(editorIn("main"), "r");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Search prompt history")).toBeTruthy();
   });
 
   it("dispatches a palette invocation to the composer focused when it opened", () => {

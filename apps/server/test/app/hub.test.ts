@@ -156,16 +156,15 @@ describe("NotificationHub", () => {
       environmentId: "environment-1",
     } as const;
     const pullRequest = {
-      kind: "environment-pull-request",
-      environmentId: "environment-1",
+      kind: "plugin-read",
+      pluginId: "bb--github-pr-status",
+      method: "pullRequests",
+      read: { key: "environment-1" },
     } as const;
     const changes: unknown[] = [];
-    hub.onWatchedTargets(
-      ["environment-detail", "environment-pull-request"],
-      (change) => {
-        changes.push(change);
-      },
-    );
+    hub.onWatchedTargets(["environment-detail", "plugin-read"], (change) => {
+      changes.push(change);
+    });
 
     hub.subscribe(first, environment);
     hub.subscribe(second, { ...environment });
@@ -956,4 +955,29 @@ describe("NotificationHub events-appended thread-list coalescing", () => {
     hub.notifyThread("thread-1", ["events-appended"]);
     expect(seen).toEqual([["events-appended"], ["events-appended"]]);
   });
+});
+
+it("shares watched producers across sockets", () => {
+  const hub = new NotificationHub();
+  const a = createMockHubSocket();
+  const b = createMockHubSocket();
+  const changes = vi.fn();
+  const read = {
+    kind: "plugin-read",
+    pluginId: "demo",
+    method: "status",
+    read: { input: { a: 1, b: 2 } },
+  } as const;
+  const stop = hub.onWatchedTargets(["plugin-read"], changes);
+  hub.subscribe(a, read);
+  hub.subscribe(b, { ...read, read: { input: { b: 2, a: 1 } } });
+  expect(changes.mock.calls).toEqual([[{ started: [read], stopped: [] }]]);
+  hub.unsubscribe(a, read);
+  expect(changes).toHaveBeenCalledTimes(1);
+  hub.unregisterClient(b);
+  expect(changes.mock.calls).toEqual([
+    [{ started: [read], stopped: [] }],
+    [{ started: [], stopped: [read] }],
+  ]);
+  stop();
 });

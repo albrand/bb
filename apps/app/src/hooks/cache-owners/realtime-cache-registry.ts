@@ -56,7 +56,6 @@ import {
   environmentDiffFilesQueryKeyPrefix,
   environmentDiffViewedQueryKeyPrefix,
   environmentFilePreviewQueryKeyPrefix,
-  environmentPullRequestQueryKey,
   environmentWorkStatusQueryKeyPrefix,
   hostsQueryKey,
   serverMoveStatusQueryKey,
@@ -363,7 +362,6 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadTimelineQueriesForAppendedEvents,
       dirtyThreadCompactionTurnIdsQueriesForCompletedTurn,
       dirtyThreadSpendSummaryQueriesForUsageUpdate,
-      dirtyThreadPullRequestQueryForCompletedTurn,
       dirtyThreadTurnRequestQueries,
     ],
   },
@@ -1062,18 +1060,6 @@ function dirtyThreadTurnRequestQueries({
     queryKey,
     ...getThreadPromptHistoryInvalidationQueryKeys({ threadId }),
   ];
-}
-
-function dirtyThreadPullRequestQueryForCompletedTurn({
-  eventTypes,
-  queryClient,
-  threadId,
-}: ThreadRealtimeDirtyContext): QueryKey[] {
-  if (!threadId || !eventTypes?.includes("turn/completed")) {
-    return [];
-  }
-  const environmentId = getCachedThreadEnvironmentId({ queryClient, threadId });
-  return environmentId ? [environmentPullRequestQueryKey(environmentId)] : [];
 }
 
 export function getCachedThreadEnvironmentId({

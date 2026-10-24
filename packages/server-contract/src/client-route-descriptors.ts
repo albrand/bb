@@ -1,12 +1,10 @@
 import type { ApiError } from "./errors.js";
-import type { PathId } from "./common.js";
 import {
   defineRoute,
   jsonRequest,
   jsonResponse,
   noRequest,
 } from "@bb/hono-typed-routes";
-import type { EnvironmentPullRequestResponse } from "./api-types.js";
 import {
   updateUiPreferenceRequestSchema,
   type PathUiPreferenceKey,
@@ -16,18 +14,6 @@ import {
 } from "./api/ui-preferences.js";
 
 export const UI_PREFERENCES_TAG = "ui-preferences";
-
-export function environmentPullRequestTag(environmentId: string): string {
-  return `environment-pull-request:${environmentId}`;
-}
-
-export const environmentPullRequestRoute = defineRoute({
-  path: "/environments/:id/pull-request",
-  method: "get",
-  request: noRequest<PathId>(),
-  response: jsonResponse<EnvironmentPullRequestResponse>(),
-  tags: ({ params }) => [environmentPullRequestTag(params.id)],
-});
 
 export const uiPreferencesRoute = defineRoute({
   path: "/preferences/ui",

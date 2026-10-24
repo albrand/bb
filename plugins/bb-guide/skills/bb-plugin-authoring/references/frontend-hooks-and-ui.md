@@ -28,6 +28,7 @@ Hooks:
   `"reconnecting"` for the same shared socket used by `useRealtime`. Reconcile
   durable server state on subsequent transitions to `connected` (not the first
   connection) because plugin signals are ephemeral and are not replayed.
+- `experimental_useExperiment(key)` → whether a known bb experiment is enabled, following live changes; false while configuration loads or for unknown keys.
 - `useSettings()` → `{ values, isLoading }` — effective non-secret values
   (secret settings are excluded; read them server-side only).
 - `useBbContext()` → `{ projectId, threadId }` from the current route.
@@ -49,7 +50,7 @@ experimental_openSignInWindow({ url, redirectUrlPrefix? }),
 experimental_openTerminal({ terminalId }) }`.
   `toCompose` opens the root compose screen; pass `initialPrompt` to seed the
   composer draft and `focusPrompt: true` to focus it. The panel
-  opener opens one of the current plugin's registered `threadPanelAction` tabs
+  opener opens one of the current plugin's registered `experimental_tab` with thread context and action availability tabs
   in a thread, or its `experimental_newThreadPanelAction` tabs on the New
   thread screen, and returns whether the host accepted it; it returns false on
   plugin pages, which have no panel actions.
@@ -265,9 +266,10 @@ composer.
   files, and drop `@hugeicons/core-free-icons` and `@hugeicons/react` from
   `dependencies`. A git install keeps every version's `node_modules` on the
   user's disk, and the full hugeicons set is over 100 MB per copy.
-- `toast`: `import { toast } from "sonner"` — runtime-shimmed to the host's
-  Toaster (`toast.success("Saved")` just works; never mount your own
-  `<Toaster>`).
+- `toast`: `import { toast } from "sonner"` — runtime-shimmed to bb's own
+  toast, so `toast.success("Saved")` looks like bb's toasts and lands in the
+  notification center; `toast.custom` keeps your rendering. Never mount your
+  own `<Toaster>`.
 - Never bundled (runtime-shimmed, import freely): react, the portaling
   radix families (`@radix-ui/react-dialog`, `-alert-dialog`, `-popover`,
   `-select`, `-dropdown-menu`, `-context-menu`, `-menubar`, `-hover-card`,

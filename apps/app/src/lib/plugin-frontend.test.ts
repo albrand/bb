@@ -9,7 +9,10 @@ import {
   loadPluginFrontend,
   type PluginFrontendCandidate,
 } from "./plugin-frontend";
-import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
+import {
+  pluginSdkAppImplementation,
+  retiredPluginSdkAppMembers,
+} from "./plugin-sdk-app-impl";
 
 function candidate(
   pluginId: string,
@@ -147,7 +150,11 @@ describe("installPluginRuntime", () => {
       react.useState,
     );
     expect((runtime.jsxRuntime as { jsx: unknown }).jsx).toBe(jsxRuntime.jsx);
-    expect(runtime.pluginSdkApp).toBe(pluginSdkAppImplementation);
+    expect(runtime.pluginSdkApp).toEqual({
+      ...pluginSdkAppImplementation,
+      experimental_useSidebarThreadPullRequest:
+        retiredPluginSdkAppMembers.experimental_useSidebarThreadPullRequest,
+    });
 
     installPluginRuntime();
     expect((globalThis as RuntimeHost).__bbPluginRuntime).toBe(runtime);

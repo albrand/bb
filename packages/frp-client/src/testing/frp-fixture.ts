@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -39,9 +40,21 @@ async function cachedArchiveBytes(archive: FrpArchive): Promise<Uint8Array> {
     const bytes = await fetchArchive(archive.url);
     verifyFrpArchive(archive, bytes);
     await fs.mkdir(FRP_CACHE_DIR, { recursive: true });
-    const staging = `${file}.${process.pid}.${Date.now()}`;
-    await fs.writeFile(staging, bytes);
-    await fs.rename(staging, file);
+    const staging = `${file}.${randomUUID()}`;
+    try {
+      await fs.writeFile(staging, bytes);
+      try {
+        await fs.rename(staging, file);
+      } catch (error) {
+        try {
+          verifyFrpArchive(archive, new Uint8Array(await fs.readFile(file)));
+        } catch {
+          throw error;
+        }
+      }
+    } finally {
+      await fs.rm(staging, { force: true });
+    }
     return bytes;
   }
 }

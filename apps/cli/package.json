@@ -27,6 +27,7 @@
     "@bb/text-utils": "workspace:*",
     "@bb/thread-view": "workspace:*",
     "@get-bb/plugin-sdk": "workspace:*",
+    "bb-plugin-bb--github-pr-status": "workspace:*",
     "cli-table3": "^0.6.5",
     "commander": "^13.0.0",
     "mime-types": "^3.0.2",

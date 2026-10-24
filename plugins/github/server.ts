@@ -349,6 +349,17 @@ function describeIgnoredExtraRepos(ignored: string[]): string {
   );
 }
 
+const environmentPullRequestUrlsSchema = z.record(
+  z.string(),
+  z.union([
+    z.object({
+      outcome: z.literal("available"),
+      pullRequest: z.object({ url: z.string() }),
+    }),
+    z.object({ outcome: z.enum(["absent", "unavailable"]) }),
+  ]),
+);
+
 function run(
   file: string,
   args: string[],
@@ -1448,11 +1459,15 @@ export default async function plugin(bb: BbPluginApi) {
         const thread = await bb.sdk.threads.get({ threadId });
         if (thread?.environmentId) {
           environmentId = thread.environmentId;
-          const result = await bb.sdk.environments.pullRequest({
-            environmentId: thread.environmentId,
+          const rows = await bb.sdk.plugins.callRpc({
+            pluginId: "bb--github-pr-status",
+            method: "pullRequests",
+            input: { keys: [thread.environmentId] },
+            outputSchema: environmentPullRequestUrlsSchema,
           });
+          const result = rows[thread.environmentId];
           const url =
-            result.outcome === "available" ? result.pullRequest.url : null;
+            result?.outcome === "available" ? result.pullRequest.url : null;
           const match =
             typeof url === "string"
               ? url.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/)

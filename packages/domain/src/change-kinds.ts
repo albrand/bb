@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { jsonValueSchema, type JsonValue } from "./json-value.js";
 import {
   threadEventTypeSchema,
   threadEventTypeValues,
@@ -89,7 +90,43 @@ export type ThreadTimelineSubscriptionTarget = z.infer<
   typeof threadTimelineSubscriptionTargetSchema
 >;
 
+export function canonicalPluginReadInput(value: JsonValue): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value))
+    return `[${value.map(canonicalPluginReadInput).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${canonicalPluginReadInput(value[key]!)}`,
+    )
+    .join(",")}}`;
+}
+
+export const pluginReadSubscriptionTargetSchema = z
+  .object({
+    kind: z.literal("plugin-read"),
+    pluginId: z.string().min(1),
+    method: z.string().min(1),
+    read: z
+      .union([
+        z.object({ input: jsonValueSchema }).strict(),
+        z.object({ key: z.string() }).strict(),
+      ])
+      .refine(
+        (read) =>
+          new TextEncoder().encode(canonicalPluginReadInput(read)).byteLength <=
+          16_384,
+        "Plugin read input exceeds 16 KiB",
+      ),
+  })
+  .strict();
+export type PluginReadSubscriptionTarget = z.infer<
+  typeof pluginReadSubscriptionTargetSchema
+>;
+
 export const realtimeSubscriptionTargetSchema = z.discriminatedUnion("kind", [
+  pluginReadSubscriptionTargetSchema,
   z.object({ kind: z.literal("plugin"), pluginId: z.string().min(1) }).strict(),
   z
     .object({
@@ -122,12 +159,6 @@ export const realtimeSubscriptionTargetSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
-      kind: z.literal("environment-pull-request"),
-      environmentId: z.string().min(1),
-    })
-    .strict(),
-  z
-    .object({
       kind: z.literal("environment-list"),
     })
     .strict(),
@@ -153,30 +184,51 @@ export type RealtimeSubscriptionTarget = z.infer<
 >;
 
 function isUnknownSubscriptionTarget(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return false;
+  }
+  const kind = value.kind;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof value.kind === "string" &&
+    typeof kind === "string" &&
     !realtimeSubscriptionTargetSchema.options.some(
-      (option) => option.shape.kind.value === value.kind,
+      (option) => option.shape.kind.value === kind,
     )
   );
 }
-const knownSubscriptionTargetsSchema = z.preprocess(
+
+function isOversizedPluginReadTarget(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return false;
+  }
+  if (value.kind !== "plugin-read") return false;
+  const result = pluginReadSubscriptionTargetSchema.safeParse(value);
+  return (
+    !result.success &&
+    result.error.issues.some(
+      (issue) => issue.message === "Plugin read input exceeds 16 KiB",
+    )
+  );
+}
+
+function shouldSkipSubscriptionTarget(value: unknown): boolean {
+  return isUnknownSubscriptionTarget(value) || isOversizedPluginReadTarget(value);
+}
+
+const validSubscriptionTargetsSchema = z.preprocess(
   (value) =>
     Array.isArray(value)
-      ? value.filter((target) => !isUnknownSubscriptionTarget(target))
+      ? value.filter((target) => !shouldSkipSubscriptionTarget(target))
       : value,
   z.array(realtimeSubscriptionTargetSchema),
 );
-const knownSubscriptionTargetSchema = z.preprocess(
-  (value) => (isUnknownSubscriptionTarget(value) ? null : value),
+const validSubscriptionTargetSchema = z.preprocess(
+  (value) =>
+    value === undefined || shouldSkipSubscriptionTarget(value) ? null : value,
   realtimeSubscriptionTargetSchema.nullable().optional(),
 );
 const subscriptionFields = {
-  target: knownSubscriptionTargetSchema,
-  targets: knownSubscriptionTargetsSchema.optional(),
+  target: validSubscriptionTargetSchema,
+  targets: validSubscriptionTargetsSchema.optional(),
 };
 const hasSubscriptionTargets = (value: {
   target?: RealtimeSubscriptionTarget | null;
@@ -262,8 +314,6 @@ export function realtimeSubscriptionTargetKey(
       return "project-list";
     case "environment-detail":
       return `environment-detail:${target.environmentId}`;
-    case "environment-pull-request":
-      return `environment-pull-request:${target.environmentId}`;
     case "environment-list":
       return "environment-list";
     case "host-detail":
@@ -272,6 +322,8 @@ export function realtimeSubscriptionTargetKey(
       return "host-list";
     case "plugin":
       return `plugin:${target.pluginId}`;
+    case "plugin-read":
+      return `plugin-read:${canonicalPluginReadInput({ pluginId: target.pluginId, method: target.method, read: target.read })}`;
     case "system":
       return "system";
     default:

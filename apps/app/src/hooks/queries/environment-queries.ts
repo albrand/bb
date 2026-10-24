@@ -1,18 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTaggedQuery } from "@bb/query-tags";
-import type {
-  Environment,
-  ThreadPullRequest,
-  WorkspaceDiffTarget,
-} from "@bb/domain";
+import { useQuery } from "@tanstack/react-query";
+import type { Environment, WorkspaceDiffTarget } from "@bb/domain";
 import type {
   EnvironmentDiffBranchesResponse,
   EnvironmentDiffFilesResponse,
-  EnvironmentPullRequestResponse,
   EnvironmentStatusResponse,
   WorkspacePathListResponse,
 } from "@bb/server-contract";
-import { environmentPullRequestRoute } from "@bb/server-contract";
 import type { EnvironmentDiffArgs } from "@bb/sdk/browser";
 import type {
   EnvironmentFilePreviewSource,
@@ -21,23 +14,18 @@ import type {
 import { loadFilePreview } from "@/lib/api";
 import { buildEnvironmentFileContentUrl } from "@/lib/file-content-urls";
 import { sdk } from "@/lib/sdk";
-import {
-  useEnvironmentDetailRealtimeSubscription,
-  useEnvironmentPullRequestRealtimeSubscription,
-} from "@/hooks/useRealtimeSubscription";
+import { useEnvironmentDetailRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import {
   environmentDiffFilesQueryKey,
   environmentDiffTargetKey,
   environmentDiffViewedQueryKey,
   environmentFilePreviewQueryKey,
   environmentMergeBaseBranchesQueryKey,
-  environmentPullRequestQueryKey,
   environmentPathsQueryKey,
   environmentQueryKey,
   environmentWorkStatusQueryKey,
 } from "./query-keys";
 import { useDebouncedBranchSearchQuery } from "./branch-search-debounce";
-import { routeTaggedRead } from "./route-tags";
 import {
   resolveEnvironmentDiffFilesPlaceholder,
   resolveEnvironmentMergeBaseBranchesPlaceholder,
@@ -67,8 +55,6 @@ interface UseEnvironmentDiffFilesOptions extends QueryOptions {
   ignoreWhitespace: boolean;
 }
 
-const ENVIRONMENT_PULL_REQUEST_STALE_MS = 30_000;
-const ENVIRONMENT_SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
 const MERGE_BASE_BRANCHES_STALE_MS = 30_000;
 const MERGE_BASE_BRANCHES_LIMIT = 50;
 const ENVIRONMENT_DIFF_STALE_MS = 5_000;
@@ -137,56 +123,6 @@ export function useEnvironmentWorkStatus(
             environmentId,
           )
         : undefined,
-  });
-}
-
-export function getEnvironmentPullRequestFromResponse(
-  response: EnvironmentPullRequestResponse | undefined,
-): ThreadPullRequest | null {
-  return response?.outcome === "available" ? response.pullRequest : null;
-}
-
-export function getEnvironmentPullRequestStaleTime(
-  pullRequest: ThreadPullRequest | null | undefined,
-): number {
-  return pullRequest?.state === "closed" || pullRequest?.state === "merged"
-    ? ENVIRONMENT_SETTLED_PULL_REQUEST_STALE_MS
-    : ENVIRONMENT_PULL_REQUEST_STALE_MS;
-}
-
-export function useEnvironmentPullRequest(
-  environmentId: string | null | undefined,
-  options?: QueryOptions,
-) {
-  const client = useQueryClient();
-  const enabled = (options?.enabled ?? true) && Boolean(environmentId);
-  useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
-  useEnvironmentPullRequestRealtimeSubscription(environmentId, { enabled });
-  const queryKey = environmentPullRequestQueryKey(environmentId);
-
-  return useTaggedQuery<EnvironmentPullRequestResponse>({
-    queryKey,
-    ...routeTaggedRead(
-      client,
-      queryKey,
-      environmentPullRequestRoute,
-      { params: environmentId ? { id: environmentId } : {}, input: undefined },
-      (signal) =>
-        sdk.environments.pullRequest({
-          environmentId: requireEnvironmentId(
-            environmentId,
-            "useEnvironmentPullRequest",
-          ),
-          signal,
-        }),
-    ),
-    enabled,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    staleTime: (query) =>
-      getEnvironmentPullRequestStaleTime(
-        getEnvironmentPullRequestFromResponse(query.state.data),
-      ),
   });
 }
 

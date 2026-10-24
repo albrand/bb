@@ -820,7 +820,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       }),
       readWorkspaceSkills(),
     ]);
-    const skillCatalog = resolveSkillCatalog(deps, {
+    const skillCatalog = await resolveSkillCatalog(deps, {
       projectSkillSources: workspaceSkills.projectSkillSources,
       sharedSkillSources: workspaceSkills.sharedSkills.runtimeSources,
     });

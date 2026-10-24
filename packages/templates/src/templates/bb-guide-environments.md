@@ -234,11 +234,9 @@ Making your repo work with bb:
   `sdk.environments.experimental_cleanup({ environmentId, recover: true })`.
   Inspect `bb environment show <id>` after recovery to confirm removal.
 
-  bb environment pull-request show <id>   Inspect a pull request
-  bb environment pull-request ready <id>  Mark a pull request ready
-  bb environment pull-request draft <id>  Convert a pull request to draft
-  bb environment pull-request merge <id>  Merge a pull request
-    --method <method>                     merge, squash, or rebase
+  Pull requests moved to the bundled GitHub PR Status plugin:
+  `bb pull-request show|ready|draft|merge <environment-id>`. See its
+  github-pr-status skill.
 
 Every inspection command accepts an arbitrary environment ID and supports
 `--json`. Non-git status/diff responses are reported explicitly. `diff-file`

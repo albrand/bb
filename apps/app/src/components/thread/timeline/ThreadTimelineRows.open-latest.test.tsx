@@ -259,10 +259,11 @@ describe("opening an unseen timeline", () => {
     const { area } = renderThread();
     resize();
     expect(area.scrollTop).toBe(399_200);
+    height += 100;
     area.scrollTop = 20_500;
     fireEvent.scroll(area);
     act(() => vi.advanceTimersByTime(25_000));
-    expect(area.scrollTop).toBe(399_200);
+    expect(area.scrollTop).toBe(399_300);
   });
 
   it("respects browser scrolling to a timeline control reached by Tab", () => {

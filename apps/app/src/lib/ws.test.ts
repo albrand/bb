@@ -158,6 +158,32 @@ function createConnectedManager(): ConnectedManager {
 }
 
 describe("WebSocketManager subscriptions", () => {
+  it("never sends a target the server would reject", () => {
+    const { manager, socket } = createConnectedManager();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const oversized = {
+      kind: "plugin-read",
+      pluginId: "usage",
+      method: "getUsage",
+      read: { input: "x".repeat(17_000) },
+    } satisfies RealtimeSubscriptionTarget;
+    try {
+      manager.subscribe(oversized);
+      manager.subscribe(THREAD_TARGET);
+      manager.unsubscribe(oversized);
+      socket.close();
+      socket.open();
+
+      expect(readClientMessages(socket)).toEqual([
+        { type: "subscribe", target: THREAD_TARGET },
+        { type: "subscribe", targets: [THREAD_TARGET] },
+      ]);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   const originalWebSocket = globalThis.WebSocket;
 
   beforeEach(() => {
@@ -174,7 +200,7 @@ describe("WebSocketManager subscriptions", () => {
     });
   });
 
-  it("ref-counts duplicate subscriptions and unsubscribes only after the final cleanup", () => {
+  it("ref-counts duplicate subscriptions and unsubscribes only after the final cleanup", async () => {
     const { manager, socket } = createConnectedManager();
 
     manager.subscribe(THREAD_TARGET);
@@ -197,6 +223,7 @@ describe("WebSocketManager subscriptions", () => {
     ]);
 
     manager.unsubscribe(THREAD_TARGET);
+    await Promise.resolve();
 
     expect(readClientMessages(socket)).toEqual([
       {
@@ -207,6 +234,23 @@ describe("WebSocketManager subscriptions", () => {
         type: "unsubscribe",
         target: THREAD_TARGET,
       },
+    ]);
+  });
+
+  it("keeps a subscription that a remount releases and retakes in the same task", async () => {
+    const { manager, socket } = createConnectedManager();
+
+    manager.subscribe(THREAD_TARGET);
+    manager.unsubscribe(THREAD_TARGET);
+    manager.subscribe(THREAD_TARGET);
+    await Promise.resolve();
+    manager.unsubscribe(THREAD_TARGET);
+    manager.unsubscribe(THREAD_TARGET);
+    await Promise.resolve();
+
+    expect(readClientMessages(socket)).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+      { type: "unsubscribe", target: THREAD_TARGET },
     ]);
   });
 

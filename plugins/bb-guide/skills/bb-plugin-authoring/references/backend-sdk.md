@@ -41,8 +41,7 @@ signatures (see "Looking up the exact API" in distribution.md).
 - `experimental_promptHistory`: `list`
 - `environments`: `list` `listProviders` `get` `update` `delete` `status`
   `paths` `commit` `archiveThreads` `diff` `diffFile` `diffFiles`
-  `diffBranches` `diffPatch` `pullRequest` `markPullRequestDraft`
-  `markPullRequestReady` `mergePullRequest` `experimental_cleanup`
+  `diffBranches` `diffPatch` `experimental_cleanup`
   `experimental_diffViewed` `experimental_markDiffViewed`
   `experimental_clearDiffViewed`
 - `hosts`: `list` `get` `update` `delete` `directory` `pathsExist`

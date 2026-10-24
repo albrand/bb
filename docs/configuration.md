@@ -625,6 +625,27 @@ User-level skills live under `<dataDir>/skills/<name>/SKILL.md` (usually
 `skills/<name>/SKILL.md` (relocatable with the manifest's `bb.skills` field).
 Project skills override user skills, which override plugin skills, by name.
 
+All skill discovery uses the shared skills index. User roots, skill directories,
+and `SKILL.md` entries may be symlinks. Project skills and Markdown commands may
+follow links only within their workspace (or the repository boundary for an
+ancestor root). Traversal resolves real paths and stops cycles. Each recursive
+skill root reads at most 1,000 folders and each command root at most 1,000
+entries; files inside skill folders do not count. Supporting files in an
+injected skill tree must remain ordinary files and directories; linking the root
+or `SKILL.md` is supported.
+
+`bb skill list`, the SDK, and the Skills page collapse registrations that share a
+name and identical `SKILL.md` bytes, preferring provider-neutral and user-wide
+registrations. Different contents with the same name, and identical contents under
+different names, remain distinct. Previously issued registration IDs still address
+their original registration. Linked registrations are read-only in bb. Runtime
+catalogs collapse skills with the same name and identical trees, and Claude Code
+omits injected copies already visible under the same name in its native user or
+project roots. Selected Codex skills are sent as structured skill inputs with the
+path from Codex's active catalog, matched by catalog name or skill directory name,
+for both starting and steering a turn; a selected skill missing from that
+catalog is sent as plain text only.
+
 Top-level `sharedSkillRoots` in `~/.bb/config.json` adds one provider-neutral
 skill collection: `{"user": [...], "project": [...]}` relative paths, resolved
 from the home directory and the workspace. bb indexes them read-only and
@@ -770,7 +791,7 @@ list|get|set|reset` or `sdk.system.uiPreferences` (see
 | `sidebar.visiblePluginPanels` | Navigation destinations shown, or `null` for every destination                                                                                         |
 | `sidebar.footerOrder`         | Footer action order                                                                                                                                    |
 | `sidebar.hiddenFooterItems`   | Footer actions moved into More                                                                                                                         |
-| `infoPanel.collapsedSections` | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
+| `infoPanel.collapsedSections` | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`, or `<pluginId>/<sectionId>`)          |
 
 A legacy `__builtin__` thread list selection resolves to the bundled plugin.
 Footer IDs are `builtin:settings` (top list layout only), `builtin:mobile`,
@@ -1231,7 +1252,7 @@ bb stores only the experiments you set; the others follow the shipped default.
 The `earlyAdopter` general setting (the Become an early adopter banner on
 Settings → Experiments, `bb settings general earlyAdopter on`) switches the
 shipped default to the early adopter default: experiments marked Early adopter
-(currently `timelinePush` and `compactExpiredCache`) turn on, and the rest stay
+(currently `timelinePush`, `compactExpiredCache`, and `sidebarMultiSelect`) turn on, and the rest stay
 off. An experiment you set yourself keeps your value either way.
 `/system/config` and `sdk.system.config()` return the resolved values in
 `experiments`.
@@ -1261,6 +1282,17 @@ off. An experiment you set yourself keeps your value either way.
   collection. The experiment itself applies live; turning it off restores
   normal logging and flushes the in-flight profile, keeping saved files. See
   [diagnostics](debugging-and-qa.md#opt-in-server-performance-diagnostics).
+- `sidebarMultiSelect` (on for early adopters) lets the built-in thread list
+  select several threads: Cmd/Ctrl+Shift-click toggles a row (starting from the
+  open thread), Shift-click selects the visible range from the last clicked row,
+  and a plain click, Cmd/Ctrl-click, Escape, or a click outside the sidebar
+  clears the selection.
+  Right-clicking a selected row offers Mark read/unread, Pin/Unpin, Move to
+  section, and Archive for the whole selection. Dragging a selected row moves
+  every selected thread onto a section, under a thread, or into Pinned, or drops
+  them onto a composer as one mention per thread. Cmd/Ctrl-click still opens a
+  thread in a split. Plugins read it with
+  `experimental_useExperiment("sidebarMultiSelect")`.
 - `timelinePush` makes an open thread view subscribe to its latest timeline
   window over the WebSocket (`thread-timeline` subscription target); the server
   pushes the full window once, then row deltas after new events, instead of the

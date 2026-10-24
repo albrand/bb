@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { getDefaultStore } from "jotai";
-import { composerEditorHeightAtom } from "./composerHeightAtoms";
-import { buildMessageClipboardHtml } from "../../lib/message-clipboard";
-
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { Provider, createStore, getDefaultStore } from "jotai";
+import {
+  COMPOSER_EDITOR_HEIGHT_STORAGE_KEY,
+  composerEditorHeightAtom,
+} from "./composerHeightAtoms";
+import { buildMessageClipboardHtml } from "@/lib/message-clipboard";
 import { createPortal } from "react-dom";
 import { focusPaneComposer } from "@/lib/pane-composer-focus";
 import {
@@ -11,6 +12,11 @@ import {
   type OpenAttachmentRequest,
 } from "@/components/secondary-panel/AttachmentOpenerContext";
 import { registerComposerMenuPlugins } from "@/test/fixtures/composer-menu";
+import {
+  composerSearchQueries,
+  setComposerSearchResults,
+  testTypeaheadConfig,
+} from "@/test/fixtures/composer-search";
 import { resolveThreadMentionDropTarget } from "@/lib/thread-mention-drop";
 import { sdk } from "@/lib/sdk";
 import type { PromptTextMention } from "@bb/domain";
@@ -39,12 +45,24 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
+import {
+  clearLocalAttachmentPreviews,
+  registerLocalAttachmentPreview,
+} from "@/lib/attachment-local-previews";
+import { registerComposerPlugin } from "@/test/fixtures/composer-plugin";
+import { ComposerTestProviders } from "@/test/fixtures/composer-test-providers";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 import { ThreadContextWindowIndicator } from "@/components/thread/timeline/ThreadContextWindowIndicator";
 import {
-  EMPTY_ORDERED_MENTION_SUGGESTIONS,
   emptyPromptDraftState,
   promptInputToDraft,
   type PromptDraftState,
@@ -65,6 +83,7 @@ import {
   resetPluginThreadRowStatusesForTest,
 } from "@/lib/plugin-thread-row-status";
 import {
+  removePluginSlotRegistrations,
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
   type PluginRegistrationSet,
@@ -82,33 +101,38 @@ import {
 } from "@/lib/plugin-logos";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
-  INERT_TYPEAHEAD_COMMAND_CONFIG,
-  PromptBoxInternal,
-  arePromptEditorValuesEqual,
-  suppressPromptEditorAnchorActivation,
+  ComposerBox,
   type PromptBoxAction,
   type PromptBoxHandle,
   type PromptVoiceConfig,
   type TypeaheadConfig,
-} from "./PromptBoxInternal";
+} from "./ComposerBox";
+const PromptBoxInternal = ComposerBox;
 import {
   promptMentionClipboardDataAttributes,
   serializedTextForPromptMentionResource,
 } from "@bb/client-core";
-import { orderPromptMentionSuggestions } from "@/hooks/promptMentionCandidates";
 import type {
-  ComposerMentionShape,
   PromptDraftAttachment,
   PromptMentionSuggestion,
   ProviderCommandSuggestion,
 } from "@bb/client-core";
 
+vi.mock("@/hooks/usePromptMentions", async () =>
+  (await import("@/test/fixtures/composer-search")).fakePromptMentionsModule(),
+);
+vi.mock("@/hooks/useCommandSuggestions", async () =>
+  (
+    await import("@/test/fixtures/composer-search")
+  ).fakeCommandSuggestionsModule(),
+);
+
 const render = (
   ui: Parameters<typeof renderWithoutProviders>[0],
   options?: Parameters<typeof renderWithoutProviders>[1],
-) => renderWithoutProviders(ui, { wrapper: TooltipProvider, ...options });
+) => renderWithoutProviders(ui, { wrapper: ComposerTestProviders, ...options });
 
-type PromptBoxProps = ComponentProps<typeof PromptBoxInternal>;
+type PromptBoxProps = ComponentProps<typeof ComposerBox>;
 
 function pluginRegistrationSet(
   composerCustomizations: NonNullable<
@@ -168,57 +192,18 @@ function createPromptBoxProps(
     mentionRanges: [],
     onChange: vi.fn(),
     onSubmit: vi.fn(),
+    surface: "thread",
     mentionMenuPlacement: "bottom",
-    typeahead: {
-      mention: {
-        results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
-        isLoading: false,
-        isRefreshing: false,
-        isError: false,
-        onQueryChange: vi.fn(),
-      },
-      command: INERT_TYPEAHEAD_COMMAND_CONFIG,
-    },
+    typeahead: testTypeaheadConfig(),
     ...overrides,
   };
 }
 
-function buildTypeaheadConfig({
-  mentionTriggers,
-  mentionSuggestions = [],
-  onMentionQueryChange = () => {},
-  commandSuggestions = [],
-  onCommandQueryChange = () => {},
-}: {
-  mentionTriggers?: TypeaheadConfig["mention"]["triggers"];
-  mentionSuggestions?: readonly PromptMentionSuggestion[];
-  onMentionQueryChange?: TypeaheadConfig["mention"]["onQueryChange"];
-  commandSuggestions?: TypeaheadConfig["command"]["suggestions"];
-  onCommandQueryChange?: (query: string | null) => void;
-} = {}): TypeaheadConfig {
-  return {
-    mention: {
-      triggers: mentionTriggers,
-      results: orderPromptMentionSuggestions({
-        query: "",
-        suggestions: mentionSuggestions,
-      }),
-      isLoading: false,
-      isRefreshing: false,
-      isError: false,
-      onQueryChange: onMentionQueryChange,
-    },
-    command: {
-      triggers: ["/"],
-      suggestions: commandSuggestions,
-      isLoading: false,
-      isError: false,
-      hasMore: false,
-      isLoadingMore: false,
-      loadMore: () => {},
-      onQueryChange: onCommandQueryChange,
-    },
-  };
+function buildTypeaheadConfig(
+  results: Parameters<typeof setComposerSearchResults>[0],
+): TypeaheadConfig {
+  setComposerSearchResults(results);
+  return testTypeaheadConfig({ commandTriggers: ["/"] });
 }
 
 function PromptBoxRaceHarness({
@@ -236,11 +221,11 @@ function PromptBoxRaceHarness({
 
     insertedForValueRef.current = value;
     promptBoxRef.current?.focusEnd();
-    promptBoxRef.current?.insertTextAtCursor("reply");
+    promptBoxRef.current?.voice?.deliverTranscript("reply", "insert");
   }, [value]);
 
   return (
-    <PromptBoxInternal
+    <ComposerBox
       {...createPromptBoxProps({
         onChange,
         value,
@@ -258,10 +243,7 @@ function PromptBoxFocusOnMountHarness() {
   }, []);
 
   return (
-    <PromptBoxInternal
-      {...createPromptBoxProps()}
-      promptBoxRef={promptBoxRef}
-    />
+    <ComposerBox {...createPromptBoxProps()} promptBoxRef={promptBoxRef} />
   );
 }
 
@@ -273,7 +255,7 @@ function PromptBoxHistoryAutoFocusHarness({
   return (
     <>
       <button type="button">Outside focus target</button>
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           history: {
             currentDraft: emptyPromptDraftState(),
@@ -300,7 +282,7 @@ function PromptBoxHistoryAutoFocusAfterLayoutStealHarness({
 
   return (
     <>
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           history: {
             currentDraft: emptyPromptDraftState(),
@@ -322,7 +304,7 @@ describe("composer portal focus", () => {
     renderPromptBox("", {
       props: {
         autoFocus: false,
-        header: createPortal(
+        handoff: createPortal(
           <div role="dialog" tabIndex={-1}>
             <span>Reasoning in drawer</span>
           </div>,
@@ -346,7 +328,7 @@ function PromptBoxHistoryNavigationHarness({
 }) {
   const [draft, setDraft] = useState(emptyPromptDraftState);
   return (
-    <PromptBoxInternal
+    <ComposerBox
       {...createPromptBoxProps({
         value: draft.text,
         mentionRanges: draft.mentions,
@@ -375,7 +357,7 @@ function renderPromptBox(
     initialMentionRanges?: PromptTextMention[];
     mentionTriggers?: TypeaheadConfig["mention"]["triggers"];
     mentionSuggestions?: readonly PromptMentionSuggestion[];
-    commandSuggestions?: TypeaheadConfig["command"]["suggestions"];
+    commandSuggestions?: readonly ProviderCommandSuggestion[];
     onAttachFiles?: (files: File[]) => Promise<PromptDraftAttachment[]>;
     upload?: (files: File[]) => Promise<PromptDraftAttachment[]>;
     initialAttachments?: PromptDraftAttachment[];
@@ -386,8 +368,10 @@ function renderPromptBox(
 ) {
   registerComposerMenuPlugins();
   const changes: PromptChange[] = [];
-  const onMentionQueryChange = vi.fn();
-  const onCommandQueryChange = vi.fn();
+  setComposerSearchResults({
+    mentionSuggestions: options.mentionSuggestions,
+    commandSuggestions: options.commandSuggestions,
+  });
   const onSubmit = vi.fn();
   const promptBoxRef = createRef<PromptBoxHandle>();
   const attachmentState = { items: options.initialAttachments ?? [] };
@@ -425,7 +409,8 @@ function renderPromptBox(
     );
     return (
       <PluginComposerHostProvider value={host}>
-        <PromptBoxInternal
+        <ComposerBox
+          surface="thread"
           value={value}
           mentionRanges={mentionRanges}
           onChange={(nextValue, nextMentions) => {
@@ -434,12 +419,9 @@ function renderPromptBox(
             setMentionRanges(nextMentions);
           }}
           onSubmit={onSubmit}
-          typeahead={buildTypeaheadConfig({
+          typeahead={testTypeaheadConfig({
             mentionTriggers: options.mentionTriggers,
-            mentionSuggestions: options.mentionSuggestions,
-            onMentionQueryChange,
-            commandSuggestions: options.commandSuggestions,
-            onCommandQueryChange,
+            commandTriggers: ["/"],
           })}
           mentionMenuPlacement="bottom"
           attachments={
@@ -464,11 +446,9 @@ function renderPromptBox(
   }
 
   const ui = (
-    <MemoryRouter>
-      <AttachmentOpenerContext.Provider value={options.openAttachment ?? null}>
-        <PromptBoxHarness />
-      </AttachmentOpenerContext.Provider>
-    </MemoryRouter>
+    <AttachmentOpenerContext.Provider value={options.openAttachment ?? null}>
+      <PromptBoxHarness />
+    </AttachmentOpenerContext.Provider>
   );
   const view = render(
     options.compact === undefined ? (
@@ -482,8 +462,8 @@ function renderPromptBox(
   return {
     view,
     changes,
-    onMentionQueryChange,
-    onCommandQueryChange,
+    onMentionQueryChange: composerSearchQueries.mention,
+    onCommandQueryChange: composerSearchQueries.command,
     onSubmit,
     promptBoxRef,
     attachmentPaths: () => attachmentState.items.map((item) => item.path),
@@ -504,32 +484,6 @@ function uploadedAs(files: File[]): PromptDraftAttachment[] {
     path: `uploads/${file.name}`,
     name: file.name,
   }));
-}
-
-function dispatchThroughEditorTarget({
-  eventName,
-  target,
-}: {
-  eventName: "auxclick" | "click";
-  target: HTMLElement;
-}) {
-  const editorRoot = document.createElement("div");
-  editorRoot.append(target);
-  document.body.append(editorRoot);
-
-  let suppressed = false;
-  editorRoot.addEventListener(eventName, (event) => {
-    suppressed = suppressPromptEditorAnchorActivation(event);
-  });
-
-  const event = new MouseEvent(eventName, {
-    bubbles: true,
-    cancelable: true,
-  });
-  const defaultAllowed = target.dispatchEvent(event);
-
-  editorRoot.remove();
-  return { defaultAllowed, event, suppressed };
 }
 
 async function selectPromptAction(label: string) {
@@ -617,6 +571,38 @@ function pasteClipboard({
       },
     },
   });
+}
+
+function recordResizeObservers() {
+  const observers: { callback: ResizeObserverCallback; targets: Element[] }[] =
+    [];
+  const original = window.ResizeObserver;
+  window.ResizeObserver = class RecordingResizeObserver {
+    private readonly entry: (typeof observers)[number];
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { callback, targets: [] };
+      observers.push(this.entry);
+    }
+    observe(target: Element) {
+      this.entry.targets.push(target);
+    }
+    unobserve() {}
+    disconnect() {
+      this.entry.targets = [];
+    }
+  };
+  onTestFinished(() => {
+    window.ResizeObserver = original;
+  });
+  return {
+    notify(target: Element) {
+      for (const observer of observers) {
+        if (observer.targets.includes(target)) {
+          observer.callback([], new original(() => {}));
+        }
+      }
+    },
+  };
 }
 
 function mockPointerCoarse(matches: boolean): () => void {
@@ -730,12 +716,14 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+beforeEach(async () => {
+  await registerComposerPlugin();
+});
+
 describe("suppressPromptEditorAnchorActivation", () => {
   it("restores the editor selection when pane navigation returns focus", async () => {
     render(
-      <PromptBoxInternal
-        {...createPromptBoxProps({ value: "Retained draft" })}
-      />,
+      <ComposerBox {...createPromptBoxProps({ value: "Retained draft" })} />,
     );
     const element = getPromptEditorElement() as TiptapEditorHTMLElement;
     const editor = element.editor;
@@ -747,7 +735,7 @@ describe("suppressPromptEditorAnchorActivation", () => {
     document.body.append(outside);
     outside.focus();
     act(() => {
-      focusPaneComposer(element);
+      expect(focusPaneComposer(document.body)).toBe(true);
     });
     expect(document.activeElement).toBe(element);
     expect(editor.state.selection.from).toBe(3);
@@ -756,53 +744,9 @@ describe("suppressPromptEditorAnchorActivation", () => {
     expect(editor.getText()).toBe("Retained draft");
     outside.remove();
   });
-
-  it("cancels anchor clicks inside the prompt editor", () => {
-    const anchor = document.createElement("a");
-    anchor.href = "https://example.com";
-    anchor.textContent = "https://example.com";
-
-    const result = dispatchThroughEditorTarget({
-      eventName: "click",
-      target: anchor,
-    });
-
-    expect(result.suppressed).toBe(true);
-    expect(result.event.defaultPrevented).toBe(true);
-    expect(result.defaultAllowed).toBe(false);
-  });
-
-  it("cancels auxiliary anchor clicks inside the prompt editor", () => {
-    const anchor = document.createElement("a");
-    anchor.href = "https://example.com";
-    anchor.textContent = "https://example.com";
-
-    const result = dispatchThroughEditorTarget({
-      eventName: "auxclick",
-      target: anchor,
-    });
-
-    expect(result.suppressed).toBe(true);
-    expect(result.event.defaultPrevented).toBe(true);
-    expect(result.defaultAllowed).toBe(false);
-  });
-
-  it("does not cancel ordinary prompt editor clicks", () => {
-    const span = document.createElement("span");
-    span.textContent = "plain prompt text";
-
-    const result = dispatchThroughEditorTarget({
-      eventName: "click",
-      target: span,
-    });
-
-    expect(result.suppressed).toBe(false);
-    expect(result.event.defaultPrevented).toBe(false);
-    expect(result.defaultAllowed).toBe(true);
-  });
 });
 
-describe("PromptBoxInternal composer popups", () => {
+describe("ComposerBox composer popups", () => {
   function SavedPrompts() {
     const composer = useComposer();
     return (
@@ -1039,7 +983,7 @@ describe("PromptBoxInternal composer popups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Other plugin close" }));
     expect(foreignClose).toHaveBeenCalledWith(false);
     expect(screen.getByRole("dialog", { name: "Saved prompts" })).toBeTruthy();
-    act(() => resetPluginSlotStoreForTest());
+    act(() => removePluginSlotRegistrations("saved-prompts"));
     expect(screen.queryByRole("dialog", { name: "Saved prompts" })).toBeNull();
   });
 
@@ -1090,33 +1034,7 @@ describe("PromptBoxInternal composer popups", () => {
   });
 });
 
-describe("PromptBoxInternal controlled value sync", () => {
-  it("compares cloned mention values without serializing the prompt text", () => {
-    const mention: ComposerMentionShape = {
-      from: 4,
-      to: 10,
-      kind: "path",
-      source: "workspace",
-      entryKind: "file",
-      path: "src/a.ts",
-      label: "a.ts",
-    };
-    const left = { text: "see @a.ts", mentions: [mention] };
-
-    expect(
-      arePromptEditorValuesEqual(left, {
-        text: left.text,
-        mentions: [{ ...mention }],
-      }),
-    ).toBe(true);
-    expect(
-      arePromptEditorValuesEqual(left, {
-        text: left.text,
-        mentions: [{ ...mention, path: "src/b.ts" }],
-      }),
-    ).toBe(false);
-  });
-
+describe("ComposerBox controlled value sync", () => {
   it("suppresses and restores plugin customizations without remounting the editor, keeping plus-menu rows", () => {
     setPluginSlotRegistrations(
       "pending-test",
@@ -1137,14 +1055,14 @@ describe("PromptBoxInternal controlled value sync", () => {
       ]),
     );
     const props = createPromptBoxProps({ value: "Retained draft" });
-    const view = render(<PromptBoxInternal {...props} />);
+    const view = render(<ComposerBox {...props} />);
     const editor = getPromptEditorElement();
 
     expect(screen.getByRole("button", { name: "Plugin action" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Prompt actions" })).toBeTruthy();
 
     view.rerender(
-      <PromptBoxInternal {...props} suppressPluginComposerCustomizations />,
+      <ComposerBox {...props} suppressPluginComposerCustomizations />,
     );
 
     expect(screen.queryByRole("button", { name: "Plugin action" })).toBeNull();
@@ -1152,10 +1070,7 @@ describe("PromptBoxInternal controlled value sync", () => {
     expect(getPromptEditorElement()).toBe(editor);
 
     view.rerender(
-      <PromptBoxInternal
-        {...props}
-        suppressPluginComposerCustomizations={false}
-      />,
+      <ComposerBox {...props} suppressPluginComposerCustomizations={false} />,
     );
 
     expect(screen.getByRole("button", { name: "Plugin action" })).toBeTruthy();
@@ -1166,7 +1081,7 @@ describe("PromptBoxInternal controlled value sync", () => {
   it("decorates only draft text and removes the effect when cleared", async () => {
     const props = createPromptBoxProps({ value: "Keep this draft readable" });
     const view = render(
-      <PromptBoxInternal
+      <ComposerBox
         {...props}
         textEffects={[
           {
@@ -1189,7 +1104,7 @@ describe("PromptBoxInternal controlled value sync", () => {
         ?.classList.contains("test-text-effect"),
     ).toBe(false);
 
-    view.rerender(<PromptBoxInternal {...props} textEffects={[]} />);
+    view.rerender(<ComposerBox {...props} textEffects={[]} />);
     await waitFor(() => {
       expect(view.container.querySelector(".test-text-effect")).toBeNull();
     });
@@ -1207,9 +1122,7 @@ describe("PromptBoxInternal controlled value sync", () => {
       effect: { className: "zeta-effect" },
       order: 2,
     } as const;
-    const view = render(
-      <PromptBoxInternal {...props} textEffects={[alpha, zeta]} />,
-    );
+    const view = render(<ComposerBox {...props} textEffects={[alpha, zeta]} />);
 
     await waitFor(() => {
       expect(view.container.querySelector(".alpha-effect")?.textContent).toBe(
@@ -1219,7 +1132,7 @@ describe("PromptBoxInternal controlled value sync", () => {
         "Overlapping effects",
       );
     });
-    view.rerender(<PromptBoxInternal {...props} textEffects={[zeta]} />);
+    view.rerender(<ComposerBox {...props} textEffects={[zeta]} />);
     await waitFor(() => {
       expect(view.container.querySelector(".alpha-effect")).toBeNull();
       expect(view.container.querySelector(".zeta-effect")?.textContent).toBe(
@@ -1227,7 +1140,7 @@ describe("PromptBoxInternal controlled value sync", () => {
       );
     });
 
-    view.rerender(<PromptBoxInternal {...props} textEffects={[]} />);
+    view.rerender(<ComposerBox {...props} textEffects={[]} />);
     await waitFor(() => {
       expect(view.container.querySelector(".zeta-effect")).toBeNull();
     });
@@ -1268,7 +1181,7 @@ describe("PromptBoxInternal controlled value sync", () => {
       ]),
     );
     const props = createPromptBoxProps({ value: "Decorate this draft" });
-    const view = render(<PromptBoxInternal {...props} />);
+    const view = render(<ComposerBox {...props} />);
     const editor = getPromptEditorElement();
 
     await waitFor(() => {
@@ -1315,7 +1228,7 @@ describe("PromptBoxInternal controlled value sync", () => {
     expect(getPromptEditorElement()).toBe(editor);
 
     view.rerender(
-      <PromptBoxInternal {...props} suppressPluginComposerCustomizations />,
+      <ComposerBox {...props} suppressPluginComposerCustomizations />,
     );
     await waitFor(() => {
       expect(
@@ -1338,14 +1251,14 @@ describe("PromptBoxInternal controlled value sync", () => {
     const props = createPromptBoxProps({ value: "" });
     const rendered = render(
       <PluginComposerHostProvider value={host("message-1")}>
-        <PromptBoxInternal {...props} />
+        <ComposerBox {...props} />
       </PluginComposerHostProvider>,
     );
     expect(getComposerEditorBridge("queued-message:message-1")).not.toBeNull();
 
     rendered.rerender(
       <PluginComposerHostProvider value={host("message-2")}>
-        <PromptBoxInternal {...props} />
+        <ComposerBox {...props} />
       </PluginComposerHostProvider>,
     );
     expect(getComposerEditorBridge("queued-message:message-1")).toBeNull();
@@ -1386,7 +1299,7 @@ describe("PromptBoxInternal controlled value sync", () => {
     const props = createPromptBoxProps({ value: draft.text });
     const rendered = render(
       <PluginComposerHostProvider value={host("message-1")}>
-        <PromptBoxInternal {...props} />
+        <ComposerBox {...props} />
       </PluginComposerHostProvider>,
     );
 
@@ -1402,7 +1315,7 @@ describe("PromptBoxInternal controlled value sync", () => {
 
     rendered.rerender(
       <PluginComposerHostProvider value={host("message-2")}>
-        <PromptBoxInternal {...props} />
+        <ComposerBox {...props} />
       </PluginComposerHostProvider>,
     );
 
@@ -1540,7 +1453,7 @@ describe("PromptBoxInternal controlled value sync", () => {
         view.rerender(
           <PromptBoxInternal
             {...props}
-            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+        compact={{ when: "always", placeholder: "Compact prompt" }}
             onComposerLayoutChange={nextLayoutChange}
           />,
         );
@@ -1580,7 +1493,7 @@ describe("PromptBoxInternal controlled value sync", () => {
         view.rerender(
           <PromptBoxInternal
             {...props}
-            compact={{ isCompact: true, placeholder: "Compact prompt" }}
+        compact={{ when: "always", placeholder: "Compact prompt" }}
             onComposerLayoutChange={nextLayoutChange}
           />,
         );
@@ -1635,7 +1548,7 @@ describe("PromptBoxInternal controlled value sync", () => {
   it("skips passive autofocus on coarse pointers", async () => {
     const restoreMatchMedia = mockPointerCoarse(true);
     try {
-      render(<PromptBoxInternal {...createPromptBoxProps()} />);
+      render(<ComposerBox {...createPromptBoxProps()} />);
 
       await waitFor(() =>
         expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
@@ -1655,12 +1568,12 @@ describe("PromptBoxInternal controlled value sync", () => {
     document.body.append(rename);
     try {
       const props = createPromptBoxProps({ autoFocus: false });
-      const view = render(<PromptBoxInternal {...props} />);
+      const view = render(<ComposerBox {...props} />);
       await waitFor(() =>
         expect(getPromptEditorElement()).toBeInstanceOf(HTMLElement),
       );
       input.focus();
-      view.rerender(<PromptBoxInternal {...props} autoFocus />);
+      view.rerender(<ComposerBox {...props} autoFocus />);
       await act(
         () =>
           new Promise<void>((resolve) =>
@@ -1678,10 +1591,10 @@ describe("PromptBoxInternal controlled value sync", () => {
     const restoreMatchMedia = mockPointerCoarse(false);
     try {
       const baseProps = createPromptBoxProps();
-      const view = render(<PromptBoxInternal {...baseProps} />);
+      const view = render(<ComposerBox {...baseProps} />);
 
       await waitForPromptFocus();
-      view.rerender(<PromptBoxInternal {...baseProps} autoFocus={false} />);
+      view.rerender(<ComposerBox {...baseProps} autoFocus={false} />);
 
       await waitFor(() =>
         expect(document.activeElement).not.toBe(getPromptEditorElement()),
@@ -1699,14 +1612,14 @@ describe("PromptBoxInternal controlled value sync", () => {
         focusEndKey: 0,
         promptBoxRef,
       });
-      const view = render(<PromptBoxInternal {...baseProps} />);
+      const view = render(<ComposerBox {...baseProps} />);
 
       await waitFor(() => expect(promptBoxRef.current).not.toBeNull());
       const outsideTarget = document.createElement("button");
       document.body.append(outsideTarget);
       outsideTarget.focus();
 
-      view.rerender(<PromptBoxInternal {...baseProps} focusEndKey={1} />);
+      view.rerender(<ComposerBox {...baseProps} focusEndKey={1} />);
       promptBoxRef.current?.focusEnd();
 
       expect(document.activeElement).toBe(outsideTarget);
@@ -1722,9 +1635,7 @@ describe("PromptBoxInternal controlled value sync", () => {
       const onChange = vi.fn();
       const promptBoxRef = createRef<PromptBoxHandle>();
       render(
-        <PromptBoxInternal
-          {...createPromptBoxProps({ onChange, promptBoxRef })}
-        />,
+        <ComposerBox {...createPromptBoxProps({ onChange, promptBoxRef })} />,
       );
 
       await waitFor(() => expect(promptBoxRef.current).not.toBeNull());
@@ -1732,7 +1643,9 @@ describe("PromptBoxInternal controlled value sync", () => {
       document.body.append(outsideTarget);
       outsideTarget.focus();
 
-      act(() => promptBoxRef.current?.insertTextAtCursor("transcript"));
+      act(() =>
+        promptBoxRef.current?.voice?.deliverTranscript("transcript", "insert"),
+      );
 
       expect(onChange).toHaveBeenLastCalledWith("transcript", []);
       expect(document.activeElement).toBe(outsideTarget);
@@ -1748,7 +1661,7 @@ describe("PromptBoxInternal controlled value sync", () => {
       const start = vi.fn();
       const promptBoxRef = createRef<PromptBoxHandle>();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             promptBoxRef,
             voice: createVoiceConfig({ start }),
@@ -1916,10 +1829,10 @@ describe("PromptBoxInternal controlled value sync", () => {
       value: "",
       focusEndKey: 0,
     });
-    const view = render(<PromptBoxInternal {...baseProps} />);
+    const view = render(<ComposerBox {...baseProps} />);
 
     view.rerender(
-      <PromptBoxInternal
+      <ComposerBox
         {...baseProps}
         value={"> selected text\n"}
         focusEndKey={1}
@@ -1928,14 +1841,14 @@ describe("PromptBoxInternal controlled value sync", () => {
 
     await waitForPromptFocus();
     await act(async () => {
-      promptBoxRef.current?.insertTextAtCursor("reply");
+      promptBoxRef.current?.voice?.deliverTranscript("reply", "insert");
     });
 
     expect(onChange).toHaveBeenLastCalledWith("> selected text\n\nreply", []);
   });
 });
 
-describe("PromptBoxInternal programmatic submit", () => {
+describe("ComposerBox programmatic submit", () => {
   const COMBINED_SEND_AT = Date.now() + 60 * 60 * 1000;
 
   function renderThreadComposerWithSubmitter({
@@ -2010,24 +1923,22 @@ describe("PromptBoxInternal programmatic submit", () => {
       sendsOnEnter,
     };
     render(
-      <MemoryRouter>
-        <PluginComposerHostProvider value={host}>
-          <PromptBoxInternal
-            {...createPromptBoxProps({
-              value: text,
-              onSubmit: send,
-              submission: running
-                ? {
-                    isRunning: true,
-                    onModifierSubmit: steer,
-                    swapSubmitActions,
-                    showModifierSubmitAction: true,
-                  }
-                : {},
-            })}
-          />
-        </PluginComposerHostProvider>
-      </MemoryRouter>,
+      <PluginComposerHostProvider value={host}>
+        <ComposerBox
+          {...createPromptBoxProps({
+            value: text,
+            onSubmit: send,
+            submission: running
+              ? {
+                  isRunning: true,
+                  onModifierSubmit: steer,
+                  swapSubmitActions,
+                  showModifierSubmitAction: true,
+                }
+              : {},
+          })}
+        />
+      </PluginComposerHostProvider>,
     );
     return { send, steer, submitted, rejected };
   }
@@ -2147,11 +2058,11 @@ describe("PromptBoxInternal programmatic submit", () => {
   });
 });
 
-describe("PromptBoxInternal submit shortcuts", () => {
+describe("ComposerBox submit shortcuts", () => {
   it("exposes the disabled submit reason as its label and hover tooltip", async () => {
     const reason = "Loading models from the selected machine...";
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Investigate this",
           submission: { disabled: true, disabledReason: reason },
@@ -2178,7 +2089,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
     try {
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Run this",
             onSubmit,
@@ -2204,12 +2115,11 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onChange = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Run this",
             onChange,
             onSubmit,
-            blurOnPointerSubmit: true,
           })}
         />,
       );
@@ -2246,7 +2156,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onChange = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "First line",
             onChange,
@@ -2284,7 +2194,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onChange = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "First line",
             onChange,
@@ -2315,7 +2225,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onChange = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "First line",
             onChange,
@@ -2350,7 +2260,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
           const onModifierSubmit = vi.fn();
           const onStop = vi.fn();
           render(
-            <PromptBoxInternal
+            <ComposerBox
               {...createPromptBoxProps({
                 value,
                 onSubmit,
@@ -2437,23 +2347,21 @@ describe("PromptBoxInternal submit shortcuts", () => {
           focus: vi.fn(),
         };
         const renderComposer = (value: string, disabled = false) => (
-          <MemoryRouter>
-            <PluginComposerHostProvider value={host}>
-              <PromptBoxInternal
-                {...createPromptBoxProps({
-                  value,
-                  onSubmit,
-                  submission: {
-                    onModifierSubmit,
-                    swapSubmitActions,
-                    disabled,
-                    showModifierSubmitAction: true,
-                  },
-                  compact: { isCompact: true, placeholder: "Ask a follow-up" },
-                })}
-              />
-            </PluginComposerHostProvider>
-          </MemoryRouter>
+          <PluginComposerHostProvider value={host}>
+            <ComposerBox
+              {...createPromptBoxProps({
+                value,
+                onSubmit,
+                submission: {
+                  onModifierSubmit,
+                  swapSubmitActions,
+                  disabled,
+                  showModifierSubmitAction: true,
+                },
+                compact: { when: "always", placeholder: "Ask a follow-up" },
+              })}
+            />
+          </PluginComposerHostProvider>
         );
         const { rerender } = render(renderComposer("Follow up"));
         const touch = {
@@ -2561,12 +2469,12 @@ describe("PromptBoxInternal submit shortcuts", () => {
       try {
         const save = vi.fn();
         render(
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value: "Edit the queued message",
               onSubmit: save,
               submission: { onModifierSubmit: save },
-              compact: { isCompact: true, placeholder: "Edit message" },
+              compact: { when: "always", placeholder: "Edit message" },
             })}
           />,
         );
@@ -2608,7 +2516,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
     const onSubmit = vi.fn();
     const onModifierSubmit = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Follow up",
           onSubmit,
@@ -2635,12 +2543,11 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onModifierSubmit = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Follow up",
             onSubmit,
             submission: { onModifierSubmit },
-            blurOnPointerSubmit: true,
           })}
         />,
       );
@@ -2670,7 +2577,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       const onModifierSubmit = vi.fn();
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Follow up",
             onSubmit,
@@ -2701,7 +2608,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       .mockReturnValue("MacIntel");
     try {
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Follow up",
             submission: { onModifierSubmit: vi.fn() },
@@ -2729,7 +2636,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
       try {
         const onSubmit = vi.fn();
         render(
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value: "Composing",
               onSubmit,
@@ -2757,7 +2664,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
     try {
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Composed candidate",
             onSubmit,
@@ -2787,7 +2694,7 @@ describe("PromptBoxInternal submit shortcuts", () => {
     try {
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Run this",
             onSubmit,
@@ -2811,11 +2718,11 @@ describe("PromptBoxInternal submit shortcuts", () => {
   });
 });
 
-describe("PromptBoxInternal escape", () => {
+describe("ComposerBox escape", () => {
   it("blurs the editor when no host Escape action is provided", async () => {
     const promptBoxRef = createRef<PromptBoxHandle>();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({ value: "Follow-up message" })}
         promptBoxRef={promptBoxRef}
       />,
@@ -2833,7 +2740,7 @@ describe("PromptBoxInternal escape", () => {
     const onEscape = vi.fn();
     const promptBoxRef = createRef<PromptBoxHandle>();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({ onEscape, value: "Edited message" })}
         promptBoxRef={promptBoxRef}
       />,
@@ -2853,7 +2760,7 @@ describe("PromptBoxInternal escape", () => {
     const onEscape = vi.fn();
     const promptBoxRef = createRef<PromptBoxHandle>();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           onEscape,
           value: "/re",
@@ -2888,24 +2795,42 @@ describe("PromptBoxInternal escape", () => {
   });
 });
 
-describe("PromptBoxInternal size controls", () => {
+describe("ComposerBox size controls", () => {
+  it("renders the height saved under the existing composer key before the upgrade", () => {
+    const storedHeight = 312;
+    window.localStorage.setItem(
+      COMPOSER_EDITOR_HEIGHT_STORAGE_KEY,
+      JSON.stringify(storedHeight),
+    );
+    onTestFinished(() =>
+      window.localStorage.removeItem(COMPOSER_EDITOR_HEIGHT_STORAGE_KEY),
+    );
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ComposerBox {...createPromptBoxProps()} />
+      </Provider>,
+    );
+
+    const editorScroll = document.querySelector<HTMLElement>(
+      "[data-promptbox-editor-scroll]",
+    );
+    expect(editorScroll?.style.minHeight).toContain(`${storedHeight}px`);
+  });
+
   it.each([
     [
       "thread",
       "min(calc(50dvh - 3rem), var(--composer-editor-available-height, 100dvh))",
     ],
     [
-      "root-compose",
+      "new-thread",
       "min(calc(70dvh - 3rem), var(--composer-editor-available-height, 100dvh))",
     ],
   ] as const)(
     "caps the %s editor at its intended viewport height or the host's available space",
-    (layout, maxHeight) => {
-      render(
-        <PromptBoxInternal
-          {...createPromptBoxProps({ editorLayout: layout })}
-        />,
-      );
+    (surface, maxHeight) => {
+      render(<ComposerBox {...createPromptBoxProps({ surface })} />);
 
       const editorScroll = document.querySelector<HTMLElement>(
         "[data-promptbox-editor-scroll]",
@@ -2918,7 +2843,7 @@ describe("PromptBoxInternal size controls", () => {
     getDefaultStore().set(composerEditorHeightAtom, 300);
     render(
       <PromptBoxInternal
-        {...createPromptBoxProps({ compact: { isCompact: true } })}
+        {...createPromptBoxProps({ compact: { when: "always", placeholder: "Compact prompt" } })}
       />,
     );
 
@@ -2935,7 +2860,7 @@ describe("PromptBoxInternal size controls", () => {
   it("offers only the collapse action and releases editor focus", async () => {
     const onCollapse = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           onCollapse,
         })}
@@ -2960,7 +2885,7 @@ describe("PromptBoxInternal size controls", () => {
   });
 });
 
-describe("PromptBoxInternal plugin composer actions", () => {
+describe("ComposerBox plugin composer actions", () => {
   it("mounts scope-matched actions in deterministic order before voice", () => {
     setPluginSlotRegistrations(
       "zeta",
@@ -2995,7 +2920,7 @@ describe("PromptBoxInternal plugin composer actions", () => {
     );
 
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           voice: createVoiceConfig(),
         })}
@@ -3052,14 +2977,12 @@ describe("PromptBoxInternal plugin composer actions", () => {
     function Harness() {
       const textEffects = useComposerTextEffects(host.textEffectKey);
       return (
-        <MemoryRouter>
-          <PluginComposerHostProvider value={host}>
-            <PromptBoxInternal
-              {...createPromptBoxProps({ value: "Native draft" })}
-              textEffects={textEffects}
-            />
-          </PluginComposerHostProvider>
-        </MemoryRouter>
+        <PluginComposerHostProvider value={host}>
+          <ComposerBox
+            {...createPromptBoxProps({ value: "Native draft" })}
+            textEffects={textEffects}
+          />
+        </PluginComposerHostProvider>
       );
     }
 
@@ -3137,13 +3060,9 @@ describe("PromptBoxInternal plugin composer actions", () => {
       focus: vi.fn(),
     };
     render(
-      <MemoryRouter>
-        <PluginComposerHostProvider value={host}>
-          <PromptBoxInternal
-            {...createPromptBoxProps({ value: "Thread draft" })}
-          />
-        </PluginComposerHostProvider>
-      </MemoryRouter>,
+      <PluginComposerHostProvider value={host}>
+        <ComposerBox {...createPromptBoxProps({ value: "Thread draft" })} />
+      </PluginComposerHostProvider>,
     );
     const editor = getPromptEditorElement();
     expect(editor.getAttribute("contenteditable")).toBe("true");
@@ -3229,22 +3148,18 @@ describe("PromptBoxInternal plugin composer actions", () => {
     const secondHost = host("two");
     const props = createPromptBoxProps({ value: "Scoped draft" });
     const rendered = render(
-      <MemoryRouter>
-        <PluginComposerHostProvider value={firstHost}>
-          <PromptBoxInternal {...props} />
-        </PluginComposerHostProvider>
-      </MemoryRouter>,
+      <PluginComposerHostProvider value={firstHost}>
+        <ComposerBox {...props} />
+      </PluginComposerHostProvider>,
     );
     expect(mounted).toHaveBeenCalledTimes(1);
     expect(getComposerInputLock(firstHost.textEffectKey)).toBe(true);
     expect(getComposerTextEffects(firstHost.textEffectKey)).toHaveLength(1);
 
     rendered.rerender(
-      <MemoryRouter>
-        <PluginComposerHostProvider value={secondHost}>
-          <PromptBoxInternal {...props} />
-        </PluginComposerHostProvider>
-      </MemoryRouter>,
+      <PluginComposerHostProvider value={secondHost}>
+        <ComposerBox {...props} />
+      </PluginComposerHostProvider>,
     );
     expect(cleaned).toHaveBeenCalledTimes(1);
     expect(mounted).toHaveBeenCalledTimes(2);
@@ -3269,8 +3184,10 @@ describe("PromptBoxInternal plugin composer actions", () => {
       ]),
     );
     render(
-      <PromptBoxInternal
-        {...createPromptBoxProps({ compact: { isCompact: true } })}
+      <ComposerBox
+        {...createPromptBoxProps({
+          compact: { when: "always", placeholder: "Ask a follow-up" },
+        })}
       />,
     );
 
@@ -3279,7 +3196,54 @@ describe("PromptBoxInternal plugin composer actions", () => {
   });
 });
 
-describe("PromptBoxInternal compact layout", () => {
+describe("ComposerBox attachment previews", () => {
+  afterEach(() => {
+    clearLocalAttachmentPreviews();
+    Reflect.deleteProperty(URL, "createObjectURL");
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+  });
+
+  it("releases a local preview once its attachment leaves the draft", () => {
+    const revoked: string[] = [];
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: () => "blob:local-photo",
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: (url: string) => revoked.push(url),
+    });
+    registerLocalAttachmentPreview(
+      "photo-1-abc.png",
+      new Blob([new Uint8Array([1])], { type: "image/png" }),
+    );
+    const photo = {
+      type: "localImage" as const,
+      path: "photo-1-abc.png",
+      name: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: 1,
+    };
+    const props = createPromptBoxProps({
+      attachments: { items: [photo], onUpdate: vi.fn() },
+    });
+    const { rerender } = render(<ComposerBox {...props} />);
+    expect(
+      screen.getByRole("img", { name: "photo.png" }).getAttribute("src"),
+    ).toBe("blob:local-photo");
+    expect(revoked).toEqual([]);
+
+    rerender(
+      <ComposerBox
+        {...props}
+        attachments={{ ...props.attachments, items: [] }}
+      />,
+    );
+    expect(revoked).toEqual(["blob:local-photo"]);
+  });
+});
+
+describe("ComposerBox compact layout", () => {
   it("shows only an attachment count when compact and removal controls when expanded", () => {
     const items: NonNullable<
       NonNullable<PromptBoxProps["attachments"]>["items"]
@@ -3294,15 +3258,15 @@ describe("PromptBoxInternal compact layout", () => {
     ];
     const props = createPromptBoxProps({
       attachments: { items, onUpdate: vi.fn() },
-      compact: { isCompact: true },
+      compact: { when: "always", placeholder: "Ask a follow-up" },
     });
-    const { rerender } = render(<PromptBoxInternal {...props} />);
+    const { rerender } = render(<ComposerBox {...props} />);
     expect(screen.getByRole("img", { name: "2 attachments" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Remove / })).toBeNull();
     expect(
       document.querySelector("[data-promptbox-attachments] button"),
     ).toBeNull();
-    rerender(<PromptBoxInternal {...props} compact={{ isCompact: false }} />);
+    rerender(<ComposerBox {...props} compact={undefined} />);
     expect(
       screen.getByRole("button", { name: "Remove photo.png" }),
     ).toBeTruthy();
@@ -3310,14 +3274,14 @@ describe("PromptBoxInternal compact layout", () => {
       screen.getByRole("button", { name: "Remove notes.txt" }),
     ).toBeTruthy();
     rerender(
-      <PromptBoxInternal
+      <ComposerBox
         {...props}
         attachments={{ ...props.attachments, items: items.slice(1) }}
       />,
     );
     expect(screen.getByRole("img", { name: "1 attachment" })).toBeTruthy();
     rerender(
-      <PromptBoxInternal
+      <ComposerBox
         {...props}
         attachments={{ ...props.attachments, items: [] }}
       />,
@@ -3329,11 +3293,11 @@ describe("PromptBoxInternal compact layout", () => {
     const restoreMatchMedia = mockPointerCoarse(true);
     try {
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             attachments: { isAttaching: true },
             compact: {
-              isCompact: true,
+              when: "always",
               placeholder: "Ask a follow-up",
             },
             voice: createVoiceConfig(),
@@ -3354,12 +3318,12 @@ describe("PromptBoxInternal compact layout", () => {
     }
   });
 
-  it("publishes the container-compact placeholder for CSS", () => {
+  it("publishes the narrow compact placeholder for CSS", () => {
     const baseProps = createPromptBoxProps();
     const view = render(
-      <PromptBoxInternal
+      <ComposerBox
         {...baseProps}
-        containerCompactPlaceholder="Reconnecting..."
+        compact={{ when: "narrow", placeholder: "Reconnecting..." }}
       />,
     );
     const form = document.querySelector("[data-promptbox]");
@@ -3371,7 +3335,7 @@ describe("PromptBoxInternal compact layout", () => {
       form.style.getPropertyValue("--promptbox-container-compact-placeholder"),
     ).toBe('"Reconnecting..."');
 
-    view.rerender(<PromptBoxInternal {...baseProps} />);
+    view.rerender(<ComposerBox {...baseProps} />);
     expect(
       form.style.getPropertyValue("--promptbox-container-compact-placeholder"),
     ).toBe("");
@@ -3380,20 +3344,24 @@ describe("PromptBoxInternal compact layout", () => {
   it.each([
     {
       trigger: "the compact layout",
-      before: { compact: { isCompact: true, placeholder: "Ask a follow-up" } },
-      after: { compact: { isCompact: false, placeholder: "Ask a follow-up" } },
+      before: {
+        compact: { when: "always" as const, placeholder: "Ask a follow-up" },
+      },
+      after: { compact: undefined },
     },
     {
-      trigger: "an external animation key",
-      before: { heightAnimationKey: "compact" },
-      after: { heightAnimationKey: "expanded" },
+      trigger: "the narrow compact form",
+      before: {
+        compact: { when: "narrow" as const, placeholder: "Ask a follow-up" },
+      },
+      after: { compact: undefined },
     },
   ])(
     "animates a height change driven by $trigger",
     async ({ before, after }) => {
-      const promptBoxRef = createRef<PromptBoxHandle>();
-      const baseProps = createPromptBoxProps({ promptBoxRef });
-      const view = render(<PromptBoxInternal {...baseProps} {...before} />);
+      const resizes = recordResizeObservers();
+      const baseProps = createPromptBoxProps();
+      const view = render(<ComposerBox {...baseProps} {...before} />);
       const form = document.querySelector("[data-promptbox]");
       if (!(form instanceof HTMLFormElement)) {
         throw new Error("Prompt box form was not rendered");
@@ -3403,8 +3371,8 @@ describe("PromptBoxInternal compact layout", () => {
         .mockReturnValueOnce(new DOMRect(0, 0, 320, 144))
         .mockReturnValue(new DOMRect(0, 0, 320, 144));
 
-      act(() => promptBoxRef.current?.captureHeightForLayoutChange());
-      view.rerender(<PromptBoxInternal {...baseProps} {...after} />);
+      act(() => resizes.notify(form));
+      view.rerender(<ComposerBox {...baseProps} {...after} />);
 
       await waitFor(() => {
         expect(form.style.transition).toContain("height 240ms");
@@ -3416,11 +3384,14 @@ describe("PromptBoxInternal compact layout", () => {
     },
   );
 
-  it("skips an external layout animation when the height did not change", () => {
-    const promptBoxRef = createRef<PromptBoxHandle>();
-    const baseProps = createPromptBoxProps({ promptBoxRef });
+  it("skips a layout animation when the height did not change", () => {
+    const resizes = recordResizeObservers();
+    const baseProps = createPromptBoxProps();
     const view = render(
-      <PromptBoxInternal {...baseProps} heightAnimationKey="compact" />,
+      <ComposerBox
+        {...baseProps}
+        compact={{ when: "narrow", placeholder: "Ask a follow-up" }}
+      />,
     );
     const form = document.querySelector("[data-promptbox]");
     if (!(form instanceof HTMLFormElement)) {
@@ -3430,10 +3401,8 @@ describe("PromptBoxInternal compact layout", () => {
       new DOMRect(0, 0, 320, 144),
     );
 
-    act(() => promptBoxRef.current?.captureHeightForLayoutChange());
-    view.rerender(
-      <PromptBoxInternal {...baseProps} heightAnimationKey="expanded" />,
-    );
+    act(() => resizes.notify(form));
+    view.rerender(<ComposerBox {...baseProps} compact={undefined} />);
 
     expect(form.style.transition).toBe("");
     expect(form.style.height).toBe("");
@@ -3443,14 +3412,14 @@ describe("PromptBoxInternal compact layout", () => {
     const voice = createVoiceConfig();
 
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value:
             "A compact follow-up that is much wider than the available mobile space\nA hidden second line",
           attachments: { onAttachFiles: vi.fn() },
-          footerStart: <button type="button">Model selector</button>,
+          executionControls: <button type="button">Model selector</button>,
           compact: {
-            isCompact: true,
+            when: "always",
             placeholder: "Ask a follow-up",
           },
           promptActions,
@@ -3531,10 +3500,10 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const start = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             compact: {
-              isCompact: true,
+              when: "always",
               placeholder: "Ask a follow-up",
             },
             voice: createVoiceConfig({ start }),
@@ -3575,10 +3544,12 @@ describe("PromptBoxInternal compact layout", () => {
         const start = vi.fn();
         const onStop = vi.fn();
         render(
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               submission: { isRunning: true, onStop },
-              compact: { isCompact, placeholder: "Ask a follow-up" },
+              compact: isCompact
+                ? { when: "always", placeholder: "Ask a follow-up" }
+                : undefined,
               voice: createVoiceConfig({ start }),
             })}
           />,
@@ -3617,12 +3588,12 @@ describe("PromptBoxInternal compact layout", () => {
         const start = vi.fn();
         const onSubmit = vi.fn();
         render(
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value: "Please also check the mobile layout.",
               onSubmit,
               submission: { isRunning, onStop: vi.fn() },
-              compact: { isCompact: true, placeholder: "Ask a follow-up" },
+              compact: { when: "always", placeholder: "Ask a follow-up" },
               voice: createVoiceConfig({ start }),
             })}
           />,
@@ -3657,12 +3628,12 @@ describe("PromptBoxInternal compact layout", () => {
       const voice = createVoiceConfig({ start });
       const onSubmit = vi.fn();
       const { rerender } = render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Send this",
             onSubmit,
             voice,
-            compact: { isCompact: true, placeholder: "Ask a follow-up" },
+            compact: { when: "always", placeholder: "Ask a follow-up" },
           })}
         />,
       );
@@ -3684,12 +3655,12 @@ describe("PromptBoxInternal compact layout", () => {
       expect(onSubmit).toHaveBeenCalledOnce();
 
       rerender(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "",
             onSubmit,
             voice,
-            compact: { isCompact: true, placeholder: "Ask a follow-up" },
+            compact: { when: "always", placeholder: "Ask a follow-up" },
           })}
         />,
       );
@@ -3719,9 +3690,9 @@ describe("PromptBoxInternal compact layout", () => {
           value: "Send this follow-up",
           onSubmit,
           submission: { isRunning, onStop },
-          compact: { isCompact: true, placeholder: "Ask a follow-up" },
+          compact: { when: "always", placeholder: "Ask a follow-up" },
         });
-        const { rerender } = render(<PromptBoxInternal {...props} />);
+        const { rerender } = render(<ComposerBox {...props} />);
         const submit = screen.getByRole("button", { name: "Submit (Enter)" });
         vi.spyOn(submit, "getBoundingClientRect").mockReturnValue(
           new DOMRect(0, 0, 40, 40),
@@ -3739,7 +3710,7 @@ describe("PromptBoxInternal compact layout", () => {
         expect(onSubmit).toHaveBeenCalledOnce();
 
         rerender(
-          <PromptBoxInternal
+          <ComposerBox
             {...props}
             value=""
             submission={{ isRunning: true, onStop }}
@@ -3766,7 +3737,7 @@ describe("PromptBoxInternal compact layout", () => {
     (input) => {
       const onStop = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             submission: { isRunning: true, onStop },
           })}
@@ -3787,9 +3758,9 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const start = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
-            compact: { isCompact: true, placeholder: "Ask a follow-up" },
+            compact: { when: "always", placeholder: "Ask a follow-up" },
             voice: createVoiceConfig({ start }),
           })}
         />,
@@ -3819,9 +3790,9 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const start = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
-            compact: { isCompact: true, placeholder: "Ask a follow-up" },
+            compact: { when: "always", placeholder: "Ask a follow-up" },
             voice: createVoiceConfig({ start }),
           })}
         />,
@@ -3845,12 +3816,12 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Transcript ready to send",
             onSubmit,
             compact: {
-              isCompact: true,
+              when: "always",
               placeholder: "Ask a follow-up",
             },
           })}
@@ -3879,11 +3850,10 @@ describe("PromptBoxInternal compact layout", () => {
         expect(document.activeElement).toBe(getPromptEditorElement());
       });
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Send with the keyboard open",
             onSubmit,
-            blurOnPointerSubmit: true,
           })}
         />,
       );
@@ -3908,13 +3878,13 @@ describe("PromptBoxInternal compact layout", () => {
   });
 
   it("submits on touch release without waiting for or duplicating the click", () => {
+    onTestFinished(mockPointerCoarse(true));
     const onSubmit = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Send immediately",
           onSubmit,
-          blurOnPointerSubmit: true,
         })}
       />,
     );
@@ -3956,10 +3926,9 @@ describe("PromptBoxInternal compact layout", () => {
       const [value, setValue] = useState("Send this follow-up");
       return (
         <CompactViewportOverrideProvider isCompactViewport>
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value,
-              blurOnPointerSubmit: true,
               onSubmit: () => {
                 onSubmit();
                 setValue("");
@@ -4019,7 +3988,7 @@ describe("PromptBoxInternal compact layout", () => {
     (gesture) => {
       const onSubmit = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({ value: "Keep this draft", onSubmit })}
         />,
       );
@@ -4052,12 +4021,12 @@ describe("PromptBoxInternal compact layout", () => {
   it("keeps the editor focused through a pointer submit", async () => {
     const onSubmit = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Send this follow-up",
           onSubmit,
           compact: {
-            isCompact: true,
+            when: "always",
             placeholder: "Ask a follow-up",
           },
         })}
@@ -4080,7 +4049,7 @@ describe("PromptBoxInternal compact layout", () => {
 
   it("keeps DOM focus through submit when TipTap focus state is stale", async () => {
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({ value: "Send this follow-up" })}
       />,
     );
@@ -4098,24 +4067,24 @@ describe("PromptBoxInternal compact layout", () => {
     expect(document.activeElement).toBe(editor);
   });
 
-  it("blurs the editor after a pointer submit when requested", async () => {
+  it("blurs the editor after a pointer submit on a phone", async () => {
+    onTestFinished(mockPointerCoarse(true));
     const onSubmit = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Send this follow-up",
           onSubmit,
-          blurOnPointerSubmit: true,
           compact: {
-            isCompact: true,
+            when: "always",
             placeholder: "Ask a follow-up",
           },
         })}
       />,
     );
 
-    await waitForPromptFocus();
     const editor = getPromptEditorElement();
+    act(() => editor.focus());
     const submit = screen.getByRole("button", { name: "Submit (Enter)" });
 
     expect(
@@ -4140,7 +4109,7 @@ describe("PromptBoxInternal compact layout", () => {
     const mentionStart = value.indexOf(mentionToken);
 
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value,
           mentionRanges: [
@@ -4157,7 +4126,7 @@ describe("PromptBoxInternal compact layout", () => {
             },
           ],
           compact: {
-            isCompact: true,
+            when: "always",
             placeholder: "Ask a follow-up",
           },
         })}
@@ -4180,7 +4149,7 @@ describe("PromptBoxInternal compact layout", () => {
 
   it("anchors only the primary action during a container-driven reveal", () => {
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           voice: createVoiceConfig(),
         })}
@@ -4199,7 +4168,7 @@ describe("PromptBoxInternal compact layout", () => {
     const onChange = vi.fn();
     const voice = createVoiceConfig();
     const view = render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Keep this prompt visible while I dictate",
           onChange,
@@ -4212,7 +4181,7 @@ describe("PromptBoxInternal compact layout", () => {
     expect(editor.textContent).toBe("Keep this prompt visible while I dictate");
 
     view.rerender(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Keep this prompt visible while I dictate",
           onChange,
@@ -4236,7 +4205,7 @@ describe("PromptBoxInternal compact layout", () => {
     async (state) => {
       const onChange = vi.fn();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "Keep this prompt unchanged",
             onChange,
@@ -4286,7 +4255,7 @@ describe("PromptBoxInternal compact layout", () => {
       );
       return (
         <>
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value,
               onChange: (next) => setValue(next),
@@ -4302,7 +4271,9 @@ describe("PromptBoxInternal compact layout", () => {
       );
     }
     render(<Harness />);
-    act(() => promptBoxRef.current?.sendVoiceTranscript("more words"));
+    act(() =>
+      promptBoxRef.current?.voice?.deliverTranscript("more words", "send"),
+    );
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith(
       "Existing prompt more words",
     );
@@ -4322,7 +4293,7 @@ describe("PromptBoxInternal compact layout", () => {
       );
       return (
         <>
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value,
               onChange: (next) => setValue(next),
@@ -4339,7 +4310,9 @@ describe("PromptBoxInternal compact layout", () => {
       );
     }
     render(<Harness />);
-    act(() => promptBoxRef.current?.sendVoiceTranscript("more words"));
+    act(() =>
+      promptBoxRef.current?.voice?.deliverTranscript("more words", "send"),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Finish transcription" }),
     );
@@ -4355,10 +4328,10 @@ describe("PromptBoxInternal compact layout", () => {
     "keeps empty compact drafts compact while %s and reveals existing draft content",
     (state) => {
       const props = createPromptBoxProps({
-        compact: { isCompact: true, placeholder: "Ask a follow-up" },
+        compact: { when: "always", placeholder: "Ask a follow-up" },
         voice: createVoiceConfig({ state }),
       });
-      const view = render(<PromptBoxInternal {...props} />);
+      const view = render(<ComposerBox {...props} />);
       const form = document.querySelector("[data-promptbox]");
       expect(form?.hasAttribute("data-promptbox-compact")).toBe(true);
       expect(
@@ -4366,12 +4339,12 @@ describe("PromptBoxInternal compact layout", () => {
       ).toBeTruthy();
       expect(screen.queryByRole("textbox")).toBeNull();
 
-      view.rerender(<PromptBoxInternal {...props} value="Existing draft" />);
+      view.rerender(<ComposerBox {...props} value="Existing draft" />);
       expect(form?.hasAttribute("data-promptbox-compact")).toBe(false);
       expect(screen.getByRole("textbox").textContent).toBe("Existing draft");
 
       view.rerender(
-        <PromptBoxInternal
+        <ComposerBox
           {...props}
           attachments={{
             items: [
@@ -4395,7 +4368,7 @@ describe("PromptBoxInternal compact layout", () => {
     const send = vi.fn();
     const cancel = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           value: "Keep this prompt visible while I dictate",
           voice: createVoiceConfig({ state: "recording", stop, send, cancel }),
@@ -4458,11 +4431,11 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const idleVoice = createVoiceConfig();
       const view = render(
-        <PromptBoxInternal {...createPromptBoxProps({ voice: idleVoice })} />,
+        <ComposerBox {...createPromptBoxProps({ voice: idleVoice })} />,
       );
 
       view.rerender(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             voice: { ...idleVoice, state: "recording" },
           })}
@@ -4494,7 +4467,7 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const promptBoxRef = createRef<PromptBoxHandle>();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             promptBoxRef,
             value: "Existing draft",
@@ -4506,7 +4479,7 @@ describe("PromptBoxInternal compact layout", () => {
       let transitionFinished = false;
       let transition: Promise<void> | undefined;
       act(() => {
-        transition = promptBoxRef.current?.playVoiceCompletionTransition();
+        transition = promptBoxRef.current?.voice?.playCompletionTransition();
         void transition?.then(() => {
           transitionFinished = true;
         });
@@ -4551,16 +4524,14 @@ describe("PromptBoxInternal compact layout", () => {
       const cancel = vi.fn();
       const recordingVoice = createVoiceConfig({ state: "recording", cancel });
       const view = render(
-        <PromptBoxInternal
-          {...createPromptBoxProps({ voice: recordingVoice })}
-        />,
+        <ComposerBox {...createPromptBoxProps({ voice: recordingVoice })} />,
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Cancel recording" }));
       expect(cancel).toHaveBeenCalledOnce();
 
       view.rerender(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             voice: { ...recordingVoice, state: "idle" },
           })}
@@ -4609,7 +4580,7 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const promptBoxRef = createRef<PromptBoxHandle>();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             promptBoxRef,
             voice: createVoiceConfig({ state: "transcribing" }),
@@ -4618,7 +4589,7 @@ describe("PromptBoxInternal compact layout", () => {
       );
 
       await expect(
-        promptBoxRef.current?.playVoiceCompletionTransition(),
+        promptBoxRef.current?.voice?.playCompletionTransition(),
       ).resolves.toBeUndefined();
     } finally {
       if (originalVisibilityState) {
@@ -4648,7 +4619,7 @@ describe("PromptBoxInternal compact layout", () => {
     try {
       const promptBoxRef = createRef<PromptBoxHandle>();
       render(
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             promptBoxRef,
             voice: createVoiceConfig({ state: "transcribing" }),
@@ -4657,7 +4628,7 @@ describe("PromptBoxInternal compact layout", () => {
       );
 
       await expect(
-        promptBoxRef.current?.playVoiceCompletionTransition(),
+        promptBoxRef.current?.voice?.playCompletionTransition(),
       ).resolves.toBeUndefined();
     } finally {
       window.matchMedia = originalMatchMedia;
@@ -4666,10 +4637,9 @@ describe("PromptBoxInternal compact layout", () => {
 
   it("keeps prompt actions in the full mobile layout", () => {
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           attachments: { onAttachFiles: vi.fn() },
-          compact: { isCompact: false },
           promptActions,
         })}
       />,
@@ -4679,7 +4649,7 @@ describe("PromptBoxInternal compact layout", () => {
   });
 });
 
-describe("PromptBoxInternal mention triggers", () => {
+describe("ComposerBox mention triggers", () => {
   const githubIssueSuggestion: PromptMentionSuggestion = {
     kind: "plugin",
     pluginId: "github",
@@ -4798,7 +4768,9 @@ describe("PromptBoxInternal mention triggers", () => {
     await screen.findByRole("button", { name: /Fix login bug/u });
 
     fireEvent.keyDown(getPromptEditorElement(), { key: "Escape" });
-    await act(async () => promptBoxRef.current?.insertTextAtCursor("rt"));
+    await act(async () =>
+      promptBoxRef.current?.voice?.deliverTranscript("rt", "insert"),
+    );
 
     await waitFor(() => expect(latestValue(changes)).toBe("@asdf qwe rt"));
     expect(screen.queryByRole("button", { name: /Fix login bug/u })).toBeNull();
@@ -4846,7 +4818,7 @@ describe("PromptBoxInternal mention triggers", () => {
           <button type="button" onClick={() => setValue("@fix")}>
             Retype occurrence
           </button>
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value,
               onChange: (nextValue) => setValue(nextValue),
@@ -4901,7 +4873,7 @@ describe("PromptBoxInternal mention triggers", () => {
       <QueuedEditorTypeaheadLayoutContext.Provider
         value={(layout) => layouts.push(layout)}
       >
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value: "@fix",
             typeahead: buildTypeaheadConfig({
@@ -4945,7 +4917,7 @@ describe("PromptBoxInternal mention triggers", () => {
           ])
         }
       >
-        <PromptBoxInternal
+        <ComposerBox
           {...createPromptBoxProps({
             value,
             mentionRanges: [
@@ -5224,12 +5196,14 @@ describe("PromptBoxInternal mention triggers", () => {
     }: {
       mentionSuggestions: readonly PromptMentionSuggestion[];
     }) {
+      setComposerSearchResults({ mentionSuggestions });
       const [value, setValue] = useState("@atlas");
       const [mentionRanges, setMentionRanges] = useState<PromptTextMention[]>(
         [],
       );
       return (
-        <PromptBoxInternal
+        <ComposerBox
+          surface="thread"
           value={value}
           mentionRanges={mentionRanges}
           onChange={(nextValue, nextMentions) => {
@@ -5238,19 +5212,7 @@ describe("PromptBoxInternal mention triggers", () => {
             setMentionRanges(nextMentions);
           }}
           onSubmit={vi.fn()}
-          typeahead={{
-            mention: {
-              results: orderPromptMentionSuggestions({
-                query: "atlas",
-                suggestions: mentionSuggestions,
-              }),
-              isLoading: false,
-              isRefreshing: false,
-              isError: false,
-              onQueryChange: vi.fn(),
-            },
-            command: INERT_TYPEAHEAD_COMMAND_CONFIG,
-          }}
+          typeahead={testTypeaheadConfig()}
           mentionMenuPlacement="bottom"
           promptBoxRef={promptBoxRef}
         />
@@ -5289,7 +5251,7 @@ describe("PromptBoxInternal mention triggers", () => {
   });
 });
 
-describe("PromptBoxInternal selection reveal", () => {
+describe("ComposerBox selection reveal", () => {
   async function nextAnimationFrame() {
     await act(
       () =>
@@ -5358,7 +5320,7 @@ describe("PromptBoxInternal selection reveal", () => {
   });
 });
 
-describe("PromptBoxInternal prompt actions", () => {
+describe("ComposerBox prompt actions", () => {
   it("keeps the action row out of text selection while the editor stays selectable", () => {
     renderPromptBox("");
 
@@ -5760,7 +5722,7 @@ describe("PromptBoxInternal prompt actions", () => {
       const promptBoxRef = createRef<PromptBoxHandle>();
       const { container } = render(
         <div data-promptbox-shell="">
-          <PromptBoxInternal
+          <ComposerBox
             {...createPromptBoxProps({
               value: "Review ",
               onChange: (value, mentions) => changes.push({ value, mentions }),
@@ -5782,10 +5744,12 @@ describe("PromptBoxInternal prompt actions", () => {
         .spyOn(EditorView.prototype, "posAtCoords")
         .mockReturnValue(null);
       try {
-        const target = resolveThreadMentionDropTarget(100, 100, {
-          threadId: "thr_dropped",
-          label: "Dropped thread",
-        });
+        const target = resolveThreadMentionDropTarget(100, 100, [
+          {
+            threadId: "thr_dropped",
+            label: "Dropped thread",
+          },
+        ]);
         expect(target).not.toBeNull();
         act(() => target?.drop());
         await waitFor(() =>
@@ -5893,7 +5857,7 @@ describe("PromptBoxInternal prompt actions", () => {
   it("opens the file picker from the prompt actions menu", async () => {
     const onAttachFiles = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           attachments: { onAttachFiles },
           promptActions,
@@ -6020,7 +5984,7 @@ describe("PromptBoxInternal prompt actions", () => {
     await waitFor(() => expect(latestValue(changes)).toBe("/plan "));
     await waitForPromptFocus();
     await act(async () => {
-      promptBoxRef.current?.insertTextAtCursor("wraps CI");
+      promptBoxRef.current?.voice?.deliverTranscript("wraps CI", "insert");
     });
     await waitFor(() => expect(latestValue(changes)).toBe("/plan wraps CI"));
 
@@ -6117,7 +6081,7 @@ describe("PromptBoxInternal prompt actions", () => {
     await waitForPromptFocus();
 
     await act(async () => {
-      promptBoxRef.current?.insertTextAtCursor("clean up");
+      promptBoxRef.current?.voice?.deliverTranscript("clean up", "insert");
     });
     await waitFor(() => expect(latestValue(changes)).toBe("/plan clean up"));
 
@@ -6142,7 +6106,7 @@ describe("PromptBoxInternal prompt actions", () => {
   });
 });
 
-describe("PromptBoxInternal command typeahead submit", () => {
+describe("ComposerBox command typeahead submit", () => {
   const compactSuggestion: ProviderCommandSuggestion = {
     kind: "command",
     name: "compact",
@@ -6171,7 +6135,8 @@ describe("PromptBoxInternal command typeahead submit", () => {
         [],
       );
       return (
-        <PromptBoxInternal
+        <ComposerBox
+          surface="thread"
           value={value}
           mentionRanges={mentionRanges}
           onChange={(nextValue, nextMentions) => {
@@ -6180,31 +6145,14 @@ describe("PromptBoxInternal command typeahead submit", () => {
             setMentionRanges(nextMentions);
           }}
           onSubmit={onSubmit}
-          typeahead={{
-            mention: {
-              results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
-              isLoading: false,
-              isRefreshing: false,
-              isError: false,
-              onQueryChange: () => {},
-            },
-            command: {
-              triggers: ["/"],
-              suggestions: [suggestion],
-              isLoading: false,
-              isError: false,
-              hasMore: false,
-              isLoadingMore: false,
-              loadMore: () => {},
-              onQueryChange: () => {},
-            },
-          }}
+          typeahead={testTypeaheadConfig({ commandTriggers: ["/"] })}
           mentionMenuPlacement="bottom"
           promptBoxRef={promptBoxRef}
         />
       );
     }
 
+    setComposerSearchResults({ commandSuggestions: [suggestion] });
     render(<Harness />);
     return { changes, onSubmit, promptBoxRef };
   }
@@ -6216,7 +6164,7 @@ describe("PromptBoxInternal command typeahead submit", () => {
   ) {
     await focusPromptEnd(promptBoxRef);
     await act(async () => {
-      promptBoxRef.current?.insertTextAtCursor(token);
+      promptBoxRef.current?.voice?.deliverTranscript(token, "insert");
     });
     await act(async () => {});
     await waitFor(() => expect(screen.queryByText(name)).not.toBeNull());
@@ -6281,7 +6229,7 @@ describe("PromptBoxInternal command typeahead submit", () => {
   });
 });
 
-describe("PromptBoxInternal command typeahead navigation", () => {
+describe("ComposerBox command typeahead navigation", () => {
   it("uses the rendered section order for Arrow keys and Enter", async () => {
     const { changes, promptBoxRef } = renderPromptBox("/", {
       commandSuggestions: [
@@ -6464,7 +6412,7 @@ describe("voice recording escape", () => {
   it("cancels the recording on Escape and consumes the event before the composer's dismiss", () => {
     const cancel = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({ voice: voiceConfig({ cancel }) })}
       />,
     );
@@ -6485,7 +6433,7 @@ describe("voice recording escape", () => {
   it("cancels on Escape while transcribing too", () => {
     const cancel = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           voice: voiceConfig({ state: "transcribing", cancel }),
         })}
@@ -6499,7 +6447,7 @@ describe("voice recording escape", () => {
   it("leaves Escape alone when not recording", () => {
     const cancel = vi.fn();
     render(
-      <PromptBoxInternal
+      <ComposerBox
         {...createPromptBoxProps({
           voice: voiceConfig({ state: "idle", cancel }),
         })}
@@ -6615,13 +6563,7 @@ describe("thread URL clipboard paste", () => {
         onSubmit: submitted,
       });
       const content = (value: string) => (
-        <MemoryRouter>
-          <PromptBoxInternal
-            {...props}
-            value={value}
-            promptBoxRef={promptBoxRef}
-          />
-        </MemoryRouter>
+        <ComposerBox {...props} value={value} promptBoxRef={promptBoxRef} />
       );
       try {
         const view = render(content(""));

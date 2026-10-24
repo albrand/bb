@@ -12,10 +12,7 @@ import {
   type ThreadChangeMetadata,
   type ThreadChangeKind,
 } from "@bb/domain";
-import {
-  environmentPullRequestTag,
-  type RealtimeSubscriptionTarget,
-} from "@bb/server-contract";
+import type { RealtimeSubscriptionTarget } from "@bb/server-contract";
 import {
   invalidateRealtimeQueriesAfterServerReconnect,
   invalidateRealtimeQueriesFetchedBeforeInitialConnect,
@@ -529,10 +526,8 @@ export function createRealtimeCacheEffects({
         }
         return;
       }
-      case "environment-pull-request":
-        applyTags(CORE_TAG_SCOPE, [
-          environmentPullRequestTag(target.environmentId),
-        ]);
+      case "plugin-read":
+        applyTags(pluginTagScope(target.pluginId), null);
         return;
       case "thread-timeline":
       case "thread-list":

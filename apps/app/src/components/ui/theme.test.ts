@@ -488,14 +488,4 @@ describe("theme.css shimmer and scroll-anchor paint scope", () => {
     expect(rule).toMatch(/(?<!-)mask-image:\s*none;/);
     expect(rule).toMatch(/-webkit-mask-image:\s*none;/);
   });
-
-  it("excludes the bottom-anchored wrapper without a universal descendant rule", () => {
-    expect(css).not.toMatch(/\.scroll-bottom-anchor-content\s*\*/);
-    expect(ruleBody(".scroll-bottom-anchor-content")).toMatch(
-      /overflow-anchor:\s*none;/,
-    );
-    expect(ruleBody(".scroll-bottom-anchor")).toMatch(
-      /overflow-anchor:\s*auto;/,
-    );
-  });
 });

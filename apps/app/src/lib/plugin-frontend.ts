@@ -28,7 +28,7 @@ import { BbHttpError } from "@bb/sdk/browser";
 import type { QueryClient } from "@tanstack/react-query";
 import { markEnabledPluginListStale } from "@/hooks/cache-owners/plugin-cache-owner";
 import { pluginListQueryOptions } from "@/hooks/queries/plugin-settings-queries";
-import { createRecordingToast } from "@/lib/notifications/plugin-toast-recording";
+import { createPluginToast } from "@/lib/notifications/plugin-toast";
 import { appQueryClient } from "./app-query-client";
 import {
   setServerPluginsStarting,
@@ -56,7 +56,10 @@ import {
 import { setPluginAssetIcons } from "@bb/shared-ui/icon-registry";
 import { setPluginLogoUrls, type PluginLogoUrls } from "./plugin-logos";
 import { createGatedPierreDiffsReact } from "./plugin-pierre-diffs-react";
-import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
+import {
+  pluginSdkAppImplementation,
+  retiredPluginSdkAppMembers,
+} from "./plugin-sdk-app-impl";
 import {
   beginPluginSlotBatch,
   removePluginSlotRegistrations,
@@ -178,7 +181,7 @@ interface BbPluginRuntime {
   reactDomClient: unknown;
   jsxRuntime: unknown;
   jsxDevRuntime: unknown;
-  pluginSdkApp: PluginSdkApp;
+  pluginSdkApp: PluginSdkApp & typeof retiredPluginSdkAppMembers;
   radixAlertDialog: unknown;
   radixContextMenu: unknown;
   radixDialog: unknown;
@@ -212,7 +215,10 @@ export function installPluginRuntime(): void {
     reactDomClient,
     jsxRuntime,
     jsxDevRuntime,
-    pluginSdkApp: pluginSdkAppImplementation,
+    pluginSdkApp: {
+      ...pluginSdkAppImplementation,
+      ...retiredPluginSdkAppMembers,
+    },
     radixAlertDialog,
     radixContextMenu,
     radixDialog,
@@ -223,7 +229,7 @@ export function installPluginRuntime(): void {
     radixPopover,
     radixSelect,
     radixTooltip,
-    sonner: { ...sonner, toast: createRecordingToast(sonner.toast) },
+    sonner: { ...sonner, toast: createPluginToast(sonner.toast) },
     vaul,
     pierreDiffs,
     pierreDiffsReact: createGatedPierreDiffsReact(),

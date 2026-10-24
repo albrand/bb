@@ -24,7 +24,6 @@ import {
   rawDiffFileStatSchema,
   workspaceDiffTargetSchema,
   workspaceStatusSchema,
-  gitHostPullRequestSchema,
   clientTurnRequestIdSchema,
   gitBranchNameSchema,
   jsonObjectSchema,
@@ -753,6 +752,8 @@ const discoveredSkillSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   filePath: z.string(),
+  realPath: z.string(),
+  contentSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   rootKind: skillRootKindSchema,
   linked: z.boolean(),
 });
@@ -1035,44 +1036,6 @@ const workspaceDiffPatchCommandSchema = hostDaemonWorkspaceTargetSchema.extend({
   ignoreWhitespace: z.boolean(),
 });
 
-const workspacePullRequestCommandSchema =
-  hostDaemonWorkspaceTargetSchema.extend({
-    type: z.literal("workspace.pull_request"),
-  });
-
-const pullRequestMergeMethodSchema = z.enum(["merge", "squash", "rebase"]);
-
-const workspacePullRequestReadyCommandSchema = hostDaemonWorkspaceTargetSchema
-  .extend({
-    type: z.literal("workspace.pull_request_action"),
-    operation: z.literal("ready"),
-  })
-  .strict();
-
-const workspacePullRequestDraftCommandSchema = hostDaemonWorkspaceTargetSchema
-  .extend({
-    type: z.literal("workspace.pull_request_action"),
-    operation: z.literal("draft"),
-  })
-  .strict();
-
-const workspacePullRequestMergeCommandSchema = hostDaemonWorkspaceTargetSchema
-  .extend({
-    type: z.literal("workspace.pull_request_action"),
-    operation: z.literal("merge"),
-    method: pullRequestMergeMethodSchema,
-  })
-  .strict();
-
-const workspacePullRequestActionCommandSchema = z.discriminatedUnion(
-  "operation",
-  [
-    workspacePullRequestReadyCommandSchema,
-    workspacePullRequestDraftCommandSchema,
-    workspacePullRequestMergeCommandSchema,
-  ],
-);
-
 const workspaceCommitCommandSchema = hostDaemonWorkspaceTargetSchema
   .extend({
     type: z.literal("workspace.commit"),
@@ -1189,22 +1152,6 @@ const workspaceDiffPatchResultSchema = z.discriminatedUnion("outcome", [
     .object({
       outcome: z.literal("unavailable"),
       failure: workspaceResolutionFailureSchema,
-    })
-    .strict(),
-]);
-
-const workspacePullRequestResultSchema = z.discriminatedUnion("outcome", [
-  z
-    .object({
-      outcome: z.literal("available"),
-      pullRequest: gitHostPullRequestSchema,
-    })
-    .strict(),
-  z.object({ outcome: z.literal("absent") }).strict(),
-  z
-    .object({
-      outcome: z.literal("unavailable"),
-      message: z.string().min(1),
     })
     .strict(),
 ]);
@@ -1357,7 +1304,6 @@ const workspaceCommitResultSchema = z.object({
   commitSha: z.string().min(1),
   commitSubject: z.string().min(1),
 });
-const workspacePullRequestActionResultSchema = z.object({}).strict();
 
 export { providerUsageWindowSchema };
 
@@ -1714,15 +1660,6 @@ export const hostDaemonCommandRegistry = {
     type: "workspace.commit",
     schema: workspaceCommitCommandSchema,
     resultSchema: workspaceCommitResultSchema,
-    transport: "settled",
-    retryable: false,
-    flushEventsBeforeResult: false,
-    envLane: "write",
-  }),
-  "workspace.pull_request_action": defineHostDaemonCommandDescriptor({
-    type: "workspace.pull_request_action",
-    schema: workspacePullRequestActionCommandSchema,
-    resultSchema: workspacePullRequestActionResultSchema,
     transport: "settled",
     retryable: false,
     flushEventsBeforeResult: false,
@@ -2129,15 +2066,6 @@ export const hostDaemonCommandRegistry = {
     retryable: true,
     flushEventsBeforeResult: false,
     envLane: "read",
-  }),
-  "workspace.pull_request": defineHostDaemonCommandDescriptor({
-    type: "workspace.pull_request",
-    schema: workspacePullRequestCommandSchema,
-    resultSchema: workspacePullRequestResultSchema,
-    transport: "onlineRpc",
-    retryable: true,
-    flushEventsBeforeResult: false,
-    envLane: null,
   }),
   "server_move.inspect": defineHostDaemonCommandDescriptor({
     type: "server_move.inspect",

@@ -46,7 +46,6 @@ const THREAD_HOST_FILE_PREVIEW_QUERY_KEY = "threadHostFilePreview";
 const HOST_FILE_PREVIEW_QUERY_KEY = "hostFilePreview";
 const ENVIRONMENT_QUERY_KEY = "environment";
 export const ENVIRONMENT_WORK_STATUS_QUERY_KEY = "environmentWorkStatus";
-const ENVIRONMENT_PULL_REQUEST_QUERY_KEY = "environmentPullRequest";
 export const ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY =
   "environmentMergeBaseBranches";
 export const ENVIRONMENT_DIFF_FILES_QUERY_KEY = "environmentDiffFiles";
@@ -344,10 +343,6 @@ export type EnvironmentWorkStatusQueryKey = readonly [
 type EnvironmentWorkStatusQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_WORK_STATUS_QUERY_KEY,
   string,
-];
-type EnvironmentPullRequestQueryKey = readonly [
-  typeof ENVIRONMENT_PULL_REQUEST_QUERY_KEY,
-  string | null | undefined,
 ];
 type EnvironmentMergeBaseBranchesQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY,
@@ -965,12 +960,6 @@ export function environmentWorkStatusQueryKeyPrefix(
   environmentId: string,
 ): EnvironmentWorkStatusQueryKeyPrefix {
   return [ENVIRONMENT_WORK_STATUS_QUERY_KEY, environmentId];
-}
-
-export function environmentPullRequestQueryKey(
-  environmentId: string | null | undefined,
-): EnvironmentPullRequestQueryKey {
-  return [ENVIRONMENT_PULL_REQUEST_QUERY_KEY, environmentId];
 }
 
 export function environmentMergeBaseBranchesQueryKey(

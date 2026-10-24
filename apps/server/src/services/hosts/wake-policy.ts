@@ -24,7 +24,6 @@ const hostCommandWakePolicy = {
   "project.clone": "work",
   "environment.attach.cancel": "never",
   "workspace.commit": "work",
-  "workspace.pull_request_action": "work",
   "desktop.browser.list_instances": "work",
   "desktop.browser.list_tabs": "work",
   "desktop.browser.create_tab": "work",
@@ -79,7 +78,6 @@ const hostCommandWakePolicy = {
   "workspace.diff": "work",
   "workspace.diffFiles": "work",
   "workspace.diffPatch": "work",
-  "workspace.pull_request": "work",
 } satisfies Record<HostDaemonRpcCommand["type"], "never" | "work">;
 
 export function hostCommandMayWake(command: HostDaemonRpcCommand): boolean {

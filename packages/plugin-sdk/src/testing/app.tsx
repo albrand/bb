@@ -8,6 +8,7 @@ import {
 import * as React from "react";
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useLayoutEffect,
@@ -34,6 +35,7 @@ import {
   type ComposerSelection,
   type ComposerSubmitOptions,
   type ComposerView,
+  type ExperimentalTabRegistration,
   type ExperimentalAppOverlayRegistration,
   type ExperimentalSidebarNavigationActions,
   type ExperimentalSidebarNavigationTarget,
@@ -61,7 +63,25 @@ import {
   type PluginMessageDirectiveRegistration,
   type ExperimentalCodeFenceRendererRegistration,
   type PluginDiffRendererRegistration,
-  type PluginNavPanelRegistration,
+  type ExperimentalComposerRegistration,
+  type ExperimentalComposerRendererApi,
+  type ExperimentalComposerCommandSearch,
+  type ExperimentalComposerContributions,
+  type ExperimentalComposerMentionSearch,
+  type ExperimentalComposerRootProps,
+  type ExperimentalComposerPopupProps,
+  type ExperimentalComposerMenuEntryProps,
+  type ExperimentalVoiceInputButtonProps,
+  type ExperimentalVoiceRecordingBarProps,
+  type ExperimentalFailedVoiceRecordingsProps,
+  type ExperimentalShortcutHintProps,
+  type ExperimentalImageLightboxProps,
+  type ExperimentalPromptMentionIconProps,
+  type ExperimentalPromptMentionClipboardPill,
+  type ExperimentalPromptMentionPresentation,
+  type ExperimentalComposerMentionTarget,
+  type ExperimentalPluginIconProps,
+  type ExperimentalThreadTitleTextProps,
   type PluginNewThreadPanelActionRegistration,
   type PluginPendingInteractionRegistration,
   type ExperimentalIconRegistration,
@@ -72,14 +92,12 @@ import {
   type PluginSettingsSectionRegistration,
   type PluginSettingsState,
   type PluginSidebarFooterActionRegistration,
-  type PluginSidebarPullRequest,
   type PluginSidebarProjectActions,
   type PluginSidebarThreadActions,
   type PluginBrowserBbSdk,
   type PluginEnvironmentProvidersState,
   type PluginSidebarSplitLayout,
   type PluginSidebarThreadDraftState,
-  type PluginSidebarThreadPullRequestState,
   type PluginSidebarThreadRowStatus,
   type PluginSidebarThreadShortcut,
   type PluginSidebarThreadSplit,
@@ -87,6 +105,13 @@ import {
   type PluginSidebarThreadsState,
   type PluginSourceCodeRendererRegistration,
   type PluginThreadHeaderActionRegistration,
+  type ExperimentalThreadContextSegmentRegistration,
+  type ExperimentalThreadInfoRowRegistration,
+  type ExperimentalThreadInfoSectionRegistration,
+  type ExperimentalInfoSectionProps,
+  type ExperimentalDetailRowProps,
+  type ExperimentalInfoListProps,
+  type ExperimentalInfoListRowProps,
   type PluginThreadActionEntry,
   type PluginThreadActionRegistration,
   type PluginThreadActionRegistrationInfo,
@@ -97,7 +122,6 @@ import {
   type PluginThreadActionTarget,
   type ExperimentalPluginBrowserToolbarActionRegistration,
   type PluginThreadListRegistration,
-  type PluginThreadPanelActionRegistration,
   type PluginRpcContract,
   type StandardSchemaV1,
   type PluginRpcResult,
@@ -135,6 +159,11 @@ import {
 import { normalizePluginThreadRowStatus } from "../internal/composer-customization-validation.js";
 import { normalizeExperimentalFileOpenOptions } from "../internal/file-navigation-validation.js";
 import { experimental_THREAD_ACTION_GROUPS } from "../thread-action-groups.js";
+import {
+  experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
+  experimental_THREAD_INFO_ROW_GROUPS,
+  experimental_THREAD_INFO_SECTION_GROUPS,
+} from "../thread-info-groups.js";
 import {
   collectPluginAppRegistrations,
   type CollectedPluginProviderIconRegistration,
@@ -232,7 +261,7 @@ export type NavigateCall =
 
 export interface ExperimentalFixedTabOpenCall {
   surface: ExperimentalOpenFixedTabOptions<JsonValue>["surface"];
-  panelId: string;
+  panelId?: string;
   tabId: string;
   target?: JsonValue;
 }
@@ -304,6 +333,7 @@ interface SlotEnv {
   navigateCalls: NavigateCall[];
   appPanel: ExperimentalAppPanel;
   experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[];
+  experimental_tabOpenCalls: import("@get-bb/plugin-sdk").ExperimentalTabOpenOptions[];
   fixedTabTarget: TestFixedTabTargetStore;
   composer: TestComposerStore;
   composerLog: ComposerLog;
@@ -316,11 +346,12 @@ interface SlotEnv {
   environmentArchiveCalls: string[];
   threadActions: TestThreadActionsResolver;
   threadActionRegistrations: readonly PluginThreadActionRegistrationInfo[];
-  sidebarPullRequests: ReadonlyMap<string, PluginSidebarPullRequest>;
   sidebarDraftThreadIds: ReadonlySet<string>;
+  experiments: ReadonlySet<string>;
   sidebarRowStatuses: ReadonlyMap<string, PluginSidebarThreadRowStatus>;
   sidebarShortcuts: ReadonlyMap<string, PluginSidebarThreadShortcut>;
   sidebarSplitLayout: PluginSidebarSplitLayout | null;
+  composerRenderer: ExperimentalComposerRendererApi | null;
   environmentProviders: PluginEnvironmentProvidersState;
   sdk: PluginBrowserBbSdk;
   sdkCalls: SdkCall[];
@@ -1150,6 +1181,143 @@ function TestPermissionModePicker({
   );
 }
 
+function TestComposerRoot(_props: ExperimentalComposerRootProps) {
+  return null;
+}
+
+function TestComposerPluginActions() {
+  return null;
+}
+
+function TestComposerPluginPopup({
+  contribution,
+}: ExperimentalComposerPopupProps) {
+  return <contribution.popup.component />;
+}
+
+function TestComposerMenuEntry({
+  contribution,
+}: ExperimentalComposerMenuEntryProps) {
+  return <div role="menuitem">{contribution.item.label}</div>;
+}
+
+const IDLE_COMPOSER_MENTION_SEARCH: ExperimentalComposerMentionSearch = {
+  status: "idle",
+  refreshing: false,
+  groups: [],
+  search: () => {},
+};
+
+const IDLE_COMPOSER_COMMAND_SEARCH: ExperimentalComposerCommandSearch = {
+  status: "idle",
+  refreshing: false,
+  groups: [],
+  search: () => {},
+};
+
+const TEST_COMPOSER_CONTRIBUTIONS: ExperimentalComposerContributions = {
+  popups: [],
+  plusMenuItems: [],
+  sendMenuItems: [],
+  Actions: TestComposerPluginActions,
+  Popup: TestComposerPluginPopup,
+  MenuEntry: TestComposerMenuEntry,
+};
+
+function TestVoiceInputButton({
+  warning: _warning,
+  variant: _variant,
+  size: _size,
+  ...props
+}: ExperimentalVoiceInputButtonProps) {
+  return <button {...props} />;
+}
+
+function TestVoiceRecordingBar({
+  state,
+  onConfirm,
+  onCancel,
+}: ExperimentalVoiceRecordingBarProps) {
+  return (
+    <div data-voice-recording-state={state}>
+      <button type="button" onClick={onConfirm}>
+        Finish voice input
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel voice input
+      </button>
+    </div>
+  );
+}
+
+function TestFailedVoiceRecordings({
+  recordings,
+  className,
+}: ExperimentalFailedVoiceRecordingsProps) {
+  return (
+    <ul className={className}>
+      {recordings.map((recording) => (
+        <li key={recording.id}>{recording.errorMessage}</li>
+      ))}
+    </ul>
+  );
+}
+
+function TestShortcutHint({
+  shortcut,
+  className,
+}: ExperimentalShortcutHintProps) {
+  return shortcut === null ? null : (
+    <kbd className={className}>{shortcut.label}</kbd>
+  );
+}
+
+function TestImageLightbox({
+  imageSrc,
+  imageAlt,
+  isOpen,
+}: ExperimentalImageLightboxProps) {
+  const visible = isOpen ?? imageSrc !== null;
+  return visible && imageSrc !== null ? (
+    <img alt={imageAlt} src={imageSrc} />
+  ) : null;
+}
+
+function TestPromptMentionIcon({
+  className,
+}: ExperimentalPromptMentionIconProps) {
+  return <span className={className} aria-hidden />;
+}
+
+const TEST_PROMPT_MENTION_ATTRIBUTE = "data-test-prompt-mention";
+
+function testPromptMentionClipboardAttributes(
+  mention: ExperimentalComposerMentionTarget,
+  text: string,
+): Readonly<Record<string, string>> {
+  return { [TEST_PROMPT_MENTION_ATTRIBUTE]: JSON.stringify({ mention, text }) };
+}
+
+function readTestPromptMentionClipboard(
+  element: Element,
+): ExperimentalPromptMentionClipboardPill | null {
+  const value = element.getAttribute(TEST_PROMPT_MENTION_ATTRIBUTE);
+  if (value === null) return null;
+  const pill: ExperimentalPromptMentionClipboardPill = JSON.parse(value);
+  return pill;
+}
+
+function TestPluginIcon({ className }: ExperimentalPluginIconProps) {
+  return <span className={className} aria-hidden />;
+}
+
+function TestThreadTitleText({
+  title,
+  className,
+}: ExperimentalThreadTitleTextProps) {
+  return <span className={className}>{title}</span>;
+}
+
 /**
  * Stand-in for the host-owned voice input textarea: a plain controlled
  * textarea with no microphone, matching a host where voice input is
@@ -1227,6 +1395,78 @@ function TestDiff({
   );
 }
 
+/** Stand-in for the Info tab section frame: a labelled section. */
+function TestInfoSection({
+  label,
+  count,
+  accessory,
+  trailing,
+  children,
+}: ExperimentalInfoSectionProps) {
+  return (
+    <section aria-label={label} data-testid="bb-info-section">
+      <h3>
+        {label}
+        {count === undefined ? null : <span>{count}</span>}
+      </h3>
+      {accessory}
+      {trailing}
+      {children}
+    </section>
+  );
+}
+
+/** Stand-in for the Info tab label and value row. */
+function TestDetailRow({ label, icon, children }: ExperimentalDetailRowProps) {
+  return (
+    <div data-testid="bb-detail-row" data-icon={icon}>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+/** Stand-in for the Info tab list: every item, with the limit recorded. */
+function TestInfoList<Item>({
+  items,
+  getKey,
+  renderItem,
+  limit,
+}: ExperimentalInfoListProps<Item>) {
+  return (
+    <ul data-limit={limit}>
+      {items.map((item) => (
+        <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
+      ))}
+    </ul>
+  );
+}
+
+/** Stand-in for one Info tab list row: a button when it can be selected. */
+function TestInfoListRow({
+  leading,
+  name,
+  title,
+  context,
+  trailing,
+  onSelect,
+}: ExperimentalInfoListRowProps) {
+  return (
+    <li>
+      {leading}
+      {onSelect === undefined ? (
+        <span title={title}>{name}</span>
+      ) : (
+        <button type="button" title={title} onClick={onSelect}>
+          {name}
+        </button>
+      )}
+      {context === undefined ? null : <span>{context}</span>}
+      {trailing}
+    </li>
+  );
+}
+
 type TestClipboard = (
   content: ExperimentalClipboardContent,
 ) => Promise<boolean>;
@@ -1285,6 +1525,9 @@ const testPluginSdkApp = {
   useSettings(): PluginSettingsState {
     return useSlotEnv("useSettings").settingsState;
   },
+  experimental_useExperiment(key): boolean {
+    return useSlotEnv("experimental_useExperiment").experiments.has(key);
+  },
   useBbContext(): BbContext {
     return useSlotEnv("useBbContext").bbContext;
   },
@@ -1301,7 +1544,9 @@ const testPluginSdkApp = {
     return useSlotEnv("experimental_useAppPanel").appPanel;
   },
   experimental_useFixedTabTarget<Target extends JsonValue>(
-    tab: ExperimentalPluginFixedTabReference<Target>,
+    tab:
+      | import("@get-bb/plugin-sdk").ExperimentalTabTargetReference<Target>
+      | ExperimentalPluginFixedTabReference<Target>,
   ): ExperimentalFixedTabTargetState<Target> | null {
     const store = useSlotEnv("experimental_useFixedTabTarget").fixedTabTarget;
     const state = useSyncExternalStore(
@@ -1311,7 +1556,8 @@ const testPluginSdkApp = {
     );
     if (
       state === null ||
-      state.panelId !== tab.panelId ||
+      state.panelId !==
+        ("context" in tab ? tab.context.panelId : tab.panelId) ||
       state.tabId !== tab.id ||
       tab.experimental_target === undefined
     ) {
@@ -1379,6 +1625,30 @@ const testPluginSdkApp = {
   UrlLink: TestUrlLink,
   experimental_NewThreadComposer: TestNewThreadComposer,
   experimental_VoiceInputTextarea: TestVoiceInputTextarea,
+  experimental_ComposerRoot: TestComposerRoot,
+  experimental_VoiceInputButton: TestVoiceInputButton,
+  experimental_VoiceRecordingBar: TestVoiceRecordingBar,
+  experimental_FailedVoiceRecordings: TestFailedVoiceRecordings,
+  experimental_ShortcutHint: TestShortcutHint,
+  experimental_ImageLightbox: TestImageLightbox,
+  experimental_PromptMentionIcon: TestPromptMentionIcon,
+  experimental_describePromptMention(
+    mention: ExperimentalComposerMentionTarget,
+  ): ExperimentalPromptMentionPresentation {
+    return {
+      className: "prompt-mention-pill",
+      title: mention.label,
+      text: `${mention.kind}: ${mention.label}`,
+    };
+  },
+  experimental_promptMentionClipboardAttributes:
+    testPromptMentionClipboardAttributes,
+  experimental_readPromptMentionClipboard: readTestPromptMentionClipboard,
+  experimental_PluginIcon: TestPluginIcon,
+  experimental_ThreadTitleText: TestThreadTitleText,
+  experimental_useThreadTitleDisplayText(title: string): string {
+    return title;
+  },
   experimental_ProviderModelPicker: TestProviderModelPicker,
   experimental_PermissionModePicker: TestPermissionModePicker,
   experimental_BranchPicker: TestBranchPicker,
@@ -1390,6 +1660,10 @@ const testPluginSdkApp = {
   },
   experimental_SourceCode: TestSourceCode,
   experimental_Diff: TestDiff,
+  experimental_InfoSection: TestInfoSection,
+  experimental_DetailRow: TestDetailRow,
+  experimental_InfoList: TestInfoList,
+  experimental_InfoListRow: TestInfoListRow,
   experimental_useSidebarThreads(): PluginSidebarThreadsState {
     return useSlotEnv("experimental_useSidebarThreads").sidebarThreads;
   },
@@ -1445,6 +1719,9 @@ const testPluginSdkApp = {
   experimental_ThreadActionsContextMenu: TestThreadActionsContextMenu,
   experimental_PluginRpcCallError,
   experimental_THREAD_ACTION_GROUPS,
+  experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
+  experimental_THREAD_INFO_ROW_GROUPS,
+  experimental_THREAD_INFO_SECTION_GROUPS,
   experimental_useSidebarNavigation(): ExperimentalSidebarNavigationState {
     return useSlotEnv("experimental_useSidebarNavigation").sidebarNavigation;
   },
@@ -1525,17 +1802,33 @@ const testPluginSdkApp = {
   useSdk(): PluginBrowserBbSdk {
     return useSlotEnv("useSdk").sdk;
   },
-  experimental_useSidebarThreadPullRequest(
-    threadId,
-  ): PluginSidebarThreadPullRequestState {
-    const env = useSlotEnv("experimental_useSidebarThreadPullRequest");
-    return useMemo(
-      () => ({
-        isLoading: false,
-        pullRequest: env.sidebarPullRequests.get(threadId) ?? null,
-      }),
-      [env, threadId],
-    );
+  experimental_useComposerRenderer(): ExperimentalComposerRendererApi {
+    const renderer = useSlotEnv(
+      "experimental_useComposerRenderer",
+    ).composerRenderer;
+    if (renderer === null) {
+      throw new Error(
+        "experimental_useComposerRenderer() is only available inside an experimental_composer component; pass composerRenderer to mount it as one.",
+      );
+    }
+    return renderer;
+  },
+  experimental_useComposerContributions(): ExperimentalComposerContributions {
+    if (
+      useSlotEnv("experimental_useComposerContributions").composerRenderer ===
+      null
+    ) {
+      throw new Error(
+        "experimental_useComposerContributions() is only available inside an experimental_composer component; pass composerRenderer to mount it as one.",
+      );
+    }
+    return TEST_COMPOSER_CONTRIBUTIONS;
+  },
+  experimental_useComposerMentionSearch(): ExperimentalComposerMentionSearch {
+    return IDLE_COMPOSER_MENTION_SEARCH;
+  },
+  experimental_useComposerCommandSearch(): ExperimentalComposerCommandSearch {
+    return IDLE_COMPOSER_COMMAND_SEARCH;
   },
   useComposerView(): ComposerView {
     const composer = useSlotEnv("useComposerView").composer;
@@ -1589,8 +1882,9 @@ export interface CapturedPluginApp {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
-  navPanels: PluginNavPanelRegistration[];
-  threadPanelActions: PluginThreadPanelActionRegistration[];
+  navPanels: import("../internal/plugin-app-registration-collector.js").LegacyNavPanelRegistration[];
+  tabs: ExperimentalTabRegistration[];
+  threadPanelActions: import("../internal/plugin-app-registration-collector.js").LegacyThreadPanelActionRegistration[];
   newThreadPanelActions: PluginNewThreadPanelActionRegistration[];
   composerCustomizations: ComposerCustomization[];
   pendingInteractions: PluginPendingInteractionRegistration[];
@@ -1599,11 +1893,15 @@ export interface CapturedPluginApp {
   threadLists: PluginThreadListRegistration[];
   experimentalSidebarNavigations: ExperimentalSidebarNavigationRegistration[];
   threadHeaderActions: PluginThreadHeaderActionRegistration[];
+  threadContextSegments: ExperimentalThreadContextSegmentRegistration[];
+  threadInfoRows: ExperimentalThreadInfoRowRegistration[];
+  threadInfoSections: ExperimentalThreadInfoSectionRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
   browserToolbarActions: ExperimentalPluginBrowserToolbarActionRegistration[];
   fileOpeners: PluginFileOpenerRegistration[];
   sourceCodeRenderers: PluginSourceCodeRendererRegistration[];
   diffRenderers: PluginDiffRendererRegistration[];
+  composers: ExperimentalComposerRegistration[];
   messageDirectives: PluginMessageDirectiveRegistration[];
   codeFenceRenderers: ExperimentalCodeFenceRendererRegistration[];
   messageActions: PluginMessageActionRegistration[];
@@ -1870,15 +2168,12 @@ export interface RenderSlotOptions<
   /** Checkout facts `experimental_useCheckoutState()` reports. */
   checkoutState?: Partial<CheckoutState>;
   /**
-   * Pull requests `experimental_useSidebarThreadPullRequest()` reports, keyed
-   * by thread id. Omitted → every thread reports none.
-   */
-  sidebarPullRequests?: Record<string, PluginSidebarPullRequest>;
-  /**
    * Thread ids `useSidebarThreadDraft()` and `useSidebarThreadDraftIds()`
    * report as holding an unsent draft. Omitted → none.
    */
   sidebarDraftThreadIds?: readonly string[];
+  /** Experiment keys `experimental_useExperiment()` reports as on. Omitted → none. */
+  experiments?: readonly string[];
   /**
    * Row statuses `useSidebarThreadRowStatus()` reports, keyed by thread id.
    * Omitted → every thread reports null.
@@ -1895,6 +2190,12 @@ export interface RenderSlotOptions<
   sidebarProjectActions?: Partial<
     Pick<PluginSidebarProjectActions, "isAvailable" | "isCreating">
   >;
+  /**
+   * What `experimental_useComposerRenderer()` returns, as if the slot were
+   * mounted as an `experimental_composer` replacement. Omitted → the hook
+   * throws, as it does outside a composer replacement.
+   */
+  composerRenderer?: ExperimentalComposerRendererApi;
   /**
    * Items and the active item `experimental_useSidebarNavigation()` reports.
    * Omitted → no items. Actions are recorded in `sidebarNavigationCalls` and
@@ -1947,6 +2248,9 @@ export interface RenderSlotOptions<
   ) => boolean;
   /** Host acceptance for an owner-scoped fixed-tab selection. */
   experimental_openFixedTab?: (call: ExperimentalFixedTabOpenCall) => boolean;
+  experimental_openTab?: (
+    call: import("@get-bb/plugin-sdk").ExperimentalTabOpenOptions,
+  ) => boolean;
   /** Initial session target visible to `experimental_useFixedTabTarget`. */
   experimental_fixedTabTarget?: {
     panelId: string;
@@ -1961,7 +2265,10 @@ export interface RenderedSlotBehaviorDrivers {
    * Push a realtime event to `useRealtime(channel, …)` subscribers, wrapped
    * in act. The payload is JSON-round-tripped like `bb.realtime.publish`.
    */
-  experimental_invalidateRpc(tags: readonly string[] | null): Promise<void>;
+  experimental_invalidateRpc(
+    tags: readonly string[] | null,
+    pluginId?: string,
+  ): Promise<void>;
   emitRealtime(channel: string, payload: unknown): Promise<void>;
   /** Drive the lifecycle of the same connection used by realtime events. */
   setRealtimeConnectionState(
@@ -1983,6 +2290,7 @@ export interface RenderedSlotInspectionState {
   readonly navigateCalls: NavigateCall[];
   /** Every validated `experimental_useAppPanel().openFixedTab` call. */
   readonly experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[];
+  readonly experimental_tabOpenCalls: import("@get-bb/plugin-sdk").ExperimentalTabOpenOptions[];
   /** @internal Every `experimental_useSidebarThreadActions()` call, in order; kept for plugins built against older SDKs. */
   readonly sidebarActionCalls: SidebarActionCall[];
   /**
@@ -2099,7 +2407,9 @@ export function renderSlot<
       });
     return parsed.value;
   };
-  const queryClient = new QueryClient();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   const callRpc = async (method: string, input?: unknown) => {
     const normalizedInput =
       input === undefined
@@ -2151,6 +2461,8 @@ export function renderSlot<
 
   const navigateCalls: NavigateCall[] = [];
   const experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[] = [];
+  const experimental_tabOpenCalls: import("@get-bb/plugin-sdk").ExperimentalTabOpenOptions[] =
+    [];
   let fixedTabTargetSnapshot =
     options.experimental_fixedTabTarget === undefined
       ? null
@@ -2176,7 +2488,70 @@ export function renderSlot<
       for (const listener of fixedTabTargetListeners) listener();
     },
   };
+  function captureFixedTabOpen(
+    surface: ExperimentalFixedTabOpenCall["surface"],
+    panelId: string | undefined,
+    tabId: string,
+    target: JsonValue | undefined,
+  ): boolean {
+    const call: ExperimentalFixedTabOpenCall = {
+      surface: surface,
+      ...(panelId === undefined ? {} : { panelId: panelId }),
+      tabId: tabId,
+      ...(target === undefined ? {} : { target }),
+    };
+    experimental_fixedTabOpenCalls.push(call);
+    const accepted = options.experimental_openFixedTab?.(call) ?? false;
+    if (accepted && target !== undefined && panelId !== undefined) {
+      fixedTabTargetSnapshot = {
+        panelId: panelId,
+        sequence: (fixedTabTargetSnapshot?.sequence ?? 0) + 1,
+        tabId: tabId,
+        target,
+      };
+      for (const listener of fixedTabTargetListeners) listener();
+    }
+    return accepted;
+  }
   const appPanel: ExperimentalAppPanel = {
+    experimental_openTab(tabOptions) {
+      experimental_tabOpenCalls.push(tabOptions);
+      if (options.experimental_openTab !== undefined)
+        return options.experimental_openTab(tabOptions);
+      if (tabOptions.tab.availability === "action") {
+        try {
+          const params =
+            tabOptions.params === undefined
+              ? undefined
+              : strictJsonRoundTrip(tabOptions.params, "tab params");
+          return navigate.openThreadPanel({
+            actionId: tabOptions.tab.id,
+            ...(tabOptions.title === undefined
+              ? {}
+              : { title: tabOptions.title }),
+            ...(params === undefined ? {} : { params }),
+          });
+        } catch {
+          return false;
+        }
+      }
+      try {
+        const target =
+          tabOptions.target === undefined
+            ? undefined
+            : strictJsonRoundTrip(tabOptions.target, "tab target");
+        return captureFixedTabOpen(
+          tabOptions.surface,
+          tabOptions.tab.context.kind === "nav-panel"
+            ? tabOptions.tab.context.panelId
+            : undefined,
+          tabOptions.tab.id,
+          target,
+        );
+      } catch {
+        return false;
+      }
+    },
     openFixedTab(panelOptions) {
       let target: JsonValue | undefined;
       if (panelOptions.target !== undefined) {
@@ -2197,24 +2572,26 @@ export function renderSlot<
           return false;
         }
       }
-      const call: ExperimentalFixedTabOpenCall = {
-        surface: panelOptions.surface,
-        panelId: panelOptions.tab.panelId,
-        tabId: panelOptions.tab.id,
-        ...(target === undefined ? {} : { target }),
-      };
-      experimental_fixedTabOpenCalls.push(call);
-      const accepted = options.experimental_openFixedTab?.(call) ?? false;
-      if (accepted && target !== undefined) {
-        fixedTabTargetSnapshot = {
-          panelId: panelOptions.tab.panelId,
-          sequence: (fixedTabTargetSnapshot?.sequence ?? 0) + 1,
-          tabId: panelOptions.tab.id,
-          target,
-        };
-        for (const listener of fixedTabTargetListeners) listener();
+      if (panelOptions.tab.panelId === undefined) {
+        if (target !== undefined) return false;
+        return appPanel.experimental_openTab({
+          surface: panelOptions.surface,
+          tab: {
+            id: panelOptions.tab.id,
+            context: { kind: "thread" },
+            availability: "fixed",
+          },
+        });
       }
-      return accepted;
+      return appPanel.experimental_openTab({
+        surface: panelOptions.surface,
+        tab: {
+          id: panelOptions.tab.id,
+          context: { kind: "nav-panel", panelId: panelOptions.tab.panelId },
+          availability: "fixed",
+        },
+        ...(target === undefined ? {} : { target }),
+      });
     },
   };
   const sidebarActionCalls: SidebarActionCall[] = [];
@@ -2264,9 +2641,6 @@ export function renderSlot<
     },
   };
   const environmentArchiveCalls: string[] = [];
-  const sidebarPullRequests = new Map(
-    Object.entries(options.sidebarPullRequests ?? {}),
-  );
   const sidebarDraftThreadIds: ReadonlySet<string> = new Set(
     options.sidebarDraftThreadIds ?? [],
   );
@@ -2708,6 +3082,7 @@ export function renderSlot<
     navigateCalls,
     appPanel,
     experimental_fixedTabOpenCalls,
+    experimental_tabOpenCalls,
     fixedTabTarget,
     composer,
     composerLog,
@@ -2721,11 +3096,12 @@ export function renderSlot<
     threadActions: options.threadActions ?? NO_THREAD_ACTIONS,
     threadActionRegistrations:
       options.threadActionRegistrations ?? NO_THREAD_ACTION_REGISTRATIONS,
-    sidebarPullRequests,
     sidebarDraftThreadIds,
+    experiments: new Set(options.experiments ?? []),
     sidebarRowStatuses,
     sidebarShortcuts,
     sidebarSplitLayout: options.sidebarSplitLayout ?? null,
+    composerRenderer: options.composerRenderer ?? null,
     environmentProviders,
     sdk,
     sdkCalls,
@@ -2798,7 +3174,15 @@ export function renderSlot<
   const setRealtimeConnectionState = async (
     state: PluginRealtimeConnectionState,
   ): Promise<void> => {
-    await act(async () => realtimeConnection.setState(state));
+    await act(async () => {
+      realtimeConnection.setState(state);
+      if (state === "connected")
+        await invalidateTags(
+          queryClient,
+          pluginTagScope(options.pluginId ?? "test-plugin"),
+          null,
+        );
+    });
   };
   const setComposerText = async (text: string): Promise<void> => {
     await act(async () => commitComposerText(text));
@@ -2811,13 +3195,12 @@ export function renderSlot<
       notifyComposerListeners();
     });
   };
-  const experimental_invalidateRpc = async (tags: readonly string[] | null) => {
+  const experimental_invalidateRpc = async (
+    tags: readonly string[] | null,
+    pluginId = options.pluginId ?? "test-plugin",
+  ) => {
     await act(async () => {
-      await invalidateTags(
-        queryClient,
-        pluginTagScope(rpcQueryHost.pluginId),
-        tags,
-      );
+      await invalidateTags(queryClient, pluginTagScope(pluginId), tags);
     });
   };
   const unmountSlot = (): void => {
@@ -2837,6 +3220,7 @@ export function renderSlot<
     setComposerScope,
     navigateCalls,
     experimental_fixedTabOpenCalls,
+    experimental_tabOpenCalls,
     sidebarActionCalls,
     sidebarNavigationCalls,
     experimental_environmentArchiveCalls: environmentArchiveCalls,
@@ -2857,6 +3241,7 @@ export function renderSlot<
       rpcCalls,
       navigateCalls,
       experimental_fixedTabOpenCalls,
+      experimental_tabOpenCalls,
       sidebarActionCalls,
       sidebarNavigationCalls,
       experimental_environmentArchiveCalls: environmentArchiveCalls,

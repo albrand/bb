@@ -586,21 +586,6 @@ const commandHandlers: CommandHandlerMap = {
       noVerify: true,
     });
   },
-  "workspace.pull_request_action": async (command, options) => {
-    const entry = await requireResolvedWorkspaceForCommand({
-      environmentId: command.environmentId,
-      requireGit: true,
-      runtimeManager: options.runtimeManager,
-      workspaceContext: command.workspaceContext,
-    });
-    await entry.workspace.runPullRequestAction(
-      command.operation === "merge"
-        ? { operation: "merge", method: command.method }
-        : { operation: command.operation },
-      userExecutableProcessOptions(options.runtimeManager.getShellEnv()),
-    );
-    return {};
-  },
 };
 
 const onlineRpcHandlers: OnlineRpcHandlerMap = {
@@ -766,30 +751,6 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
         ignoreWhitespace: command.ignoreWhitespace,
       }),
     })),
-  "workspace.pull_request": async (command, options) => {
-    const resolution = await resolveWorkspaceForCommand({
-      environmentId: command.environmentId,
-      requireGit: true,
-      runtimeManager: options.runtimeManager,
-      workspaceContext: command.workspaceContext,
-    });
-    if (!resolution.ok) {
-      return resolution.failure.code === "not_git_repo"
-        ? { outcome: "absent" }
-        : { outcome: "unavailable", message: resolution.failure.message };
-    }
-    const lookup = await resolution.entry.workspace.getPullRequest(
-      userExecutableProcessOptions(options.runtimeManager.getShellEnv()),
-    );
-    switch (lookup.outcome) {
-      case "found":
-        return { outcome: "available", pullRequest: lookup.pullRequest };
-      case "none":
-        return { outcome: "absent" };
-      case "unavailable":
-        return { outcome: "unavailable", message: lookup.message };
-    }
-  },
   "server_move.inspect": (command, options) =>
     requireServerMove(options).inspect(command),
   "server_move.probe": (command, options) =>
@@ -836,11 +797,7 @@ export async function dispatchOnlineRpcCommand<
 ): Promise<HostDaemonOnlineRpcResult<TType>> {
   try {
     return await withVcsProcessPriority(
-      command.type === "workspace.pull_request"
-        ? "background"
-        : command.type === "workspace.status"
-          ? "status"
-          : "interactive",
+      command.type === "workspace.status" ? "status" : "interactive",
       () => onlineRpcHandlers[command.type](command, options, signal),
     );
   } catch (error) {

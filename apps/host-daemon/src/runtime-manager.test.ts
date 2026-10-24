@@ -35,11 +35,11 @@ type GetCurrentBranchArgs = Parameters<HostWorkspace["getCurrentBranch"]>;
 type GetStatusResult = Awaited<ReturnType<HostWorkspace["getStatus"]>>;
 type GetDiffResult = Awaited<ReturnType<HostWorkspace["getDiff"]>>;
 type GetLocalStateFingerprintResult = Awaited<
-  ReturnType<HostWorkspace["getLocalStateFingerprint"]>
->;
+  ReturnType<HostWorkspace["getLocalStateSnapshot"]>
+>["fingerprint"];
 type GetSharedGitRefsFingerprintResult = Awaited<
-  ReturnType<HostWorkspace["getSharedGitRefsFingerprint"]>
->;
+  ReturnType<HostWorkspace["getSharedGitRefsSnapshot"]>
+>["fingerprint"];
 type CommitArgs = Parameters<HostWorkspace["commit"]>;
 type ProvisionWorkspaceMockArgs = Parameters<
   (options: ProvisionWorkspaceArgs) => Promise<HostWorkspace>
@@ -86,7 +86,7 @@ async function runGit(
 
 async function writeInjectedSkillSource(
   args: WriteInjectedSkillSourceArgs,
-): Promise<Extract<HostDaemonInjectedSkillSource, { kind: "workspace-path" }>> {
+): Promise<Extract<HostDaemonInjectedSkillSource, { kind: "host-path" }>> {
   const sourceRootPath = path.join(args.dataDir, "skills", args.name);
   await fs.mkdir(sourceRootPath, { recursive: true });
   await fs.writeFile(
@@ -103,8 +103,8 @@ async function writeInjectedSkillSource(
     "utf8",
   );
   return {
-    kind: "workspace-path",
-    sourceType: "project",
+    kind: "host-path",
+    sourceType: "shared-user",
     name: args.name,
     description: `Use ${args.name} when runtime manager tests run.`,
     sourceRootPath,
@@ -149,17 +149,17 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
     getDefaultBranch: vi.fn(async () => "main"),
     getCurrentBranch: vi.fn(async (..._args: GetCurrentBranchArgs) => "main"),
     getHeadSha: vi.fn(async () => "commit-1"),
-    getLocalStateFingerprint: vi.fn(async () => {
+    getLocalStateSnapshot: vi.fn(async () => {
       if (localStateFingerprintError) {
         throw localStateFingerprintError;
       }
-      return localStateFingerprint;
+      return { fingerprint: localStateFingerprint, branchName: "main" };
     }),
-    getSharedGitRefsFingerprint: vi.fn(async () => {
+    getSharedGitRefsSnapshot: vi.fn(async () => {
       if (sharedGitRefsFingerprintError) {
         throw sharedGitRefsFingerprintError;
       }
-      return sharedGitRefsFingerprint;
+      return { fingerprint: sharedGitRefsFingerprint, defaultBranch: "main" };
     }),
     getAdditionalWorkspaceWriteRoots: vi.fn(async () => []),
     getStatus: vi.fn(async () => status),
@@ -171,8 +171,6 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
       truncated: false,
     })),
     diffPatch: vi.fn(async () => []),
-    getPullRequest: vi.fn(async () => ({ outcome: "none" as const })),
-    runPullRequestAction: vi.fn(async () => undefined),
     commit: vi.fn(async (..._args: CommitArgs) => ({
       commitSha: "commit-1",
       commitSubject: "commit",

@@ -39,14 +39,14 @@ import {
 } from "@/components/promptbox/ExecutionControls";
 import {
   DEFAULT_COMPOSER_SCOPE,
-  PromptBoxInternal,
+  ComposerBox,
   type AttachmentsConfig,
   type HistoryConfig,
   type MentionMenuPlacement,
   type PromptBoxAction,
   type PromptBoxHandle,
   type TypeaheadConfig,
-} from "@/components/promptbox/PromptBoxInternal";
+} from "@/components/promptbox/ComposerBox";
 import { usePromptModePermissionDisplay } from "@/components/promptbox/usePromptModePermissionDisplay";
 import { usePromptVoice } from "@/components/promptbox/usePromptVoice";
 import {
@@ -122,7 +122,6 @@ export interface NewThreadModeConfig {
   environmentProviderInputsSlot?: ReactNode;
   machineProviderInputsSlot?: ReactNode;
   banner?: ReactNode;
-  header?: ReactNode;
 }
 
 interface NewThreadPromptBoxUIProps {
@@ -314,7 +313,7 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
           {modeConfig.banner}
         </ComposerBannersSlot>
       </div>
-      <PromptBoxInternal
+      <ComposerBox
         id={id}
         promptBoxRef={promptBoxRef}
         value={value}
@@ -323,9 +322,11 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         onSubmit={onSubmit}
         textEffects={textEffects}
         onComposerLayoutChange={onComposerLayoutChange}
-        history={history}
-        promptHistorySearch={{
-          projectId: project?.value ?? PERSONAL_PROJECT_ID,
+        history={{
+          ...history,
+          promptHistorySearch: {
+            projectId: project?.value ?? PERSONAL_PROJECT_ID,
+          },
         }}
         typeahead={typeahead}
         mentionMenuPlacement={mentionMenuPlacement}
@@ -340,11 +341,10 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         }}
         autoFocus={autoFocus}
         onFocusCommand={onFocusCommand}
-        editorLayout="root-compose"
+        surface="new-thread"
         minHeight={NEW_THREAD_PROMPT_BOX_MIN_HEIGHT}
         placeholder={placeholder}
-        header={modeConfig.header}
-        footerStart={<ExecutionControls {...execution} />}
+        executionControls={<ExecutionControls {...execution} />}
       />
       <div
         data-new-thread-footer=""

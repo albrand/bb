@@ -1,5 +1,4 @@
 import {
-  environmentPullRequestRoute,
   uiPreferencesRoute,
   updateUiPreferenceRoute,
   resetUiPreferenceRoute,
@@ -1291,7 +1290,6 @@ export const publicApiRoutes = {
       ),
       response: jsonResponse<EnvironmentStatusResponse>(),
     }),
-    pullRequest: environmentPullRequestRoute,
     diff: defineRoute({
       path: "/environments/:id/diff",
       method: "get",

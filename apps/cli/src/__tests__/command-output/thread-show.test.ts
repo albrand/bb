@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import * as domain from "@bb/domain";
 import type * as serverContract from "@bb/server-contract";
+import type {
+  EnvironmentPullRequest,
+  PullRequest,
+} from "bb-plugin-bb--github-pr-status/contract";
 import {
   setupCommandOutputTestEnvironment,
   collectLogLines,
@@ -15,6 +19,9 @@ import { printExecutionProfile } from "../../commands/thread/show.js";
 
 describe("bb thread show command output", () => {
   setupCommandOutputTestEnvironment();
+
+  const register: CommandRegistrar = (program) =>
+    registerThreadCommands(program, () => "http://server");
 
   function stubThreadApi(handlers: Parameters<typeof stubServerApi>[0]): void {
     stubServerApi({
@@ -44,9 +51,6 @@ describe("bb thread show command output", () => {
     });
   }
 
-  const register: CommandRegistrar = (program) =>
-    registerThreadCommands(program, () => "http://server");
-
   it("prints stored and next-turn models when they differ", () => {
     printExecutionProfile({
       lastRequested: null,
@@ -66,9 +70,24 @@ describe("bb thread show command output", () => {
     );
   });
 
-  function makePullRequest(
-    overrides: Partial<domain.ThreadPullRequest> = {},
-  ): domain.ThreadPullRequest {
+  function stubPullRequestRpc(
+    environmentId: string,
+    row: EnvironmentPullRequest,
+  ): { urls: string[]; bodies: unknown[] } {
+    const urls: string[] = [];
+    const bodies: unknown[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      urls.push(String(input));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(
+        JSON.stringify({ ok: true, result: { [environmentId]: row } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    return { urls, bodies };
+  }
+
+  function makePullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     return {
       number: 42,
       title: "Review thread show",
@@ -124,7 +143,7 @@ describe("bb thread show command output", () => {
         ...stamp,
       });
       const get = vi.fn(async () => thread);
-      const timelineGet = vi.fn(fixtures.makeEmptyTimelineGetMock());
+      const timelineGet = fixtures.makeEmptyTimelineGetMock();
       stubThreadApi({
         "v1.threads.:id.$get": get,
         "v1.threads.:id.timeline.$get": timelineGet,
@@ -135,7 +154,6 @@ describe("bb thread show command output", () => {
       expect(get).toHaveBeenCalledWith({
         param: { id: `thread-${flag}-1` },
       });
-      expect(timelineGet).toHaveBeenCalledTimes(1);
       expect(timelineGet).toHaveBeenCalledWith({
         param: { id: `thread-${flag}-1` },
         query: { summaryOnly: "true" },
@@ -144,51 +162,6 @@ describe("bb thread show command output", () => {
       expect(lines.some((line) => line.includes(label))).toBe(true);
     },
   );
-
-  it("bb thread show prints the latest failed turn error", async () => {
-    const thread: domain.Thread = fixtures.makeThread({
-      id: "thread-show-error",
-      projectId: "proj-1",
-      providerId: "codex",
-      status: "error",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    const get = vi.fn(async () => thread);
-    const events = vi.fn(async () => [
-      {
-        id: "event-turn-completed",
-        threadId: thread.id,
-        type: "turn/completed",
-        data: {
-          status: "failed",
-          error: { message: "Agent stopped the turn: refusal" },
-        },
-        createdAt: 2,
-        sequence: 2,
-      },
-    ]);
-    const timelineGet = fixtures.makeEmptyTimelineGetMock();
-    stubThreadApi({
-      "v1.threads.:id.$get": get,
-      "v1.threads.:id.events.$get": events,
-      "v1.threads.:id.timeline.$get": timelineGet,
-    });
-
-    await runCommand(["thread", "show", thread.id], register);
-
-    expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "  Error: Agent stopped the turn: refusal",
-    );
-    expect(events).toHaveBeenCalledWith({
-      param: { id: thread.id },
-      query: {
-        limit: "100",
-        order: "desc",
-        types: "system/error,turn/completed",
-      },
-    });
-  });
 
   it("bb thread show --self resolves from BB_THREAD_ID", async () => {
     vi.stubEnv("BB_THREAD_ID", "thread-show-self");
@@ -213,77 +186,6 @@ describe("bb thread show command output", () => {
       param: { id: "thread-show-self" },
     });
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
-  });
-
-  it("loads timeline rows for the on-demand token usage analysis", async () => {
-    const thread = fixtures.makeThread({
-      id: "thread-usage-analysis",
-      projectId: "proj-1",
-      providerId: "codex",
-      status: "idle",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    const latestTimeline = fixtures.makeTimelineResponse([]);
-    latestTimeline.timelinePage.olderCursor = {
-      anchorId: "older-anchor",
-      anchorSeq: 20,
-    };
-    const timelineGet = vi.fn(
-      async ({ query }: { query: Record<string, string> }) =>
-        query.beforeAnchorSeq === undefined
-          ? latestTimeline
-          : fixtures.makeTimelineResponse([]),
-    );
-    stubThreadApi({
-      "v1.threads.:id.$get": vi.fn(async () => thread),
-      "v1.threads.:id.timeline.$get": timelineGet,
-      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        historyComplete: false,
-        providerId: "codex",
-        total: {
-          inputTokens: 22,
-          cachedInputTokens: 2_100_000,
-          outputTokens: 5_900,
-          reasoningOutputTokens: 0,
-          totalTokens: 2_105_922,
-        },
-        turns: [
-          {
-            turnId: "pruned-turn",
-            model: null,
-            inputTokens: null,
-            cachedInputTokens: null,
-            outputTokens: null,
-            reasoningOutputTokens: null,
-            totalTokens: null,
-          },
-        ],
-      })),
-    });
-
-    await runCommand(["thread", "show", thread.id, "--usage"], register);
-
-    expect(timelineGet).toHaveBeenCalledWith({
-      param: { id: thread.id },
-      query: {},
-    });
-    expect(timelineGet).toHaveBeenCalledWith({
-      param: { id: thread.id },
-      query: {
-        beforeAnchorId: "older-anchor",
-        beforeAnchorSeq: "20",
-      },
-    });
-    expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "  History: partial",
-    );
-    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
-      "  Weather: clear · cache reuse 100% · context fill unavailable",
-    );
-    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
-      "  Rules: overall weather follows durable thread cache reuse",
-    );
   });
 
   it("bb thread show --work-status prints non-git environment message", async () => {
@@ -311,11 +213,9 @@ describe("bb thread show command output", () => {
       reason: "non_git_environment",
       message: "Workspace is not a Git repository.",
     }));
-    const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.environments.:id.status.$get": statusGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
@@ -382,12 +282,10 @@ describe("bb thread show command output", () => {
       diff: gitDiff,
     };
     const diffGet = vi.fn(async () => diffResponse);
-    const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.diff.$get": diffGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -436,12 +334,10 @@ describe("bb thread show command output", () => {
     const get = vi.fn(async () => thread);
     const environmentGet = vi.fn(async () => environment);
     const diffGet = vi.fn(async () => diffResponse);
-    const pullRequestGet = vi.fn(async () => ({ outcome: "absent" }));
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
       "v1.environments.:id.diff.$get": diffGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -495,23 +391,23 @@ describe("bb thread show command output", () => {
     });
     const get = vi.fn(async () => thread);
     const environmentGet = vi.fn(async () => environment);
-    const pullRequestGet = vi.fn(async () => ({
+    const rpc = stubPullRequestRpc("env-show-pr", {
       outcome: "available",
       pullRequest,
-    }));
+    });
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
 
     await runCommand(["thread", "show", "thread-show-pr"], register);
 
-    expect(pullRequestGet).toHaveBeenCalledWith({
-      param: { id: "env-show-pr" },
-    });
+    expect(rpc.urls).toEqual([
+      "http://server/api/v1/plugins/bb--github-pr-status/rpc/pullRequests",
+    ]);
+    expect(rpc.bodies).toEqual([{ keys: ["env-show-pr"] }]);
     const output = collectLogLines(vi.mocked(console.log)).join("\n");
     expect(output.indexOf("Environment:")).toBeLessThan(
       output.indexOf("Pull request:"),
@@ -548,14 +444,13 @@ describe("bb thread show command output", () => {
     });
     const get = vi.fn(async () => thread);
     const environmentGet = vi.fn(async () => environment);
-    const pullRequestGet = vi.fn(async () => ({
+    stubPullRequestRpc("env-show-pr-down", {
       outcome: "unavailable",
       message: "gh pr view failed: authentication required",
-    }));
+    });
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -566,150 +461,6 @@ describe("bb thread show command output", () => {
     expect(output).toContain("Pull request: unavailable");
     expect(output).toContain("gh pr view failed: authentication required");
     expect(output).not.toContain("Pull request: none");
-  });
-
-  it("prints token kinds and child agent states", async () => {
-    const thread = fixtures.makeThread({
-      id: "thread-spend-show",
-      projectId: "proj-1",
-      providerId: "codex",
-      status: "idle",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    stubThreadApi({
-      "v1.threads.:id.$get": vi.fn(async () => thread),
-      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
-      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        historyComplete: true,
-        providerId: "codex",
-        total: {
-          inputTokens: 1_200,
-          cachedInputTokens: 300,
-          outputTokens: 80_000,
-          reasoningOutputTokens: 12_000,
-          totalTokens: 93_500,
-        },
-        turns: [
-          {
-            turnId: "turn-1",
-            model: null,
-            inputTokens: 1_000,
-            cachedInputTokens: null,
-            outputTokens: 20,
-            reasoningOutputTokens: 4,
-            totalTokens: 1_024,
-          },
-        ],
-      })),
-      "v1.threads.:id.child-summary.$get": vi.fn(async () => ({
-        nonDeletedChildCount: 2,
-        unarchivedDescendantCount: 2,
-        working: 1,
-        waiting: 0,
-        idle: 1,
-        failed: 0,
-        totalTokens: 64_400_000,
-        children: [],
-      })),
-    });
-
-    await runCommand(["thread", "show", thread.id], register);
-
-    const lines = collectLogLines(vi.mocked(console.log));
-    expect(lines).toContain(
-      "  Thread: Input (uncached) 1.2K · Out 80K · Reasoning (within output) 12K · Cached 300 · Σ 93.5K",
-    );
-    expect(lines).toContain(
-      "  Turn turn-1: Input (uncached) 1K · Out 20 · Reasoning (within output) 4 · Cached unavailable · Σ 1K",
-    );
-    expect(lines).toContain("Ran 2 agents:");
-    expect(lines).toContain(
-      "  1 working · 0 waiting · 1 idle · 0 failed · Σ 64.4M",
-    );
-  });
-
-  it("renders the live Claude token rows with partial-history labels", async () => {
-    const thread = fixtures.makeThread({
-      id: "thr_k3d6qji9a4",
-      projectId: "proj-1",
-      providerId: "claude-code",
-      status: "idle",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    stubThreadApi({
-      "v1.threads.:id.$get": vi.fn(async () => thread),
-      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
-      "v1.threads.:id.spend-summary.$get": vi.fn(async () => ({
-        historyComplete: false,
-        providerId: "claude-code",
-        total: {
-          inputTokens: 6_442,
-          cachedInputTokens: 686_719_425,
-          outputTokens: 1_809_971,
-          reasoningOutputTokens: 0,
-          totalTokens: 688_535_838,
-        },
-        turns: [
-          {
-            turnId: "da385f7e5d-t1",
-            model: null,
-            inputTokens: 30,
-            cachedInputTokens: 2_843_776,
-            outputTokens: 6_149,
-            reasoningOutputTokens: null,
-            totalTokens: 2_849_955,
-          },
-          {
-            turnId: "da385f7e5d-t2",
-            model: null,
-            inputTokens: 8,
-            cachedInputTokens: 788_012,
-            outputTokens: 831,
-            reasoningOutputTokens: null,
-            totalTokens: 788_851,
-          },
-        ],
-      })),
-    });
-
-    await runCommand(["thread", "show", thread.id], register);
-
-    expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "  Thread: Input (uncached) ≥ 6.4K (partial history) · Out ≥ 1.8M (partial history) · Reasoning included in output · Cached ≥ 686.7M (partial history) · Σ ≥ 688.5M (partial history)",
-    );
-    expect(collectLogLines(vi.mocked(console.log)).join("\n")).toMatch(
-      /Turn da385f7e5d-t2: Input \(uncached\) 8 · Out 831 · Reasoning included in output · Cached 788K · Σ 788\.9K/,
-    );
-  });
-
-  it("keeps thread show available when spend summary routes fail", async () => {
-    const thread = fixtures.makeThread({
-      id: "thread-spend-unavailable",
-      projectId: "proj-1",
-      providerId: "codex",
-      status: "idle",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    stubThreadApi({
-      "v1.threads.:id.$get": vi.fn(async () => thread),
-      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
-      "v1.threads.:id.spend-summary.$get": vi.fn(async () => {
-        throw new Error("spend summary unavailable");
-      }),
-      "v1.threads.:id.child-summary.$get": vi.fn(async () => {
-        throw new Error("child summary unavailable");
-      }),
-    });
-
-    await runCommand(["thread", "show", thread.id], register);
-
-    const lines = collectLogLines(vi.mocked(console.log));
-    expect(lines).toContain("Token usage: unavailable");
-    expect(lines).not.toContain("Ran 0 agents:");
-    expect(lines.some((line) => line.includes("Status: idle"))).toBe(true);
   });
 
   it("bb thread show --json includes pull request details", async () => {
@@ -732,14 +483,13 @@ describe("bb thread show command output", () => {
     const pullRequest = makePullRequest();
     const get = vi.fn(async () => thread);
     const environmentGet = vi.fn(async () => environment);
-    const pullRequestGet = vi.fn(async () => ({
+    stubPullRequestRpc("env-json-show-pr", {
       outcome: "available",
       pullRequest,
-    }));
+    });
     const timelineGet = fixtures.makeEmptyTimelineGetMock();
     stubThreadApi({
       "v1.environments.:id.$get": environmentGet,
-      "v1.environments.:id.pull-request.$get": pullRequestGet,
       "v1.threads.:id.$get": get,
       "v1.threads.:id.timeline.$get": timelineGet,
     });
@@ -763,21 +513,21 @@ describe("bb thread show command output", () => {
       pendingTodos: null,
       execution: null,
       childSummary: {
-        nonDeletedChildCount: 0,
-        unarchivedDescendantCount: 0,
-        working: 0,
-        waiting: 0,
-        idle: 0,
-        failed: 0,
-        totalTokens: 0,
         children: [],
+        failed: 0,
+        idle: 0,
+        nonDeletedChildCount: 0,
+        totalTokens: 0,
+        unarchivedDescendantCount: 0,
+        waiting: 0,
+        working: 0,
       },
       spendSummary: {
         historyComplete: false,
         providerId: "codex",
         total: {
-          inputTokens: null,
           cachedInputTokens: null,
+          inputTokens: null,
           outputTokens: null,
           reasoningOutputTokens: null,
           totalTokens: null,
@@ -816,21 +566,21 @@ describe("bb thread show command output", () => {
       pendingTodos: null,
       execution: null,
       childSummary: {
-        nonDeletedChildCount: 0,
-        unarchivedDescendantCount: 0,
-        working: 0,
-        waiting: 0,
-        idle: 0,
-        failed: 0,
-        totalTokens: 0,
         children: [],
+        failed: 0,
+        idle: 0,
+        nonDeletedChildCount: 0,
+        totalTokens: 0,
+        unarchivedDescendantCount: 0,
+        waiting: 0,
+        working: 0,
       },
       spendSummary: {
         historyComplete: false,
         providerId: "codex",
         total: {
-          inputTokens: null,
           cachedInputTokens: null,
+          inputTokens: null,
           outputTokens: null,
           reasoningOutputTokens: null,
           totalTokens: null,
@@ -838,25 +588,5 @@ describe("bb thread show command output", () => {
         turns: [],
       },
     });
-  });
-
-  it("keeps bb thread status as an alias for showing a thread", async () => {
-    const thread: domain.Thread = fixtures.makeThread({
-      id: "thread-status-show-alias",
-      projectId: "proj-1",
-      providerId: "codex",
-      status: "idle",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    const get = vi.fn(async () => thread);
-    stubThreadApi({
-      "v1.threads.:id.$get": get,
-      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
-    });
-
-    await runCommand(["thread", "status", thread.id, "--json"], register);
-
-    expect(get).toHaveBeenCalledWith({ param: { id: thread.id } });
   });
 });

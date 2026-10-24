@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   useQueryClient,
+  type QueryClient,
   type QueryObserverResult,
 } from "@tanstack/react-query";
 import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
@@ -84,6 +85,37 @@ interface ReconcileLoadedTimelineArgs {
   current: LoadedTimelineState;
   latestTimeline: ThreadTimelineResponse | undefined;
   surfaceKey: string;
+}
+
+const MAX_RETAINED_LOADED_TIMELINES = 8;
+const retainedLoadedTimelines = new WeakMap<
+  QueryClient,
+  Map<string, LoadedTimelineState>
+>();
+
+function retainedLoadedTimeline(
+  queryClient: QueryClient,
+  surfaceKey: string,
+): LoadedTimelineState | undefined {
+  return retainedLoadedTimelines.get(queryClient)?.get(surfaceKey);
+}
+
+function retainLoadedTimeline(
+  queryClient: QueryClient,
+  loaded: LoadedTimelineState,
+): void {
+  let retained = retainedLoadedTimelines.get(queryClient);
+  if (retained === undefined) {
+    retained = new Map();
+    retainedLoadedTimelines.set(queryClient, retained);
+  }
+  retained.delete(loaded.surfaceKey);
+  retained.set(loaded.surfaceKey, loaded);
+  while (retained.size > MAX_RETAINED_LOADED_TIMELINES) {
+    const oldest = retained.keys().next().value;
+    if (oldest === undefined) break;
+    retained.delete(oldest);
+  }
 }
 
 function isStaleTimelinePaginationCursorError(error: Error): boolean {
@@ -173,7 +205,9 @@ export function useThreadTimelineController({
     useState<LoadedTimelineTracker>(() => ({
       latestTimeline: queriedTimeline,
       loaded: reconcileLoadedTimeline({
-        current: buildEmptyLoadedTimelineState(initialSurfaceKey),
+        current:
+          retainedLoadedTimeline(queryClient, initialSurfaceKey) ??
+          buildEmptyLoadedTimelineState(initialSurfaceKey),
         latestTimeline: queriedTimeline,
         surfaceKey: initialSurfaceKey,
       }),
@@ -197,12 +231,18 @@ export function useThreadTimelineController({
     loadedTimeline.surfaceKey !== surfaceKey
   ) {
     loadedTimeline = reconcileLoadedTimeline({
-      current: loadedTimelineTracker.loaded,
+      current:
+        loadedTimeline.surfaceKey === surfaceKey
+          ? loadedTimeline
+          : (retainedLoadedTimeline(queryClient, surfaceKey) ?? loadedTimeline),
       latestTimeline,
       surfaceKey,
     });
     setLoadedTimelineTracker({ latestTimeline, loaded: loadedTimeline });
   }
+  useEffect(() => {
+    retainLoadedTimeline(queryClient, loadedTimeline);
+  }, [loadedTimeline, queryClient]);
   const updateLoadedTimeline = useCallback(
     (update: (current: LoadedTimelineState) => LoadedTimelineState) => {
       setLoadedTimelineTracker((current) => {
