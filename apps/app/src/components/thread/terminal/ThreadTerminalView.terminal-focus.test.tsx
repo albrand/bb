@@ -19,11 +19,12 @@ import {
 import { decodeBase64Bytes } from "@/lib/base64-bytes";
 import { makeTerminalSession } from "@/test/fixtures/terminal-sessions";
 import { wsManager } from "@/lib/ws";
+import * as terminalModules from "./terminal-modules";
 import {
   AppCommandProvider,
   useAppCommandHandler,
 } from "@/components/commands/AppCommandProvider";
-import { ThreadTerminalView } from "./ThreadTerminalView";
+import { ThreadTerminalView, writeTerminalOutput } from "./ThreadTerminalView";
 
 const testState = vi.hoisted(() => ({
   calls: [] as string[],
@@ -204,7 +205,12 @@ async function waitForReadinessCondition<T>(
   try {
     return await waitFor(callback, { timeout: 5_000 });
   } catch {
-    throw new Error(failureMessage);
+    const terminalError = document.querySelector<HTMLElement>(
+      "[data-terminal-renderer]",
+    )?.textContent;
+    throw new Error(
+      terminalError ? `${failureMessage}: ${terminalError}` : failureMessage,
+    );
   }
 }
 
@@ -270,6 +276,35 @@ function prepareMobileTerminal(): void {
   );
 }
 
+function stubVisibleIntersectionObserver(): void {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(
+        private readonly callback: IntersectionObserverCallback,
+        _options?: IntersectionObserverInit,
+      ) {}
+
+      disconnect(): void {}
+
+      observe(target: Element): void {
+        this.callback(
+          [
+            {
+              target,
+              isIntersecting: true,
+              intersectionRect: new DOMRect(0, 0, 354, 504),
+            } as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      unobserve(): void {}
+    },
+  );
+}
+
 function renderMobileTerminal(): ReturnType<typeof makeTerminalSession> {
   const session = makeTerminalSession({
     id: "term_mobile_paste",
@@ -294,7 +329,321 @@ function scrollTerminalAsUser(terminal: Terminal, line: number): void {
   terminal.scrollToLine(line);
 }
 
+function writeReplay(terminal: Terminal, data: string): Promise<void> {
+  return new Promise((resolve) => {
+    writeTerminalOutput({
+      data,
+      isReplay: true,
+      onParsed: resolve,
+      replayWriteState: { suppressedWriteCount: 0 },
+      terminal,
+    });
+  });
+}
+
 describe("ThreadTerminalView terminal focus boundary", () => {
+  it("reveals before a pending search add-on loads, then attaches it", async () => {
+    prepareMobileTerminal();
+    testState.touchEnabled = false;
+    stubVisibleIntersectionObserver();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(FitAddon.prototype, "proposeDimensions").mockReturnValue({
+      cols: 40,
+      rows: 12,
+    });
+    type SearchAddonModule = Awaited<
+      ReturnType<typeof terminalModules.importTerminalSearchAddon>
+    >;
+    let resolveSearch!: (module: SearchAddonModule) => void;
+    const searchModule = new Promise<SearchAddonModule>((resolve) => {
+      resolveSearch = resolve;
+    });
+    vi.spyOn(terminalModules, "importTerminalSearchAddon").mockReturnValue(
+      searchModule,
+    );
+    const originalOpen = Terminal.prototype.open;
+    vi.spyOn(Terminal.prototype, "open").mockImplementation(function openTerminal(
+      this: Terminal,
+      element: HTMLElement,
+    ) {
+      originalOpen.call(this, element);
+    });
+
+    const session = renderMobileTerminal();
+    await waitForReadinessCondition(
+      () => expect(document.querySelector(".xterm")).not.toBeNull(),
+      "terminal did not open while search was pending",
+    );
+    const socket = testState.sockets[0];
+    if (!socket) throw new Error("terminal socket was not created");
+    socket.receive({
+      type: "attached",
+      session,
+      replayStartSeq: 0,
+      nextSeq: 0,
+    });
+    const terminalElement = document.querySelector(".xterm");
+    if (!terminalElement) throw new Error("terminal was not opened");
+    fireEvent.pointerDown(terminalElement);
+    document
+      .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+      ?.focus();
+    await waitForReadinessCondition(
+      () => {
+        const renderer = document.querySelector<HTMLElement>(
+          "[data-terminal-renderer]",
+        );
+        expect(renderer?.style.opacity).toBe("");
+      },
+      "terminal did not reveal while search was pending",
+    );
+    expect(
+      (screen.getByRole("button", {
+        name: "Search terminal output",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    const addon = await import("@xterm/addon-search");
+    await act(async () => resolveSearch(addon));
+    await waitForReadinessCondition(
+      () => {
+        expect(
+          (screen.getByRole("button", {
+            name: "Search terminal output",
+          }) as HTMLButtonElement).disabled,
+        ).toBe(false);
+      },
+      "search add-on did not attach after loading",
+    );
+  }, 30_000);
+
+  it("keeps the terminal open when an optional search add-on fails", async () => {
+    prepareMobileTerminal();
+    testState.touchEnabled = false;
+    vi.spyOn(terminalModules, "importTerminalSearchAddon").mockRejectedValue(
+      new Error("search add-on unavailable"),
+    );
+    renderMobileTerminal();
+    await waitForReadinessCondition(
+      () => expect(document.querySelector(".xterm")).not.toBeNull(),
+      "terminal did not open after optional search failed",
+    );
+    expect(document.querySelector("[data-terminal-renderer]")).not.toBeNull();
+  }, 30_000);
+
+  it("uses Unicode 11 cell widths for replayed wide TUI status lines", async () => {
+    prepareMobileTerminal();
+    testState.touchEnabled = false;
+    stubVisibleIntersectionObserver();
+    vi.spyOn(FitAddon.prototype, "proposeDimensions").mockReturnValue({
+      cols: 40,
+      rows: 12,
+    });
+    let actualTerminal: Terminal | null = null;
+    let unicodeVersionAtOpen: string | undefined;
+    const open = Terminal.prototype.open;
+    vi.spyOn(Terminal.prototype, "open").mockImplementation(function (
+      this: Terminal,
+      element: HTMLElement,
+    ) {
+      actualTerminal = this;
+      unicodeVersionAtOpen = this.unicode.activeVersion;
+      open.call(this, element);
+    });
+    class WebglAddon {
+      activate(_terminal: Terminal): void {}
+      dispose(): void {}
+      onContextLoss(_listener: () => void) {
+        return { dispose: () => {} };
+      }
+    }
+    vi.spyOn(terminalModules, "importTerminalWebglAddon").mockResolvedValue({
+      WebglAddon,
+    } as Awaited<ReturnType<typeof terminalModules.importTerminalWebglAddon>>);
+
+    renderMobileTerminal();
+    await waitForReadinessCondition(
+      () => {
+        expect(document.querySelector(".xterm")).not.toBeNull();
+        expect(actualTerminal).not.toBeNull();
+        expect(unicodeVersionAtOpen).toBe("11");
+      },
+      "Unicode 11 was not active when the terminal opened",
+    );
+    expect(unicodeVersionAtOpen).toBe("11");
+    const terminal = actualTerminal;
+    if (!terminal) throw new Error("terminal did not open");
+    const line = `🧐界${" ".repeat(31)}12:34`;
+    await writeReplay(terminal, line);
+
+    const [{ SearchAddon }, { WebLinksAddon }, { Unicode11Addon }] =
+      await Promise.all([
+        import("@xterm/addon-search"),
+        import("@xterm/addon-web-links"),
+        import("@xterm/addon-unicode11"),
+      ]);
+    const referenceHost = document.createElement("div");
+    document.body.append(referenceHost);
+    const reference = new Terminal({
+      allowProposedApi: true,
+      cols: 40,
+      rows: 12,
+    });
+    reference.loadAddon(new FitAddon());
+    reference.loadAddon(new Unicode11Addon());
+    reference.unicode.activeVersion = "11";
+    reference.open(referenceHost);
+    reference.loadAddon(new SearchAddon());
+    reference.loadAddon(new WebLinksAddon(() => {}));
+    reference.loadAddon(new WebglAddon());
+    await new Promise<void>((resolve) => reference.write(line, resolve));
+
+    const positions = (terminal: Terminal) => {
+      const row = terminal.buffer.active.getLine(0);
+      return {
+        emoji: row?.getCell(0)?.getChars(),
+        cjk: row?.getCell(2)?.getChars(),
+        statusStart: row?.getCell(35)?.getChars(),
+        statusEnd: row?.getCell(39)?.getChars(),
+        cursorX: terminal.buffer.active.cursorX,
+      };
+    };
+    expect(positions(terminal)).toEqual(positions(reference));
+    expect(positions(terminal)).toMatchObject({
+      emoji: "🧐",
+      cjk: "界",
+      statusStart: "1",
+      statusEnd: "4",
+    });
+    reference.dispose();
+    referenceHost.remove();
+  }, 30_000);
+
+  it("preserves terminal state when WebGL attaches after replay", async () => {
+    prepareMobileTerminal();
+    testState.touchEnabled = false;
+    stubVisibleIntersectionObserver();
+    vi.spyOn(FitAddon.prototype, "proposeDimensions").mockReturnValue({
+      cols: 40,
+      rows: 12,
+    });
+    type WebglModule = Awaited<
+      ReturnType<typeof terminalModules.importTerminalWebglAddon>
+    >;
+    let resolveWebgl!: (module: WebglModule) => void;
+    const webglModule = new Promise<WebglModule>((resolve) => {
+      resolveWebgl = resolve;
+    });
+    vi.spyOn(terminalModules, "importTerminalWebglAddon").mockReturnValue(
+      webglModule,
+    );
+    class WebglAddon {
+      activate(_terminal: Terminal): void {}
+      dispose(): void {}
+      onContextLoss(_listener: () => void) {
+        return { dispose: () => {} };
+      }
+    }
+    const mountedTerminal: { current: Terminal | null } = { current: null };
+    const loadAddon = Terminal.prototype.loadAddon;
+    vi.spyOn(Terminal.prototype, "loadAddon").mockImplementation(function (
+      this: Terminal,
+      addon: Parameters<typeof loadAddon>[0],
+    ) {
+      mountedTerminal.current ??= this;
+      loadAddon.call(this, addon);
+    });
+    renderMobileTerminal();
+    await waitForReadinessCondition(
+      () => expect(document.querySelector(".xterm")).not.toBeNull(),
+      "terminal did not open before WebGL resolution",
+    );
+    const terminal = mountedTerminal.current;
+    if (!terminal) throw new Error("terminal did not mount");
+    const history = Array.from(
+      { length: 160 },
+      (_, index) => `history ${String(index + 1).padStart(3, "0")}`,
+    ).join("\r\n");
+    await writeReplay(terminal, history);
+    await waitForReadinessCondition(
+      () => expect(terminal.buffer.active.baseY).toBeGreaterThan(0),
+      "replay history did not render before WebGL resolution",
+    );
+    await waitForReadinessCondition(
+      () => expect(document.querySelector(".xterm-screen")).not.toBeNull(),
+      "terminal screen did not render replay history",
+    );
+    const screen = document.querySelector(".xterm-screen");
+    if (!screen) throw new Error("terminal screen was not mounted");
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      fireEvent.wheel(screen, { deltaY: -120 });
+    }
+    const before = {
+      cols: terminal.cols,
+      rows: terminal.rows,
+      cursorX: terminal.buffer.active.cursorX,
+      cursorY: terminal.buffer.active.cursorY,
+      baseY: terminal.buffer.active.baseY,
+      viewportY: terminal.buffer.active.viewportY,
+      retainedLine: terminal.buffer.active.getLine(5)?.translateToString(true),
+    };
+    expect(before.viewportY).toBeLessThan(before.baseY);
+    await act(async () => resolveWebgl({ WebglAddon } as WebglModule));
+    await waitForReadinessCondition(
+      () =>
+        expect(
+          document.querySelector<HTMLElement>("[data-terminal-renderer]")
+            ?.dataset.terminalRenderer,
+        ).toBe("webgl"),
+      "WebGL renderer did not attach after replay",
+    );
+    expect({
+      cols: terminal.cols,
+      rows: terminal.rows,
+      cursorX: terminal.buffer.active.cursorX,
+      cursorY: terminal.buffer.active.cursorY,
+      baseY: terminal.buffer.active.baseY,
+      viewportY: terminal.buffer.active.viewportY,
+      retainedLine: terminal.buffer.active.getLine(5)?.translateToString(true),
+    }).toEqual(before);
+  }, 30_000);
+
+  it("keeps the DOM renderer and replay working when WebGL import fails", async () => {
+    prepareMobileTerminal();
+    vi.spyOn(terminalModules, "importTerminalWebglAddon").mockRejectedValue(
+      new Error("WebGL unavailable"),
+    );
+    const session = renderMobileTerminal();
+    await waitForReadinessCondition(
+      () => expect(document.querySelector(".xterm")).not.toBeNull(),
+      "terminal did not open after WebGL import failed",
+    );
+    const socket = testState.sockets[0];
+    if (!socket) throw new Error("terminal socket was not created");
+    socket.receive({ type: "attached", session, replayStartSeq: 0, nextSeq: 1 });
+    socket.receive({
+      type: "output",
+      chunk: { seq: 0, dataBase64: btoa("DOM renderer remains active") },
+    });
+    await waitForReadinessCondition(
+      () =>
+        expect(
+          document.querySelector<HTMLElement>("[data-terminal-renderer]")
+            ?.dataset.terminalRenderer,
+        ).toBe("dom"),
+      "DOM renderer fallback did not remain active",
+    );
+    await waitForReadinessCondition(
+      () =>
+        expect(
+          document
+            .querySelector(".xterm")
+            ?.textContent?.replace(/\s+/g, " "),
+        ).toContain("DOM renderer remains active"),
+      "terminal did not render output after WebGL import failed",
+    );
+  }, 30_000);
+
   it("mounts and records output boundaries without crypto.randomUUID", async () => {
     prepareMobileTerminal();
     const originalRandomUUID = crypto.randomUUID;

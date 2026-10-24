@@ -90,6 +90,40 @@ function watchTerminalKeys(textarea: HTMLTextAreaElement) {
 }
 
 describe("TerminalSearch shortcuts and closed controls", () => {
+  it("keeps an early search request open until the add-on arrives", () => {
+    const addon = createSearchAddon();
+    const textarea = document.createElement("textarea");
+    document.body.appendChild(textarea);
+    const terminal = { textarea } as unknown as Terminal;
+    const view = render(
+      <div className="group/terminal-pane">
+        <TerminalSearch
+          addon={null}
+          terminal={terminal}
+          open
+          onOpenChange={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(
+      screen.getByRole("search", { name: "Search terminal output" }),
+    ).toBeTruthy();
+    expect(() =>
+      view.rerender(
+        <div className="group/terminal-pane">
+          <TerminalSearch
+            addon={addon}
+            terminal={terminal}
+            open
+            onOpenChange={vi.fn()}
+          />
+        </div>,
+      ),
+    ).not.toThrow();
+    expect(screen.getByRole("searchbox", { name: "Find in terminal" })).toBeTruthy();
+  });
+
   it("does not open search shortcuts when the optional add-on failed to load", async () => {
     Object.defineProperty(navigator, "platform", {
       configurable: true,

@@ -95,6 +95,7 @@ import {
 } from "./pending-rpc-registry.js";
 import { TerminalOutputFlowControl } from "./terminal-output-flow-control.js";
 import { TerminalOutputSequenceRebase } from "./terminal-output-sequence-rebase.js";
+import { TerminalScreenStateCache } from "./terminal-screen-state.js";
 import {
   isTimeoutFlushableHolderMarkerPrefix,
   shouldFlushHolderMarkerChunksOnTimeout,
@@ -850,6 +851,7 @@ export class TerminalSessionLifecycle {
   private readonly resizeAckSockets = new WeakSet<TerminalClientSocket>();
   private readonly outputFlow: TerminalOutputFlowControl;
   private readonly outputSequenceRebase = new TerminalOutputSequenceRebase();
+  private readonly terminalScreenStates = new TerminalScreenStateCache();
   private readonly pendingHolderMarkers = new Set<string>();
   private readonly pendingHolderOutput = new Map<
     string,
@@ -945,6 +947,42 @@ export class TerminalSessionLifecycle {
         "Timed out replaying terminal output after the host reconnected",
       ),
     });
+  }
+
+  async warmTerminalScreenStates(): Promise<void> {
+    const sessions = listTerminalSessions(this.options.db, {
+      scope: { kind: "all", statuses: ["running"] },
+      visible: false,
+    });
+    for (const session of sessions) {
+      await yieldToEventLoop();
+      if (this.terminalScreenStates.has(session.id)) continue;
+      const chunks = getRetainedTerminalOutput(this.options.db, {
+        hostId: session.hostId,
+        terminalSessionId: session.id,
+        now: Date.now(),
+      });
+      if (chunks === null) {
+        this.terminalScreenStates.create(
+          session.id,
+          session.cols,
+          session.rows,
+        );
+        continue;
+      }
+      if (chunks[0]?.seq !== 0) continue;
+      this.terminalScreenStates.create(session.id, session.cols, session.rows);
+      for (const chunk of chunks) {
+        this.terminalScreenStates.push(
+          session.id,
+          session.cols,
+          session.rows,
+          chunk.seq,
+          Buffer.from(chunk.dataBase64, "base64"),
+        );
+      }
+      await this.terminalScreenStates.snapshot(session.id);
+    }
   }
 
   listTerminals(args: ListTerminalsArgs): TerminalSession[] {
@@ -1419,6 +1457,11 @@ export class TerminalSessionLifecycle {
         "Terminal session was cancelled before it opened",
       );
     }
+    this.terminalScreenStates.create(
+      runningSession.id,
+      runningSession.cols,
+      runningSession.rows,
+    );
     args.onTerminalStarted?.(runningSession.id);
     this.notifyTerminalSessionChanged(runningSession);
     return this.toTerminalSession(runningSession);
@@ -1754,6 +1797,7 @@ export class TerminalSessionLifecycle {
           });
     const session = resized ?? current;
     if (resized && resized !== current) {
+      this.terminalScreenStates.resize(resized.id, resized.cols, resized.rows);
       this.notifyTerminalSessionChanged(resized);
       this.options.hub.sendTerminalClientMessage(resized.id, {
         type: "session-updated",
@@ -1831,6 +1875,16 @@ export class TerminalSessionLifecycle {
       );
     }
     if (
+      args.query.threadId !== undefined &&
+      session.threadId !== args.query.threadId
+    ) {
+      throw new ApiError(
+        404,
+        "terminal_not_found",
+        "Terminal session not found",
+      );
+    }
+    if (
       args.query.lines !== undefined &&
       args.query.lines > TERMINAL_SCREEN_MAX_LINES
     ) {
@@ -1839,6 +1893,12 @@ export class TerminalSessionLifecycle {
         "invalid_request",
         `lines must be at most ${TERMINAL_SCREEN_MAX_LINES}`,
       );
+    }
+    if (args.query.lines === undefined) {
+      const maintained = await this.terminalScreenStates.snapshot(
+        args.terminalId,
+      );
+      if (maintained !== null) return maintained;
     }
     const output = await this.readTerminalOutput({
       terminalId: args.terminalId,
@@ -1896,6 +1956,13 @@ export class TerminalSessionLifecycle {
     session: TerminalSessionRow,
     chunk: TerminalOutputChunk,
   ): void {
+    this.terminalScreenStates.push(
+      session.id,
+      session.cols,
+      session.rows,
+      chunk.seq,
+      Buffer.from(chunk.dataBase64, "base64"),
+    );
     const batches = this.pendingRetainedOutput.get(session.id) ?? [];
     const last = batches.at(-1);
     if (last !== undefined && last.hostId === session.hostId) {
@@ -2124,6 +2191,7 @@ export class TerminalSessionLifecycle {
       clearTimeout(pending.timer);
     }
     this.pendingHolderOutput.clear();
+    this.terminalScreenStates.dispose();
   }
 
   flushAllRetainedOutput(): void {
@@ -3642,6 +3710,11 @@ export class TerminalSessionLifecycle {
         rows: size.rows,
       });
       if (resized) {
+        this.terminalScreenStates.resize(
+          resized.id,
+          resized.cols,
+          resized.rows,
+        );
         const session = this.toTerminalSession(resized);
         this.notifyTerminalSessionChanged(resized);
         this.options.hub.sendTerminalClientMessage(resized.id, {
@@ -3842,6 +3915,7 @@ export class TerminalSessionLifecycle {
       terminalId: args.terminalId,
     };
     this.catchingUpTerminalIds.add(args.terminalId);
+    this.terminalScreenStates.remove(args.terminalId);
     void this.pendingCatchUps.claim(pending).promise.catch(() => undefined);
     const sent = this.options.hub.sendDaemonSessionMessage(
       args.daemonSessionId,
@@ -4338,6 +4412,7 @@ export class TerminalSessionLifecycle {
       this.options.hub.notifyThread(session.threadId, ["terminals-changed"]);
     }
     if (session.status !== "exited") return;
+    this.terminalScreenStates.remove(session.id);
     for (const listener of this.exitListeners) {
       try {
         listener(session);

@@ -123,6 +123,7 @@ export interface TerminalOutputArgs extends TerminalTargetArgs {
 
 export interface TerminalScreenArgs extends TerminalTargetArgs {
   lines?: TerminalScreenQuery["lines"];
+  threadId?: TerminalScreenQuery["threadId"];
   signal?: AbortSignal;
 }
 
@@ -467,7 +468,12 @@ export function createTerminalsArea(args: CreateSdkAreaArgs): TerminalsArea {
             transport.api.v1.terminals[":terminalId"].screen.$get(
               {
                 param: { terminalId: input.terminalId },
-                query: input.lines === undefined ? {} : { lines: input.lines },
+                query: {
+                  ...(input.lines === undefined ? {} : { lines: input.lines }),
+                  ...(input.threadId === undefined
+                    ? {}
+                    : { threadId: input.threadId }),
+                },
               },
               ...signalRequestArgs(signal),
             ),

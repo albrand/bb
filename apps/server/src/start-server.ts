@@ -713,6 +713,9 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     },
     "Server listening",
   );
+  void terminalSessions.warmTerminalScreenStates().catch((error: unknown) => {
+    logger.warn({ err: error }, "Failed to warm terminal screen states");
+  });
   pluginService.bindSdk({
     baseUrl: `http://127.0.0.1:${serverConfig.BB_SERVER_PORT}`,
   });

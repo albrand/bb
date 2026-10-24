@@ -2453,6 +2453,39 @@ describe("terminal output encoding", () => {
     terminal.dispose();
   });
 
+  it("feeds a checkpoint preview only from the checkpoint sequence onward", async () => {
+    const terminal = new Terminal({ cols: 40, rows: 5 });
+    const previewPush = vi.fn((bytes: Uint8Array, callback: () => void) =>
+      callback(),
+    );
+    const replayWriteState = { suppressedWriteCount: 0 };
+    const write = (sequence: number, isReplay: boolean) =>
+      writeTerminalOutput({
+        data: `chunk-${sequence}`,
+        isReplay,
+        outputSequence: sequence,
+        replayCheckpointSequence: 3,
+        onParsed: () => undefined,
+        replayWriteState,
+        terminal,
+        replayPipeline: { push: previewPush },
+      });
+
+    write(0, true);
+    await writeTerminal(terminal, "");
+    expect(previewPush).not.toHaveBeenCalled();
+    write(3, true);
+    await writeTerminal(terminal, "");
+    expect(Buffer.from(previewPush.mock.calls[0]?.[0] ?? []).toString()).toBe(
+      "chunk-3",
+    );
+    write(4, false);
+    await writeTerminal(terminal, "");
+    expect(previewPush).toHaveBeenCalledTimes(2);
+    expect(replayWriteState.suppressedWriteCount).toBe(0);
+    terminal.dispose();
+  });
+
   it("keeps keystrokes typed while replayed output is still parsing, and still drops the replay's protocol replies", async () => {
     const terminal = new Terminal({ cols: 80, rows: 24 });
     const sent: string[] = [];

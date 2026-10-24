@@ -59,6 +59,10 @@ export function NativeThreadTerminalMain({
   const terminalsUpdatedAt = terminalsQuery.dataUpdatedAt;
 
   useEffect(() => {
+    void LazyThreadTerminalPanel.preload();
+  }, []);
+
+  useEffect(() => {
     if (state.kind === "live") return;
     void refetch();
   }, [refetch, state.kind, terminalsUpdatedAt]);
