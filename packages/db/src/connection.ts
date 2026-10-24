@@ -38,7 +38,7 @@ export interface ThreadListRequestShape {
 }
 
 export interface ThreadListClientKind {
-  appSurface: "api" | "desktop" | "mobile" | "web";
+  appSurface: "api" | "cli" | "desktop" | "mobile" | "web";
   userAgentKind: "node" | "browser" | "other" | "missing";
   pluginId?: string;
 }

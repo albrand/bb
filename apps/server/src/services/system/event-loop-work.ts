@@ -46,6 +46,10 @@ interface EventLoopWorkSnapshot {
 
 const activeFrames = new Map<number, EventLoopWorkFrame>();
 const currentFrameId = new AsyncLocalStorage<number>();
+const threadListRequestFields = new WeakMap<
+  ThreadListRequestContext,
+  { clientKind: ThreadListClientKind; requestShape: ThreadListRequestShape }
+>();
 const completedInWindow: CompletedEventLoopWork[] = [];
 let nextFrameId = 1;
 let lastCompleted: CompletedEventLoopWork | null = null;
@@ -180,6 +184,8 @@ export function setCurrentThreadListSlowQueryContext(
   frame.threadListLimit = limit;
   frame.threadListOffset = offset;
   frame.threadListPluginCallerResolver = pluginCallerResolver;
+  const fields = getCurrentThreadListSlowQueryFields();
+  if (fields !== undefined) threadListRequestFields.set(context, fields);
 }
 
 export function clearCurrentThreadListSlowQueryContext(): void {
@@ -254,6 +260,14 @@ export function getCurrentThreadListSlowQueryFields():
       frame.parentId === null ? undefined : activeFrames.get(frame.parentId);
   }
   return undefined;
+}
+
+export function getThreadListSlowApiRequestFields(
+  context: ThreadListRequestContext,
+):
+  | { clientKind: ThreadListClientKind; requestShape: ThreadListRequestShape }
+  | undefined {
+  return threadListRequestFields.get(context);
 }
 
 export function takeEventLoopWorkWindowSnapshot(): EventLoopWorkSnapshot {

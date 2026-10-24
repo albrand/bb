@@ -7,6 +7,7 @@ export type AppSurface = (typeof APP_SURFACE_VALUES)[number];
 const REQUEST_APP_SURFACE_VALUES = [
   ...APP_SURFACE_VALUES,
   "api",
+  "cli",
   "mobile",
 ] as const;
 export type RequestAppSurface = (typeof REQUEST_APP_SURFACE_VALUES)[number];

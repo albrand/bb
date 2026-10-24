@@ -91,7 +91,10 @@ import {
   captureTrustedRemoteAddress,
   resolveRequestAppSurface,
 } from "./request-context.js";
-import { runEventLoopWork } from "./services/system/event-loop-work.js";
+import {
+  getThreadListSlowApiRequestFields,
+  runEventLoopWork,
+} from "./services/system/event-loop-work.js";
 import { setTurnTelemetryDeps } from "./services/system/turn-telemetry.js";
 import { runWithTelemetryAppSurface } from "./services/system/telemetry.js";
 import {
@@ -770,6 +773,9 @@ export function createApp(
           method: context.req.method,
           path,
           status: context.res.status,
+          ...(context.req.method === "GET" && path === "/api/v1/threads"
+            ? getThreadListSlowApiRequestFields(context)
+            : {}),
         },
         "Slow API request",
       );

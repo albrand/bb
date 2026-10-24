@@ -241,12 +241,12 @@ describe("server skeleton", () => {
       const response = await serverApp.app.request("/api/v1/hosts");
       expect(response.status).toBe(200);
       expect(logger.debug).toHaveBeenCalledWith(
-        expect.objectContaining({
+        {
           durationMs: expect.any(Number),
           method: "GET",
           path: "/api/v1/hosts",
           status: 200,
-        }),
+        },
         "Slow API request",
       );
     } finally {
