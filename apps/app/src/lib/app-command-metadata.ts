@@ -286,6 +286,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Search prompts you sent in any thread and put one in the active composer.",
       ),
       command(
+        "composer.dictation.toggle",
+        "Start or stop dictation",
+        "Start dictating into the focused native terminal composer, or stop and keep the text.",
+      ),
+      command(
         "modelPicker.toggle",
         "Toggle model picker",
         "Open or close the focused composer's model picker.",

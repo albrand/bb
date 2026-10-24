@@ -31,6 +31,7 @@ export type * from "./areas/device-handoff.js";
 export type * from "./areas/projects.js";
 export type * from "./areas/providers.js";
 export type * from "./areas/spend.js";
+export type * from "./areas/writing-assistance.js";
 export type * from "./areas/native-terminals.js";
 export type * from "./areas/status.js";
 export type * from "./areas/system.js";

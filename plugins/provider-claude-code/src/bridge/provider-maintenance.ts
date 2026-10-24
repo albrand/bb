@@ -64,7 +64,7 @@ const claudeAccountSchema = z.object({
     .nullish(),
 });
 
-async function claudeExecutable(): Promise<string> {
+export async function claudeExecutable(): Promise<string> {
   const explicit = process.env.BB_CLAUDE_CODE_EXECUTABLE?.trim();
   if (explicit) return explicit;
   if (

@@ -1,5 +1,9 @@
 import { getAiServiceSelections, setAiServiceSelection } from "@bb/db";
-import { promptInputSchema, type AiTextTask } from "@bb/domain";
+import {
+  defaultWritingAssistanceSettings,
+  promptInputSchema,
+  type AiTextTask,
+} from "@bb/domain";
 import type {
   SetAiServiceSelectionRequest,
   SystemAiServicesResponse,
@@ -19,6 +23,10 @@ import {
   sanitizeGeneratedCommitMessage,
 } from "./commit-message.js";
 import { sanitizeGeneratedTitle } from "../threads/title-generation.js";
+import {
+  buildCorrectionPrompt,
+  parseCorrectionReply,
+} from "./writing-assistance.js";
 
 type AiServicesViewDeps = Pick<
   LoggedWorkSessionDeps,
@@ -103,6 +111,23 @@ function sampleFor(task: AiTextTask): {
     return {
       prompt: buildCommitMessagePrompt(SAMPLE_COMMIT),
       sanitize: sanitizeGeneratedCommitMessage,
+    };
+  }
+  if (task === "writing") {
+    return {
+      prompt: buildCorrectionPrompt(defaultWritingAssistanceSettings, {
+        target: "The user are authenticated before acessing the endpoint.",
+        context: "",
+        complete: true,
+      }),
+      sanitize: (value) => {
+        const proposals = parseCorrectionReply(value);
+        return proposals === null || proposals.length === 0
+          ? null
+          : proposals
+              .map((edit) => `${edit.original} → ${edit.replacement}`)
+              .join("; ");
+      },
     };
   }
   const prompt = buildThreadTitlePrompt(SAMPLE_TITLE_INPUT);

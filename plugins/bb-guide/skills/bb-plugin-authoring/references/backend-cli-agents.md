@@ -250,10 +250,11 @@ data-dir user instructions, then workspace instructions. Tool snippets above
 truncated to 4096 characters, and a throwing `contributeInstructions` is
 logged and contributes nothing.
 
-### bb.experimental_aiServices — titles, commit messages, and voice
+### bb.experimental_aiServices — titles, commit messages, writing, and voice
 
 bb's helper tasks are served by plugins: thread titles (branch names follow the
-title), commit messages, and voice transcripts. Register plain functions in
+title), commit messages, writing assistance, and voice transcripts. Register
+plain functions in
 `server.ts`. The user picks a service per task in Settings → AI services or
 with `bb settings ai-services set <task> <service-id>`:
 
@@ -280,15 +281,34 @@ bb.experimental_aiServices.register({
 
 - `complete(prompt, { signal })` returns the model's text. bb writes the
   prompt and cleans the reply (think blocks, quotes, labels, extra lines), so
-  return the text as-is. Declared services appear for titles and commits.
+  return the text as-is. Declared services appear for titles, commits, and
+  writing. Writing prompts ask for JSON edit proposals or formatted dictation
+  of up to about 70 words, and bb validates both. From an edit list cut off
+  by the output limit bb keeps only the complete edits before the cut, each
+  checked like any other edit; an unreadable list changes nothing. Dictation
+  keeps the transcript as heard when the formatted reply is unreadable, adds
+  words, changes protected tokens, loses a negation (other than the words of a
+  self-correction phrase that replaces what was said before it, such as no in
+  no wait) or a number's minus sign (also when it moves to another equal
+  number, as in -5 and 5 becoming 5 and -5, and for a leading decimal such as -.5), adds, removes or moves a symbol next to a
+  number (5 never becomes 5%) or changes what joins two numbers (1-3 never
+  becomes 1/3), or drops any word, even a hesitation sound such as uh or one
+  of a word said twice such as the the, other than a spoken self-correction
+  (no wait, quer dizer) with the phrase just before it that it replaces (one
+  unbroken run of at most six words ending at the correction, no longer than
+  what was said after it, starting with the same word, and nothing else near
+  it left out; a phrase that replaces nothing is not a correction), spoken
+  symbol names in literal-code mode, or a numbered list's spoken numbers and
+  the connectors said just before an item number (and then second; a
+  connector inside an item, as in users and groups, always stays).
 - `transcribe(audio: File, { signal, hint })` returns a transcript. `hint` is
   vocabulary text or `null`. Declared services appear for voice input.
 - `status()` is optional. Its message shows beside the service in the picker.
   A service that is not ready is skipped by Automatic and hides the
   microphone. bb caches the result for about 10 seconds.
 - The plugin owns everything behind the function: model, API, retries. Failure
-  is a rejected promise. bb aborts `signal` after 5 seconds for text and 10
-  seconds for voice.
+  is a rejected promise. bb aborts `signal` after 5 seconds for text (9 for
+  writing) and 10 seconds for voice.
 - The functions run in the server process. To use host-local state (a login
   file, a local model), call your own `bb.host` entry through
   `bb.hosts.experimental_client`, as the Codex plugin does.

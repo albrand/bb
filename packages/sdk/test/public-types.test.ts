@@ -241,7 +241,8 @@ type ExpectedBbSdkKey =
   | "terminals"
   | "theme"
   | "threadSections"
-  | "threads";
+  | "threads"
+  | "writingAssistance";
 
 type ExpectedRealtimeKey = "subscribe";
 

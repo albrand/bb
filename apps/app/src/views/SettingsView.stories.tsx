@@ -17,6 +17,7 @@ import type {
   WorkspaceOpenTargetId,
 } from "@bb/host-daemon-contract";
 import { VoiceInputSettingsSectionContent } from "@/components/settings/VoiceInputSettingsSection";
+import { WritingAssistanceSettingsSection } from "@/components/settings/WritingAssistanceSettingsSection";
 import { AiServicesSettingsSection } from "@/components/settings/AiServicesSettingsSection";
 import { ArchivedThreadsSettingsSection } from "@/components/settings/ArchivedThreadsSettingsSection";
 import { CommunitySettingsSection } from "@/components/settings/CommunitySettingsSection";
@@ -248,6 +249,7 @@ function GeneralSettingsStory({
         statusBadge={null}
       />
       <VoiceInputStory />
+      <WritingAssistanceSettingsSection />
       <PrivacySettingsSection
         onStreamerModeChange={state.setStreamerMode}
         telemetryEnabled={state.telemetryEnabled}

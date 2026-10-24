@@ -31,6 +31,10 @@ import { createStatusArea, type StatusArea } from "./areas/status.js";
 import { createSkillsArea, type SkillsArea } from "./areas/skills.js";
 import { createSpendArea, type SpendArea } from "./areas/spend.js";
 import {
+  createWritingAssistanceArea,
+  type WritingAssistanceArea,
+} from "./areas/writing-assistance.js";
+import {
   createNativeTerminalsArea,
   type NativeTerminalsArea,
 } from "./areas/native-terminals.js";
@@ -69,6 +73,7 @@ export interface BbSdkAreas extends BbRealtime {
   providers: ProvidersArea;
   skills: SkillsArea;
   spend: SpendArea;
+  writingAssistance: WritingAssistanceArea;
   status: StatusArea;
   system: SystemArea;
   terminals: TerminalsArea;
@@ -107,6 +112,7 @@ export function createBbSdk(
     providers: createProvidersArea(sdkContext),
     skills: createSkillsArea(sdkContext),
     spend: createSpendArea(sdkContext),
+    writingAssistance: createWritingAssistanceArea(sdkContext),
     status: createStatusArea(sdkContext),
     system: createSystemArea(sdkContext),
     terminals: createTerminalsArea(sdkContext),

@@ -2472,7 +2472,9 @@ Docs: `frontend-registration.md`.
 ## AI services (`bb.experimental_aiServices.register`)
 
 Registers `{ id, displayName, complete?, transcribe?, status? }`. `complete`
-serves thread titles and commit messages, `transcribe` serves voice input,
+serves thread titles, commit messages, and writing assistance (typing
+corrections as JSON edits and dictation formatting, both validated by the
+server before use), `transcribe` serves voice input and dictation segments,
 and `status` feeds pickers and Automatic. The user selects per task
 (`automatic`, `off`, or `{ pluginId, serviceId }`), and an explicit pick
 never falls through to another service.

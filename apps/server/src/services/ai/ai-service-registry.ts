@@ -1,4 +1,5 @@
 import {
+  AI_TEXT_TASKS,
   aiServiceStatusSchema,
   type AiServiceStatus,
   type AiTask,
@@ -7,11 +8,13 @@ import type { NormalizedPluginAiService } from "@get-bb/plugin-sdk/internal/host
 import { aiServiceAlreadyRegisteredMessage } from "@get-bb/plugin-sdk/internal/host-policy";
 
 const STATUS_TTL_MS = 10_000;
-const STATUS_TIMEOUT_MS = 2_000;
+const STATUS_ANSWER_MS = 2_000;
+const STATUS_SETTLE_MS = 30_000;
 const NOT_RESPONDING: AiServiceStatus = {
   ready: false,
   message: "Not responding",
 };
+const CHECKING: AiServiceStatus = { ready: false, message: "Checking" };
 
 export interface AiServiceRegistration extends NormalizedPluginAiService {
   pluginId: string;
@@ -26,6 +29,12 @@ export interface AiServiceKey {
 interface CachedStatus {
   status: AiServiceStatus;
   checkedAt: number;
+  startedAt: number;
+}
+
+interface StatusProbe {
+  startedAt: number;
+  request: Promise<AiServiceStatus>;
 }
 
 export interface AiServiceRegistry {
@@ -34,6 +43,8 @@ export interface AiServiceRegistry {
   list(): AiServiceRegistration[];
   peekStatus(key: AiServiceKey): AiServiceStatus | null;
   status(key: AiServiceKey): Promise<AiServiceStatus>;
+  taskStatus(key: AiServiceKey): Promise<AiServiceStatus>;
+  settledStatus(key: AiServiceKey, maxWaitMs: number): Promise<AiServiceStatus>;
 }
 
 interface CreateAiServiceRegistryArgs {
@@ -43,9 +54,7 @@ interface CreateAiServiceRegistryArgs {
 
 export function aiServiceTasks(service: NormalizedPluginAiService): AiTask[] {
   return [
-    ...(service.complete === null
-      ? []
-      : (["thread-title", "commit-message"] as const)),
+    ...(service.complete === null ? [] : AI_TEXT_TASKS),
     ...(service.transcribe === null ? [] : (["voice"] as const)),
   ];
 }
@@ -76,7 +85,7 @@ async function readStatus(
     const raw = await Promise.race([
       service.status(),
       new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), STATUS_TIMEOUT_MS);
+        timer = setTimeout(() => resolve(null), STATUS_SETTLE_MS);
         timer.unref();
       }),
     ]);
@@ -102,25 +111,97 @@ export function createAiServiceRegistry(
   const now = args.now ?? Date.now;
   const services = new Map<string, AiServiceRegistration>();
   const statuses = new Map<AiServiceRegistration, CachedStatus>();
-  const inFlight = new Map<AiServiceRegistration, Promise<AiServiceStatus>>();
+  const inFlight = new Map<AiServiceRegistration, StatusProbe>();
+  const taskTimeouts = new Map<AiServiceRegistration, number>();
 
   function refresh(service: AiServiceRegistration): Promise<AiServiceStatus> {
+    return probeFor(service).request;
+  }
+
+  function probeFor(service: AiServiceRegistration): StatusProbe {
     const pending = inFlight.get(service);
-    if (pending !== undefined) return pending;
-    const request = readStatus(service)
-      .then((status) => {
-        const previous = statuses.get(service)?.status;
-        if (services.get(mapKey(aiServiceKey(service))) === service) {
-          statuses.set(service, { status, checkedAt: now() });
-        }
-        if (previous === undefined || previous.ready !== status.ready) {
-          args.onStatusChange?.();
-        }
-        return status;
-      })
-      .finally(() => inFlight.delete(service));
-    inFlight.set(service, request);
-    return request;
+    if (pending !== undefined && now() - pending.startedAt < STATUS_ANSWER_MS) {
+      return pending;
+    }
+    const startedAt = now();
+    let answered = false;
+    const routingTimeout = setTimeout(() => {
+      if (answered) return;
+      if (services.get(mapKey(aiServiceKey(service))) !== service) return;
+      taskTimeouts.set(service, now());
+    }, STATUS_ANSWER_MS);
+    routingTimeout.unref();
+    const probe: StatusProbe = {
+      startedAt,
+      request: readStatus(service)
+        .then((status) => {
+          const cached = statuses.get(service);
+          if (cached !== undefined && cached.startedAt > startedAt) {
+            return status;
+          }
+          if (services.get(mapKey(aiServiceKey(service))) === service) {
+            statuses.set(service, { status, checkedAt: now(), startedAt });
+          }
+          if (cached === undefined || cached.status.ready !== status.ready) {
+            args.onStatusChange?.();
+          }
+          return status;
+        })
+        .finally(() => {
+          answered = true;
+          clearTimeout(routingTimeout);
+          if (inFlight.get(service) === probe) inFlight.delete(service);
+        }),
+    };
+    inFlight.set(service, probe);
+    return probe;
+  }
+
+  function supersededNegative(
+    service: AiServiceRegistration,
+    cached: CachedStatus,
+  ): boolean {
+    const pending = inFlight.get(service);
+    return (
+      !cached.status.ready &&
+      pending !== undefined &&
+      pending.startedAt > cached.startedAt
+    );
+  }
+
+  function freshStatus(
+    service: AiServiceRegistration,
+  ): AiServiceStatus | undefined {
+    const cached = statuses.get(service);
+    if (cached === undefined || now() - cached.checkedAt > STATUS_TTL_MS) {
+      return undefined;
+    }
+    if (supersededNegative(service, cached)) return undefined;
+    return cached.status;
+  }
+
+  function statusAfterWait(service: AiServiceRegistration): AiServiceStatus {
+    const cached = statuses.get(service);
+    if (cached === undefined) return CHECKING;
+    if (supersededNegative(service, cached)) return NOT_RESPONDING;
+    return cached.status;
+  }
+
+  function answerWithin(
+    probe: Promise<AiServiceStatus>,
+    waitMs: number,
+    fallback: () => AiServiceStatus,
+  ): Promise<AiServiceStatus> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      probe,
+      new Promise<AiServiceStatus>((resolve) => {
+        timer = setTimeout(() => resolve(fallback()), waitMs);
+        timer.unref();
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
   }
 
   return {
@@ -139,6 +220,7 @@ export function createAiServiceRegistry(
           if (services.get(key) === registration) {
             services.delete(key);
             statuses.delete(registration);
+            taskTimeouts.delete(registration);
             args.onStatusChange?.();
           }
         },
@@ -164,11 +246,42 @@ export function createAiServiceRegistry(
       if (service === undefined) {
         return { ready: false, message: "Plugin not loaded" };
       }
-      const cached = statuses.get(service);
-      if (cached !== undefined && now() - cached.checkedAt <= STATUS_TTL_MS) {
-        return cached.status;
+      const fresh = freshStatus(service);
+      if (fresh !== undefined) return fresh;
+      return answerWithin(refresh(service), STATUS_ANSWER_MS, () =>
+        statusAfterWait(service),
+      );
+    },
+    async taskStatus(key) {
+      const service = services.get(mapKey(key));
+      if (service === undefined) {
+        return { ready: false, message: "Plugin not loaded" };
       }
-      return refresh(service);
+      const timedOutAt = taskTimeouts.get(service);
+      if (timedOutAt !== undefined && now() - timedOutAt <= STATUS_TTL_MS) {
+        return NOT_RESPONDING;
+      }
+      const fresh = freshStatus(service);
+      if (fresh !== undefined) return fresh;
+      const probe = probeFor(service);
+      return answerWithin(
+        probe.request,
+        Math.max(0, probe.startedAt + STATUS_ANSWER_MS - now()),
+        () => NOT_RESPONDING,
+      );
+    },
+    async settledStatus(key, maxWaitMs) {
+      const service = services.get(mapKey(key));
+      if (service === undefined) {
+        return { ready: false, message: "Plugin not loaded" };
+      }
+      const fresh = freshStatus(service);
+      if (fresh !== undefined) return fresh;
+      return answerWithin(
+        refresh(service),
+        maxWaitMs,
+        () => freshStatus(service) ?? NOT_RESPONDING,
+      );
     },
   };
 }

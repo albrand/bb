@@ -1,10 +1,19 @@
 import { z } from "zod";
 
-export const AI_TASKS = ["thread-title", "commit-message", "voice"] as const;
+export const AI_TASKS = [
+  "thread-title",
+  "commit-message",
+  "voice",
+  "writing",
+] as const;
 export const aiTaskSchema = z.enum(AI_TASKS);
 export type AiTask = z.infer<typeof aiTaskSchema>;
 
-export const AI_TEXT_TASKS = ["thread-title", "commit-message"] as const;
+export const AI_TEXT_TASKS = [
+  "thread-title",
+  "commit-message",
+  "writing",
+] as const;
 export const aiTextTaskSchema = z.enum(AI_TEXT_TASKS);
 export type AiTextTask = z.infer<typeof aiTextTaskSchema>;
 
@@ -26,6 +35,7 @@ export const aiServiceSelectionsSchema = z
     "thread-title": aiServiceSelectionSchema,
     "commit-message": aiServiceSelectionSchema,
     voice: aiServiceSelectionSchema,
+    writing: aiServiceSelectionSchema,
   })
   .strict();
 export type AiServiceSelections = z.infer<typeof aiServiceSelectionsSchema>;
@@ -34,6 +44,7 @@ export const defaultAiServiceSelections: AiServiceSelections = {
   "thread-title": { mode: "automatic" },
   "commit-message": { mode: "automatic" },
   voice: { mode: "automatic" },
+  writing: { mode: "automatic" },
 };
 
 export const aiServiceStatusSchema = z.discriminatedUnion("ready", [

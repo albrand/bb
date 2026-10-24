@@ -593,6 +593,35 @@ Filter to one package, e.g.
 `BB_SIDEBAR_BENCH_OUT=/tmp/sidebar.json pnpm exec turbo run bench --filter=@bb/app`.
 Compare runs on an idle machine; the numbers are wall-clock timings.
 
+## Writing Assistance Evaluation
+
+`scripts/writing-eval/dataset.json` holds dictation scripts (English, Brazilian
+Portuguese, and code-switching, with enumerations, self-corrections, negations,
+fillers, and numbers) and typed-correction cases (protected identifiers, paths,
+URLs, versions, numbers, negations, and safe fixes). Against a running dev
+server whose Writing assistance service is ready:
+
+```bash
+mkdir -p /tmp/writing-eval
+node -e 'for (const c of require("./scripts/writing-eval/dataset.json").dictation) console.log([c.id, c.voice, c.script].join("\t"))' |
+  while IFS=$'\t' read -r id voice script; do
+    say -v "$voice" -o "/tmp/writing-eval/$id.aiff" "$script"
+    afconvert -f WAVE -d LEI16@16000 -c 1 "/tmp/writing-eval/$id.aiff" "/tmp/writing-eval/$id.wav"
+  done
+node scripts/writing-eval/run.mjs --server <server-url> --audio /tmp/writing-eval --out /tmp/writing-eval/report.json
+```
+
+`say` and `afconvert` are macOS tools; generate the clips there and copy them
+when the server runs elsewhere. `--only correction` skips audio. The report
+gives word error rates for the raw and formatted transcripts, key words the
+formatter lost, list mismatches, auto-applied edits that changed the words of a
+protected token (`harmfulAutoApplies`, which must be 0) or only its case
+(`caseOnlyTouchesOnProtected`), expected fixes offered as an edit or a
+suggestion (`expectedFixesFound`) and how many of them applied by themselves
+(`expectedFixesApplied`), and p50/p95
+latency. Each case calls the real AI services and counts against the daily
+writing limits.
+
 ## Provider Corpus
 
 The provider corpus is a private set of real production threads extracted from

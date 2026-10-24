@@ -1,29 +1,107 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
+import type {
+  WritingAssistanceView,
+  WritingCorrectionResponse,
+  WritingEdit,
+} from "@bb/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writingAssistanceQueryKey } from "@/hooks/queries/query-keys";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { NativeTerminalPromptBar } from "./NativeTerminalPromptBar";
 
 const send = vi.hoisted(() => vi.fn());
 const upload = vi.hoisted(() => vi.fn());
+const correct = vi.hoisted(() => vi.fn());
+const writingView = vi.hoisted(() => vi.fn());
+const dictationHook = vi.hoisted(() => ({
+  options: null as null | {
+    onText(text: string): void;
+    onFinished?(): void;
+  },
+  phase: "idle" as "idle" | "recording" | "finalizing",
+  start: vi.fn(),
+  stop: vi.fn(),
+  cancel: vi.fn(),
+}));
 
 vi.mock("@/lib/sdk", () => ({
-  sdk: { threads: { send }, projects: { attachments: { upload } } },
+  sdk: {
+    threads: { send },
+    projects: { attachments: { upload } },
+    writingAssistance: {
+      view: writingView,
+      correct,
+      transcribeDictationSegment: vi.fn(),
+    },
+  },
 }));
+
+vi.mock("@/hooks/queries/system-queries", () => ({
+  useSystemConfig: () => ({ data: { voiceTranscriptionEnabled: true } }),
+}));
+
+vi.mock("@/hooks/useSegmentedDictation", () => ({
+  useSegmentedDictation: (options: typeof dictationHook.options) => {
+    dictationHook.options = options;
+    return {
+      phase: dictationHook.phase,
+      pending: 0,
+      failure: null,
+      speaking: false,
+      startedAt: null,
+      stream: null,
+      start: dictationHook.start,
+      stop: dictationHook.stop,
+      cancel: dictationHook.cancel,
+      retry: vi.fn(),
+      discardFailed: vi.fn(),
+    };
+  },
+}));
+
+function view(
+  overrides: Partial<WritingAssistanceView["settings"]> = {},
+): WritingAssistanceView {
+  return {
+    settings: {
+      mode: "prompt",
+      typingCorrection: "automatic",
+      dictationFormatting: true,
+      vocabulary: [],
+      dailyCorrectionLimit: 300,
+      dailyDictationMinutes: 120,
+      ...overrides,
+    },
+    usage: {
+      day: "2026-10-16",
+      corrections: 0,
+      formattings: 0,
+      dictationSegments: 0,
+      audioSeconds: 0,
+      inputChars: 0,
+      outputChars: 0,
+      estimatedCostMicros: 0,
+    },
+    correctionAvailable: true,
+  };
+}
 
 vi.mock("@/lib/attachment-local-previews", () => ({
   registerLocalAttachmentPreview: vi.fn(),
 }));
 
 function renderBar() {
-  const { wrapper: Wrapper } = createQueryClientTestHarness();
+  const { wrapper: Wrapper, queryClient } = createQueryClientTestHarness();
   render(
     <Wrapper>
       <NativeTerminalPromptBar
@@ -34,12 +112,21 @@ function renderBar() {
     </Wrapper>,
   );
   return {
+    queryClient,
     input: screen.getByLabelText("Message Native CLI") as HTMLTextAreaElement,
     sendButton: screen.getByRole("button", { name: "Send to Native CLI" }),
   };
 }
 
 beforeEach(() => {
+  writingView.mockReset();
+  writingView.mockResolvedValue(view({ typingCorrection: "off" }));
+  correct.mockReset();
+  dictationHook.options = null;
+  dictationHook.phase = "idle";
+  dictationHook.start.mockReset();
+  dictationHook.stop.mockReset();
+  dictationHook.cancel.mockReset();
   send.mockReset();
   send.mockResolvedValue({});
   upload.mockReset();
@@ -74,6 +161,19 @@ describe("NativeTerminalPromptBar", () => {
       input: [{ type: "text", text: "fix the build", mentions: [] }],
       mode: "auto",
     });
+  });
+
+  it("keeps the composer focused when Send is pressed and sends on the click", async () => {
+    const { input, sendButton } = renderBar();
+    input.focus();
+    fireEvent.change(input, { target: { value: "ship it" } });
+    expect(fireEvent.mouseDown(sendButton)).toBe(false);
+    expect(document.activeElement).toBe(input);
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(input);
   });
 
   it("keeps Shift+Enter and IME composition as editing keys", () => {
@@ -230,3 +330,718 @@ describe("NativeTerminalPromptBar", () => {
     });
   });
 });
+
+function startDictation() {
+  const mic = screen.getByRole("button", {
+    name: "Dictate a message to Native CLI",
+  });
+  fireEvent.pointerDown(mic, { button: 0 });
+  fireEvent.pointerUp(mic);
+  fireEvent.click(mic, { detail: 1 });
+  expect(dictationHook.start).toHaveBeenCalledTimes(1);
+}
+
+function deliver(text: string) {
+  act(() => {
+    dictationHook.options?.onText(text);
+  });
+}
+
+function edit(overrides: Partial<WritingEdit>): WritingEdit {
+  return {
+    start: 0,
+    end: 0,
+    original: "",
+    replacement: "",
+    category: "grammar" as const,
+    confidence: "high" as const,
+    semanticImpact: "none" as const,
+    explanation: null,
+    disposition: "apply" as const,
+    ...overrides,
+  };
+}
+
+async function renderWithAssistance() {
+  writingView.mockResolvedValue(view());
+  const rendered = renderBar();
+  await waitFor(() => expect(writingView).toHaveBeenCalled());
+  await act(async () => {
+    await writingView.mock.results[0]?.value;
+    for (let flush = 0; flush < 3; flush += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  });
+  return rendered;
+}
+
+describe("NativeTerminalPromptBar push-to-talk", () => {
+  function firePointer(
+    target: Element,
+    type: "pointerDown" | "pointerUp" | "pointerCancel",
+    at: number,
+    handledAt: number,
+  ) {
+    vi.spyOn(performance, "now").mockReturnValue(handledAt);
+    const event = createEvent[type](target, { button: 0, pointerId: 7 });
+    Object.defineProperty(event, "timeStamp", { value: at });
+    fireEvent(target, event);
+  }
+
+  function pressMic(at: number, handledAt = at) {
+    const mic = screen.getByRole("button", {
+      name: "Dictate a message to Native CLI",
+    });
+    firePointer(mic, "pointerDown", at, handledAt);
+  }
+
+  function releaseAt(
+    at: number,
+    type: "pointerUp" | "pointerCancel",
+    handledAt = at,
+  ) {
+    firePointer(document.body, type, at, handledAt);
+  }
+
+  beforeEach(() => {
+    dictationHook.start.mockClear();
+    dictationHook.stop.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("stops a held recording when the pointer is released off the button", () => {
+    renderBar();
+    pressMic(1_000);
+    expect(dictationHook.start).toHaveBeenCalledTimes(1);
+    releaseAt(1_600, "pointerUp");
+    expect(dictationHook.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a held recording whose release targets the button, as a touch pointer captured by the button does after dragging off", () => {
+    renderBar();
+    pressMic(1_000);
+    firePointer(micButton(), "pointerUp", 1_600, 1_600);
+    expect(dictationHook.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a tapped recording running when the tap's release targets the button", () => {
+    renderBar();
+    pressMic(1_000);
+    firePointer(micButton(), "pointerUp", 1_100, 1_100);
+    expect(dictationHook.stop).not.toHaveBeenCalled();
+  });
+
+  it("stops the recording it started when the press is cancelled", () => {
+    renderBar();
+    pressMic(1_000);
+    releaseAt(1_050, "pointerCancel");
+    expect(dictationHook.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a tapped recording running and stops listening after the tap", () => {
+    renderBar();
+    pressMic(1_000);
+    releaseAt(1_100, "pointerUp");
+    releaseAt(5_000, "pointerUp");
+    releaseAt(5_100, "pointerCancel");
+    expect(dictationHook.stop).not.toHaveBeenCalled();
+  });
+
+  it("keeps a quick tap as a tap when a busy page handles the release late", () => {
+    renderBar();
+    pressMic(1_000);
+    releaseAt(1_080, "pointerUp", 2_000);
+    expect(dictationHook.stop).not.toHaveBeenCalled();
+  });
+
+  it("still stops a real hold whose press was handled late", () => {
+    renderBar();
+    pressMic(1_000, 1_500);
+    releaseAt(1_600, "pointerUp", 1_610);
+    expect(dictationHook.stop).toHaveBeenCalledTimes(1);
+  });
+
+  function micButton() {
+    return screen.getByRole("button", {
+      name: "Dictate a message to Native CLI",
+    });
+  }
+
+  it("still toggles from the keyboard after a cancelled press", () => {
+    renderBar();
+    pressMic(1_000);
+    releaseAt(1_050, "pointerCancel");
+    fireEvent.click(micButton(), { detail: 0 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("still toggles from the keyboard and the mouse after releasing off the button", () => {
+    renderBar();
+    pressMic(1_000);
+    releaseAt(1_100, "pointerUp");
+    fireEvent.click(micButton(), { detail: 0 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(2);
+    pressMic(5_000);
+    releaseAt(5_100, "pointerUp");
+    fireEvent.click(micButton(), { detail: 1 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not toggle twice for one pointer press on the button", () => {
+    renderBar();
+    pressMic(1_000);
+    vi.spyOn(performance, "now").mockReturnValue(1_100);
+    fireEvent.pointerUp(micButton(), { pointerId: 7 });
+    fireEvent.click(micButton(), { detail: 1 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(1);
+    fireEvent.click(micButton(), { detail: 0 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("toggles from the keyboard when a press on the button produced no click", () => {
+    renderBar();
+    pressMic(1_000);
+    vi.spyOn(performance, "now").mockReturnValue(1_100);
+    fireEvent.pointerUp(micButton(), { pointerId: 7 });
+    fireEvent.click(micButton(), { detail: 0 });
+    expect(dictationHook.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops listening for the release when the composer unmounts", () => {
+    renderBar();
+    pressMic(1_000);
+    cleanup();
+    releaseAt(2_000, "pointerUp");
+    expect(dictationHook.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("NativeTerminalPromptBar dictation", () => {
+  it("appends dictated phrases in order and keeps edits made while dictating", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, { target: { value: "Fix the login. " } });
+    startDictation();
+    deliver("Then add tests.");
+    expect(input.value).toBe("Fix the login. Then add tests.");
+    fireEvent.change(input, {
+      target: { value: "Please fix the login. Then add tests." },
+    });
+    deliver("Finally deploy.");
+    expect(input.value).toBe(
+      "Please fix the login. Then add tests. Finally deploy.",
+    );
+  });
+
+  it("inserts at the caret and spaces it from the following text", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, { target: { value: "existing words" } });
+    input.focus();
+    input.setSelectionRange(0, 0);
+    startDictation();
+    deliver("Hello.");
+    expect(input.value).toBe("Hello. existing words");
+    deliver("1. Check auth.");
+    expect(input.value).toBe("Hello.\n1. Check auth. existing words");
+  });
+
+  it("puts a numbered list on its own line", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, { target: { value: "Plan:" } });
+    startDictation();
+    deliver("1. Check authentication.\n2. Verify refresh tokens.");
+    expect(input.value).toBe(
+      "Plan:\n1. Check authentication.\n2. Verify refresh tokens.",
+    );
+  });
+
+  it("waits for the last phrase before sending when Send is pressed mid-dictation", async () => {
+    dictationHook.phase = "recording";
+    const { input, sendButton } = renderBar();
+    fireEvent.change(input, { target: { value: "draft" } });
+    fireEvent.click(sendButton);
+    expect(dictationHook.stop).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    deliver("and the rest.");
+    act(() => {
+      dictationHook.options?.onFinished?.();
+    });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      input: [{ type: "text", text: "draft and the rest." }],
+    });
+  });
+
+  it("never sends dictation on its own", () => {
+    const { input } = renderBar();
+    startDictation();
+    deliver("Delete the production database.");
+    act(() => {
+      dictationHook.options?.onFinished?.();
+    });
+    expect(input.value).toBe("Delete the production database.");
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe(
+  "NativeTerminalPromptBar typing assistance",
+  { timeout: 20_000 },
+  () => {
+    it("applies a safe fix to a finished sentence and lets Undo restore it", async () => {
+      correct.mockResolvedValue({
+        status: "ok",
+        edits: [
+          edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+        ],
+      });
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await waitFor(() => expect(input.value).toBe("The user is here. "), {
+        timeout: 8_000,
+      });
+      expect(correct).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: "The user are here.",
+          context: "",
+          complete: true,
+        }),
+      );
+      expect(screen.getByText("Fixed 1 issue")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+      expect(input.value).toBe("The user are here. ");
+    });
+
+    it("keeps the caret where the user left it through a fix and its Undo", async () => {
+      correct.mockImplementation(async (request: { target: string }) => ({
+        status: "ok",
+        edits:
+          request.target === "The user are here."
+            ? [edit({ start: 9, end: 12, original: "are", replacement: "is" })]
+            : [],
+      }));
+      const { input } = await renderWithAssistance();
+      const typed = "Check the logs now. The user are here. ";
+      input.focus();
+      fireEvent.change(input, { target: { value: typed } });
+      input.setSelectionRange(4, 4);
+      await waitFor(
+        () =>
+          expect(input.value).toBe("Check the logs now. The user is here. "),
+        { timeout: 8_000 },
+      );
+      expect([input.selectionStart, input.selectionEnd]).toEqual([4, 4]);
+      fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+      expect(input.value).toBe(typed);
+      expect([input.selectionStart, input.selectionEnd]).toEqual([4, 4]);
+    });
+
+    it("moves the caret by the size of a fix made before it and back on Undo", async () => {
+      correct.mockResolvedValue({
+        status: "ok",
+        edits: [
+          edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+        ],
+      });
+      const { input } = await renderWithAssistance();
+      const typed = "The user are here. ";
+      input.focus();
+      fireEvent.change(input, { target: { value: typed } });
+      input.setSelectionRange(typed.length, typed.length);
+      await waitFor(() => expect(input.value).toBe("The user is here. "), {
+        timeout: 8_000,
+      });
+      expect(input.selectionStart).toBe(typed.length - 1);
+      fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+      expect(input.value).toBe(typed);
+      expect(input.selectionStart).toBe(typed.length);
+    });
+
+    it.each([
+      { at: "start", caret: 9, fixed: 9 },
+      { at: "end", caret: 12, fixed: 11 },
+    ])(
+      "keeps a caret moved to the $at of a fix while it was checked at that edge of the fix and back on Undo",
+      async ({ caret, fixed }) => {
+        let answer: (value: unknown) => void = () => undefined;
+        correct.mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              answer = resolve;
+            }),
+        );
+        const { input } = await renderWithAssistance();
+        const typed = "The user are here. ";
+        input.focus();
+        fireEvent.change(input, { target: { value: typed } });
+        input.setSelectionRange(typed.length, typed.length);
+        await waitFor(() => expect(correct).toHaveBeenCalled(), {
+          timeout: 8_000,
+        });
+        input.setSelectionRange(caret, caret);
+        answer({
+          status: "ok",
+          edits: [
+            edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+          ],
+        });
+        await waitFor(() => expect(input.value).toBe("The user is here. "), {
+          timeout: 8_000,
+        });
+        expect([input.selectionStart, input.selectionEnd]).toEqual([
+          fixed,
+          fixed,
+        ]);
+        expect(document.activeElement).toBe(input);
+        fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+        expect(input.value).toBe(typed);
+        expect([input.selectionStart, input.selectionEnd]).toEqual([
+          caret,
+          caret,
+        ]);
+      },
+    );
+
+    it("does not send a corrected sentence back for another correction", async () => {
+      correct.mockImplementation(async (request: { target: string }) => ({
+        status: "ok",
+        edits: request.target.includes("user are")
+          ? [edit({ start: 9, end: 12, original: "are", replacement: "is" })]
+          : [],
+      }));
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await waitFor(() => expect(input.value).toBe("The user is here. "), {
+        timeout: 8_000,
+      });
+      fireEvent.change(input, { target: { value: "The user is here. And" } });
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      const targets = correct.mock.calls.map((call) => call[0].target);
+      expect(targets).toContain("The user are here.");
+      expect(targets).not.toContain("The user is here.");
+    });
+
+    it("drops a correction when the user edited that sentence meanwhile", async () => {
+      let resolve: ((value: WritingCorrectionResponse) => void) | undefined;
+      correct.mockImplementation(
+        () =>
+          new Promise<WritingCorrectionResponse>((done) => {
+            resolve = done;
+          }),
+      );
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await waitFor(() => expect(correct).toHaveBeenCalled(), {
+        timeout: 8_000,
+      });
+      fireEvent.change(input, { target: { value: "The users are here. " } });
+      await act(async () => {
+        resolve?.({
+          status: "ok",
+          edits: [
+            edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+          ],
+        });
+      });
+      expect(input.value).toBe("The users are here. ");
+      expect(screen.queryByText("Fixed 1 issue")).toBeNull();
+    });
+
+    it("offers meaning changes as suggestions the user can accept", async () => {
+      correct.mockResolvedValue({
+        status: "ok",
+        edits: [
+          edit({
+            start: 19,
+            end: 26,
+            original: "talking",
+            replacement: "token",
+            category: "speech-recognition",
+            semanticImpact: "possible",
+            disposition: "suggest",
+          }),
+        ],
+      });
+      const { input } = await renderWithAssistance();
+      const text = "The authentication talking expires. ";
+      fireEvent.change(input, { target: { value: text } });
+      const chip = await screen.findByRole(
+        "button",
+        { name: "Replace “talking” with “token”" },
+        { timeout: 8_000 },
+      );
+      expect(input.value).toBe(text);
+      fireEvent.click(chip);
+      expect(input.value).toBe("The authentication token expires. ");
+    });
+
+    it("keeps typing and sending working while a correction is pending", async () => {
+      correct.mockImplementation(() => new Promise(() => undefined));
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, { target: { value: "First sentence. " } });
+      await waitFor(() => expect(correct).toHaveBeenCalled(), {
+        timeout: 8_000,
+      });
+      fireEvent.change(input, { target: { value: "First sentence. Second" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+      expect(send.mock.calls[0]?.[0]).toMatchObject({
+        input: [{ type: "text", text: "First sentence. Second" }],
+      });
+    });
+
+    it("checks a sentence typed before writing assistance finished loading", async () => {
+      let resolveView: (value: WritingAssistanceView) => void = () => {};
+      writingView.mockReturnValue(
+        new Promise<WritingAssistanceView>((resolve) => {
+          resolveView = resolve;
+        }),
+      );
+      correct.mockResolvedValue({
+        status: "ok",
+        edits: [
+          edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+        ],
+      });
+      const { input } = renderBar();
+      await waitFor(() => expect(writingView).toHaveBeenCalled());
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await new Promise((resolve) => setTimeout(resolve, 1_300));
+      expect(correct).not.toHaveBeenCalled();
+      await act(async () => {
+        resolveView(view());
+      });
+      await waitFor(() => expect(input.value).toBe("The user is here. "), {
+        timeout: 8_000,
+      });
+      expect(correct).toHaveBeenCalledTimes(1);
+      expect(correct).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: "The user are here.",
+          complete: true,
+        }),
+      );
+    });
+
+    it("checks a sentence again after its check was cancelled by turning assistance off", async () => {
+      writingView.mockResolvedValue(view());
+      let firstSignal: AbortSignal | null = null;
+      let resolveFirst: (value: WritingCorrectionResponse) => void = () => {};
+      correct.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        firstSignal = signal;
+        return new Promise<WritingCorrectionResponse>((resolve) => {
+          resolveFirst = resolve;
+        });
+      });
+      correct.mockResolvedValue({
+        status: "ok",
+        edits: [
+          edit({ start: 9, end: 12, original: "are", replacement: "is" }),
+        ],
+      });
+      const { input, queryClient } = renderBar();
+      await waitFor(() => expect(writingView).toHaveBeenCalled());
+      await act(async () => {
+        await writingView.mock.results[0]?.value;
+      });
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await waitFor(() => expect(correct).toHaveBeenCalledTimes(1), {
+        timeout: 4_000,
+      });
+      act(() => {
+        queryClient.setQueryData(
+          writingAssistanceQueryKey(),
+          view({ typingCorrection: "off" }),
+        );
+      });
+      await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+      await act(async () => {
+        resolveFirst({
+          status: "ok",
+          edits: [
+            edit({ start: 9, end: 12, original: "are", replacement: "was" }),
+          ],
+        });
+      });
+      expect(input.value).toBe("The user are here. ");
+      act(() => {
+        queryClient.setQueryData(writingAssistanceQueryKey(), view());
+      });
+      await waitFor(() => expect(input.value).toBe("The user is here. "), {
+        timeout: 8_000,
+      });
+      expect(correct).toHaveBeenCalledTimes(2);
+      expect(correct).toHaveBeenLastCalledWith(
+        expect.objectContaining({ target: "The user are here." }),
+      );
+    });
+
+    it("retries a sentence whose check failed once, then stops after a second failure", async () => {
+      writingView.mockResolvedValue(view());
+      correct.mockResolvedValue({ status: "skipped", reason: "failed" });
+      const { input } = renderBar();
+      await waitFor(() => expect(writingView).toHaveBeenCalled());
+      await act(async () => {
+        await writingView.mock.results[0]?.value;
+      });
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await waitFor(() => expect(correct).toHaveBeenCalledTimes(1), {
+        timeout: 4_000,
+      });
+      fireEvent.change(input, { target: { value: "The user are here. A" } });
+      await waitFor(() => expect(correct).toHaveBeenCalledTimes(2), {
+        timeout: 4_000,
+      });
+      expect(correct).toHaveBeenLastCalledWith(
+        expect.objectContaining({ target: "The user are here." }),
+      );
+      fireEvent.change(input, { target: { value: "The user are here. Ab" } });
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(correct).toHaveBeenCalledTimes(2);
+    });
+
+    it("checks every sentence of a draft longer than one request, each once, and keeps the caret and Undo", async () => {
+      correct.mockImplementation(async (request: { target: string }) => {
+        const at = request.target.indexOf("The user are here.");
+        return {
+          status: "ok",
+          edits:
+            at < 0
+              ? []
+              : [
+                  edit({
+                    start: at + 9,
+                    end: at + 12,
+                    original: "are",
+                    replacement: "is",
+                  }),
+                ],
+        };
+      });
+      const { input } = await renderWithAssistance();
+      const sentences = Array.from(
+        { length: 15 },
+        (_, index) =>
+          `Item ${index + 1} of the long draft is checked once and only once here.`,
+      );
+      sentences.push("The user are here.");
+      const typed = `${sentences.join(" ")} `;
+      input.focus();
+      fireEvent.change(input, { target: { value: typed } });
+      input.setSelectionRange(typed.length, typed.length);
+      await waitFor(
+        () => expect(input.value).toBe(typed.replace("user are", "user is")),
+        { timeout: 12_000 },
+      );
+      expect(input.selectionStart).toBe(typed.length - 1);
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      const targets: string[] = correct.mock.calls.map(
+        (call) => call[0].target,
+      );
+      expect(targets.length).toBeGreaterThan(1);
+      for (const target of targets)
+        expect(target.length).toBeLessThanOrEqual(500);
+      for (const sentence of sentences) {
+        expect(
+          targets.filter((target) => target.includes(sentence)),
+        ).toHaveLength(1);
+      }
+      fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+      expect(input.value).toBe(typed);
+      expect(input.selectionStart).toBe(typed.length);
+    });
+
+    it("sends an unfinished last sentence of five words as incomplete after about four seconds idle", async () => {
+      correct.mockResolvedValue({ status: "ok", edits: [] });
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, {
+        target: { value: "We should check the deploy" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      expect(correct).not.toHaveBeenCalled();
+      await waitFor(() => expect(correct).toHaveBeenCalledTimes(1), {
+        timeout: 4_000,
+      });
+      expect(correct).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: "We should check the deploy",
+          complete: false,
+        }),
+      );
+    });
+
+    it("never sends an unfinished last sentence shorter than five words", async () => {
+      correct.mockResolvedValue({ status: "ok", edits: [] });
+      const { input } = await renderWithAssistance();
+      fireEvent.change(input, { target: { value: "We check the deploy" } });
+      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      expect(correct).not.toHaveBeenCalled();
+    });
+
+    it("sends one sentence longer than 500 characters on its own", async () => {
+      correct.mockResolvedValue({ status: "ok", edits: [] });
+      const { input } = await renderWithAssistance();
+      const long = `This sentence ${"keeps going and going ".repeat(30)}until it ends.`;
+      expect(long.length).toBeGreaterThan(500);
+      fireEvent.change(input, { target: { value: `${long} ` } });
+      await waitFor(() => expect(correct).toHaveBeenCalledTimes(1), {
+        timeout: 8_000,
+      });
+      expect(correct).toHaveBeenCalledWith(
+        expect.objectContaining({ target: long, complete: true }),
+      );
+    });
+
+    it("checks a dictation longer than one request in parts, each sentence once", async () => {
+      correct.mockResolvedValue({ status: "ok", edits: [] });
+      await renderWithAssistance();
+      const sentences = Array.from(
+        { length: 14 },
+        (_, index) =>
+          `Dictated sentence ${index + 1} must reach the writing check in some part.`,
+      );
+      sentences.push("and the last dictated words end without a full stop");
+      startDictation();
+      deliver(sentences.join(" "));
+      act(() => {
+        dictationHook.options?.onFinished?.();
+      });
+      await waitFor(
+        () => {
+          const targets: string[] = correct.mock.calls.map(
+            (call) => call[0].target,
+          );
+          expect(targets.join(" ")).toContain(sentences.at(-1));
+        },
+        { timeout: 12_000 },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      const targets: string[] = correct.mock.calls.map(
+        (call) => call[0].target,
+      );
+      expect(targets.length).toBeGreaterThan(1);
+      for (const target of targets)
+        expect(target.length).toBeLessThanOrEqual(500);
+      for (const sentence of sentences) {
+        expect(
+          targets.filter((target) => target.includes(sentence)),
+        ).toHaveLength(1);
+      }
+      expect(correct.mock.calls.at(-1)?.[0]).toMatchObject({
+        target: expect.stringContaining(sentences.at(-1)!),
+        complete: true,
+      });
+    });
+
+    it("does not ask for corrections when typing correction is off", async () => {
+      writingView.mockResolvedValue(view({ typingCorrection: "off" }));
+      const { input } = renderBar();
+      await waitFor(() => expect(writingView).toHaveBeenCalled());
+      fireEvent.change(input, { target: { value: "The user are here. " } });
+      await new Promise((resolve) => setTimeout(resolve, 1_300));
+      expect(correct).not.toHaveBeenCalled();
+    });
+  },
+);

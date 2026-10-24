@@ -177,6 +177,7 @@ describe("AI services routes", () => {
         "thread-title": { mode: "automatic" },
         "commit-message": { mode: "automatic" },
         voice: { mode: "automatic" },
+        writing: { mode: "automatic" },
       });
     });
   });

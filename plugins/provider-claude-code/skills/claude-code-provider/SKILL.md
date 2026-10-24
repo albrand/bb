@@ -40,6 +40,10 @@ with `bb plugin config provider-claude-code set <key> <value>`.
 - bb passes only `BB_CLAUDE_CODE_EXECUTABLE` and `CLAUDE_CODE_OAUTH_TOKEN` to
   the CLI. Mint the token with `claude setup-token` for machines with no
   interactive login.
+- The Claude writing service runs the same binary only when
+  `BB_CLAUDE_CODE_EXECUTABLE` is absolute and no account other than the
+  daemon's or root can change the file, its links or the directories above
+  them; otherwise it reports not ready with the reason (not checked on Windows).
 - Claude Code's own slash commands, including bundled skills such as
   `/simplify` and `/code-review`, appear in the composer's `/` menu,
   `bb project commands`, and `bb thread commands`. The provider reads them from

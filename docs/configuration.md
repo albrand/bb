@@ -305,8 +305,9 @@ telemetry is off and resumes at the next number when enabled again.
 ## AI services
 
 Thread titles (and the branch names built from them), commit messages, and
-voice transcripts come from AI services that plugins register. Each task
-(`thread-title`, `commit-message`, `voice`) is `automatic` (default), `off`,
+voice transcripts come from AI services that plugins register, as do dictation
+formatting and typing corrections in the native terminal composer. Each task
+(`thread-title`, `commit-message`, `voice`, `writing`) is `automatic` (default), `off`,
 or a service id; set it in Settings → AI services or with
 `bb settings ai-services set <task> <value> [--plugin <plugin-id>]` (see
 `bb guide customization`). Automatic tries bb cloud (the `bb-ai` plugin, for a
@@ -317,9 +318,181 @@ it fails, titles fall back to the start of the prompt and commits to
 `bb: automated commit`. `bb ai off|on` turns bb cloud off and on; see the
 `bb-cloud-ai` skill.
 
+The Claude Code provider plugin registers a `claude` service for
+`thread-title`, `commit-message`, and `writing`. It runs the primary machine's
+`claude` CLI with its own login (`claude auth login`), no tools, no user or
+project settings, CLAUDE.md or hooks, also when `CLAUDE_CONFIG_DIR` points the
+CLI at another config directory, no auto-memory (bb sets
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for it and passes no `--settings`), and no
+session history, trying Claude Haiku 5.5 and then Claude Sonnet 5.5. Managed
+settings that an administrator installs for the CLI still apply, as the CLI
+documents for `--setting-sources`, including any hooks they define: such a hook
+can run for this service, as for every `claude` command on that machine, and
+can read its prompt. bb leaves managed settings and their hooks in place
+because they are that machine's administrator policy, so where such a hook
+sends a prompt is up to that administrator.
+It reports ready when that login is valid or has a refresh token the CLI can
+renew with, and not ready, asking for `claude auth login`, when the login is
+signed out, its renewal was rejected, or its access token expired with
+nothing to renew it.
+The CLI gets only an allowlisted environment (path, home, user, temp, locale,
+XDG, `DBUS_SESSION_BUS_ADDRESS`, `CLAUDE_CONFIG_DIR`, which selects the CLI's
+config directory and so its login, `CLAUDE_CODE_OAUTH_TOKEN`, and the Windows
+system variables), plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+`DBUS_SESSION_BUS_ADDRESS` lets the CLI on a Linux desktop reach the user's
+session bus, where the keyring that can hold its login lives; anything else on
+that bus is reachable too, with the same rights as the user bb runs as.
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`NODE_OPTIONS`, other `CLAUDE_CODE_*` settings (bb's own value of
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY` is replaced by 1), and the proxy and CA
+variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`,
+`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`) in bb's environment
+never reach it, and the prompt cannot be redirected or intercepted through
+them. On a network that only allows HTTPS through a proxy, this service
+cannot reach Claude; pick Codex or bb cloud for the text tasks there.
+Claude does not transcribe audio, so `voice` still needs bb cloud or Codex.
+Because `provider-claude-code` sorts before `provider-codex`, automatic text
+tasks try Claude before Codex.
+
 The removed `BB_INFERENCE`, `BB_INFERENCE_FALLBACK`, and `BB_TRANSCRIPTION`
 keys are ignored with a warning in `~/.bb/config.json`, and `bb-app config set`
 refuses them.
+
+Writing assistance: the native terminal composer has a microphone and typing assistance. Dictation
+records phrase by phrase: each pause ends a short clip that is transcribed by the
+`voice` service and then punctuated and formatted by the `writing` service. The
+server passes each uploaded clip only to the `voice` service; formatting gets
+the transcript text, never audio. When transcribing a clip fails for any reason
+other than the daily limit, whether the upload failed or the server or the
+`voice` service failed after the clip arrived, the app sends the same clip once
+more automatically, so the `voice` service can receive it twice; after that the
+clip is sent again only if you choose Retry. A clip refused by the daily limit
+stops dictation and is not resent automatically. Cancelling dictation drops
+every clip still uploading or waiting; none of them is sent again. bb keeps no
+audio: the server holds a clip in memory for its request and writes it to
+neither disk nor the database (what the voice service's provider keeps is up to
+that provider). The server measures each
+clip from its encoded audio (WebM or Ogg with Opus, MP4 or M4A with AAC, MP3, or
+WAV): the longer of its summed audio frames and the playback timeline its
+timestamps describe, so a gap between timestamps counts as recorded time (for
+WAV, only the declared audio data counts, not metadata after it). Only that
+measured length counts against `dailyDictationMinutes`; the request carries no
+client-reported length. A clip it cannot measure (including an MP4 whose boxes
+nest more than 16 levels deep, or a streamed WAV whose data chunk declares size 0
+and is followed by bytes that read as another chunk header), an empty one, or one longer
+than 120 seconds is refused before transcription. An upload over 25 MiB
+(26214400 bytes), whether it declares its length or is sent chunked, is
+refused with 413 while it streams in, before the form is parsed. A formatted phrase that
+adds words the speaker did not say, changes a number, or drops a protected
+term is discarded in favor of the plain transcript. Typing assistance sends
+finished sentences that changed, with up to 500 characters of preceding
+text, after about a second of idle time. After about four seconds of idle
+time it also sends the unfinished last sentence, if it has at least five words
+and is outside a code fence, marked incomplete; fixes to an unfinished sentence
+are only suggested, never applied automatically. A long draft or dictation is checked a
+few sentences at a time, up to 500 characters per request, with the next part
+sent about a second after each reply; a single sentence is sent alone up to
+2,000 characters, and a longer one is not checked.
+
+Settings (stored server-side; also `bb settings writing`):
+
+| Setting                 | Default     | Meaning                                                                                                                                              |
+| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                  | `prompt`    | `prompt`, `developer`, `natural`, `polished`, `verbatim`, `literal-code`                                                                             |
+| `typingCorrection`      | `automatic` | `automatic` applies only the fixes listed below and suggests the rest; `suggest`; `off`                                                              |
+| `dictationFormatting`   | `true`      | Format dictated phrases; off inserts transcripts as heard                                                                                            |
+| `vocabulary`            | `[]`        | Up to 200 terms sent as spelling hints with each request                                                                                             |
+| `dailyCorrectionLimit`  | `300`       | Writing requests per UTC day before assistance pauses                                                                                                |
+| `dailyDictationMinutes` | `60`        | Dictated minutes per UTC day before dictation stops; bb cloud also caps each account at $0.50 of AI usage per day, about 80 minutes of transcription |
+
+`bb settings writing vocabulary add|remove` and the Settings page edit the
+vocabulary on the server in one step, so concurrent edits keep each other's
+terms. Each edit says what to do with a term to remove that is not in the
+vocabulary (`ifMissing`). `bb settings writing vocabulary remove` sends
+`fail`: it changes nothing and fails, naming the missing term. The Settings
+page sends `ignore`: a term that is already gone is skipped and the rest of the
+edit applies. SDK callers choose either one. The vocabulary changes only
+through these edits (`writingAssistance.editVocabulary`):
+`writingAssistance.updateSettings` and `PUT /api/v1/writing-assistance/settings`
+reject a `vocabulary` field, and a settings update never rewrites the
+vocabulary.
+
+Automatic typing correction applies an edit by itself only when its meaning cannot
+change, whatever the AI service reports: capitalizing the first word of a
+sentence or the pronoun I, and spacing, inside a sentence that already ends
+with . ! or ? (any other change of case, such as turkey to Turkey, is only
+suggested), removing a word typed twice with only spaces between (not a tab or line break)
+when it is one of these words, which never stand twice in a row: the, a, an, I, we, they, he, she, our, your, their, of, and, or, but, if, and the Portuguese o, os, a, as, um, uma, de, da, dos, das, em, na, nas, e, ou, eu, ele, ela, nós, por, com (any
+other repeat can be meant and is only suggested: very very, had had, that that, not not, her her as in
+tell her her access, in in as in log in in five minutes, para para, and a pair split by punctuation
+such as so did I. I left), the lowercase article a to an or an to a (a capital A or An can be a label, so that change is only suggested), and accents on a fixed list of lowercase Portuguese words that are
+not words without them (nao, voce, tambem, entao, amanha; a capitalized Nao can be a name, so an accent on a capitalized word is only suggested). Spelling fixes, a
+missing final period, capitalization or spacing in text that does not end a
+sentence (such as a bare `return true`), other punctuation (commas, question marks), homophones such as its/it's, verb
+agreement (is/are/am, was/were, has/have, does/do and their negations, since the
+subject can be singular or plural, as in "The fish are nearby", and a verb's mood
+can change the meaning, as in "If he were there"), and tense or plural changes
+are offered as suggestions, as is any edit between quotation marks, even when
+the quotation spans lines or paragraphs ('the the', ‘the the’, “the the”,
+«o o», including quotes inside quotes such as “They said ‘the the’”). A
+quotation left open covers the rest of the text, across blank lines. A closing
+mark must match the opening one: “ closes „, ” closes “, » closes «, and
+‘quoted', 'quoted’ and „quoted” stay open. An apostrophe inside a word (don't) or after
+one (users', 5') is not a quotation mark unless it closes an open single
+quote. Code, paths, identifiers and
+vocabulary terms are never edited, and on a line containing any of
+= ; { } ( ) < > [ ] $ ` | \ / # " or --, a colon followed directly by text
+(10:30), a key: value line (status: ready, - name: x, "title": x), a line
+that starts with a shell command, builtin or keyword such as echo, git, npm, read, for or if (also after a $,
+%, > or # prompt or sudo), a line that starts with a hyphenated word, as every PowerShell
+command does (Write-Output, ConvertTo-Json, fetch-data; also prose such as
+Well-known teams say), a line that starts with PowerShell's call or
+dot-source operator, & or . then a space (& Fetch-Data, . setup), a line that starts with an identifier written with an underscore or with a
+lowercase letter followed by a capital (fetch_data, \_fetch, fetchData,
+FetchData; also words such as iPhone or McDonald), a line with a short flag such as -la, a line
+with a +, * or ^ between two operands (x + y, total * rate, n ^ k), a line that is only an
+arithmetic expression (price - discount., count % size), a line
+indented four spaces or a tab, or a ``` or ~~~ fence line or a line inside such a fence (closed
+only by a bare fence of the same character at least as long), every
+change, even capitalization, is only suggested. A line that starts with a plain word, such as a custom command named setup or
+notepad typed without a prompt, cannot be told from prose and is treated as prose. Dictation formatting follows the same rule:
+if the formatter changes a spoken word into another word, other than one of
+those accent restorations, the transcript is inserted
+as heard. Vocabulary terms are sent to transcription as hints, which make the
+expected spelling more likely but do not guarantee it; formatting may change
+their case or punctuation
+("next js" to "Next.js") but never their letters, since without a dictionary a
+misheard name cannot be told from a real word ("public" is never rewritten as
+a similar term). Formatting may not leave out any spoken word, including hesitation
+sounds such as uh, um or hmm, or one of two words said twice in a row ("the the"
+stays, because only the speaker knows whether it was meant) (a formatted phrase that does is discarded in favor
+of the plain transcript); it may leave out only a spoken self-correction (no wait, I mean, scratch that, actually,
+quer dizer, na verdade and the like) together with the phrase just before it
+that it replaces (one unbroken run of at most six words ending at the
+correction, no longer than what was said after it and starting with the same
+word (on monday no wait on tuesday), with nothing else near it left out; a phrase
+that replaces nothing, as in "no wait is required", is not a correction), spoken symbol names in literal-code
+mode when the reply writes that symbol where it was spoken ("run dash force" may become "run -force" but never "run force" or "run force-"), and for paren, bracket or brace only when every pair it opens is closed ("call foo paren" may become "call foo()" but never "call foo("), and the spoken numbers of a numbered list with the connectors (and, then, next, finally, e,
+depois, então) said just before an item number, as in "and then second"; the numbers may be
+ordinals (first, second, primeiro, segundo) or, when the transcript has a comma or colon right
+after each, counting words ("one, add users; two, remove keys", um, dois), one kind per list; a
+counting word without that pause, as in "one check auth two run tests", is never taken as a
+list number; a connector inside an item ("users and groups") always stays; leaving out any other word, a negation
+outside a self-correction phrase, or the minus sign of a number ("-5" never
+becomes "5", "-.5" never becomes ".5", and "-5 and 5" never becomes "5 and -5"), or adding, removing or moving a symbol next to a number, such as
+%, $, €, °, #, + or ~ ("5" never becomes "5%", and "5% and 5" never becomes
+"5 and 5%"), or changing what joins two numbers ("1-3" never becomes "1/3",
+and "10 30" never becomes "10:30"), inserts the transcript as heard. The spoken words must also keep the order they were said in,
+and no word, accented or not, may appear more times than it was said ("nao"
+never becomes "Não não."). A question stays a question: a
+sentence the transcript ended with a question mark keeps it, one it ended with
+a period or exclamation mark (including the full-width forms) is never turned into a question, and the tags né
+and eh are kept ("vai funcionar, né?" never becomes "Vai funcionar."). Only
+speech the transcript left unpunctuated may be punctuated as a question.
+
+Usage counts and the cost estimate use list prices and are not a bill: bb
+cloud has its own daily limit, Codex uses the primary machine's Codex
+login, and Claude uses the primary machine's Claude Code login. Typing and sending never wait for assistance.
 
 bb accepts voice recordings up to 25 MB; a service may set a lower limit, and
 Codex transcribes up to 20 MB and bb cloud up to 10 MB. With a ChatGPT
@@ -755,22 +928,22 @@ ui_preference_conflict`. Read and write them with `bb settings ui
 list|get|set|reset` or `sdk.system.uiPreferences` (see
 `bb guide customization`).
 
-| Key                           | Value                                                                                                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sidebar.organizationMode`           | `project`, `chronological`, or `machine`                                                                         |
-| `sidebar.threadGrouping.environment` | `auto`, `true`, or `false`                                                                                       |
-| `sidebar.chronologicalSort`          | `updated`, `created`, `alpha`, or `none`                                                                         |
-| `sidebar.sectionOrder`               | Section id list for **By project**                                                                               |
-| `sidebar.manualSectionOrder`         | Section id list for **Manually**                                                                                 |
-| `sidebar.machineSectionOrder`        | Section id list for **By machine**                                                                               |
-| `sidebar.hiddenGroups`               | Legacy project, custom section, and machine ids migrated once into the Thread list plugin                        |
-| `sidebar.threadListProvider`  | Plugin key or `__automatic__` (default): the first installed thread list plugin other than the bundled `thread-list/thread-list`, else the bundled one |
-| `sidebar.navigationProvider`  | Plugin key or `__automatic__` (default): the first navigation from a plugin other than the bundled Navigation plugin, else its `navigation/rail`       |
-| `sidebar.pluginPanelOrder`    | Navigation destination order                                                                                                                           |
-| `sidebar.visiblePluginPanels` | Navigation destinations shown, or `null` for every destination                                                                                         |
-| `sidebar.footerOrder`         | Footer action order                                                                                                                                    |
-| `sidebar.hiddenFooterItems`   | Footer actions moved into More                                                                                                                         |
-| `infoPanel.collapsedSections` | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
+| Key                                  | Value                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sidebar.organizationMode`           | `project`, `chronological`, or `machine`                                                                                                               |
+| `sidebar.threadGrouping.environment` | `auto`, `true`, or `false`                                                                                                                             |
+| `sidebar.chronologicalSort`          | `updated`, `created`, `alpha`, or `none`                                                                                                               |
+| `sidebar.sectionOrder`               | Section id list for **By project**                                                                                                                     |
+| `sidebar.manualSectionOrder`         | Section id list for **Manually**                                                                                                                       |
+| `sidebar.machineSectionOrder`        | Section id list for **By machine**                                                                                                                     |
+| `sidebar.hiddenGroups`               | Legacy project, custom section, and machine ids migrated once into the Thread list plugin                                                              |
+| `sidebar.threadListProvider`         | Plugin key or `__automatic__` (default): the first installed thread list plugin other than the bundled `thread-list/thread-list`, else the bundled one |
+| `sidebar.navigationProvider`         | Plugin key or `__automatic__` (default): the first navigation from a plugin other than the bundled Navigation plugin, else its `navigation/rail`       |
+| `sidebar.pluginPanelOrder`           | Navigation destination order                                                                                                                           |
+| `sidebar.visiblePluginPanels`        | Navigation destinations shown, or `null` for every destination                                                                                         |
+| `sidebar.footerOrder`                | Footer action order                                                                                                                                    |
+| `sidebar.hiddenFooterItems`          | Footer actions moved into More                                                                                                                         |
+| `infoPanel.collapsedSections`        | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
 
 A legacy `__builtin__` thread list selection resolves to the bundled plugin.
 Footer IDs are `builtin:settings` (top list layout only), `builtin:mobile`,
@@ -1365,9 +1538,25 @@ conversation. Memory, native subagents, and the Workflow tool are toggled on
 the provider's page in Settings → Providers (see `bb guide providers`).
 
 Two host-daemon environment variables reach the Claude Code bridge:
-`BB_CLAUDE_CODE_EXECUTABLE` picks the `claude` binary, and
-`CLAUDE_CODE_OAUTH_TOKEN` authenticates a machine with no interactive login,
-such as a CI runner (mint it with `claude setup-token`). See the
+`BB_CLAUDE_CODE_EXECUTABLE` picks the `claude` binary (otherwise bb uses
+`claude` from the host's PATH) for Claude threads and the Claude writing
+service alike; a request cannot choose it. Before the writing service sends
+text, it resolves that binary to its real file and refuses it unless the file,
+every link on the way to it (including a linked directory in its path) and
+every directory above them belong to the daemon's own account or root and no
+other account can change them. It then runs that resolved file, not the path
+it was given, so a link changed after the check cannot point the request at
+another binary. Group write
+counts as another account: a group-writable file is refused, and a directory
+that its group or any account can write counts only with the sticky bit, as
+`/tmp` has, so a binary under Homebrew's group-writable `/opt/homebrew/bin` is
+refused. On macOS an access control list entry that allows writing to any of
+them is refused too; on Linux an ACL that grants write shows in the group bits
+and is refused the same way.
+For the writing service the variable must be an absolute path. A refused
+binary shows the service as not ready with the reason, and no text is sent.
+Windows has no such ownership check. The other, `CLAUDE_CODE_OAUTH_TOKEN`, authenticates a
+machine with no interactive login, such as a CI runner (mint it with `claude setup-token`). See the
 `claude-code-provider` skill.
 
 ### Account Pooler [Experimental]

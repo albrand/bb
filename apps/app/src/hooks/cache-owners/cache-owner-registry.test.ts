@@ -179,6 +179,7 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
     "threadTimelineQueryKeyPrefix",
     "terminalsQueryKey",
     "threadsQueryKey",
+    "writingAssistanceQueryKey",
   ],
   "hooks/cache-owners/skills-cache-effects.ts": ["projectSkillsQueryKey"],
   "hooks/cache-owners/system-cache-effects.ts": [
@@ -270,6 +271,9 @@ const CACHE_OWNER_QUERY_KEY_IMPORTS: CacheOwnerQueryKeyImportRegistry = {
   ],
   "hooks/cache-owners/thread-timeline-unseen-events.ts": [
     "threadTimelineQueryKey",
+  ],
+  "hooks/cache-owners/writing-assistance-cache-owner.ts": [
+    "writingAssistanceQueryKey",
   ],
   "hooks/cache-owners/thread-runtime-cache-owner.ts": [
     "environmentQueryKey",

@@ -69,7 +69,7 @@ bb.providers.register({
     supportsThreadArchive: true,
     supportsThreadRename: true,
     supportsServiceTier: false,
-    reportsTokenUsage: true,     // optional; omitted = unknown, false = never reports
+    reportsTokenUsage: true, // optional; omitted = unknown, false = never reports
     reasoningLevels: ["low", "high"], // the coarse ladder; `reasoningLevels` below is precise
   },
   reasoningLevels: [
@@ -557,6 +557,7 @@ plugin, and only on hosts its server instructs.
 
 ## 7. AI services
 
-Helper tasks (thread titles, commit messages, voice transcripts) are
+Helper tasks (thread titles, commit messages, voice transcripts, writing
+assistance) are
 plugin-served through `bb.experimental_aiServices`, documented in the
 bb-plugin-authoring skill's `backend-cli-agents.md`.

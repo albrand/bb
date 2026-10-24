@@ -114,7 +114,7 @@ export function WaveformVisualizer({
     }
 
     const audioCtx = new AudioContext();
-    void audioCtx.resume();
+    void audioCtx.resume().catch(() => {});
     const analysisTrack = audioTrack.clone();
     const source = audioCtx.createMediaStreamSource(
       new MediaStream([analysisTrack]),
@@ -128,7 +128,8 @@ export function WaveformVisualizer({
     let rafId = 0;
 
     const tick = () => {
-      if (audioCtx.state === "suspended") void audioCtx.resume();
+      if (audioCtx.state === "suspended")
+        void audioCtx.resume().catch(() => {});
       if (frame % SAMPLE_EVERY_N_FRAMES === 0) {
         analyser.getByteTimeDomainData(timeData);
         let sumSquares = 0;
@@ -157,7 +158,7 @@ export function WaveformVisualizer({
       source.disconnect();
       analyser.disconnect();
       analysisTrack.stop();
-      void audioCtx.close();
+      void audioCtx.close().catch(() => {});
     };
   }, [stream, active, prefersReducedMotion]);
 

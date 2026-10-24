@@ -49,6 +49,7 @@ import { registerDeviceHandoffRoutes } from "./routes/device-handoff.js";
 import { registerThreadRoutes } from "./routes/threads/index.js";
 import { registerQueueRoutes } from "./routes/queue.js";
 import { registerSpendRoutes } from "./routes/spend.js";
+import { registerWritingAssistanceRoutes } from "./routes/writing-assistance.js";
 import { registerNativeTerminalThreadRoutes } from "./routes/native-terminal-threads.js";
 import { registerPluginRoutes } from "./routes/plugins.js";
 import { registerPluginCatalogRoutes } from "./routes/plugin-catalog.js";
@@ -961,6 +962,7 @@ export function createApp(
   registerThreadRoutes(publicApi, deps);
   registerQueueRoutes(publicApi, deps);
   registerSpendRoutes(publicApi, deps);
+  registerWritingAssistanceRoutes(publicApi, deps);
   registerNativeTerminalThreadRoutes(publicApi, deps);
   registerSystemRoutes(publicApi, deps, pluginService);
   registerUiPreferenceRoutes(publicApi, deps);

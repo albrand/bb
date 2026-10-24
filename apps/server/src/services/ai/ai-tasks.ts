@@ -19,7 +19,10 @@ export const AI_TASK_TIMEOUT_MS: Record<AiTask, number> = {
   "thread-title": 8_000,
   "commit-message": 8_000,
   voice: 70_000,
+  writing: 9_000,
 };
+
+export const AI_STATUS_FALLBACK_WAIT_MS = 2_000;
 
 export type AiTaskFailureReason =
   | "off"
@@ -209,10 +212,21 @@ export async function runAiTask<T>(
     reason: "unavailable",
     message: "No AI service is ready",
   };
-  for (const service of services) {
+  const waitsForStatus = args.task === "writing";
+  for (const [index, service] of services.entries()) {
+    const attemptDeadline = Date.now() + timeoutMs;
+    const statusWaitMs =
+      index < services.length - 1
+        ? Math.min(AI_STATUS_FALLBACK_WAIT_MS, timeoutMs)
+        : timeoutMs;
     const skipped = skipMessage(
       service,
-      await deps.aiServices.status(aiServiceKey(service)),
+      waitsForStatus
+        ? await deps.aiServices.settledStatus(
+            aiServiceKey(service),
+            statusWaitMs,
+          )
+        : await deps.aiServices.taskStatus(aiServiceKey(service)),
     );
     if (skipped !== null) {
       last = { reason: "unavailable", message: skipped };
@@ -222,7 +236,10 @@ export async function runAiTask<T>(
       last = { reason: "cancelled", message: REQUEST_CANCELLED_MESSAGE };
       break;
     }
-    const link = linkedSignal(timeoutMs, args.signal);
+    const link = linkedSignal(
+      waitsForStatus ? Math.max(0, attemptDeadline - Date.now()) : timeoutMs,
+      args.signal,
+    );
     const fields = {
       task: args.task,
       serviceId: service.id,

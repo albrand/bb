@@ -34,6 +34,7 @@ import { createCliBbSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { outputJson } from "./helpers.js";
 import { resolveMachineHostId, resolveMachineTargetOption } from "./machine.js";
+import { registerWritingSettingsCommands } from "./settings-writing.js";
 
 interface JsonOptions {
   json?: boolean;
@@ -144,6 +145,9 @@ function describeAiSelection(
 
 function printAiServices(view: SystemAiServicesResponse): void {
   for (const task of AI_TASKS) {
+    if (!(task in view.selections)) {
+      continue;
+    }
     const selection = view.selections[task];
     const automatic =
       selection.mode === "automatic" ? automaticAiServiceFor(view, task) : null;
@@ -399,6 +403,8 @@ export function registerSettingsCommands(
         console.log(JSON.stringify(result, null, 2));
       }),
     );
+
+  registerWritingSettingsCommands(settings, getUrl);
 
   const aiServices = settings
     .command("ai-services")
