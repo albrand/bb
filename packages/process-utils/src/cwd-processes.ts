@@ -25,7 +25,7 @@ function isPathUnderDirectory(candidate: string, directory: string): boolean {
   );
 }
 
-async function listLinuxProcessCwds(): Promise<ProcessWithCwd[]> {
+export async function listLinuxProcessCwds(): Promise<ProcessWithCwd[]> {
   const entries = await readdir("/proc");
   const results: ProcessWithCwd[] = [];
   await Promise.all(
@@ -66,7 +66,7 @@ async function listLsofProcessCwds(): Promise<ProcessWithCwd[]> {
   return results;
 }
 
-async function resolveSweepDirectory(
+export async function resolveSweepDirectory(
   directory: string,
 ): Promise<string | null> {
   const resolved = resolve(directory);

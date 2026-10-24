@@ -4,6 +4,7 @@ import {
   listUnarchivedAssignedChildThreads,
   type DbNotifier,
   type DbTransaction,
+  type EnvironmentReleaseActor,
   updateThread,
 } from "@bb/db";
 import type { PromptInput, SystemMessageSubject, Thread } from "@bb/domain";
@@ -53,6 +54,7 @@ interface ReleaseUnarchivedChildrenFromArchivedThreadArgs {
 }
 
 interface ArchiveThreadAndReleaseChildrenArgs {
+  release: EnvironmentReleaseActor | null;
   threadId: string;
 }
 
@@ -251,6 +253,7 @@ export function archiveThreadAndReleaseChildren(
         tx,
         notificationBuffer,
         args.threadId,
+        args.release,
       );
       if (!archivedThread) {
         return null;

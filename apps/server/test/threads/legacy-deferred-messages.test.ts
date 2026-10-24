@@ -3,6 +3,7 @@ import {
   listEvents,
   listQueuedThreadMessages,
   markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { describe, expect, it } from "vitest";
 import { deliverLegacyDeferredThreadMessages } from "../../src/services/threads/legacy-deferred-messages.js";
@@ -163,7 +164,10 @@ describe("deliverLegacyDeferredThreadMessages", () => {
           },
         },
       });
-      markThreadDeleted(harness.db, harness.deps.hub, { threadId: thread.id });
+      markThreadDeleted(harness.db, harness.deps.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: thread.id,
+      });
 
       await deliverLegacyDeferredThreadMessages(harness.deps);
 

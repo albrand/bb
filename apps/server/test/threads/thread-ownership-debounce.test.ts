@@ -1,4 +1,9 @@
-import { archiveThread, getThread, updateThread } from "@bb/db";
+import {
+  archiveThread,
+  getThread,
+  updateThread,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import type { ThreadParentNotifications } from "@bb/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
@@ -83,7 +88,12 @@ async function withOwnershipFixture(
           });
         },
         archive() {
-          archiveThread(harness.db, harness.deps.hub, child.id);
+          archiveThread(
+            harness.db,
+            harness.deps.hub,
+            child.id,
+            SYSTEM_RELEASE_ACTOR,
+          );
         },
       });
     } finally {

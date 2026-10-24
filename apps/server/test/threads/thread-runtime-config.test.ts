@@ -5,6 +5,7 @@ import {
   markThreadDeleted,
   setExperiments,
   setThreadExecutionOverride,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import {
   defaultExperiments,
@@ -625,6 +626,7 @@ describe("thread runtime config", () => {
         environmentId: environment.id,
       });
       markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deletedParent.id,
       });
       const childThread = seedThread(harness.deps, {

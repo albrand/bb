@@ -38,6 +38,11 @@ export {
 
 export { experimental_killProcessesWithCwdUnder } from "./kill-processes.js";
 
+export {
+  internal_DO_NOT_USE_scanProcessesWithCwdUnder,
+  type InternalDoNotUseCwdHolderScan,
+} from "./scan-processes.js";
+
 export { experimental_nativeTerminalEnvArgs } from "./native-terminal-env-args.js";
 
 export {

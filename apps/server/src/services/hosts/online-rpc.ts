@@ -10,6 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   hostDaemonSupportsEnvironmentCleanupInspection,
+  hostDaemonSupportsMoveFile,
   type HostDaemonOnlineRpcResponseMessage,
   type HostDaemonOnlineRpcResultForCommand,
   type HostDaemonRetryableOnlineRpcCommand,
@@ -346,6 +347,18 @@ function requestHostOnlineRpcResponse(
           409,
           "environment_cleanup_upgrade_required",
           "Update this machine before recovering environment cleanup",
+        ),
+      );
+  }
+  if (args.command.type === "host.move_file") {
+    const sessionId = deps.hub.getDaemonSessionIdForHost(args.hostId);
+    const session = sessionId ? getSessionById(deps.db, { sessionId }) : null;
+    if (session && !hostDaemonSupportsMoveFile(session.protocolVersion))
+      return Promise.reject(
+        new ApiError(
+          409,
+          "file_move_upgrade_required",
+          "Update this machine before moving files; the old move is not used because it cannot refuse folders and links",
         ),
       );
   }

@@ -110,6 +110,12 @@ function toEnvironmentResponseWithHostLifecycle(
               ? "retiring"
               : "active",
       retireAt: row.retireAt,
+      ...(row.teardownStatus === null &&
+      row.teardownMessage !== null &&
+      row.retireAt !== null &&
+      row.status !== "destroyed"
+        ? { message: row.teardownMessage }
+        : {}),
       teardown:
         row.teardownStatus === null
           ? null

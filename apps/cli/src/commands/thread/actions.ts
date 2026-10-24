@@ -42,6 +42,10 @@ import {
   uploadClientAttachmentInputs,
 } from "./helpers.js";
 import { SEND_AT_HELP, parseSendAt } from "./send-time.js";
+import {
+  describeThreadStorageDeletion,
+  waitForThreadStorageDeletion,
+} from "./storage-deletion.js";
 
 interface ThreadUpdateCommandOptions {
   self?: boolean;
@@ -80,6 +84,7 @@ interface ThreadPinCommandOptions {
 
 interface ThreadDeleteCommandOptions {
   confirmChildThreads?: boolean;
+  wait?: boolean;
   yes?: boolean;
   json?: boolean;
 }
@@ -442,6 +447,10 @@ export function registerActionsCommands(
       "--confirm-child-threads",
       "Confirm deleting a thread with child threads",
     )
+    .option(
+      "--wait",
+      "Wait up to 30 seconds for the thread's files to be removed, and print why they are kept if something is using them",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ThreadDeleteCommandOptions) => {
@@ -466,8 +475,21 @@ export function registerActionsCommands(
         } catch (err: unknown) {
           throw prependErrorContext(`Failed to delete thread ${id}`, err);
         }
-        if (outputJson(opts, { ok: true, threadId: id })) return;
+        const storage =
+          opts.wait === true
+            ? await waitForThreadStorageDeletion(sdk, id)
+            : null;
+        if (
+          outputJson(opts, {
+            ok: true,
+            threadId: id,
+            ...(storage === null ? {} : { storage }),
+          })
+        )
+          return;
         console.log(`Thread ${id} deleted`);
+        if (storage !== null)
+          console.log(describeThreadStorageDeletion(id, storage));
       }),
     );
 

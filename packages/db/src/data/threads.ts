@@ -39,6 +39,7 @@ import type { DbQueryConnection } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import {
   environments,
+  hosts,
   pendingInteractions,
   projects,
   terminalSessions,
@@ -50,6 +51,12 @@ import { NON_TERMINAL_SESSION_STATUSES } from "./terminal-sessions.js";
 import { bumpThreadEventOwnershipEpoch } from "./event-rewrite-generation.js";
 import { createOrderKeyBetween } from "./order-keys.js";
 import { insertThreadPluginMetadata } from "./thread-plugin-metadata.js";
+import { reviveFailedEnvironmentTeardown } from "./environments.js";
+import {
+  recordThreadEnvironmentReleases,
+  revokeThreadEnvironmentReleases,
+  type EnvironmentReleaseActor,
+} from "./environment-release-consents.js";
 
 type ThreadWriteConnection = DbConnection | DbTransaction;
 
@@ -666,6 +673,7 @@ export interface ListNonDeletedChildThreadsArgs {
 
 export interface MarkThreadDeletedArgs {
   deletedAt?: number;
+  release: EnvironmentReleaseActor | null;
   threadId: string;
 }
 
@@ -2176,20 +2184,29 @@ export function markThreadDeleted(
   notifier: DbNotifier,
   args: MarkThreadDeletedArgs,
 ) {
-  const updated = db
-    .update(threads)
-    .set({
-      deletedAt: args.deletedAt ?? Date.now(),
-      updatedAt: Date.now(),
-    })
-    .where(
-      and(
-        inArray(threads.id, lifecycleThreadTreeIdsForThread(args.threadId)),
-        isNull(threads.deletedAt),
-      ),
-    )
-    .returning()
-    .all();
+  const updated = db.transaction((tx) => {
+    const deleted = tx
+      .update(threads)
+      .set({
+        deletedAt: args.deletedAt ?? Date.now(),
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          inArray(threads.id, lifecycleThreadTreeIdsForThread(args.threadId)),
+          isNull(threads.deletedAt),
+        ),
+      )
+      .returning()
+      .all();
+    if (args.release)
+      recordThreadEnvironmentReleases(
+        tx,
+        deleted.map((thread) => thread.id),
+        args.release,
+      );
+    return deleted;
+  });
   for (const thread of updated) {
     notifier.notifyThread(thread.id, ["thread-deleted"], {
       projectId: thread.projectId,
@@ -2202,6 +2219,20 @@ export function markThreadDeleted(
   );
 }
 
+export function setThreadStorageDeleteRefusal(
+  db: ThreadWriteConnection,
+  args: { refusal: string | null; threadId: string },
+) {
+  return (
+    db
+      .update(threads)
+      .set({ storageDeleteRefusal: args.refusal })
+      .where(and(eq(threads.id, args.threadId), isNotNull(threads.deletedAt)))
+      .returning()
+      .get() ?? null
+  );
+}
+
 export function markThreadStorageDeleted(
   db: ThreadWriteConnection,
   args: { threadId: string },
@@ -2209,7 +2240,7 @@ export function markThreadStorageDeleted(
   return (
     db
       .update(threads)
-      .set({ storageDeletedAt: Date.now() })
+      .set({ storageDeletedAt: Date.now(), storageDeleteRefusal: null })
       .where(eq(threads.id, args.threadId))
       .returning()
       .get() ?? null
@@ -2220,6 +2251,7 @@ export function archiveThread(
   db: ThreadWriteConnection,
   notifier: DbNotifier,
   id: string,
+  release: EnvironmentReleaseActor | null,
 ) {
   const now = Date.now();
   const updated = db.transaction((tx) => {
@@ -2240,6 +2272,12 @@ export function archiveThread(
       archived.map((thread) => thread.id),
       "rate-limits",
     );
+    if (release)
+      recordThreadEnvironmentReleases(
+        tx,
+        archived.map((thread) => thread.id),
+        release,
+      );
     return archived;
   });
   for (const thread of updated) {
@@ -2251,6 +2289,43 @@ export function archiveThread(
   return root?.deletedAt === null ? root : null;
 }
 
+export function isThreadEnvironmentRemovalRunning(
+  db: DbConnection | DbTransaction,
+  id: string,
+): boolean {
+  return (
+    db
+      .select({ id: environments.id })
+      .from(threads)
+      .innerJoin(environments, eq(environments.id, threads.environmentId))
+      .where(and(eq(threads.id, id), eq(environments.teardownStatus, "running")))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
+export function isThreadEphemeralMachineRemoving(
+  db: DbConnection | DbTransaction,
+  id: string,
+): boolean {
+  return (
+    db
+      .select({ id: hosts.id })
+      .from(threads)
+      .innerJoin(environments, eq(environments.id, threads.environmentId))
+      .innerJoin(hosts, eq(hosts.id, environments.hostId))
+      .where(
+        and(
+          eq(threads.id, id),
+          eq(hosts.type, "ephemeral"),
+          eq(hosts.phase, "removing"),
+        ),
+      )
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
 export function unarchiveThread(
   db: DbConnection,
   notifier: DbNotifier,
@@ -2260,6 +2335,8 @@ export function unarchiveThread(
     (tx) => {
       const current = getThread(tx, id);
       if (current?.deletedAt !== null) return null;
+      if (isThreadEphemeralMachineRemoving(tx, id)) return null;
+      if (isThreadEnvironmentRemovalRunning(tx, id)) return null;
       if (current.lifecycleOwnerThreadId) {
         const owner = getThread(tx, current.lifecycleOwnerThreadId);
         if (!owner || owner.archivedAt !== null || owner.deletedAt !== null)
@@ -2272,8 +2349,12 @@ export function unarchiveThread(
         .where(and(eq(threads.id, id), isNotNull(threads.archivedAt)))
         .returning()
         .get();
-      if (unarchived)
+      if (unarchived) {
         markThreadPruningPolicyWork(tx, [unarchived.id], "rate-limits");
+        revokeThreadEnvironmentReleases(tx, unarchived.id);
+        if (unarchived.environmentId !== null)
+          reviveFailedEnvironmentTeardown(tx, unarchived.environmentId);
+      }
       return unarchived;
     },
     { behavior: "immediate" },

@@ -22,6 +22,26 @@ const reports = new WeakMap<
   >
 >();
 
+export function environmentTeardownHookId(environment: {
+  id: string;
+  environmentProviderInstanceKey: string | null;
+}): string {
+  return `environment:${environment.id}:${environment.environmentProviderInstanceKey}:teardown`;
+}
+
+export function environmentHookOperationExists(
+  db: Pick<WorkSessionDeps["db"], "select">,
+  id: string,
+): boolean {
+  return (
+    db
+      .select({ id: environmentHookOperations.id })
+      .from(environmentHookOperations)
+      .where(eq(environmentHookOperations.id, id))
+      .get() !== undefined
+  );
+}
+
 export function registerEnvironmentProgressReport(
   deps: Pick<WorkSessionDeps, "db">,
   args: {

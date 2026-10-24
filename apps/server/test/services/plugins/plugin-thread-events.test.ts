@@ -4,6 +4,7 @@ import {
   getLatestThreadSequence,
   setNativeTerminalThreadTerminal,
   stampNativeTerminalThreadActivity,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
@@ -841,7 +842,10 @@ describe("plugin thread lifecycle events", () => {
       expect((await move({ parentThreadId: parent.id })).status).toBe(200);
       expect((await move({ title: "Renamed" })).status).toBe(200);
       await vi.waitFor(() => expect(recorded).toHaveLength(1));
-      archiveThreadAndReleaseChildren(harness.deps, { threadId: parent.id });
+      archiveThreadAndReleaseChildren(harness.deps, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: parent.id,
+      });
       await vi.waitFor(() => expect(recorded).toHaveLength(3));
       expect(recorded[0]).toEqual({
         threadId: child.id,

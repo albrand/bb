@@ -16,6 +16,7 @@ import {
 import {
   createEnvironment,
   createProjectSource,
+  environments,
   ensurePersonalProject,
   getEnvironment,
   getHost,
@@ -42,6 +43,7 @@ import {
   validatePluginEnvironmentProviderDeclaration,
   validatePluginMachineProviderDeclaration,
 } from "@get-bb/plugin-sdk/internal/host-policy";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiError } from "../../src/errors.js";
@@ -571,6 +573,7 @@ describe("machine and environment provider composition", () => {
       expect(environment?.hostId).toBe(machineHost?.id);
       if (environment === null)
         throw new Error("Missing preparing environment");
+      if (machineHost === null) throw new Error("Missing machine host");
       const destroyed = createDeferredPromise<void>();
       const socket = {
         close() {},
@@ -587,6 +590,18 @@ describe("machine and environment provider composition", () => {
       });
       try {
         release.resolve();
+        await expect
+          .poll(() => getThread(harness.db, thread.id)?.status)
+          .toBe("error");
+        harness.db
+          .update(environments)
+          .set({ retireAt: Date.now() - 1 })
+          .where(eq(environments.id, environment.id))
+          .run();
+        updateHost(harness.db, harness.hub, machineHost.id, {
+          removeRetryAt: Date.now() - 1,
+        });
+        await sweepProviderMachine(harness.deps, machineHost.id);
         await destroyed.promise;
         expect(getPreparingEnvironment(harness.db, thread.id)).toMatchObject({
           status: "destroyed",

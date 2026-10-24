@@ -1,4 +1,4 @@
-import { archiveThread } from "@bb/db";
+import { archiveThread, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { threadRunningResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
@@ -65,7 +65,12 @@ describe("GET /threads/running", () => {
         projectId: project.id,
         status: "active",
       });
-      archiveThread(harness.db, harness.deps.hub, archived.id);
+      archiveThread(
+        harness.db,
+        harness.deps.hub,
+        archived.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       const rows = await running(harness);
       // A child and a plugin-spawned thread occupy slots like any other, so

@@ -9,6 +9,7 @@ import {
   searchThreadsWithPendingInteractionState,
   upsertThreadSearchSegments,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 interface FixtureThread {
@@ -203,7 +204,7 @@ function seedWorkspace(): ReturnType<typeof createConnection> {
         text,
       })),
     });
-    if (fixture.archived) archiveThread(db, noopNotifier, created.id);
+    if (fixture.archived) archiveThread(db, noopNotifier, created.id, SYSTEM_RELEASE_ACTOR);
     setUpdatedAt.run(fixture.updatedAt, created.id);
   }
   return db;

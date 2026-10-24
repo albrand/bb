@@ -3,6 +3,10 @@ import path from "node:path";
 import { readPositivePidFile } from "@bb/test-helpers";
 import { removePathWithRetry } from "./helpers/remove-path.js";
 import {
+  startUnreadableProcess,
+  stopUnreadableProcess,
+} from "./helpers/unreadable-process.js";
+import {
   HARNESS_TMP_ROOT_PREFIX,
   integrationTmpBase,
 } from "./helpers/tmp-base.js";
@@ -51,5 +55,14 @@ async function sweepIntegrationTmpRoots(minAgeMs: number): Promise<void> {
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   await sweepIntegrationTmpRoots(STALE_TMP_ROOT_AGE_MS);
-  return () => sweepIntegrationTmpRoots(0);
+  const unreadablePid = await startUnreadableProcess();
+  if (unreadablePid !== null) {
+    process.env.UNREADABLE_PROCESS_PID = String(unreadablePid);
+  }
+  return async () => {
+    if (unreadablePid !== null) {
+      stopUnreadableProcess(unreadablePid);
+    }
+    await sweepIntegrationTmpRoots(0);
+  };
 }

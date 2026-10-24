@@ -42,12 +42,12 @@ afterEach(async () => {
 });
 
 describe("personal workspace host entry", () => {
-  it("kills processes still running inside a workspace before removing it", async ({
+  it("keeps a workspace and reports the process still running inside it, signalling nothing", async ({
     skip,
   }) => {
     skip(
       process.platform === "win32",
-      "killProcessesWithCwdUnder does not enumerate process working directories on Windows",
+      "process working directories are not exercised on Windows",
     );
     const dataDir = await createDataDir();
     const harness = createHarness(dataDir);
@@ -71,9 +71,10 @@ describe("personal workspace host entry", () => {
         path: created.path,
       });
 
-      expect(removed).toEqual({ removed: true });
-      expect(existsSync(created.path)).toBe(false);
-      expect(isPidAlive(child.pid ?? 0)).toBe(false);
+      expect(removed.removed).toBe(false);
+      expect(removed.holders.map((holder) => holder.pid)).toContain(child.pid);
+      expect(existsSync(created.path)).toBe(true);
+      expect(isPidAlive(child.pid ?? 0)).toBe(true);
     } finally {
       child.kill("SIGKILL");
     }
@@ -100,14 +101,14 @@ describe("personal workspace host entry", () => {
         pathKey: "thr_a",
         path: created.path,
       }),
-    ).toEqual({ removed: true });
+    ).toMatchObject({ removed: true, holders: [], unknown: null });
     expect(existsSync(created.path)).toBe(false);
     expect(
       await harness.experimental_call("removeWorkspace", {
         pathKey: "thr_a",
         path: created.path,
       }),
-    ).toEqual({ removed: false });
+    ).toMatchObject({ removed: false, holders: [], unknown: null });
   });
 
   it("removes a workspace core made, so a migrated environment can retire", async () => {
@@ -127,7 +128,7 @@ describe("personal workspace host entry", () => {
         pathKey: "env_migrated",
         path: legacyPath,
       }),
-    ).toEqual({ removed: true });
+    ).toMatchObject({ removed: true, holders: [], unknown: null });
     expect(existsSync(legacyPath)).toBe(false);
   });
 
@@ -143,7 +144,7 @@ describe("personal workspace host entry", () => {
         pathKey: "thr_interrupted",
         path: null,
       }),
-    ).toEqual({ removed: true });
+    ).toMatchObject({ removed: true, holders: [], unknown: null });
     expect(existsSync(created.path)).toBe(false);
   });
 

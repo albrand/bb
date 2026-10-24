@@ -20,6 +20,11 @@ export interface CreateTestGitRepoOptions {
   repoDir: string;
 }
 
+export interface PublishTestGitRepoOptions {
+  remoteName?: string;
+  repoDir: string;
+}
+
 export interface RunGitOptions {
   args: string[];
   cwd: string;
@@ -84,4 +89,28 @@ export async function createTestGitRepo(
     args: ["commit", "-m", "Initial commit"],
   });
   return options.repoDir;
+}
+
+export async function publishTestGitRepo(
+  options: PublishTestGitRepoOptions,
+): Promise<string> {
+  const remoteName = options.remoteName ?? "origin";
+  const remoteDir = path.join(
+    path.dirname(options.repoDir),
+    `${path.basename(options.repoDir)}-${remoteName}.git`,
+  );
+  await fs.mkdir(remoteDir, { recursive: true });
+  await runGit({
+    cwd: remoteDir,
+    args: ["init", "--bare", "--initial-branch", "main"],
+  });
+  await runGit({
+    cwd: options.repoDir,
+    args: ["remote", "add", remoteName, remoteDir],
+  });
+  await runGit({
+    cwd: options.repoDir,
+    args: ["push", remoteName, "main"],
+  });
+  return remoteDir;
 }

@@ -17,6 +17,7 @@ import {
   setExperiments,
   upsertProjectExecutionDefaults,
   threads,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { eq } from "drizzle-orm";
 import { defaultExperiments, threadSchema } from "@bb/domain";
@@ -1870,7 +1871,12 @@ function seedSpawner(
         projectId: args.projectId,
         status: "active",
       });
-      archiveThread(harness.db, harness.deps.hub, spawner.id);
+      archiveThread(
+        harness.db,
+        harness.deps.hub,
+        spawner.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
       return spawner.id;
     }
     default:

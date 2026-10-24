@@ -80,6 +80,7 @@ import {
   requireEnvironment,
   requirePublicProject,
   requirePublicThread,
+  requireThread,
 } from "../../services/lib/entity-lookup.js";
 import { listRunningThreadsWithIntendedHosts } from "../../services/threads/dispatch-attempt.js";
 import { dispatchThreadRenameCommand } from "../../services/threads/thread-commands.js";
@@ -87,6 +88,11 @@ import { requestThreadStorageDeletion } from "../../services/threads/thread-life
 import { createThreadFromRequest } from "../../services/threads/thread-create.js";
 import { createThreadForkFromRequest } from "../../services/threads/thread-fork.js";
 import { requireChildThreadsConfirmation } from "../../services/threads/child-thread-confirmation.js";
+import {
+  parseReleaseActorThreadId,
+  RELEASE_ACTOR_THREAD_HEADER,
+  releaseActorFor,
+} from "../../services/threads/release-actor.js";
 import {
   toThreadListEntryResponses,
   toThreadResponseFromThread,
@@ -559,6 +565,14 @@ export function registerThreadBaseRoutes(
     return context.json(getThreadChildSummary(thread));
   });
 
+  get(routes.storageDeletion, (context) => {
+    const thread = requireThread(deps.db, context.req.param("id"));
+    return context.json({
+      deletedAt: thread.deletedAt,
+      keptReason: thread.storageDeleteRefusal,
+    });
+  });
+
   patch(routes.update, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     if (payload.projectId !== undefined) {
@@ -947,7 +961,13 @@ export function registerThreadBaseRoutes(
       thread,
     });
     const dependents = listLifecycleThreadTree(deps.db, thread.id);
-    markThreadDeleted(deps.db, deps.hub, { threadId: thread.id });
+    const actorThreadId = parseReleaseActorThreadId(
+      context.req.header(RELEASE_ACTOR_THREAD_HEADER),
+    );
+    markThreadDeleted(deps.db, deps.hub, {
+      release: releaseActorFor(actorThreadId, thread.id),
+      threadId: thread.id,
+    });
     for (const dependent of dependents) {
       const deleted = getThread(deps.db, dependent.id);
       if (!deleted) continue;

@@ -18,6 +18,7 @@ import {
   markThreadDeleted,
   requireThreadLifecycleEventApplied,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createProject } from "../../src/data/projects.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { withWriteAfterFirstRead } from "../helpers/interleave.js";
@@ -215,7 +216,7 @@ describe("applyEnvironmentLifecycleEvent", () => {
       }),
     );
     expect(getThread(db, thread.id)?.status).toBe("stopping");
-    markThreadDeleted(db, noopNotifier, { threadId: thread.id });
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: thread.id });
     const blockedByStop = applyEnvironmentLifecycleEvent(db, spy, {
       environmentId: environment.id,
       event: { type: "destroy.recorded" },

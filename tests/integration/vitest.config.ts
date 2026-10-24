@@ -26,6 +26,7 @@ export default defineWorkspaceTestConfig({
           fileParallelism: true,
           isolate: false,
           globalSetup: ["./global-setup.ts"],
+          setupFiles: ["./vitest.setup.ts"],
           include: ["fake/**/*.test.ts"],
         },
       },

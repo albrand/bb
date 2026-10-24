@@ -14,6 +14,7 @@ import {
   getNativeTerminalThread,
   listNonDeletedChildThreads,
   listNonDeletedHiddenSourceThreads,
+  recordThreadEnvironmentReleases,
 } from "@bb/db";
 import type { EnvironmentRow } from "@bb/db";
 import type { Thread } from "@bb/domain";
@@ -33,6 +34,7 @@ import {
 } from "./archive-undo-grace.js";
 import { archiveThreadAndReleaseChildren } from "./thread-ownership.js";
 import { resolveThreadHostCommandEnvironment } from "./thread-command-environment.js";
+import { releaseActorFor } from "./release-actor.js";
 
 interface ArchiveThreadEnvironment {
   hostId: string;
@@ -40,15 +42,18 @@ interface ArchiveThreadEnvironment {
 }
 
 interface ArchiveThreadWithLifecycleEffectsArgs {
+  actorThreadId: string | null;
   environment: ArchiveThreadEnvironment | null;
   thread: Pick<Thread, "environmentId" | "id" | "status">;
 }
 
 interface ArchiveEnvironmentThreadsArgs {
+  actorThreadId?: string | null;
   environment: EnvironmentRow;
 }
 
 interface ArchiveThreadAndChildrenArgs {
+  actorThreadId?: string | null;
   parentThread: Thread;
 }
 
@@ -57,6 +62,7 @@ function archiveThreadWithLifecycleEffects(
   args: ArchiveThreadWithLifecycleEffectsArgs,
 ): Thread | null {
   const archivedThread = archiveThreadAndReleaseChildren(deps, {
+    release: releaseActorFor(args.actorThreadId, args.thread.id),
     threadId: args.thread.id,
   });
   if (!archivedThread) {
@@ -111,10 +117,14 @@ export function archiveEnvironmentThreads(
   const roots = listLiveThreadsInEnvironment(deps.db, {
     environmentId: args.environment.id,
   });
-  return archiveThreadTrees(deps, roots, (thread) =>
-    thread.environmentId === null
-      ? null
-      : getEnvironment(deps.db, thread.environmentId),
+  return archiveThreadTrees(
+    deps,
+    roots,
+    (thread) =>
+      thread.environmentId === null
+        ? null
+        : getEnvironment(deps.db, thread.environmentId),
+    args.actorThreadId ?? null,
   );
 }
 
@@ -126,12 +136,16 @@ export function archiveThreadAndChildren(
     db: deps.db,
     thread: args.parentThread,
   });
-  return archiveThreadTrees(deps, [args.parentThread], (thread) =>
-    thread.id === args.parentThread.id
-      ? environment
-      : thread.environmentId === null
-        ? null
-        : getEnvironment(deps.db, thread.environmentId),
+  return archiveThreadTrees(
+    deps,
+    [args.parentThread],
+    (thread) =>
+      thread.id === args.parentThread.id
+        ? environment
+        : thread.environmentId === null
+          ? null
+          : getEnvironment(deps.db, thread.environmentId),
+    args.actorThreadId ?? null,
   );
 }
 
@@ -141,14 +155,26 @@ function archiveThreadTrees(
   resolveEnvironment: (
     thread: ArchiveThreadWithLifecycleEffectsArgs["thread"],
   ) => ArchiveThreadEnvironment | null,
+  actorThreadId: string | null,
 ): string[] {
   const threads = listArchiveCandidates(deps.db, roots);
-  for (const root of roots) archiveThread(deps.db, deps.hub, root.id);
+  for (const root of roots)
+    archiveThread(
+      deps.db,
+      deps.hub,
+      root.id,
+      releaseActorFor(actorThreadId, root.id),
+    );
   const archivedThreadIds: string[] = [];
 
   for (const thread of threads) {
     if (thread.deletedAt !== null) continue;
     if (thread.archivedAt !== null) {
+      recordThreadEnvironmentReleases(
+        deps.db,
+        [thread.id],
+        releaseActorFor(actorThreadId, thread.id),
+      );
       if (!archiveUndoGraceKeepsTurnRunning(thread, Date.now()))
         requestThreadStopForCurrentState(
           deps,
@@ -159,6 +185,7 @@ function archiveThreadTrees(
     }
     const environment = resolveEnvironment(thread);
     const result = archiveThreadWithLifecycleEffects(deps, {
+      actorThreadId,
       environment,
       thread,
     });

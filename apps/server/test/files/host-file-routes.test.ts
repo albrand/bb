@@ -1,8 +1,17 @@
+import { environments, recordEnvironmentRetention } from "@bb/db";
 import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { readJson } from "../helpers/json.js";
-import { seedHostSession, seedPrimaryHost } from "../helpers/seed.js";
+import {
+  seedEnvironment,
+  seedHost,
+  seedHostSession,
+  seedPrimaryHost,
+  seedProjectWithSource,
+  seedThread,
+} from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 import { DEFAULT_PATH_LIST_EXCLUDE_NAMES } from "../../src/routes/path-list-policy.js";
 
@@ -36,6 +45,344 @@ function postJson(path: string, body: unknown): [string, RequestInit] {
 }
 
 describe("host file routes", () => {
+  it.each([
+    ["the workspace itself", "/work/trees/thr_a/repo"],
+    ["a folder that contains the workspace", "/work/trees"],
+    ["the root folder", "/"],
+  ])(
+    "refuses to remove %s while a thread's workspace is inside, without asking the host",
+    async (_label, target) => {
+      await withTestHarness(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps);
+        seedPrimaryHost(harness.deps, host.id);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/work/trees/thr_a/repo",
+        });
+        const thread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: environment.id,
+          status: "idle",
+        });
+        const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+        registerHostRpcResponder(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+          handle: (request) => {
+            commands.push(request.command);
+            return { ok: true, result: { ok: true } };
+          },
+        });
+
+        const response = await harness.app.request(
+          ...postJson("/api/v1/files/remove", {
+            path: target,
+            recursive: true,
+          }),
+        );
+
+        expect(response.status).toBe(409);
+        expect(await readJson(response)).toMatchObject({
+          code: "workspace_busy",
+          message: expect.stringContaining(thread.id),
+        });
+        expect(commands).toEqual([]);
+      });
+    },
+  );
+
+  it("refuses to move a workspace, and one that no thread references any more", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: "/work/trees/orphan/repo",
+      });
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          return { ok: true, result: { ok: true } };
+        },
+      });
+
+      const response = await harness.app.request(
+        ...postJson("/api/v1/files/move", {
+          sourcePath: "/work/trees/orphan/repo",
+          destinationPath: "/elsewhere/repo",
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readJson(response)).toMatchObject({
+        code: "workspace_busy",
+        message: expect.stringContaining("no thread references"),
+      });
+      expect(commands).toEqual([]);
+    });
+  });
+
+  it("refuses a path inside a workspace, a workspace known only by its claimed path, and plugin data", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const live = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: "/work/trees/thr_a/repo",
+      });
+      seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: live.id,
+        status: "idle",
+      });
+      const failed = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: null,
+      });
+      harness.db
+        .update(environments)
+        .set({ claimPath: "/work/trees/thr_failed/repo" })
+        .where(eq(environments.id, failed.id))
+        .run();
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          return { ok: true, result: { ok: true } };
+        },
+      });
+
+      for (const target of [
+        "/work/trees/thr_a/repo/src/a.ts",
+        "/work/trees/thr_failed/repo",
+        `${session.dataDir}/plugins/environment-git-worktree/host-data/retained/failed-create-x`,
+      ]) {
+        const response = await harness.app.request(
+          ...postJson("/api/v1/files/remove", { path: target }),
+        );
+        expect(response.status, target).toBe(409);
+      }
+
+      expect(commands).toEqual([]);
+    });
+  });
+
+  it("refuses a removal it cannot place relative to plugin data when the machine has no daemon session", async () => {
+    await withTestHarness(async (harness) => {
+      const host = seedHost(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+
+      const response = await harness.app.request(
+        ...postJson("/api/v1/files/remove", { path: "/work/scratch/a.txt" }),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readJson(response)).toMatchObject({
+        code: "workspace_busy",
+        message: expect.stringContaining("cannot tell where this machine keeps"),
+      });
+    });
+  });
+
+  it.each([
+    ["the kept path itself", "/work/kept/thr_x/repo"],
+    ["a file inside it", "/work/kept/thr_x/repo/notes.md"],
+    ["a folder that contains it", "/work/kept"],
+  ])(
+    "refuses to remove %s while a failed create's kept work is unreleased",
+    async (_label, target) => {
+      await withTestHarness(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps);
+        seedPrimaryHost(harness.deps, host.id);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+        recordEnvironmentRetention(harness.db, {
+          environmentId: "env_kept",
+          projectId: project.id,
+          hostId: host.id,
+          ownerThreadId: null,
+          providerId: "test-provider",
+          originalPath: "/work/kept/thr_x/repo",
+          keptPath: "/work/kept/thr_x/repo",
+          state: "retained",
+          message: "setup failed",
+        });
+        const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+        registerHostRpcResponder(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+          handle: (request) => {
+            commands.push(request.command);
+            return { ok: true, result: { ok: true } };
+          },
+        });
+
+        const response = await harness.app.request(
+          ...postJson("/api/v1/files/remove", { path: target }),
+        );
+
+        expect(response.status).toBe(409);
+        expect(await readJson(response)).toMatchObject({
+          code: "workspace_busy",
+          message: expect.stringContaining("failed create kept"),
+        });
+        expect(commands).toEqual([]);
+      });
+    },
+  );
+
+  it("refuses every recursive removal, whatever the path, and never asks the host", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          return { ok: true, result: { ok: true } };
+        },
+      });
+
+      for (const target of ["/work/trees/thr_b", "/work/scratch/node_modules"]) {
+        const response = await harness.app.request(
+          ...postJson("/api/v1/files/remove", {
+            path: target,
+            recursive: true,
+          }),
+        );
+        expect(response.status, target).toBe(409);
+        expect(await readJson(response)).toMatchObject({
+          code: "workspace_busy",
+          message: expect.stringContaining("cannot prove"),
+        });
+      }
+
+      expect(commands).toEqual([]);
+    });
+  });
+
+  it("still removes a single path that is not recursive, and rejects a relative one locally", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          return { ok: true, result: { ok: true } };
+        },
+      });
+
+      const removed = await harness.app.request(
+        ...postJson("/api/v1/files/remove", { path: "/work/scratch/a.txt" }),
+      );
+      const relative = await harness.app.request(
+        ...postJson("/api/v1/files/remove", { path: "scratch/a.txt" }),
+      );
+
+      expect(removed.status).toBe(200);
+      expect(relative.status).toBe(400);
+      expect(commands).toHaveLength(1);
+    });
+  });
+
+  it("moves through one host.move_file call, never browses or uses a separate move, and surfaces the daemon's refusal of a non-file", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          if (
+            request.command.type === "host.move_file" &&
+            request.command.sourcePath !== "/work/scratch/a.txt"
+          ) {
+            return {
+              ok: false,
+              errorCode: "invalid_path",
+              errorMessage: "Refusing to move: it is not a single regular file",
+            };
+          }
+          return { ok: true, result: { ok: true } };
+        },
+      });
+      const move = (sourcePath: string) =>
+        harness.app.request(
+          ...postJson("/api/v1/files/move", {
+            sourcePath,
+            destinationPath: "/work/other/moved",
+          }),
+        );
+
+      expect((await move("/work/scratch/a.txt")).status).toBe(200);
+      expect((await move("/work/scratch/dir")).status).toBe(400);
+      expect((await move("/work/scratch/link")).status).toBe(400);
+
+      expect(commands.map((command) => command.type)).toEqual([
+        "host.move_file",
+        "host.move_file",
+        "host.move_file",
+      ]);
+    });
+  });
+
+  it("refuses a move on a compatible daemon that predates host.move_file, without sending anything or falling back", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        protocolVersion: 249,
+      });
+      seedPrimaryHost(harness.deps, host.id);
+      const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          commands.push(request.command);
+          return { ok: true, result: { ok: true } };
+        },
+      });
+
+      const response = await harness.app.request(
+        ...postJson("/api/v1/files/move", {
+          sourcePath: "/work/scratch/a.txt",
+          destinationPath: "/work/other/moved",
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await readJson(response)).toMatchObject({
+        code: "file_move_upgrade_required",
+      });
+      expect(commands).toEqual([]);
+    });
+  });
+
   it("rejects hostile-origin and text/plain privileged mutations before host RPC", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
@@ -285,7 +632,7 @@ describe("host file routes", () => {
           recursive: false,
         },
         {
-          type: "host.move_path",
+          type: "host.move_file",
           sourcePath: "/notes/a.md",
           destinationPath: "/notes/b.md",
           rootPath: "/notes",

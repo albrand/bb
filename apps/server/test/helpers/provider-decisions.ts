@@ -55,8 +55,8 @@ export function providerOperations(
       if (decision.action === "reject")
         return {
           status: "failed",
-
           message: decision.message,
+          experimental_retained: null,
         };
       if (decision.log !== undefined) report.log(decision.log);
       if (decision.action === "wait") {
@@ -67,8 +67,8 @@ export function providerOperations(
       if (decision.environment.type !== "host")
         return {
           status: "failed",
-
           message: "Providers return directories, not reuse decisions",
+          experimental_retained: null,
         };
       return {
         status: "created",

@@ -48,7 +48,7 @@ import type {
   BridgeToolCallImage,
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import { execPortableFile } from "@bb/process-utils";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { promises as fs, readFileSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, basename, relative, resolve } from "node:path";
@@ -198,6 +198,8 @@ interface AcpNativeConfigState {
 
 interface AcpThreadSession {
   bbThreadId: string;
+  toolToken: string;
+  seenToolCalls: Set<string>;
   construction: AcpSessionParams;
   nativeConfig: AcpNativeConfigState;
   providerThreadId: string;
@@ -441,6 +443,21 @@ function resolveBridgeProcessEnvForMcpServer(): AcpMcpServerConfig["env"] {
   return [{ name: "ELECTRON_RUN_AS_NODE", value: electronRunAsNode }];
 }
 
+function findSessionByToolToken(token: string): AcpThreadSession | undefined {
+  const supplied = Buffer.from(token);
+  let match: AcpThreadSession | undefined;
+  for (const session of sessionsByBbThreadId.values()) {
+    const expected = Buffer.from(session.toolToken);
+    if (
+      expected.length === supplied.length &&
+      timingSafeEqual(expected, supplied)
+    ) {
+      match = session;
+    }
+  }
+  return match;
+}
+
 async function forwardDynamicToolCall(
   args: {
     arguments: Record<string, unknown>;
@@ -448,6 +465,7 @@ async function forwardDynamicToolCall(
     threadId: string;
     tool: string;
   },
+  expected: AcpThreadSession,
   signal: AbortSignal,
 ): Promise<
   | {
@@ -462,6 +480,7 @@ async function forwardDynamicToolCall(
   const session = sessionsByBbThreadId.get(args.threadId);
   if (
     !session ||
+    session !== expected ||
     !session.providerThreadId ||
     session.stopping ||
     session.connection.exited
@@ -523,7 +542,19 @@ function handleDynamicToolBridgeSocket(
       return;
     }
     const request = dynamicToolBridgeRequestSchema.safeParse(parsed);
-    if (!request.success || request.data.token !== bridge.token) {
+    const owner = request.success
+      ? findSessionByToolToken(request.data.token)
+      : undefined;
+    if (!request.success || owner === undefined) {
+      socket.end(
+        `${JSON.stringify({ ok: false, error: "Invalid dynamic tool request" })}\n`,
+      );
+      return;
+    }
+    if (owner.bbThreadId !== request.data.threadId) {
+      process.stderr.write(
+        `acp bridge: rejected a dynamic tool frame naming thread "${request.data.threadId}" on the token of thread "${owner.bbThreadId}"\n`,
+      );
       socket.end(
         `${JSON.stringify({ ok: false, error: "Invalid dynamic tool request" })}\n`,
       );
@@ -536,7 +567,17 @@ function handleDynamicToolBridgeSocket(
       socket.end(`${JSON.stringify({ ok: true, content: "" })}\n`);
       return;
     }
-    void forwardDynamicToolCall(request.data, controller.signal).then(
+    if (owner.seenToolCalls.has(request.data.callId)) {
+      process.stderr.write(
+        `acp bridge: rejected a repeated dynamic tool call id for thread "${owner.bbThreadId}"\n`,
+      );
+      socket.end(
+        `${JSON.stringify({ ok: false, error: "Duplicate tool call id" })}\n`,
+      );
+      return;
+    }
+    owner.seenToolCalls.add(request.data.callId);
+    void forwardDynamicToolCall(request.data, owner, controller.signal).then(
       (response) => {
         if (controller.signal.aborted) return;
         socket.end(`${JSON.stringify(response)}\n`);
@@ -571,7 +612,6 @@ async function ensureDynamicToolBridge(): Promise<AcpDynamicToolBridge> {
         host,
         port: address.port,
         server,
-        token: randomBytes(32).toString("hex"),
       });
     });
   });
@@ -581,6 +621,7 @@ async function ensureDynamicToolBridge(): Promise<AcpDynamicToolBridge> {
 
 async function buildSessionMcpServers(
   params: AcpSessionParams,
+  toolToken: string,
 ): Promise<AcpMcpServerConfig[]> {
   const dynamicTools = params.dynamicTools ?? [];
   if (dynamicTools.length === 0) {
@@ -595,7 +636,7 @@ async function buildSessionMcpServers(
     port: bridge.port,
     runtimeEnv: resolveBridgeProcessEnvForMcpServer(),
     threadId: params.threadId,
-    token: bridge.token,
+    token: toolToken,
   });
   process.stderr.write(
     `acp bridge: built "${config.name}" session MCP config for thread "${params.threadId}" (${dynamicTools.length} tools)\n`,
@@ -791,7 +832,6 @@ interface AcpDynamicToolBridge {
   host: string;
   port: number;
   server: Server;
-  token: string;
 }
 
 let cachedModelCatalog: { key: string; catalog: AgentModelCatalog } | null =
@@ -2337,6 +2377,8 @@ async function startAgentSession(
   });
   session = {
     bbThreadId,
+    toolToken: randomBytes(32).toString("hex"),
+    seenToolCalls: new Set(),
     construction: params,
     nativeConfig: { configOptions: undefined, models: undefined },
     providerThreadId: "",
@@ -2402,7 +2444,7 @@ async function startAgentSession(
     }
     session.supportsLoadSession =
       supportsLoadSession || capabilities.session.resume;
-    const mcpServers = await buildSessionMcpServers(params);
+    const mcpServers = await buildSessionMcpServers(params, session.toolToken);
     const mcpServer = mcpServers[0];
     if (mcpServer) {
       session.cursorMcpApproval = await approveCursorSessionMcpServer({

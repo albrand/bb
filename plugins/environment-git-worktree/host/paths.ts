@@ -80,6 +80,10 @@ export function resolveWorktreesRoot(dataDir: string): string {
   return path.join(dataDir, "worktrees");
 }
 
+export function resolveRetainedRoot(dataDir: string): string {
+  return path.join(dataDir, "retained");
+}
+
 export function resolveWorktreeAttemptRoot(args: {
   dataDir: string;
   pathKey: string;

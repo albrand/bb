@@ -88,7 +88,10 @@ import {
   requirePublicProject,
 } from "../lib/entity-lookup.js";
 import { decideWithinBox } from "./dispatch-hooks.js";
-import { throwEnvironmentNotReady } from "../lib/lifecycle-api-errors.js";
+import {
+  failedTeardownGuidance,
+  throwEnvironmentNotReady,
+} from "../lib/lifecycle-api-errors.js";
 import {
   resolveGitCheckoutAvailability,
   resolvePluginEnvironmentProviderAvailability,
@@ -1142,10 +1145,9 @@ export function prepareProviderEnvironment(
         "The environment provider belongs to a different plugin or has no recorded owner.",
     };
   }
-  if (
-    previous?.teardownStatus === "running" ||
-    previous?.teardownStatus === "failed"
-  )
+  if (previous?.teardownStatus === "failed")
+    return { action: "reject", message: failedTeardownGuidance(previous) };
+  if (previous?.teardownStatus === "running")
     return {
       action: "wait",
       reason: "Removing the previous environment",

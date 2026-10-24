@@ -2,6 +2,7 @@ import { createBbSdk } from "@bb/sdk/core";
 import { createHttpTransport } from "@bb/sdk/node";
 import { spawnSync } from "node:child_process";
 import {
+  archiveThread,
   createTerminalSession,
   getEnvironment,
   getHost,
@@ -15,6 +16,7 @@ import {
   listStoredTurnCompletedKeys,
   replaceStoredProviderModelCatalog,
   updateHost,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import {
   createHostJoinCodeResponseSchema,
@@ -27,6 +29,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { sweepProviderMachine } from "../../src/services/machines/provider-orchestration.js";
 import { setPluginMachineProviderBridge } from "../../src/services/plugins/plugin-machine-provider-registry.js";
 import { setServerAccessBridge } from "../../src/services/plugins/plugin-server-access-registry.js";
 import { readJson } from "../helpers/json.js";
@@ -707,7 +710,7 @@ describe("public host management", () => {
     { type: "persistent", status: "active" },
     { type: "persistent", status: "stopping" },
   ] as const)(
-    "removes a $type machine retaining its $status thread",
+    "keeps a $type machine until the owner of its $status thread archives it",
     async ({ type, status }) => {
       await withTestHarness(async (harness) => {
         const remove = vi.fn(async () => ({ status: "removed" as const }));
@@ -750,17 +753,15 @@ describe("public host management", () => {
 
         expect(removed.status).toBe(200);
         expect(await readJson(removed)).toEqual({ ok: true });
-        expect(remove).toHaveBeenCalledOnce();
-        expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
-        expect(getEnvironment(harness.db, environment.id)?.status).toBe(
+        expect(remove).not.toHaveBeenCalled();
+        expect(getHost(harness.db, host.id)).toMatchObject({
+          phase: "removing",
+          teardownStatus: "failed",
+          statusMessage: expect.stringContaining(thread.id),
+        });
+        expect(getEnvironment(harness.db, environment.id)?.status).not.toBe(
           "destroyed",
         );
-        const environmentRead = await harness.app.request(
-          `${API}/environments/${environment.id}`,
-        );
-        expect(await readJson(environmentRead)).toMatchObject({
-          hostLifecycle: "removed",
-        });
         expect(getThread(harness.db, thread.id)).toMatchObject({
           archivedAt: null,
           status: "idle",
@@ -772,6 +773,24 @@ describe("public host management", () => {
             }),
           ).toEqual([{ threadId: thread.id, turnId: "turn_removal" }]);
         }
+
+        archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
+        updateHost(harness.db, harness.hub, host.id, {
+          removeRetryAt: Date.now() - 1,
+        });
+        await sweepProviderMachine(harness.deps, host.id);
+
+        expect(remove).toHaveBeenCalledOnce();
+        expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
+        expect(getEnvironment(harness.db, environment.id)?.status).toBe(
+          "destroyed",
+        );
+        const environmentRead = await harness.app.request(
+          `${API}/environments/${environment.id}`,
+        );
+        expect(await readJson(environmentRead)).toMatchObject({
+          hostLifecycle: "removed",
+        });
       });
     },
   );

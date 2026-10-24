@@ -550,10 +550,14 @@ export const environments = sqliteTable(
     environmentProviderInstanceKey: text("environment_provider_instance_key"),
     retireAt: integer("retire_at"),
     teardownAttempt: integer("teardown_attempt").notNull().default(0),
+    teardownFailures: integer("teardown_failures").notNull().default(0),
     teardownStatus: text("teardown_status").$type<
       "running" | "failed" | "removed"
     >(),
     teardownMessage: text("teardown_message"),
+    teardownPriorStatus: text(
+      "teardown_prior_status",
+    ).$type<EnvironmentStatus>(),
     resource: text("resource", { mode: "json" }).$type<JsonValue>(),
     ownerThreadId: text("owner_thread_id"),
     attempt: integer("attempt").notNull().default(0),
@@ -645,6 +649,7 @@ export const threads = sqliteTable(
     pinSortKey: text("pin_sort_key"),
     deletedAt: integer("deleted_at"),
     storageDeletedAt: integer("storage_deleted_at"),
+    storageDeleteRefusal: text("storage_delete_refusal"),
     lastReadAt: integer("last_read_at"),
     latestAttentionAt: integer("latest_attention_at").notNull(),
     createdAt: integer("created_at").notNull(),
@@ -1325,6 +1330,94 @@ export const pendingInteractions = sqliteTable(
       table.pluginId,
       table.status,
       table.createdAt,
+    ),
+  ],
+);
+
+export const environmentRetentions = sqliteTable(
+  "environment_retentions",
+  {
+    id: text("id").primaryKey(),
+    environmentId: text("environment_id").notNull(),
+    projectId: text("project_id").notNull(),
+    hostId: text("host_id").notNull(),
+    ownerThreadId: text("owner_thread_id"),
+    providerId: text("provider_id").notNull(),
+    originalPath: text("original_path"),
+    keptPath: text("kept_path"),
+    state: text("state")
+      .$type<
+        "intent" | "retained" | "unresolved" | "released_by_owner" | "closed"
+      >()
+      .notNull(),
+    message: text("message").notNull(),
+    closedAt: integer("closed_at"),
+    closedProof: text("closed_proof"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("environment_retentions_host_state_idx").on(
+      table.hostId,
+      table.state,
+    ),
+    index("environment_retentions_environment_idx").on(table.environmentId),
+    index("environment_retentions_project_idx").on(table.projectId),
+    index("environment_retentions_thread_idx").on(table.ownerThreadId),
+    uniqueIndex("environment_retentions_environment_kept_idx").on(
+      table.environmentId,
+      table.keptPath,
+    ),
+  ],
+);
+
+export const environmentReleaseConsents = sqliteTable(
+  "environment_release_consents",
+  {
+    id: text("id").primaryKey(),
+    environmentId: text("environment_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    actorKind: text("actor_kind")
+      .$type<
+        | "user"
+        | "self"
+        | "coordinator"
+        | "system"
+        | "system:failed-create"
+        | "migrated"
+      >()
+      .notNull(),
+    actorThreadId: text("actor_thread_id"),
+    grantedAt: integer("granted_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("environment_release_consents_environment_thread_idx").on(
+      table.environmentId,
+      table.threadId,
+    ),
+    index("environment_release_consents_thread_idx").on(table.threadId),
+  ],
+);
+
+export const environmentRetentionTransitions = sqliteTable(
+  "environment_retention_transitions",
+  {
+    id: text("id").primaryKey(),
+    retentionId: text("retention_id").notNull(),
+    environmentId: text("environment_id").notNull(),
+    hostId: text("host_id").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state").notNull(),
+    path: text("path"),
+    detail: text("detail").notNull(),
+    at: integer("at").notNull(),
+  },
+  (table) => [
+    index("environment_retention_transitions_retention_idx").on(
+      table.retentionId,
+    ),
+    index("environment_retention_transitions_environment_idx").on(
+      table.environmentId,
     ),
   ],
 );

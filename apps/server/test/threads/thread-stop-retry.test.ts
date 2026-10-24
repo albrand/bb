@@ -1,5 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { getThread, listEvents, markThreadDeleted } from "@bb/db";
+import {
+  getThread,
+  listEvents,
+  markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import type { EnvironmentRow } from "@bb/db";
 import type { Thread } from "@bb/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -84,7 +89,10 @@ describe("thread stop dispatch", () => {
         harness,
         value: 5,
       });
-      markThreadDeleted(harness.db, harness.hub, { threadId: thread.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: thread.id,
+      });
 
       requestThreadStorageDeletion(harness.deps, thread, environment);
       const failedDelete = await waitForQueuedCommand(
@@ -125,7 +133,10 @@ describe("thread stop dispatch", () => {
   it("keeps attached storage pending when its environment is unavailable", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedActiveThreadStopFixture({ harness, value: 6 });
-      markThreadDeleted(harness.db, harness.hub, { threadId: thread.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: thread.id,
+      });
 
       requestThreadStorageDeletion(harness.deps, thread, null);
 

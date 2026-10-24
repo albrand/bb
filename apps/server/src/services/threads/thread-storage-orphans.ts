@@ -11,6 +11,10 @@ import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import { ApiError } from "../../errors.js";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { callHostOnlineRpc } from "../hosts/online-rpc.js";
+import {
+  assertPathAvoidsProtectedWorkspaces,
+  refuseUnprovenMutation,
+} from "../environments/protected-paths.js";
 import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import { isServerMoveFrozen } from "../server-move/freeze-state.js";
 
@@ -100,7 +104,6 @@ export async function removeOrphanedThreadStorage(
   if (queue.parked) return;
   const startedAt = performance.now();
   let attempted = 0;
-  let removed = 0;
   while (
     attempted < args.limits.maxRemovals &&
     performance.now() - startedAt < args.limits.elapsedBudgetMs &&
@@ -112,21 +115,21 @@ export async function removeOrphanedThreadStorage(
     if (threadId === undefined) break;
     attempted += 1;
     try {
-      await callHostOnlineRpc(deps, {
-        command: {
-          type: "host.remove_path",
-          path: joinHostPathSegments(queue.rootPath, threadId),
-          recursive: true,
-          rootPath: queue.rootPath,
-        },
+      assertPathAvoidsProtectedWorkspaces(deps, {
         hostId,
-        timeoutMs: COMMAND_TIMEOUT_MS,
+        path: joinHostPathSegments(queue.rootPath, threadId),
+        action: "remove",
       });
-      removed += 1;
+      refuseUnprovenMutation({
+        action: "remove",
+        path: joinHostPathSegments(queue.rootPath, threadId),
+        reason:
+          "the folder of a thread with no record is removed recursively, and the removal cannot be proven to avoid a workspace",
+      });
     } catch (error) {
       deps.logger.warn(
         { err: error, hostId, threadId },
-        "Failed to remove orphaned thread storage",
+        "Kept orphaned thread storage: its removal is refused",
       );
       if (
         !(error instanceof ApiError) ||
@@ -137,12 +140,6 @@ export async function removeOrphanedThreadStorage(
         break;
       }
     }
-  }
-  if (removed > 0) {
-    deps.logger.info(
-      { hostId, removed, remaining: queue.threadIds.length },
-      "Removed thread storage with no thread record",
-    );
   }
 }
 

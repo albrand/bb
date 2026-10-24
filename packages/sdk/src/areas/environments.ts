@@ -174,7 +174,7 @@ const okResponseSchema = z.object({ ok: z.literal(true) });
 export interface EnvironmentsArea {
   experimental_cleanup(
     args: EnvironmentActionArgs & { recover?: boolean },
-  ): Promise<{ ok: true }>;
+  ): Promise<{ ok: true; checking?: true }>;
   archiveThreads(
     args: EnvironmentActionArgs,
   ): Promise<EnvironmentArchiveThreadsResult>;

@@ -2,11 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
 import { flattenPromptInputGroups } from "@bb/domain";
-import { killProcessesWithCwdUnder } from "@bb/process-utils";
 import {
   COMPETING_TURN_ERROR_CODE,
   type HostDaemonCommandResult,
 } from "@bb/host-daemon-contract";
+import { refuseWhileHeld } from "./refuse-while-held.js";
 import type { RuntimeEntry } from "../runtime-manager.js";
 import {
   CommandDispatchError,
@@ -65,7 +65,10 @@ export async function deleteThreadStorage(
     path.join(options.threadStorageRootPath, command.threadId),
     "Thread storage path escapes the storage root",
   );
-  await killProcessesWithCwdUnder({ directories: [storagePath] });
+  await refuseWhileHeld({
+    directory: storagePath,
+    action: "delete thread storage",
+  });
   await fs.rm(storagePath, { recursive: true, force: true });
 }
 

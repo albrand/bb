@@ -1,4 +1,4 @@
-export const HOST_DAEMON_PROTOCOL_VERSION = 249 as const;
+export const HOST_DAEMON_PROTOCOL_VERSION = 250 as const;
 
 export const HOST_DAEMON_CONNECT_NEXT_PROTOCOL_VERSION = 247 as const;
 
@@ -7,10 +7,13 @@ export const HOST_DAEMON_DESKTOP_BROKER_PROOF_PROTOCOL_VERSION = 248 as const;
 export const HOST_DAEMON_ENVIRONMENT_CLEANUP_INSPECTION_PROTOCOL_VERSION =
   249 as const;
 
+export const HOST_DAEMON_MOVE_FILE_PROTOCOL_VERSION = 250 as const;
+
 export const HOST_DAEMON_COMPATIBLE_PROTOCOL_VERSIONS: readonly number[] = [
   246,
   247,
   248,
+  249,
   HOST_DAEMON_PROTOCOL_VERSION,
 ];
 
@@ -39,6 +42,10 @@ export function hostDaemonSupportsEnvironmentCleanupInspection(
     protocolVersion >=
     HOST_DAEMON_ENVIRONMENT_CLEANUP_INSPECTION_PROTOCOL_VERSION
   );
+}
+
+export function hostDaemonSupportsMoveFile(protocolVersion: number): boolean {
+  return protocolVersion >= HOST_DAEMON_MOVE_FILE_PROTOCOL_VERSION;
 }
 
 export const HOST_ARTIFACT_MAX_BYTES = 256 * 1024 * 1024;

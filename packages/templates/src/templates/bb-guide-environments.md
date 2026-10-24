@@ -123,6 +123,8 @@ Making your repo work with bb:
   bb environment cleanup <id>             Remove an unused provider-managed environment now
     --recover                             After inspection, acknowledge interrupted hooks and
                                           retry failed cleanup (Linux same-user process guard)
+                                          (answers "still checking" after five seconds and
+                                          finishes in the background)
   bb environment show <id>                Show environment details (path, branch, status, lifecycle, retirement deadline and teardown attempts)
 
   bb environment status <id>              Show workspace status. Each file list holds at most
@@ -198,18 +200,33 @@ Making your repo work with bb:
 
   After the last live thread is archived, the environment provider's policy
   sets a retirement deadline; checkout environments never retire. A worktree
-  waits five minutes and then tears down: it runs .bb-env-teardown.sh, stops
-  every process whose working directory is inside the worktree (the agent
-  process, background jobs it left behind, and also shells, editors, or
-  servers you started there yourself), removes the worktree, and records the
-  environment as destroyed. The branch is kept. Unarchiving a thread inside
-  the grace window cancels the teardown. Move your own shells out of the
-  worktree first if you want to keep them. Deleting the last thread, or an
+  waits five minutes and then tears down: it runs .bb-env-teardown.sh, removes
+  the worktree, and records the
+  environment as destroyed. The branch is kept. Before any of that, a worktree
+  is kept, not removed, when it holds recoverable work: a `.keep-worktree`
+  file in its root (create one to keep a worktree on purpose), modified or
+  untracked files, a stash made on its branch, a commit not reachable from any
+  remote-tracking branch after bb fetches the repository's remotes once per
+  teardown pass (without prompting: ssh runs in batch mode appended to your own
+  ssh command, no askpass or credential helper runs, and a fetch that fails or
+  takes longer than 60 seconds keeps the worktree with that reason; this
+  includes repositories with no remote, and the message says when the branch has
+  no upstream), a lock, or an unfinished merge, rebase, cherry-pick or revert, or
+  a process working inside it (bb never stops a
+  process to remove a worktree; shells, editors, servers and background jobs left
+  there keep it). A worktree is also kept until each thread that uses it was
+  released by an archive or a delete through bb, by you, by the thread itself
+  (`bb thread archive --self`) or by a coordinator thread; unarchiving withdraws
+  the release. `bb environment show <id>` then prints the
+  reason as "Kept" and bb retries with a growing delay. Unarchiving a thread
+  inside the grace window cancels the teardown. Move your own shells out of
+  the worktree first if you want to keep them. Deleting the last thread, or an
   explicit environment or project deletion, skips the grace (including a
   never-retire policy). Failed teardown retries after 1, 2, 4, and 8 minutes, then stops after
   five failed attempts with a "Needs recovery" message;
   `bb environment show <id>` reports the lifecycle phase, deadline, teardown
-  attempt, and failure message.
+  attempt, and failure message. A kept worktree is not a failed attempt and
+  does not count toward those five.
 
   `bb environment cleanup <id> [--json]` overrides retention and retry backoff
   to remove an unused provider-managed environment early. It is not a routine

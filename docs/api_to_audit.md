@@ -683,6 +683,104 @@ the current decision timeout is appropriate. Stabilize `experimental_claimPath`
 after auditing restart, cancellation, competing checkout, and
 path-reservation behavior.
 
+## Environment provider retention: `retained` and `experimental_preflightRemove`
+
+`remove(context)` may return `{ status: "retained", message }` to say the
+resource was deliberately kept and nothing in this call changed it. Core then
+restores the environment's status from the one-attempt snapshot it took when
+the claim began, clears teardown, records the message as
+`lifecycle.message` while the environment is retiring, and retries with a delay
+that doubles from one minute up to one hour. A thread that becomes live on the
+environment before the retry stops the retirement as usual. Core refuses `retained` and records a failure instead
+when the teardown script's durable operation row exists (the script may have
+changed the workspace), when no snapshot exists (a claim that predates the
+snapshot column), when a path-less attempt resumed after an interruption (no
+record shows which workspaces were already removed), or when the environment
+is still owned by a preparing thread that never reached `ready`. A provider that
+already changed anything must return `failed` with a message naming what was
+removed and what was kept.
+
+A failed `create` or `restore` result says what the attempt kept in
+`experimental_retained`: `{ path }` means it kept that path on purpose, `null`
+means it kept nothing, and leaving the field out means the provider does not
+know. Core treats that as unresolved only for a provider that declares
+`experimental_proveRetentionAbsent`; for any other provider an omitted answer,
+and a create that throws, are treated as having kept nothing and the server logs
+a warning (owner ruling 2026-10-23). Core writes a row to
+`environment_retentions` (no foreign keys, so it outlives the environment row):
+an `intent` row with no path before every provider create or restore is
+dispatched, a second `intent` row when the create claims a path, `retained`
+when the failed result names the path, `unresolved` when the create threw, did
+not say what it kept, or core could not bind a path the provider produced, and
+no row once the create succeeds or says it kept nothing. An intent that never
+gets an outcome (a crash, a lost reply) stays blocking, and a retained or
+unresolved row is never turned back into an intent or deleted by a later retry.
+While any `intent`, `retained` or `unresolved` row exists for a machine, core
+refuses to destroy or remove that machine, refuses to hard-delete its project,
+refuses file removal and moves at or around a recorded path, and refuses a new
+create for the same thread. `released_by_owner` stays unreachable until the
+consent protocol is accepted. A row closes only through the optional
+`experimental_proveRetentionAbsent(context)` hook, which must not mutate and
+must answer `{ absent: true, proof }` only when the path is gone from the
+machine, no workspace of the project's repository is registered at or around
+it, and no workspace holds a branch of the thread; core runs it in the provider
+lifecycle sweep and writes the proof, the host and the time on the row itself
+(`state: "closed"`, `closed_at`, `closed_proof`), adding no event type. A row
+with no path, or whose provider has no hook, never closes. Stabilization needs
+the owner-release transition, the consumers in the PR's map that are still
+unbuilt (archive cascades, the placement start condition), and a rename
+project-wide.
+
+`experimental_preflightRemove(context)` is optional and runs after the claim and
+before the teardown script. It must not mutate. `{ status: "retained", message }`
+skips the script and the removal; a throw records a failure. The host answers
+the same question again inside `remove`.
+
+Core keeps an environment that a live thread uses for every provider, also
+while its machine is being removed. A live thread is unarchived, or active or
+stopping. The machine then stays in `removing`, with a status message naming the
+thread, and removal completes once the thread is archived and idle. An ephemeral
+machine follows the same rule when it is destroyed: a delete still enters
+`removing` at once, and the destroy waits, retrying about every minute, until
+no live thread uses the machine. The only thread exempt from that wait is the
+one that launched the machine, and only when it is neither active nor stopping
+and owns no ready or pathful environment on that machine. No provider opts in
+or out.
+
+Unarchiving while a machine is being removed:
+- On an ephemeral machine in `removing`, core refuses with `machine_removing`
+  for the whole phase, including the retry window after a failed destroy.
+- On a persistent machine, core refuses with `workspace_busy` only while that
+  environment's teardown is running. Once a teardown is retained or has failed,
+  the unarchive succeeds.
+- A successful unarchive shows the thread and the retained environment's details
+  and path, and adds a live-owner hold, so the machine's removal waits. It does
+  not reactivate the host, and it does not permit sends, retries, queued work,
+  work sessions, terminals, forks, new threads or environment restore while the
+  machine is removing. Transcript, environment and host details stay readable.
+  Committing, pushing or copying files out is manual on that machine. Archiving
+  the thread again lets the removal proceed. Core does not recover the files
+  itself and the workspace is not runnable.
+
+Core's unarchive path refuses with `workspace_busy` while the thread's
+environment teardown is running, so a thread cannot start in a workspace that
+is being removed.
+
+A teardown that failed before the script started, before the provider's `remove`
+was called, and with no durable script row keeps its snapshot. Unarchiving a
+thread onto it (or a sweep that finds a live thread) restores that status and
+clears the failure, keeping the message. Any other failure keeps the
+environment in `error`: placement rejects with the teardown message and the
+workspace path instead of waiting, and the restore route answers 409
+`environment_not_ready`. Archiving the thread lets the next removal attempt
+finish or fail again; a removal that keeps failing needs manual recovery of the
+path.
+
+Stabilization requires auditing the one-minute-to-one-hour retry, whether the snapshot
+belongs in a durable column or a provider-owned record, whether a retained
+environment should keep blocking replacement creation for owner rows, and the
+preflight/remove window in which the workspace can change.
+
 ## `app.slots.experimental_environmentProviderInputs`, `experimental_BranchPicker`, `experimental_useBranches` and `experimental_useCheckoutState` (`@get-bb/plugin-sdk/app`)
 
 The slot registers `{ environmentProviderId, component }`, the control the
@@ -1556,6 +1654,31 @@ deleted (the SDK still accepts the pre-0.6.27 `{ directory }` shape at
 runtime), and `experimental_readProcessIdentity(pid)` returns
 `{ command, startedAt }` so a caller can confirm a recorded PID before
 signalling it.
+
+`internal_DO_NOT_USE_scanProcessesWithCwdUnder` (not part of the public
+surface and not documented in the Plugin Guide) looks, without signalling, for
+processes whose working directory is at or under the given directories and
+answers `clear`, `held` or `unknown`. Its only callers are the first-party
+`environment-personal-workspace` and `storage-retention` host entries, which
+use it to report the holders of a tree and refuse to delete it unless the
+answer is `clear`; the daemon's thread-storage deletion and recursive file
+removal call the same `@bb/process-utils` function directly. `unknown` covers
+Windows, a symlinked target, an unreadable process list, an `lsof` failure,
+timeout, exit above 1 or any warning output, and a same-user process whose
+working directory cannot be read unless its exact `comm` (from
+`/proc/<pid>/stat`) is on the allow-list of session helpers: systemd, (sd-pam),
+ssh-agent, sshd, sshd-session, gpg-agent, dbus-daemon (owner ruling
+2026-10-23). `clear` vouches for the current user's readable processes only:
+other users' processes are excluded and counted, and allow-listed helpers are
+reported by name and pid. Measured on a development host, 22 of 287 same-user
+processes were unreadable, all of them these helpers, so refusing on every
+unreadable process would make `clear` unreachable on an ordinary Linux machine.
+Residuals the PR body states: `comm` is settable by the process itself, so a
+same-user process could name itself ssh-agent. It checks working directories only (not open files), and a
+process can still enter the tree between the scan and the delete. Stabilize it
+by replacing it with a reviewed holder scan that also covers open files and
+mapped files (the worktree plugin has a private one) and by deleting this
+entry.
 
 Docs: `backend-foundation.md`, `testing.md`.
 

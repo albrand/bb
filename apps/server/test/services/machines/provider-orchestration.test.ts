@@ -8,9 +8,11 @@ import {
   getStoredProviderModelCatalog,
   hosts,
   archiveThread,
+  recordEnvironmentRetention,
   replaceStoredProviderModelCatalog,
   setThreadStartupContext,
   updateHost,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { createDeferredPromise } from "@bb/test-helpers";
 import { eq } from "drizzle-orm";
@@ -397,7 +399,12 @@ describe("machine retirement", () => {
             expect(
               requestAutomaticMachineRemoval(harness.deps, allocation.hostId),
             ).toBe(false);
-            archiveThread(harness.db, harness.hub, thread.id);
+            archiveThread(
+              harness.db,
+              harness.hub,
+              thread.id,
+              SYSTEM_RELEASE_ACTOR,
+            );
             expect(
               requestAutomaticMachineRemoval(harness.deps, allocation.hostId),
             ).toBe(index === owners.length - 1);
@@ -429,7 +436,43 @@ describe("machine retirement", () => {
       }),
   );
 
-  it("preserves explicit removal of a machine with an unattached pending start", async () =>
+  it("does not destroy an ephemeral machine while a failed create's kept work is unreleased", async () =>
+    withTestHarness(async (harness) => {
+      const remove = vi.fn(async () => ({ status: "removed" as const }));
+      installMachineProvider({ ephemeral: true, remove });
+      const { host } = seedHostSession(harness.deps);
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      updateHost(harness.db, harness.hub, host.id, {
+        type: "ephemeral",
+        machineProviderId: "test-machine",
+        resource: {},
+      });
+      recordEnvironmentRetention(harness.db, {
+        environmentId: "env_kept",
+        projectId: project.id,
+        hostId: host.id,
+        ownerThreadId: null,
+        providerId: "test-provider",
+        originalPath: "/work/kept-attempt",
+        keptPath: "/work/kept-attempt",
+        state: "retained",
+        message: "setup failed; the workspace stays in place",
+      });
+
+      expect(requestMachineRemoval(harness.deps, host.id)).toBe(true);
+      await sweepProviderMachine(harness.deps, host.id);
+
+      expect(remove).not.toHaveBeenCalled();
+      expect(getHost(harness.db, host.id)).toMatchObject({
+        phase: "removing",
+        teardownStatus: "failed",
+        statusMessage: expect.stringContaining("/work/kept-attempt"),
+      });
+    }));
+
+  it("waits to remove a machine with an unattached pending start until the thread is archived", async () =>
     withTestHarness(async (harness) => {
       const remove = vi.fn(async () => ({ status: "removed" as const }));
       installMachineProvider({ ephemeral: true, remove });
@@ -458,6 +501,17 @@ describe("machine retirement", () => {
       });
       expect(requestAutomaticMachineRemoval(harness.deps, host.id)).toBe(false);
       expect(requestMachineRemoval(harness.deps, host.id)).toBe(true);
+      await sweepProviderMachine(harness.deps, host.id);
+      expect(remove).not.toHaveBeenCalled();
+      expect(getHost(harness.db, host.id)).toMatchObject({
+        phase: "removing",
+        teardownStatus: "failed",
+        statusMessage: expect.stringContaining(thread.id),
+      });
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
+      updateHost(harness.db, harness.hub, host.id, {
+        removeRetryAt: Date.now() - 1,
+      });
       await sweepProviderMachine(harness.deps, host.id);
       expect(remove).toHaveBeenCalledOnce();
       expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
@@ -645,7 +699,7 @@ describe("machine suspension", () => {
       const first = sweepMachineLifecycles(harness.deps);
       await started.promise;
       try {
-        archiveThread(harness.db, harness.hub, thread.id);
+        archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
         await sweepMachineLifecycles(harness.deps, { background: true });
         expect(getHost(harness.db, target.host.id)?.phase).toBe("removing");
       } finally {
@@ -739,7 +793,7 @@ describe("machine suspension", () => {
       };
 
       await expectBusy();
-      archiveThread(harness.db, harness.hub, thread.id);
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
 
       const environment = createEnvironment(harness.db, harness.hub, {
         projectId: project.id,

@@ -32,6 +32,7 @@ import type {
   SendQueuedMessageResponse,
   ThreadArchiveAllResponse,
   ThreadChildSummaryResponse,
+  ThreadStorageDeletionResponse,
   ThreadSpendSummaryResponse,
   ThreadConversationOutlineResponse,
   ThreadCountGroupBy,
@@ -203,6 +204,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
+export type ThreadStorageDeletionResult = ThreadStorageDeletionResponse;
 export type ThreadSpendSummaryResult = ThreadSpendSummaryResponse;
 export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadExecutionProfileResult = ThreadExecutionProfileResponse;
@@ -558,6 +560,7 @@ export interface ThreadsArea {
   archive(args: ThreadActionArgs): Promise<ThreadArchiveResult>;
   archiveAll(args: ThreadActionArgs): Promise<ThreadArchiveAllResult>;
   childSummary(args: ThreadStatusArgs): Promise<ThreadChildSummaryResult>;
+  storageDeletion(args: ThreadStatusArgs): Promise<ThreadStorageDeletionResult>;
   spendSummary(args: ThreadStatusArgs): Promise<ThreadSpendSummaryResult>;
   compact(args: ThreadActionArgs): Promise<ThreadCompactResult>;
   cancelPlan(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
@@ -1206,6 +1209,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         ),
       );
     },
+    async storageDeletion(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["storage-deletion"].$get(
+          { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
     async spendSummary(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"]["spend-summary"].$get(
@@ -1258,7 +1269,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
     async delete(input) {
-      await transport.readVoid(
+      return transport.readJson(
         transport.api.v1.threads[":id"].$delete({
           param: { id: input.threadId },
           json: {
@@ -1266,7 +1277,6 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           },
         }),
       );
-      return { ok: true };
     },
     async editMessage(input) {
       const { threadId, ...json } = input;

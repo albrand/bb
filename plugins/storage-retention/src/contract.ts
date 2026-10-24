@@ -87,7 +87,6 @@ export const storageRpc = defineRpcContract({
         .object({
           hostId: z.string().min(1),
           names: z.array(z.string().min(1)).min(1).max(500),
-          stopRunning: z.boolean(),
         })
         .strict(),
     ]),
@@ -96,7 +95,7 @@ export const storageRpc = defineRpcContract({
       removedCount: z.number().int().nonnegative(),
       removedBytes: z.number().int().nonnegative(),
       skippedCount: z.number().int().nonnegative(),
-      stoppedProcessCount: z.number().int().nonnegative(),
+      held: z.array(z.object({ name: z.string(), reason: z.string() })),
     }),
   },
   state: { input: z.null(), output: stateSchema },

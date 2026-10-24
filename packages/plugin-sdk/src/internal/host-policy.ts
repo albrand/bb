@@ -2318,6 +2318,12 @@ export interface NormalizedPluginEnvironmentProvider {
   > | null;
   create: PluginEnvironmentProviderDeclaration["create"];
   restore: NonNullable<PluginEnvironmentProviderDeclaration["restore"]> | null;
+  experimental_preflightRemove: NonNullable<
+    PluginEnvironmentProviderDeclaration["experimental_preflightRemove"]
+  > | null;
+  experimental_proveRetentionAbsent: NonNullable<
+    PluginEnvironmentProviderDeclaration["experimental_proveRetentionAbsent"]
+  > | null;
   remove: PluginEnvironmentProviderDeclaration["remove"];
   policy: import("../environment-provider.js").PluginEnvironmentProviderPolicy;
 }
@@ -2474,6 +2480,18 @@ export function validatePluginEnvironmentProviderDeclaration(
     declaration.restore,
     "a restore",
   );
+  assertOptionalFunction(
+    "environment provider",
+    id,
+    declaration.experimental_preflightRemove,
+    "experimental_preflightRemove",
+  );
+  assertOptionalFunction(
+    "environment provider",
+    id,
+    declaration.experimental_proveRetentionAbsent,
+    "experimental_proveRetentionAbsent",
+  );
   return {
     id,
     displayName,
@@ -2487,6 +2505,10 @@ export function validatePluginEnvironmentProviderDeclaration(
     experimental_existingPath: declaration.experimental_existingPath ?? null,
     create: declaration.create,
     restore: declaration.restore ?? null,
+    experimental_preflightRemove:
+      declaration.experimental_preflightRemove ?? null,
+    experimental_proveRetentionAbsent:
+      declaration.experimental_proveRetentionAbsent ?? null,
     remove: declaration.remove,
     policy: environmentProviderPolicySchema.parse(declaration.policy ?? {}),
   };

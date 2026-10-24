@@ -29,6 +29,7 @@ import {
   createThread,
   deleteThread,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
@@ -276,7 +277,11 @@ describe("listDueScheduledQueuedThreadMessages", () => {
   it("skips rows on archived and deleted threads", () => {
     const { db, project } = setup();
     for (const [name, dispose] of [
-      ["archived", archiveThread],
+      [
+        "archived",
+        (...[connection, notifier, id]: Parameters<typeof deleteThread>) =>
+          archiveThread(connection, notifier, id, SYSTEM_RELEASE_ACTOR),
+      ],
       ["deleted", deleteThread],
     ] as const) {
       const thread = createThread(db, noopNotifier, {

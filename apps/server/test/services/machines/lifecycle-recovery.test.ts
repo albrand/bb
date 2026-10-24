@@ -11,6 +11,7 @@ import {
   setServerMoveFrozen,
 } from "../../../src/services/server-move/freeze-state.js";
 import {
+  archiveThread,
   createEnvironment,
   createTerminalSession,
   environments,
@@ -20,6 +21,7 @@ import {
   hosts,
   listThreadIdsWithHostOfflineQueueWaits,
   updateHost,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
 import {
@@ -282,6 +284,7 @@ it.each([
           key: "cleanup-machine",
         }),
       ).rejects.toThrow("cancelled");
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
       await sweepProviderMachine(harness.deps, target.host.id);
       if (failCleanup) {
         expect(getHost(harness.db, target.host.id)).toMatchObject({
@@ -298,7 +301,7 @@ it.each([
       });
       expect(getHost(harness.db, target.host.id)?.phase).toBe("destroyed");
       expect(getThread(harness.db, thread.id)).toMatchObject({
-        archivedAt: null,
+        archivedAt: expect.any(Number),
         deletedAt: null,
         status: "idle",
       });

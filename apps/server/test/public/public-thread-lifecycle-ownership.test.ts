@@ -8,6 +8,7 @@ import {
   markThreadDeleted,
   getThread,
   getProject,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { describe, expect, it, vi } from "vitest";
 import { reconcileDaemonReportedThreads } from "../../src/services/threads/thread-lifecycle.js";
@@ -112,7 +113,13 @@ describe("lifecycle ownership deletion", () => {
           projectId: project.id,
           parentThreadId: owner.id,
         });
-        if (archived) archiveThread(harness.db, harness.deps.hub, child.id);
+        if (archived)
+          archiveThread(
+            harness.db,
+            harness.deps.hub,
+            child.id,
+            SYSTEM_RELEASE_ACTOR,
+          );
         expect((await remove(harness, owner.id)).status).toBe(200);
         expect(getThread(harness.db, nested.id)).toBeNull();
         expect(getThread(harness.db, owner.id)?.deletedAt).toEqual(
@@ -297,6 +304,7 @@ it("environment archival stops cross-environment lifecycle dependents on their o
       environmentId: childEnvironment.id,
     });
     markThreadDeleted(harness.db, harness.deps.hub, {
+      release: SYSTEM_RELEASE_ACTOR,
       threadId: deleted.id,
       deletedAt: 100,
     });
@@ -355,7 +363,12 @@ it("recovers archived active threads through the periodic sweep", async () => {
       environmentId: environment.id,
       providerThreadId: "sweep-recovery",
     });
-    archiveThread(harness.db, harness.deps.hub, thread.id);
+    archiveThread(
+      harness.db,
+      harness.deps.hub,
+      thread.id,
+      SYSTEM_RELEASE_ACTOR,
+    );
     await runThreadLifecycleSweep(harness.deps);
     expect(getThread(harness.db, thread.id)?.status).toBe("active");
     expireArchiveUndoGrace(harness.deps, thread.id);

@@ -23,6 +23,7 @@ import {
   events,
   getEnvironment,
   getHost,
+  getLatestStoredThreadEventOfTypes,
   getLatestThreadInterruptedReason,
   getThread,
   listNativeTerminalThreadIds,
@@ -31,6 +32,7 @@ import {
   listThreadIdsWithLatestHostDaemonRestartInterruption,
   listThreadTurnInterruptionEventStates,
   markThreadStorageDeleted,
+  setThreadStorageDeleteRefusal,
   threads,
   type DbNotifier,
   type DbQueryConnection,
@@ -109,6 +111,7 @@ import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 import { throwThreadNotWritable } from "../lib/lifecycle-api-errors.js";
 import { NotificationBuffer } from "../lib/notification-buffer.js";
 import { queueChildThreadTurnNotificationBestEffort } from "./child-thread-notifications.js";
+import { describeThreadStorageRefusal } from "./thread-storage-refusal.js";
 import { isParentNotifiableChildThread } from "./thread-parent.js";
 import {
   clearThreadProvisionSchedule,
@@ -1055,6 +1058,23 @@ export function settleThreadStorageDeleteCommandResult(
   args: SettleThreadStorageDeleteCommandResultArgs,
 ): CommandResultSideEffectsResult {
   if (!args.report.ok) {
+    const { kept, target, notice } = refusedThreadStorageDeletionNotices(
+      args.deps.db,
+      args.command.threadId,
+      args.report.errorMessage,
+    );
+    setThreadStorageDeleteRefusal(args.deps.db, {
+      refusal: kept,
+      threadId: args.command.threadId,
+    });
+    if (target !== null && notice !== null)
+      appendSystemErrorEventInTransaction(args.deps, {
+        threadId: target.id,
+        environmentId: target.environmentId,
+        scope: threadScope(),
+        code: STORAGE_DELETE_REFUSED_CODE,
+        message: notice,
+      });
     return emptyCommandResultSideEffects();
   }
   settleDanglingBackgroundTasksForStoppedThreadInTransaction(args.deps, {
@@ -1070,6 +1090,61 @@ export function settleThreadStorageDeleteCommandResult(
     threadId: args.command.threadId,
   });
   return emptyCommandResultSideEffects();
+}
+
+const STORAGE_DELETE_REFUSED_CODE = "thread_storage_delete_refused";
+const ANCESTOR_WALK_LIMIT = 32;
+
+function liveAncestorThread(
+  db: DbQueryConnection,
+  threadId: string,
+): { id: string; environmentId: string | null } | null {
+  let current = getThread(db, threadId);
+  for (let step = 0; step < ANCESTOR_WALK_LIMIT; step += 1) {
+    const parentId = current?.parentThreadId ?? null;
+    if (parentId === null) return null;
+    const parent = getThread(db, parentId);
+    if (parent === null) return null;
+    if (parent.deletedAt === null)
+      return { id: parent.id, environmentId: parent.environmentId };
+    current = parent;
+  }
+  return null;
+}
+
+function refusedThreadStorageDeletionNotices(
+  db: DbQueryConnection,
+  threadId: string,
+  daemonMessage: string,
+): {
+  kept: string | null;
+  target: { id: string; environmentId: string | null } | null;
+  notice: string | null;
+} {
+  if (!daemonMessage.includes("Refusing to delete thread storage"))
+    return { kept: null, target: null, notice: null };
+  const kept = describeThreadStorageRefusal(daemonMessage);
+  const target = liveAncestorThread(db, threadId);
+  if (target === null) return { kept, target: null, notice: null };
+  const notice = `The files of deleted thread ${threadId} were not deleted. ${kept}`;
+  const latest = getLatestStoredThreadEventOfTypes(db, {
+    threadId: target.id,
+    types: ["system/error"],
+    afterSequence: 0,
+  });
+  if (latest !== null && latest.data.includes(STORAGE_DELETE_REFUSED_CODE)) {
+    try {
+      const parsed: unknown = JSON.parse(latest.data);
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "message" in parsed &&
+        parsed.message === notice
+      )
+        return { kept, target, notice: null };
+    } catch {}
+  }
+  return { kept, target, notice };
 }
 
 export function requestThreadStorageDeletion(
@@ -2073,7 +2148,7 @@ export async function reconcileDaemonReportedThreads(
 
   for (const thread of pendingThreads) {
     if (thread.deletedAt !== null) {
-      requestThreadStorageDeletion(deps, thread, {
+      void requestThreadStorageDeletion(deps, thread, {
         hostId: args.hostId,
         id: thread.environmentId,
       });

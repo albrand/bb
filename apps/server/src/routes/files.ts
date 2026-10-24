@@ -20,6 +20,10 @@ import {
   requireDaemonFileContentResult,
   remapDaemonFileRouteError,
 } from "../services/hosts/daemon-file-response.js";
+import {
+  assertPathAvoidsProtectedWorkspaces,
+  refuseUnprovenMutation,
+} from "../services/environments/protected-paths.js";
 import { serveDaemonFileStream } from "../services/hosts/daemon-file-stream.js";
 import { createRawFileHeaders } from "../services/hosts/raw-file-headers.js";
 import {
@@ -340,8 +344,18 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
 
   post(fileRoutes.move, (context, payload) =>
     withHostFileRoute(payload.hostId, async (hostId) => {
+      assertPathAvoidsProtectedWorkspaces(deps, {
+        hostId,
+        path: payload.sourcePath,
+        action: "move",
+      });
+      assertPathAvoidsProtectedWorkspaces(deps, {
+        hostId,
+        path: payload.destinationPath,
+        action: "move",
+      });
       const result = await runHostFileMutationCommand(hostId, {
-        type: "host.move_path",
+        type: "host.move_file",
         sourcePath: payload.sourcePath,
         destinationPath: payload.destinationPath,
         ...(payload.rootPath !== undefined
@@ -354,6 +368,18 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
 
   post(fileRoutes.remove, (context, payload) =>
     withHostFileRoute(payload.hostId, async (hostId) => {
+      assertPathAvoidsProtectedWorkspaces(deps, {
+        hostId,
+        path: payload.path,
+        action: "remove",
+      });
+      if (payload.recursive === true) {
+        refuseUnprovenMutation({
+          action: "remove",
+          path: payload.path,
+          reason: "a recursive removal could reach a directory it was not checked against",
+        });
+      }
       const result = await runHostFileMutationCommand(hostId, {
         type: "host.remove_path",
         path: payload.path,

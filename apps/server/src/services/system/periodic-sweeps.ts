@@ -404,7 +404,7 @@ async function runThreadProvisioningOrphanCleanupSweep(
     const environment = thread.environmentId
       ? getEnvironment(deps.db, thread.environmentId)
       : null;
-    requestThreadStorageDeletion(deps, thread, environment);
+    void requestThreadStorageDeletion(deps, thread, environment);
   }
 }
 

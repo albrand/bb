@@ -11,7 +11,8 @@ import {
   machineHasStartingThreadLaunch,
 } from "../../src/data/machines.js";
 import { createProject } from "../../src/data/projects.js";
-import { archiveThread, createThread } from "../../src/data/threads.js";
+import { archiveThread, createThread} from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { noopNotifier } from "../../src/notifier.js";
 import { environments, threads } from "../../src/schema.js";
 import { createMigratedConnection } from "../../src/testing.js";
@@ -62,7 +63,7 @@ describe("machine provisioning state", () => {
       expect(machineHasStartingThreadLaunch(db, host.id)).toBe(false);
       expect(machineHasLiveThreadLaunch(db, host.id)).toBe(true);
     }
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
     expect(machineHasLiveThreadLaunch(db, host.id)).toBe(false);
     expect(machineHasStartingThreadLaunch(db, host.id)).toBe(false);
   });

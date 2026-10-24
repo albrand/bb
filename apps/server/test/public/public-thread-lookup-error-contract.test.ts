@@ -1,4 +1,4 @@
-import { archiveThread, markThreadDeleted } from "@bb/db";
+import { archiveThread, markThreadDeleted, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { createBbSdk } from "@bb/sdk/core";
 import { createHttpTransport } from "@bb/sdk/node";
 import { describe, expect, it } from "vitest";
@@ -31,8 +31,11 @@ describe("thread lookup contract used by plugins to detect gone threads", () => 
       const archived = seedThread(harness.deps, { projectId: project.id });
       const deleted = seedThread(harness.deps, { projectId: project.id });
 
-      archiveThread(harness.db, harness.hub, archived.id);
-      markThreadDeleted(harness.db, harness.hub, { threadId: deleted.id });
+      archiveThread(harness.db, harness.hub, archived.id, SYSTEM_RELEASE_ACTOR);
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: deleted.id,
+      });
 
       const liveThread = await sdk.threads.get({ threadId: live.id });
       expect(liveThread.archivedAt).toBeNull();

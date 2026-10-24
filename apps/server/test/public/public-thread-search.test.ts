@@ -1,4 +1,4 @@
-import { archiveThread } from "@bb/db";
+import { archiveThread, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { threadSearchResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
@@ -26,7 +26,12 @@ describe("public thread search route", () => {
         title: "routearchived",
         titleFallback: "routearchived",
       });
-      archiveThread(harness.deps.db, harness.deps.hub, archivedThread.id);
+      archiveThread(
+        harness.deps.db,
+        harness.deps.hub,
+        archivedThread.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
       const hiddenThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "routehidden",
@@ -39,7 +44,12 @@ describe("public thread search route", () => {
         titleFallback: "routehiddenarchived",
         visibility: "hidden",
       });
-      archiveThread(harness.deps.db, harness.deps.hub, hiddenArchivedThread.id);
+      archiveThread(
+        harness.deps.db,
+        harness.deps.hub,
+        hiddenArchivedThread.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       const response = await harness.app.request(
         "/api/v1/threads/search?query=route&limitPerGroup=10",

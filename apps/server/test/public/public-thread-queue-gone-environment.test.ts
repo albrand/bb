@@ -5,6 +5,7 @@ import {
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
   updateHost,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { applyEnvironmentLifecycleEvent } from "@bb/db/internal-environment-lifecycle";
 import {
@@ -276,7 +277,7 @@ describe("queued message into a thread whose environment is gone (#1789)", () =>
         );
       expect(sweepCandidates()).toEqual([thread.id]);
 
-      archiveThread(harness.db, harness.hub, thread.id);
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
       applyEnvironmentLifecycleEvent(harness.db, harness.hub, {
         environmentId: environment.id,
         event: { type: "destroy.recorded" },

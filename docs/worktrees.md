@@ -130,15 +130,67 @@ worktree it made and removes the ones nothing is using:
 - An archived thread keeps running for 30 seconds so Undo can restore it;
   see `bb guide thread-lifecycle`.
 
-Removal runs `.bb-env-teardown.sh` inside the worktree first, then stops
-every process whose working directory is inside the worktree — the agent's
-provider process, its background jobs (dev servers, MCP servers, `nohup`
-jobs), and any process you started there yourself, such as a shell you `cd`'d
-into the worktree or an editor terminal. Each process gets `SIGTERM`, then
-`SIGKILL` after a short grace period. Then `git worktree remove --force` runs
-and the directory is deleted. The branch is left behind, so work you committed
-to it survives the worktree. If you want to keep uncommitted work, commit and
-push (or open a PR) from inside the worktree before letting the thread go, and
+Before it runs `.bb-env-teardown.sh` or stops anything, bb inspects every
+worktree it is about to remove and checks that nothing recoverable would be
+lost. If any one of them is protected, bb changes nothing, keeps the whole
+environment as it was, shows the reason as the environment's kept message, and
+retries with a delay that doubles from one minute up to one hour. A thread
+that starts using the worktree in the meantime cancels the removal. A worktree is protected when it:
+
+- contains a `.keep-worktree` file (create one to keep a worktree on purpose),
+- has modified tracked files or untracked files (ignored files such as
+  `node_modules` do not count),
+- is locked, or is in the middle of a merge, rebase, cherry-pick or revert,
+- has a stash entry made on its branch (`git stash`),
+- has a HEAD that is not reachable from any remote-tracking branch, checked
+  after bb fetches every remote of the repository, which includes repositories
+  with no remote and detached commits that were never pushed. When the branch
+  has no upstream, the message says so. A branch needs no upstream when it holds
+  no commit that is not already on a remote-tracking branch,
+- is held by a program (see below), or cannot be fetched to check,
+- is not a linked worktree of the expected repository inside bb's worktree
+  directory, or is a symbolic link.
+
+Archiving a thread's last session on a worktree that is already being removed
+cannot be undone until the removal finishes: Unarchive answers that the
+workspace is busy. If something changes a worktree after the inspection and
+bb has already stopped its processes or removed a sibling, the environment is
+marked failed with the list of what was removed and what was kept, and it is
+never restored automatically. A thread that is live on such an environment is
+told so and its message names the path; archive the thread so bb can finish the
+removal, then unarchive it to restore the workspace, or recover the path
+yourself. A removal that failed before bb touched anything is undone when the
+thread is unarchived.
+
+A worktree is removed only after the threads that use it were released: an
+archive or a delete of each of them through bb (the app, `bb thread archive`,
+`bb thread delete` or the SDK) records the release, and unarchiving a thread
+withdraws it. Whoever archives or deletes counts: you, the thread itself, or a
+coordinator that archives its child; bb records which of them it was, as the
+caller claims it (the CLI claims the thread in `BB_THREAD_ID`). The release is
+not what keeps your work safe: the checks above are. A thread that was archived
+or deleted before bb recorded releases is treated as released by an
+upgrade-time record. bb also looks for programs that use the worktree: any
+process of yours whose working directory is inside it, or that holds a file open
+inside it. bb never signals those programs. While one is running, or when bb
+cannot tell (for example on Windows, or when a process cannot be inspected), the
+worktree is kept and the message names the program so its owner can finish and
+close it. A scan is a snapshot: a program that opens a file after the last check
+is not excluded. When bb does remove the worktree
+of a create that failed, it runs `git worktree remove` without `--force`, and bb
+never uses `--force`. A create that finds a branch still checked out by
+an earlier workspace leaves it alone and says where it is; the owning cleanup
+removes such a workspace, never the new create. A create that fails after bb made the worktree
+removes it only while it holds nothing but what bb put there: HEAD is still the
+commit bb created, no tracked file changed, no `.keep-worktree`, lock or
+unfinished operation exists, and every other file is a `.worktreeinclude` copy
+whose contents still match what bb wrote. Anything else is kept and the create
+reports why. A failed create keeps its whole worktree in place for now, copies included, and
+the failure message says where it is. bb moves or removes it only after its owner
+has released it and a durable retention record exists; neither is available yet.
+The copies may hold secrets such as `.env` files and use disk; they exist only on
+that machine, so destroying an ephemeral machine would lose them. The branch is left behind, so work you committed to it survives the
+worktree. Push (or open a PR) from inside the worktree to let bb remove it, and
 move your own shells out of the worktree first if you want to keep them.
 
 ## Run teardown with `.bb-env-teardown.sh`

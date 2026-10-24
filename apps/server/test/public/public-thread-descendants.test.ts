@@ -1,4 +1,4 @@
-import { archiveThread, markThreadDeleted } from "@bb/db";
+import { archiveThread, markThreadDeleted, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { threadDescendantsListResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { archiveThreadAndReleaseChildren } from "../../src/services/threads/thread-ownership.js";
@@ -61,6 +61,7 @@ describe("POST /threads/descendants", () => {
         parentThreadId: other.id,
       });
       markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deletedChild.id,
       });
 
@@ -88,14 +89,17 @@ describe("POST /threads/descendants", () => {
         body: JSON.stringify({ parentThreadId: other.id }),
       });
       expect(nest.status).toBe(200);
-      await expect(descendantsOf(harness, [root.id, other.id])).resolves.toEqual(
-        {
-          [root.id]: [sibling.id],
-          [other.id]: [child.id, grandchild.id],
-        },
-      );
+      await expect(
+        descendantsOf(harness, [root.id, other.id]),
+      ).resolves.toEqual({
+        [root.id]: [sibling.id],
+        [other.id]: [child.id, grandchild.id],
+      });
 
-      archiveThreadAndReleaseChildren(harness.deps, { threadId: other.id });
+      archiveThreadAndReleaseChildren(harness.deps, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: other.id,
+      });
       await expect(
         descendantsOf(harness, [other.id, child.id]),
       ).resolves.toEqual({
@@ -113,7 +117,7 @@ describe("POST /threads/descendants", () => {
         parentThreadId: root.id,
         visibility: "hidden",
       });
-      archiveThread(harness.db, harness.hub, child.id);
+      archiveThread(harness.db, harness.hub, child.id, SYSTEM_RELEASE_ACTOR);
       const sorted = async (flags: {
         includeArchived?: boolean;
         includeHidden?: boolean;

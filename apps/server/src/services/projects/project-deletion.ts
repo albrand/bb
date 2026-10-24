@@ -10,6 +10,7 @@ import {
   getEnvironment,
   lifecycleThreadTreeIdsForProject,
   listEnvironments,
+  listOpenEnvironmentRetentionsForProject,
   markProjectDeleted,
   markThreadDeleted,
   projects,
@@ -23,6 +24,7 @@ import type {
 } from "../../types.js";
 import { deleteProjectAttachments } from "./attachments.js";
 import { deferAfterResponse } from "../lib/response-deferral.js";
+import { releaseActorFor } from "../threads/release-actor.js";
 import { requestThreadStorageDeletion } from "../threads/thread-lifecycle.js";
 import { NotificationBuffer } from "../lib/notification-buffer.js";
 import { emitPluginThreadDeleted } from "../plugins/plugin-thread-events.js";
@@ -82,6 +84,7 @@ function tombstoneProjectThreadsForDeletion(
       for (const thread of threadsForDeletion) {
         if (thread.deletedAt === null) {
           const deletedThread = markThreadDeleted(tx, notificationBuffer, {
+            release: releaseActorFor(null, thread.id),
             threadId: thread.id,
           });
           if (deletedThread) deletedThreads.push(deletedThread);
@@ -132,7 +135,7 @@ export function beginProjectDeletion(
       ? (environmentsById.get(thread.environmentId) ??
         getEnvironment(deps.db, thread.environmentId))
       : null;
-    requestThreadStorageDeletion(deps, thread, environment);
+    void requestThreadStorageDeletion(deps, thread, environment);
   }
 }
 
@@ -182,13 +185,14 @@ export async function advanceProjectDeletion(
 
     if (thread.deletedAt === null) {
       const deletedThread = markThreadDeleted(deps.db, deps.hub, {
+        release: releaseActorFor(null, thread.id),
         threadId: thread.id,
       });
       if (deletedThread) emitPluginThreadDeleted(deletedThread);
     }
     cancelAbandonedProviderCreations(deps, thread.id);
     deps.terminalSessions.closeDeletedThreadTerminals({ threadId: thread.id });
-    requestThreadStorageDeletion(deps, thread, environment);
+    void requestThreadStorageDeletion(deps, thread, environment);
   }
 
   if (hasRemainingProjectThreads(deps, args.projectId)) {
@@ -202,6 +206,10 @@ export async function advanceProjectDeletion(
     const current = getEnvironment(deps.db, environment.id);
     if (current !== null && current.teardownStatus !== "removed") return false;
   }
+  if (
+    listOpenEnvironmentRetentionsForProject(deps.db, args.projectId).length > 0
+  )
+    return false;
   deleteProject(deps.db, deps.hub, args.projectId);
   await deleteProjectAttachments(deps.config.dataDir, args.projectId);
   return true;

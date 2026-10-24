@@ -1,4 +1,4 @@
-import { markThreadDeleted } from "@bb/db";
+import { markThreadDeleted, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { threadAncestorsListResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { archiveThreadAndReleaseChildren } from "../../src/services/threads/thread-ownership.js";
@@ -48,7 +48,10 @@ describe("POST /threads/ancestors", () => {
   it("returns each known thread's ancestors from the parent up, once per id", async () => {
     await withTestHarness(async (harness) => {
       const { root, child, grandchild, other } = seedTree(harness);
-      markThreadDeleted(harness.db, harness.hub, { threadId: root.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: root.id,
+      });
 
       const { body } = await listAncestors(harness, {
         threadIds: [grandchild.id, other.id, "thr_missing", grandchild.id],
@@ -76,7 +79,10 @@ describe("POST /threads/ancestors", () => {
         [grandchild.id]: [child.id, other.id],
       });
 
-      archiveThreadAndReleaseChildren(harness.deps, { threadId: other.id });
+      archiveThreadAndReleaseChildren(harness.deps, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: other.id,
+      });
       await expect(
         ancestorsOf(harness, [child.id, grandchild.id, root.id]),
       ).resolves.toEqual({

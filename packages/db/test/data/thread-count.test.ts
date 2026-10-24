@@ -9,6 +9,7 @@ import {
   createThread,
   markThreadDeleted,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 /**
@@ -74,8 +75,8 @@ describe("countThreads", () => {
       status: "active",
       visibility: "hidden",
     });
-    archiveThread(db, noopNotifier, archived.id);
-    markThreadDeleted(db, noopNotifier, { threadId: deleted.id });
+    archiveThread(db, noopNotifier, archived.id, SYSTEM_RELEASE_ACTOR);
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deleted.id });
 
     expect(countThreads(db, {})).toEqual({ total: 1 });
     // Archived rows are countable on request; deleted ones never are.

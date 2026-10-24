@@ -7,5 +7,6 @@ export default defineWorkspaceTestConfig({
     include: ["**/*.test.{ts,tsx}"],
     exclude: ["dist/**", "node_modules/**"],
     testTimeout: 60_000,
+    setupFiles: ["./vitest.setup.ts"],
   },
 });

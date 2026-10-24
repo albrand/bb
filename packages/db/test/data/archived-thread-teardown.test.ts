@@ -9,6 +9,7 @@ import {
   createThread,
   listArchivedThreadsPendingTeardown,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { noopNotifier } from "../../src/notifier.js";
 import { threads } from "../../src/schema.js";
 import { createMigratedConnection } from "../../src/testing.js";
@@ -67,7 +68,7 @@ describe("listArchivedThreadsPendingTeardown", () => {
 
     expect(listArchivedThreadsPendingTeardown(db)).toEqual([]);
 
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
 
     expect(listArchivedThreadsPendingTeardown(db)).toMatchObject([
       { id: thread.id, status: "active" },
@@ -95,7 +96,7 @@ describe("listArchivedThreadsPendingTeardown", () => {
       status,
       threadId: thread.id,
     });
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
     db.update(threads)
       .set({ status: "idle" })
       .where(eq(threads.id, thread.id))
@@ -119,7 +120,7 @@ describe("listArchivedThreadsPendingTeardown", () => {
     db.update(threads).set({ archivedAt: null }).run();
     expect(listArchivedThreadsPendingTeardown(db)).toEqual([]);
 
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
     expect(listArchivedThreadsPendingTeardown(db)).toMatchObject([
       { id: terminal.threadId },
     ]);
@@ -133,7 +134,7 @@ describe("listArchivedThreadsPendingTeardown", () => {
       status: "exited",
       threadId: thread.id,
     });
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
     db.update(threads)
       .set({ status: "idle" })
       .where(eq(threads.id, thread.id))

@@ -9,6 +9,7 @@ import {
   getThread,
   insertThreadPluginMetadata,
   type DbConnection,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
@@ -811,7 +812,12 @@ describe("plugin bb.sdk against a running server", () => {
         status: "idle",
         originPluginId: "meta-owner",
       });
-      archiveThread(server.db, server.deps.hub, archived.id);
+      archiveThread(
+        server.db,
+        server.deps.hub,
+        archived.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
       await expect(
         api.sdk.threads.updatePluginMetadata({
           threadId: archived.id,

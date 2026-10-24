@@ -12,6 +12,7 @@ import {
   requireThreadLifecycleEventApplied,
   ThreadLifecycleEventNotAppliedError,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createProject } from "../../src/data/projects.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { withWriteAfterFirstRead } from "../helpers/interleave.js";
@@ -104,7 +105,7 @@ describe("applyThreadLifecycleEvent", () => {
       providerId: "codex",
       status: "starting",
     });
-    markThreadDeleted(db, noopNotifier, { threadId: thread.id });
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: thread.id });
     const beforeRow = getThread(db, thread.id);
 
     const outcome = applyThreadLifecycleEvent(db, {

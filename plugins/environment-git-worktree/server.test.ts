@@ -211,11 +211,15 @@ describe("worktree resource operations", () => {
   });
 
   it("returns terminal creation failures for host and transport errors", async () => {
-    const failed = await setup(() => ({ status: "failed", message: "dirty" }));
+    const failed = await setup(() => ({
+      status: "failed",
+      message: "dirty",
+      kept: { kind: "nothing" },
+    }));
     await expect(failed.provider.create(failed.context)).resolves.toEqual({
       status: "failed",
-
       message: "dirty",
+      experimental_retained: null,
     });
     const offline = await setup(() => {
       throw new Error("offline");
@@ -224,6 +228,51 @@ describe("worktree resource operations", () => {
       status: "failed",
 
       message: "offline",
+    });
+  });
+
+  it("refuses a retry whose branch cannot be named instead of starting from the base", async () => {
+    const calls: string[] = [];
+    const fixture = await setup((call) => {
+      calls.push(call.method);
+      throw new Error(`unexpected host method ${call.method}`);
+    });
+    const result = await fixture.provider.create({
+      ...fixture.context,
+      pathKey: `${THREAD_ID}-2`,
+      attempt: 2,
+      suggestedBranchName: "bb_other",
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("Cannot name this retry's branch"),
+      experimental_retained: null,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("reports the path a failed create kept so core can record a retention", async () => {
+    const kept = await setup(() => ({
+      status: "failed",
+      message: "setup failed; the workspace stays in place",
+      kept: { kind: "kept", path: WORKTREE_PATH },
+    }));
+    await expect(kept.provider.create(kept.context)).resolves.toEqual({
+      status: "failed",
+      message: "setup failed; the workspace stays in place",
+      experimental_retained: { path: WORKTREE_PATH },
+    });
+  });
+
+  it("leaves the retention field out when the host cannot say what a failed create kept", async () => {
+    const unsure = await setup(() => ({
+      status: "failed",
+      message: "cleanup did not finish",
+      kept: { kind: "unknown" },
+    }));
+    expect(await unsure.provider.create(unsure.context)).toEqual({
+      status: "failed",
+      message: "cleanup did not finish",
     });
   });
 
@@ -246,6 +295,85 @@ describe("worktree resource operations", () => {
       pathKey: THREAD_ID,
       path: null,
     });
+  });
+});
+
+describe("removal outcomes", () => {
+  const removeContext = (fixture: Awaited<ReturnType<typeof setup>>) => ({
+    environment: null,
+    hostId: HOST_ID,
+    path: WORKTREE_PATH,
+    pathKey: THREAD_ID,
+    resource: null,
+    attempt: 1,
+    report: fixture.report,
+    signal: fixture.signal,
+  });
+
+  it("registers a remove preflight", async () => {
+    const fixture = await setup();
+    expect(fixture.provider.experimental_preflightRemove).not.toBeNull();
+  });
+
+  it("passes a host retention through to core instead of reporting a failure", async () => {
+    const fixture = await setup((call) => {
+      if (call.method === "remove")
+        return { status: "retained", message: "Kept: dirty" };
+      throw new Error(`unexpected host method ${call.method}`);
+    });
+    expect(await fixture.provider.remove(removeContext(fixture))).toEqual({
+      status: "retained",
+      message: "Kept: dirty",
+    });
+  });
+
+  it("asks the host to inspect without removing, and relays what it says", async () => {
+    const answers = [
+      { status: "removable" },
+      { status: "retained", message: "Kept: dirty" },
+    ];
+    const fixture = await setup((call) => {
+      if (call.method === "inspect") return answers.shift();
+      throw new Error(`unexpected host method ${call.method}`);
+    });
+    const preflight = fixture.provider.experimental_preflightRemove;
+    if (preflight === null) throw new Error("Missing preflight");
+    expect(await preflight(removeContext(fixture))).toEqual({
+      status: "removable",
+    });
+    expect(await preflight(removeContext(fixture))).toEqual({
+      status: "retained",
+      message: "Kept: dirty",
+    });
+    expect(
+      fixture.harness.experimental_hostRpcCalls.map((call) => call.method),
+    ).toEqual(["inspect", "inspect"]);
+  });
+
+  it("raises a host inspection failure instead of claiming the worktree is retained", async () => {
+    const fixture = await setup((call) => {
+      if (call.method === "inspect")
+        return { status: "failed", message: "git unavailable" };
+      throw new Error(`unexpected host method ${call.method}`);
+    });
+    const preflight = fixture.provider.experimental_preflightRemove;
+    if (preflight === null) throw new Error("Missing preflight");
+    await expect(preflight(removeContext(fixture))).rejects.toThrow(
+      "git unavailable",
+    );
+  });
+
+  it("does not inspect an adopted worktree", async () => {
+    const fixture = await setup();
+    const preflight = fixture.provider.experimental_preflightRemove;
+    if (preflight === null) throw new Error("Missing preflight");
+    expect(
+      await preflight({
+        ...removeContext(fixture),
+        resource: { adopted: true },
+      }),
+    ).toEqual({ status: "removable" });
+    expect(fixture.harness.experimental_hostRpcCalls).toHaveLength(0);
   });
 });
 

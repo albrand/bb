@@ -1,4 +1,4 @@
-import { archiveThread } from "@bb/db";
+import { archiveThread, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { threadCountResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
@@ -47,7 +47,12 @@ describe("GET /threads/count", () => {
         projectId: project.id,
         status: "idle",
       });
-      archiveThread(harness.db, harness.deps.hub, archived.id);
+      archiveThread(
+        harness.db,
+        harness.deps.hub,
+        archived.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       expect(await count(harness, "")).toEqual({ total: 2 });
       expect(await count(harness, "?includeArchived=true")).toEqual({

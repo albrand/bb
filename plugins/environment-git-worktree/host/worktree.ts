@@ -1,4 +1,11 @@
-import { experimental_killProcessesWithCwdUnder } from "@get-bb/plugin-sdk/host";
+import {
+  createBranchAtPinnedTip,
+  deleteCreatedBranch,
+  describeContinuity,
+  pinPreviousAttempt,
+  type PinnedPreviousAttempt,
+  type PreviousAttemptRequest,
+} from "./previous-attempt.js";
 import {
   findWorktreeEntry,
   parseWorktreeListPorcelain,
@@ -7,7 +14,26 @@ import {
 } from "./worktree-list.js";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { removeDirectoryTree } from "./remove-directory-tree.js";
+import {
+  beginCopy,
+  fingerprintSource,
+  inspectCreatedBy,
+  describeRetainedCopies,
+  recordCopy,
+  retainCreatedCopies,
+  type CreatedBy,
+  type RetainedCopies,
+  type SourceFingerprint,
+} from "./created-by.js";
+import {
+  WORKTREE_PRESERVED_CODE,
+  findPreservationReasons,
+  identifyWorktree,
+  isWorktreePreservedError,
+  worktreePreservedError,
+  type WorktreeIdentity,
+} from "./worktree-preservation.js";
+import { markCreateFailure } from "./create-failure.js";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   findWorktreeForBranch,
@@ -50,7 +76,9 @@ interface CreateWorktreeArgs {
   targetPath: string;
   completionPath: string;
   ownWorktreesRoot: string;
+  retainedRoot: string;
   branchName: string;
+  previousAttempt?: PreviousAttemptRequest | undefined;
   baseBranch: string | null;
   branchMode: BranchMode;
   onProgress?: ProgressCallback | undefined;
@@ -59,8 +87,49 @@ interface CreateWorktreeArgs {
 
 interface RemoveWorktreeArgs {
   path: string;
+  rootPath: string;
+  completionPath?: string | undefined;
+  createdBy?: CreatedBy | undefined;
+  branchName?: string | undefined;
+  retainedRoot?: string | undefined;
+  retention?: RetentionState | undefined;
   onProgress?: ProgressCallback | undefined;
   signal?: AbortSignal | undefined;
+  fetchTimeoutMs?: number | undefined;
+}
+
+interface RetentionState {
+  retained: RetainedCopies | null;
+}
+
+function appendToError(error: unknown, text: string): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  const combined = `${message}. ${text}`;
+  if (!(error instanceof Error)) return new Error(combined, { cause: error });
+  try {
+    Object.defineProperty(error, "message", {
+      value: combined,
+      configurable: true,
+      writable: true,
+    });
+    return error;
+  } catch {
+    return new Error(combined, { cause: error });
+  }
+}
+
+function annotateRetained(
+  error: unknown,
+  retained: RetainedCopies | null,
+): unknown {
+  if (retained === null) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes(retained.directory)) return error;
+  return appendToError(error, describeRetainedCopies(retained));
+}
+
+export interface RemoveWorktreeResult {
+  retained: RetainedCopies | null;
 }
 
 const REMOTE_BASE_FETCH_TIMEOUT_MS = 60_000;
@@ -155,48 +224,20 @@ async function isPathInside(root: string, target: string): Promise<boolean> {
   );
 }
 
-async function removeAbandonedAttemptWorktree(args: {
+async function refuseAbandonedAttemptWorktree(args: {
   sourcePath: string;
   ownWorktreesRoot: string;
   branchName: string;
-  onProgress: ProgressCallback | undefined;
-  signal: AbortSignal | undefined;
 }): Promise<void> {
   const holder = await findWorktreeForBranch(args.sourcePath, args.branchName);
   if (holder === null || !(await isPathInside(args.ownWorktreesRoot, holder))) {
     return;
   }
-  throwIfProvisionAborted(args.signal);
-  const status = await runGit(["status", "--porcelain"], {
-    cwd: holder,
-    ...(args.signal !== undefined ? { signal: args.signal } : {}),
-  });
-  if (status.stdout.trim() !== "") {
-    throw new WorkspaceError(
-      "abandoned_worktree_dirty",
-      `Branch ${args.branchName} is still checked out at ${holder} by an earlier attempt, and that worktree has uncommitted changes, so it was left alone. Remove it to retry.`,
-    );
-  }
-  const startedAt = Date.now();
-  emitStep({
-    onProgress: args.onProgress,
-    key: "abandoned-worktree-started",
-    text: "Removing the worktree an earlier attempt left behind",
-    status: "started",
-    startedAt,
-  });
-  await removeWorktree({
-    path: holder,
-    ...(args.signal !== undefined ? { signal: args.signal } : {}),
-  });
-  emitStep({
-    onProgress: args.onProgress,
-    key: "abandoned-worktree-completed",
-    text: "Removed the worktree an earlier attempt left behind",
-    status: "completed",
-    startedAt,
-    metadata: { durationMs: Date.now() - startedAt },
-  });
+  throw new WorkspaceError(
+    "abandoned_worktree_preserved",
+    `Branch ${args.branchName} is still checked out at ${holder} by an earlier workspace, so it was left alone. bb removes a workspace only through its owner's cleanup; finish or remove ${holder} yourself, then retry.`,
+    { keptPath: holder },
+  );
 }
 
 async function ensureWorkspaceParentDirectory(
@@ -382,6 +423,7 @@ function summarizePaths(paths: readonly string[]): string {
 async function copyIncludedFiles(args: {
   sourcePath: string;
   targetPath: string;
+  createdBy: CreatedBy | undefined;
   onProgress: ProgressCallback | undefined;
   signal: AbortSignal | undefined;
 }): Promise<void> {
@@ -393,6 +435,20 @@ async function copyIncludedFiles(args: {
       sourcePath: args.sourcePath,
       targetPath: args.targetPath,
       signal: args.signal,
+      ...(args.createdBy !== undefined
+        ? {
+            ledger: {
+              expect: fingerprintSource,
+              begin: (relativePath: string) =>
+                beginCopy(args.createdBy!, relativePath),
+              record: (
+                relativePath: string,
+                file: string,
+                expected: SourceFingerprint | null,
+              ) => recordCopy(args.createdBy!, relativePath, file, expected),
+            },
+          }
+        : {}),
     });
   } catch (error) {
     if (isProvisionAbortError(error)) {
@@ -453,7 +509,10 @@ async function readCompletedBranch(
   }
 }
 
-async function finishWorktreeSetup(args: CreateWorktreeArgs): Promise<void> {
+async function finishWorktreeSetup(
+  args: CreateWorktreeArgs,
+  createdBy?: CreatedBy,
+): Promise<void> {
   emitCwd({
     onProgress: args.onProgress,
     keySuffix: "target",
@@ -462,18 +521,105 @@ async function finishWorktreeSetup(args: CreateWorktreeArgs): Promise<void> {
   await copyIncludedFiles({
     sourcePath: args.sourcePath,
     targetPath: args.targetPath,
+    createdBy,
     onProgress: args.onProgress,
     signal: args.signal,
   });
   await fs.writeFile(args.completionPath, `${args.branchName}\n`, "utf8");
 }
 
-async function removeCreateTarget(args: CreateWorktreeArgs): Promise<void> {
-  await fs.rm(args.completionPath, { force: true });
-  await removeWorktree({
+async function readCreatedBy(
+  args: CreateWorktreeArgs,
+): Promise<CreatedBy | undefined> {
+  const head = await runGit(["rev-parse", "HEAD"], {
+    cwd: args.targetPath,
+    allowFailure: true,
+    ...signalOptions(args.signal),
+  });
+  const sha = head.stdout.trim();
+  return head.exitCode === 0 && sha !== ""
+    ? { head: sha, copies: new Map() }
+    : undefined;
+}
+
+async function removeCreateTarget(
+  args: CreateWorktreeArgs,
+  retention: RetentionState = { retained: null },
+  createdBy?: CreatedBy,
+): Promise<RemoveWorktreeResult> {
+  return await removeWorktree({
     path: args.targetPath,
+    rootPath: args.ownWorktreesRoot,
+    completionPath: args.completionPath,
+    createdBy,
+    branchName: args.branchName,
+    retainedRoot: args.retainedRoot,
+    retention,
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
   });
+}
+
+async function refuseExistingCreateTarget(
+  args: CreateWorktreeArgs,
+): Promise<void> {
+  try {
+    await fs.lstat(args.targetPath);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      await fs.rm(args.completionPath, { force: true });
+      return;
+    }
+    throw error;
+  }
+  throw new WorkspaceError(
+    "target_exists_preserved",
+    `${args.targetPath} already exists and is not a workspace on branch ${args.branchName} that this create can reuse, so it was left alone. bb does not replace an existing workspace; finish or remove it yourself, then retry.`,
+    { keptPath: args.targetPath },
+  );
+}
+
+async function removeCreateTargetAfterFailure(
+  args: CreateWorktreeArgs,
+  failure: unknown,
+  createdBy?: CreatedBy,
+): Promise<never> {
+  const retention: RetentionState = { retained: null };
+  try {
+    await removeCreateTarget(args, retention, createdBy);
+  } catch (cleanupError) {
+    if (
+      retention.retained !== null &&
+      !isWorktreePreservedError(cleanupError)
+    ) {
+      throw markCreateFailure(
+        appendToError(
+          cleanupError,
+          `Create failed earlier: ${failure instanceof Error ? failure.message : String(failure)}`,
+        ),
+        "unknown",
+      );
+    }
+    if (isWorktreePreservedError(cleanupError)) {
+      throw new WorkspaceError(
+        WORKTREE_PRESERVED_CODE,
+        `${failure instanceof Error ? failure.message : String(failure)}. ${cleanupError.message}`,
+        { cause: failure },
+      );
+    }
+    throw markCreateFailure(cleanupError, "unknown");
+  }
+  if (retention.retained !== null) {
+    throw new WorkspaceError(
+      WORKTREE_PRESERVED_CODE,
+      `${failure instanceof Error ? failure.message : String(failure)}. ${describeRetainedCopies(retention.retained)}`,
+      { cause: failure },
+    );
+  }
+  throw markCreateFailure(failure, "nothing");
 }
 
 export async function createWorktree(
@@ -489,16 +635,11 @@ export async function createWorktree(
     if ((await readCompletedBranch(args.completionPath)) === args.branchName) {
       return { path: args.targetPath };
     }
-    try {
-      await finishWorktreeSetup(args);
-      return { path: args.targetPath };
-    } catch (error) {
-      await removeCreateTarget(args);
-      throw error;
-    }
+    await finishWorktreeSetup(args);
+    return { path: args.targetPath };
   }
 
-  await removeCreateTarget(args);
+  await refuseExistingCreateTarget(args);
 
   throwIfProvisionAborted(args.signal);
   switch (
@@ -519,16 +660,11 @@ export async function createWorktree(
   }
 
   throwIfProvisionAborted(args.signal);
-  await removeAbandonedAttemptWorktree({
+  await refuseAbandonedAttemptWorktree({
     sourcePath: args.sourcePath,
     ownWorktreesRoot: args.ownWorktreesRoot,
     branchName: args.branchName,
-    onProgress: args.onProgress,
-    signal: args.signal,
   });
-
-  throwIfProvisionAborted(args.signal);
-  await ensureWorkspaceParentDirectory(args.targetPath);
 
   throwIfProvisionAborted(args.signal);
   const reuseExistingBranch =
@@ -536,9 +672,38 @@ export async function createWorktree(
     (await hasRef(args.sourcePath, `refs/heads/${args.branchName}`));
 
   let gitArgs: string[];
+  let pinned: PinnedPreviousAttempt | null = null;
+  if (!reuseExistingBranch && args.previousAttempt !== undefined) {
+    pinned = await pinPreviousAttempt({
+      sourcePath: args.sourcePath,
+      request: args.previousAttempt,
+      signal: args.signal,
+    });
+  }
   if (reuseExistingBranch) {
     gitArgs = ["worktree", "add", args.targetPath, args.branchName];
+  } else if (pinned !== null) {
+    throwIfProvisionAborted(args.signal);
+    await createBranchAtPinnedTip({
+      sourcePath: args.sourcePath,
+      pinned,
+      newBranch: args.branchName,
+    });
+    gitArgs = ["worktree", "add", args.targetPath, args.branchName];
   } else {
+    if (args.previousAttempt !== undefined) {
+      emitOutput(
+        args.onProgress,
+        "worktree-continuity",
+        "No earlier attempt of this thread left a branch or a workspace folder, so this attempt starts from the base branch; nothing from an earlier attempt could be lost.",
+      );
+    }
+    if (await hasRef(args.sourcePath, `refs/heads/${args.branchName}`)) {
+      throw new WorkspaceError(
+        "branch_exists_preserved",
+        `Branch ${args.branchName} already exists, so it was not reset to the base branch and its work is kept. Remove or rename that branch yourself, or retry so the create continues on its own attempt branch.`,
+      );
+    }
     const baseBranch =
       args.baseBranch ?? (await readDefaultBranch(args.sourcePath));
     if (!baseBranch) {
@@ -558,7 +723,7 @@ export async function createWorktree(
       "worktree",
       "add",
       "--no-track",
-      "-B",
+      "-b",
       args.branchName,
       args.targetPath,
       baseBranch,
@@ -574,7 +739,10 @@ export async function createWorktree(
     startedAt: worktreeStartedAt,
   });
   let worktreeCreated = false;
+  let createdBy: CreatedBy | undefined;
   try {
+    throwIfProvisionAborted(args.signal);
+    await ensureWorkspaceParentDirectory(args.targetPath);
     const result = await runGitWithWorktreeMetadataLock(gitArgs, {
       cwd: args.sourcePath,
       ...(args.signal !== undefined ? { signal: args.signal } : {}),
@@ -589,9 +757,28 @@ export async function createWorktree(
       metadata: { durationMs: Date.now() - worktreeStartedAt },
     });
     worktreeCreated = true;
-    await finishWorktreeSetup(args);
+    if (pinned !== null) {
+      emitOutput(
+        args.onProgress,
+        "worktree-continuity",
+        await describeContinuity({
+          sourcePath: args.sourcePath,
+          pinned,
+          newBranch: args.branchName,
+        }),
+      );
+    }
+    createdBy = await readCreatedBy(args);
+    await finishWorktreeSetup(args, createdBy);
     return { path: args.targetPath };
   } catch (error) {
+    if (!worktreeCreated && pinned !== null) {
+      await deleteCreatedBranch({
+        sourcePath: args.sourcePath,
+        newBranch: args.branchName,
+        sha: pinned.sha,
+      });
+    }
     if (!worktreeCreated) {
       emitStep({
         onProgress: args.onProgress,
@@ -602,8 +789,7 @@ export async function createWorktree(
         metadata: { durationMs: Date.now() - worktreeStartedAt },
       });
     }
-    await removeCreateTarget(args);
-    throw error;
+    return await removeCreateTargetAfterFailure(args, error, createdBy);
   }
 }
 
@@ -624,61 +810,170 @@ async function removeDirectoryIfEmpty(pathToRemove: string): Promise<void> {
   }
 }
 
-export async function removeWorktree(args: RemoveWorktreeArgs): Promise<void> {
-  throwIfProvisionAborted(args.signal);
-  const workspacePath = path.resolve(args.path);
-  const parentPath = path.dirname(workspacePath);
+async function assertWorktreeRemovable(
+  identity: WorktreeIdentity,
+  args: RemoveWorktreeArgs,
+  options: { fetchRemotes?: boolean; fetchTimeoutMs?: number } = {},
+): Promise<void> {
+  const reasons =
+    args.createdBy !== undefined
+      ? (await inspectCreatedBy(identity, args.createdBy, args.signal)).reasons
+      : await findPreservationReasons(identity, args.signal, options);
+  if (reasons.length > 0) {
+    throw worktreePreservedError(identity.path, reasons);
+  }
+}
+
+async function removeRegisteredWorktree(
+  identity: WorktreeIdentity,
+  args: RemoveWorktreeArgs,
+  retention: RetentionState,
+): Promise<RemoveWorktreeResult> {
+  if (args.createdBy !== undefined) {
+    const kept = await retainCreatedCopies(
+      identity,
+      args.createdBy,
+      args.retainedRoot,
+    );
+    retention.retained = kept.retained;
+    const retained = retention.retained;
+    if (kept.reasons.length > 0) {
+      throw worktreePreservedError(identity.path, [
+        ...kept.reasons,
+        ...(retained !== null ? [describeRetainedCopies(retained)] : []),
+      ]);
+    }
+    if (retained !== null) {
+      try {
+        await assertWorktreeRemovable(identity, args);
+      } catch (error) {
+        throw isWorktreePreservedError(error)
+          ? new WorkspaceError(
+              WORKTREE_PRESERVED_CODE,
+              `${error.message} ${describeRetainedCopies(retained)}`,
+              { cause: error },
+            )
+          : error;
+      }
+    }
+  }
+  const parentPath = path.dirname(identity.path);
+  const removal = await withWorktreeMetadataLock(identity.commonDir, () =>
+    runGit(
+      ["--git-dir", identity.commonDir, "worktree", "remove", identity.path],
+      {
+        cwd: parentPath,
+        ...(args.signal !== undefined ? { signal: args.signal } : {}),
+        allowFailure: true,
+      },
+    ),
+  );
+  const retained = retention.retained;
+  const keptNote = retained !== null ? [describeRetainedCopies(retained)] : [];
+  if (removal.exitCode !== 0) {
+    throw worktreePreservedError(identity.path, [
+      `Git declined to remove it${removal.stderr.trim() ? ` (${removal.stderr.trim()})` : ""}`,
+      ...keptNote,
+    ]);
+  }
+  await removeDirectoryIfEmpty(identity.path);
   try {
-    await fs.access(workspacePath);
+    await fs.lstat(identity.path);
   } catch {
+    return { retained };
+  }
+  throw worktreePreservedError(identity.path, [
+    "still has files after Git removed the worktree",
+    ...keptNote,
+  ]);
+}
+
+export async function inspectWorktreeRemoval(args: {
+  path: string;
+  rootPath: string;
+  signal?: AbortSignal | undefined;
+}): Promise<
+  { status: "removable" } | { status: "protected"; message: string }
+> {
+  const workspacePath = path.resolve(args.path);
+  const identified = await identifyWorktree({
+    path: workspacePath,
+    rootPath: args.rootPath,
+    signal: args.signal,
+  });
+  if (identified.status === "missing") {
+    return { status: "removable" };
+  }
+  const reasons =
+    identified.status === "preserve"
+      ? identified.reasons
+      : await findPreservationReasons(identified.identity, args.signal);
+  return reasons.length === 0
+    ? { status: "removable" }
+    : {
+        status: "protected",
+        message: worktreePreservedError(workspacePath, reasons).message,
+      };
+}
+
+export async function removeWorktree(
+  args: RemoveWorktreeArgs,
+): Promise<RemoveWorktreeResult> {
+  const retention = args.retention ?? { retained: null };
+  try {
+    throwIfProvisionAborted(args.signal);
+    const workspacePath = path.resolve(args.path);
+    const parentPath = path.dirname(workspacePath);
+    const identified = await identifyWorktree({
+      path: workspacePath,
+      rootPath: args.rootPath,
+      signal: args.signal,
+    });
+    if (identified.status === "preserve") {
+      throw worktreePreservedError(workspacePath, identified.reasons);
+    }
+    if (identified.status === "identified" && args.createdBy !== undefined) {
+      throw worktreePreservedError(workspacePath, [
+        `a failed create's workspace stays in place until its owner releases it and a durable retention record exists, and neither is available yet. ${args.branchName === undefined ? "Its branch is" : `Branch ${args.branchName} is`} left behind with it. Retrying this same create reuses the workspace where it is when it is still on that branch; bb does not start a second workspace or delete this one in the meantime`,
+      ]);
+    }
+    if (identified.status === "identified") {
+      const { identity } = identified;
+      const removed = await tryWithCheckoutMutationLock(
+        identity.path,
+        async () => {
+          await assertWorktreeRemovable(
+            identity,
+            args,
+            args.fetchTimeoutMs === undefined
+              ? {}
+              : { fetchTimeoutMs: args.fetchTimeoutMs },
+          );
+          throwIfProvisionAborted(args.signal);
+          throwIfProvisionAborted(args.signal);
+          await assertWorktreeRemovable(identity, args, {
+            fetchRemotes: false,
+          });
+          await removeRegisteredWorktree(identity, args, retention);
+          return true;
+        },
+        args.signal,
+        signalOptions(args.signal),
+      );
+      if (removed === null) {
+        throw worktreePreservedError(workspacePath, [
+          "its checkout lock could not be resolved",
+        ]);
+      }
+    }
+    if (args.completionPath !== undefined) {
+      await fs.rm(args.completionPath, { force: true });
+    }
     await removeDirectoryIfEmpty(parentPath);
-    return;
+    return { retained: retention.retained };
+  } catch (error) {
+    throw annotateRetained(error, retention.retained);
   }
-
-  await experimental_killProcessesWithCwdUnder({
-    directories: [workspacePath],
-  });
-  throwIfProvisionAborted(args.signal);
-
-  const commonDirResult = await runGit(["rev-parse", "--git-common-dir"], {
-    cwd: workspacePath,
-    ...(args.signal !== undefined ? { signal: args.signal } : {}),
-    allowFailure: true,
-  });
-
-  if (commonDirResult.exitCode === 0) {
-    const commonDir = path.resolve(
-      workspacePath,
-      commonDirResult.stdout.trim(),
-    );
-    await tryWithCheckoutMutationLock(
-      workspacePath,
-      () =>
-        withWorktreeMetadataLock(commonDir, () =>
-          runGit(
-            [
-              "--git-dir",
-              commonDir,
-              "worktree",
-              "remove",
-              workspacePath,
-              "--force",
-            ],
-            {
-              cwd: path.dirname(workspacePath),
-              ...(args.signal !== undefined ? { signal: args.signal } : {}),
-              allowFailure: true,
-            },
-          ),
-        ),
-      args.signal,
-      signalOptions(args.signal),
-    );
-  }
-
-  throwIfProvisionAborted(args.signal);
-  await removeDirectoryTree(workspacePath);
-  await removeDirectoryIfEmpty(parentPath);
 }
 
 export async function listGitWorktrees(args: {

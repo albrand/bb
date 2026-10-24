@@ -77,6 +77,7 @@ import {
   deleteThread,
   searchThreadsWithPendingInteractionState,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import type {
   AppendDaemonEventInput,
   InsertEventInput,
@@ -4758,7 +4759,7 @@ describe("events", () => {
       ]);
       expect(commandCount(db, thread.id)).toBe(1);
 
-      archiveThread(db, noopNotifier, thread.id);
+      archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
 
       expect(
         listActiveBackgroundTaskCountsByThreadIds(db, {

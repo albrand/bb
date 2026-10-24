@@ -12,6 +12,7 @@ import {
   setNativeTerminalThreadTerminal,
   terminalSessions,
   upsertHost,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { eq } from "drizzle-orm";
 import { terminalDataBase64Schema, TERMINAL_DATA_MAX_BYTES } from "@bb/domain";
@@ -444,7 +445,12 @@ describe("reopenNativeTerminalsAfterDaemonReconnect", () => {
           .where(eq(terminalSessions.id, closed.terminalId))
           .get()?.closeReason,
       ).toBe("user");
-      archiveThread(h.db, noopNotifier, archived.threadId);
+      archiveThread(
+        h.db,
+        noopNotifier,
+        archived.threadId,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       const reopening = reopenNativeTerminalsAfterDaemonReconnect(h.deps, {
         hostId: host.id,

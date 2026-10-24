@@ -22,7 +22,8 @@ import {
 } from "../../src/data/maintenance.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { createProject } from "../../src/data/projects.js";
-import { createThread, markThreadDeleted } from "../../src/data/threads.js";
+import { createThread, markThreadDeleted} from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 const TEST_INCREMENTAL_VACUUM_MAX_PAGES = 128;
@@ -132,7 +133,7 @@ describe("database maintenance", () => {
     expect(threadActivity.activeThreadCount).toBe(1);
     expect(isDatabaseMaintenanceIdle(threadActivity)).toBe(false);
 
-    markThreadDeleted(db, noopNotifier, { threadId: activeThread.id });
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: activeThread.id });
     expect(isDatabaseMaintenanceIdle(getDatabaseMaintenanceActivity(db))).toBe(
       true,
     );

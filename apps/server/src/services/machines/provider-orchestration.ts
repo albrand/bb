@@ -1,11 +1,21 @@
 import { withHostCleanup } from "../hosts/cleanup-context.js";
 import { readPrimaryHostIdFromDataDir } from "../hosts/primary-host.js";
 import { requestQueuedMachineReadiness } from "../threads/queued-message-dispatch.js";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   createHostId,
   hostDaemonSessions,
   hosts,
+  listEnvironmentLiveThreadIds,
   environments as environmentRows,
 } from "@bb/db";
 import { handleHostRemoved } from "../../internal/session-owner-side-effects.js";
@@ -26,6 +36,8 @@ import {
   machineHasLiveThreadLaunch,
   machineHasStartingThreadLaunch,
   machineHasProvisioningEnvironment,
+  listMachineBlockingThreadIds,
+  listOpenEnvironmentRetentionsForHost,
   machineHasLiveThreads,
   machineHasPendingThreads,
   updateHost,
@@ -130,6 +142,12 @@ const machineSweepOperations = new WeakMap<
 >();
 
 const MACHINE_CREATE_FAILURE_CLEANUP_GRACE_MS = 30_000;
+const MACHINE_IN_USE_RETRY_MS = 60_000;
+
+function machineInUseMessage(subject: string, threadIds: string[]): string {
+  const plural = threadIds.length > 1;
+  return `${subject} is in use by ${plural ? "threads" : "thread"} ${threadIds.join(", ")}; archive ${plural ? "them" : "it"} (stop ${plural ? "them" : "it"} first if running) to finish removing this machine`;
+}
 
 function runTrackedOperation(args: {
   map: Map<string, ActiveOperation>;
@@ -1127,7 +1145,13 @@ export async function retryMachineCleanup(
     .where(
       and(
         eq(environmentRows.hostId, hostId),
-        eq(environmentRows.teardownStatus, "failed"),
+        or(
+          eq(environmentRows.teardownStatus, "failed"),
+          and(
+            isNull(environmentRows.teardownStatus),
+            isNotNull(environmentRows.teardownMessage),
+          ),
+        ),
       ),
     )
     .returning({ id: environmentRows.id })
@@ -1160,6 +1184,20 @@ function assertForcedRemovalAllowed(deps: Deps, row: MachineHostRow): void {
       409,
       "machine_connected",
       "The machine is connected; retry cleanup instead of skipping it",
+    );
+  }
+  const kept = listOpenEnvironmentRetentionsForHost(deps.db, row.id);
+  if (kept.length > 0) {
+    throw new ApiError(
+      409,
+      "machine_holds_kept_work",
+      `Cleanup cannot be skipped: this machine still holds work a failed create kept (${kept
+        .slice(0, 3)
+        .map(
+          (retention) =>
+            retention.keptPath ?? "a path the provider did not report",
+        )
+        .join(", ")}), and skipping would forget it`,
     );
   }
   const blocking =
@@ -1250,6 +1288,37 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
     row.teardownAttempt === 0 && row.teardownStatus === "failed"
       ? row.statusMessage
       : null;
+  const kept = listOpenEnvironmentRetentionsForHost(deps.db, hostId);
+  if (kept.length > 0) {
+    updateHost(deps.db, deps.hub, hostId, {
+      teardownAttempt: attempt,
+      teardownStatus: "failed",
+      statusMessage: `${row.name} still holds work a failed create kept (${kept
+        .slice(0, 3)
+        .map((retention) => retention.keptPath ?? "(a path the provider did not report)")
+        .join(", ")}${kept.length > 3 ? ", …" : ""}); its owner has to release it before this machine can be destroyed, so that work is not erased.`,
+      removeRetryAt: Date.now() + MACHINE_IN_USE_RETRY_MS,
+    });
+    deps.hub.notifyHost(hostId, ["host-disconnected"]);
+    return;
+  }
+  if (row.type === "ephemeral") {
+    const owners = listMachineBlockingThreadIds(deps.db, hostId);
+    if (owners.length > 0) {
+      updateHost(deps.db, deps.hub, hostId, {
+        teardownAttempt: attempt,
+        teardownStatus: "failed",
+        statusMessage:
+          machineInUseMessage(row.name, owners) +
+          (creationFailureMessage === null
+            ? ""
+            : `; machine creation failed: ${creationFailureMessage}`),
+        removeRetryAt: Date.now() + MACHINE_IN_USE_RETRY_MS,
+      });
+      deps.hub.notifyHost(hostId, ["host-disconnected"]);
+      return;
+    }
+  }
   updateHost(deps.db, deps.hub, hostId, {
     machineOperationId: operationId,
     teardownAttempt: attempt,
@@ -1429,22 +1498,31 @@ export async function sweepProviderMachine(
       if (current.length > 0) pendingEnvironment = true;
     }
     if (pendingEnvironment) {
-      const failed = deps.db
+      const blocking = deps.db
         .select()
         .from(environmentRows)
         .where(
           and(
             eq(environmentRows.hostId, hostId),
-            eq(environmentRows.teardownStatus, "failed"),
+            inArray(environmentRows.status, ["provisioning", "ready", "error"]),
           ),
         )
+        .orderBy(sql`${environmentRows.teardownStatus} is not 'failed'`)
         .limit(1)
         .get();
-      if (failed) {
+      if (blocking) {
+        const liveThreadIds = listEnvironmentLiveThreadIds(
+          deps.db,
+          blocking.id,
+        );
         updateHost(deps.db, deps.hub, hostId, {
+          teardownAttempt: row.teardownAttempt + 1,
           teardownStatus: "failed",
-          statusMessage: failed.teardownMessage ?? "Environment cleanup failed",
-          removeRetryAt: failed.retireAt ?? Date.now() + 60_000,
+          statusMessage:
+            liveThreadIds.length > 0
+              ? machineInUseMessage(blocking.path ?? blocking.id, liveThreadIds)
+              : (blocking.teardownMessage ?? "Environment cleanup failed"),
+          removeRetryAt: blocking.retireAt ?? Date.now() + 60_000,
         });
         deps.hub.notifyHost(hostId, ["host-disconnected"]);
       }

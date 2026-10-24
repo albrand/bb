@@ -65,6 +65,30 @@ export function dropThreadParentNotificationsColumn(db: DbConnection): void {
   }
 }
 
+export function dropThreadStorageDeleteRefusalColumn(db: DbConnection): void {
+  const columns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(threads)")
+    .all();
+  if (columns.some((column) => column.name === "storage_delete_refusal")) {
+    db.$client.exec("ALTER TABLE threads DROP COLUMN storage_delete_refusal");
+  }
+}
+
+export function dropEnvironmentRetentionSchema(db: DbConnection): void {
+  dropThreadStorageDeleteRefusalColumn(db);
+  const columns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(environments)")
+    .all();
+  for (const column of ["teardown_prior_status", "teardown_failures"]) {
+    if (columns.some((existing) => existing.name === column)) {
+      db.$client.exec(`ALTER TABLE environments DROP COLUMN ${column}`);
+    }
+  }
+  db.$client.exec("DROP TABLE IF EXISTS environment_release_consents");
+  db.$client.exec("DROP TABLE IF EXISTS environment_retention_transitions");
+  db.$client.exec("DROP TABLE IF EXISTS environment_retentions");
+}
+
 export const QUEUED_MESSAGE_STATE_MIGRATION_WHEN = 1792010323040;
 
 interface QueuedTableColumn {

@@ -17,6 +17,7 @@ import {
   worktreeHostSignals,
   type WorktreeBaseBranch,
 } from "./contract.js";
+import { attemptBranchName } from "./attempt-branch.js";
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 const CREATE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -47,6 +48,7 @@ type WorktreeOperation = Pick<
   | "projectCheckout"
   | "report"
   | "signal"
+  | "thread"
 >;
 
 export const worktreeRpcContract = defineRpcContract({
@@ -97,6 +99,17 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
     if (report !== undefined) reportHostProgress(report, event.payload);
   });
 
+  function previousAttemptOf(
+    context: WorktreeOperation,
+  ): { threadId: string; attempt: number } | null {
+    const prefix = `${context.thread.id}-`;
+    if (!context.pathKey.startsWith(prefix)) return null;
+    const tail = context.pathKey.slice(prefix.length);
+    if (!/^\d+$/u.test(tail)) return null;
+    const attempt = Number(tail);
+    return attempt >= 2 ? { threadId: context.thread.id, attempt } : null;
+  }
+
   async function adoptExistingWorktree(
     context: WorktreeOperation,
     path: string,
@@ -133,6 +146,7 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       branchName: string;
       baseBranch: WorktreeBaseBranch;
       branchMode: "reset" | "reuse-existing";
+      previousAttempt?: { threadId: string; attempt: number };
     },
   ): Promise<PluginEnvironmentProviderCreateResult> {
     const operationId = `create#${context.pathKey}#${context.attempt}`;
@@ -153,7 +167,15 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
         },
       );
       if (result.status === "failed") {
-        return { status: "failed", message: result.message };
+        return {
+          status: "failed",
+          message: result.message,
+          ...(result.kept.kind === "kept"
+            ? { experimental_retained: { path: result.kept.path } }
+            : result.kept.kind === "nothing"
+              ? { experimental_retained: null }
+              : {}),
+        };
       }
       return {
         status: "created",
@@ -185,10 +207,29 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       if ("kind" in context.inputs) {
         return adoptExistingWorktree(context, context.inputs.path);
       }
+      const previousAttempt = previousAttemptOf(context);
+      const retryBranch =
+        previousAttempt === null
+          ? null
+          : attemptBranchName(
+              context.suggestedBranchName,
+              previousAttempt.threadId,
+              previousAttempt.attempt,
+            );
+      if (previousAttempt !== null && retryBranch === null) {
+        return {
+          status: "failed",
+          message: `Cannot name this retry's branch: the suggested branch ${context.suggestedBranchName} does not end with the thread id ${previousAttempt.threadId} after a "/" or "-", so an earlier attempt's branch cannot be found. Nothing was created, and any earlier work was left alone. Set the managed branch prefix to end with "/" or "-".`,
+          experimental_retained: null,
+        };
+      }
       return createManagedWorktree(context, {
-        branchName: context.suggestedBranchName,
+        branchName: retryBranch ?? context.suggestedBranchName,
         baseBranch: context.inputs.branch,
         branchMode: "reset",
+        ...(previousAttempt === null || retryBranch === null
+          ? {}
+          : { previousAttempt }),
       });
     },
     async restore(context) {
@@ -208,6 +249,40 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
         baseBranch: context.inputs.branch,
         branchMode: "reuse-existing",
       });
+    },
+    async experimental_proveRetentionAbsent(context) {
+      try {
+        return await host.call(
+          "proveRetentionAbsent",
+          {
+            path: context.path,
+            pathKey: context.pathKey,
+            branchName: context.branchName,
+            sourcePath: context.sourcePath,
+            threadId: context.threadId,
+          },
+          { hostId: context.hostId, signal: context.signal },
+        );
+      } catch (error) {
+        if (context.signal.aborted) throw error;
+        return { absent: false, reason: errorMessage(error) };
+      }
+    },
+    async experimental_preflightRemove(context) {
+      if (isAdoptedResource(context.resource) || context.hostId === null) {
+        return { status: "removable" };
+      }
+      const result = await host.call(
+        "inspect",
+        { pathKey: context.pathKey, path: context.path },
+        {
+          hostId: context.hostId,
+          signal: context.signal,
+          timeoutMs: REMOVE_TIMEOUT_MS,
+        },
+      );
+      if (result.status === "failed") throw new Error(result.message);
+      return result;
     },
     async remove(context) {
       if (isAdoptedResource(context.resource)) {

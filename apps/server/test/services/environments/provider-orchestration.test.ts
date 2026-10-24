@@ -39,6 +39,8 @@ import {
   getPreparingEnvironment,
   getThread,
   getProject,
+  recordEnvironmentRetention,
+  recordThreadEnvironmentReleases,
   reserveEnvironment,
   updatePreparingEnvironment,
   threads,
@@ -51,6 +53,7 @@ import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk
 import {
   markProviderEnvironmentAttached,
   cancelProviderEnvironmentCreation,
+  RECOVER_RESPONSE_WAIT_MS,
   sweepProviderEnvironment,
   sweepProviderLifecycles,
   type ProviderOperationContext,
@@ -1482,6 +1485,10 @@ describe("core environment orchestration", () => {
             .set({ archivedAt: Date.now() })
             .where(eq(threads.id, fixture.thread.id))
             .run();
+          recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+            kind: "system",
+            threadId: null,
+          });
           const sdk = createBbSdk({
             transport: createHttpTransport({
               baseUrl: "http://localhost",
@@ -1585,6 +1592,10 @@ describe("core environment orchestration", () => {
         .set({ archivedAt: Date.now() })
         .where(eq(threads.id, thread.id))
         .run();
+      recordThreadEnvironmentReleases(harness.db, [thread.id], {
+        kind: "system",
+        threadId: null,
+      });
       expect(toEnvironmentResponse(harness.db, environment)).toMatchObject({
         managed: false,
         workspaceProvisionType: "unmanaged",
@@ -1676,6 +1687,10 @@ describe("core environment orchestration", () => {
         })
         .where(eq(threads.id, fixture.thread.id))
         .run();
+      recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+        kind: "system",
+        threadId: null,
+      });
       await sweepProviderEnvironment(harness.deps, environmentId);
       expect(removes).toBe(0);
       harness.db
@@ -1886,6 +1901,31 @@ describe("core environment orchestration", () => {
   );
 });
 
+it("does not delete a project while a failed create's kept work is unreleased", async () => {
+  await withTestHarness(async (harness) => {
+    const fixture = setup(harness);
+    recordEnvironmentRetention(harness.db, {
+      environmentId: "env_kept",
+      projectId: fixture.context.project.id,
+      hostId: fixture.host.id,
+      ownerThreadId: null,
+      providerId: "test-provider",
+      originalPath: "/work/kept-attempt",
+      keptPath: "/work/kept-attempt",
+      state: "unresolved",
+      message: "the create did not report a result",
+    });
+    beginProjectDeletion(harness.deps, { projectId: fixture.context.project.id });
+
+    expect(
+      await advanceProjectDeletion(harness.deps, {
+        projectId: fixture.context.project.id,
+      }),
+    ).toBe(false);
+    expect(getProject(harness.db, fixture.context.project.id)).not.toBeNull();
+  });
+});
+
 it("keeps one environment identity from provider creation through removal", async () => {
   await withTestHarness(async (harness) => {
     let release: () => void = () => {};
@@ -2015,6 +2055,10 @@ it.each([false, true])(
         .set({ status: "idle", archivedAt: Date.now() })
         .where(eq(threads.id, fixture.thread.id))
         .run();
+      recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+        kind: "system",
+        threadId: null,
+      });
       const response = await harness.app.request(
         `/api/v1/environments/${failed.id}/cleanup?recover=true`,
         { method: "POST" },
@@ -2034,6 +2078,68 @@ it.each([false, true])(
     });
   },
 );
+
+it("answers a recovery that is still being checked after the response budget, and finishes it in the background", async () => {
+  await withTestHarness(async (harness) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const attempts: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = setup(harness, {
+      create: async () => ({
+        status: "created",
+        path: "/tmp/cancel-retry",
+        ownsPath: false,
+        resource: { allocation: "retained" },
+      }),
+      remove: async ({ attempt }) => {
+        attempts.push(attempt);
+        if (attempts.length <= 5)
+          return { status: "failed", message: "temporarily unavailable" };
+        await gate;
+        return { status: "removed" };
+      },
+    });
+    fixture.ask();
+    await fixture.settled();
+    await expect(
+      cancelProviderEnvironmentCreation(harness.deps, fixture.thread.id),
+    ).rejects.toThrow("temporarily unavailable");
+    const failed = fixture.row();
+    for (let attempt = 2; attempt <= 5; attempt++) {
+      vi.setSystemTime(fixture.row().retireAt!);
+      await sweepProviderLifecycles(harness.deps);
+    }
+    harness.db
+      .update(threads)
+      .set({ status: "idle", archivedAt: Date.now() })
+      .where(eq(threads.id, fixture.thread.id))
+      .run();
+    recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+      kind: "system",
+      threadId: null,
+    });
+    vi.useRealTimers();
+
+    const startedAt = Date.now();
+    const response = await harness.app.request(
+      `/api/v1/environments/${failed.id}/cleanup?recover=true`,
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, checking: true });
+    expect(Date.now() - startedAt).toBeLessThan(RECOVER_RESPONSE_WAIT_MS + 3_000);
+    expect(attempts).toHaveLength(6);
+    expect(fixture.row().teardownStatus).toBe("running");
+    release();
+    await expect
+      .poll(() => fixture.row().teardownStatus, { timeout: 5_000 })
+      .toBe("removed");
+  });
+}, 30_000);
 
 it("skips environments blocked on a foreign plugin owner until that plugin provides them again", async () => {
   await withTestHarness(async (harness) => {
@@ -2649,6 +2755,7 @@ describe("existing-path provider selection", () => {
         environmentProviderPluginId: "test",
         environmentProviderInstanceKey: "original-key",
         mergeBaseBranch: "release",
+        branchName: null,
       });
       harness.db
         .update(environments)
@@ -2686,6 +2793,7 @@ describe("worktree adoption cleanup", () => {
         const fake = createFakePluginHost({
           pluginId: "environment-git-worktree",
           experimental_callHostRpc: async ({ method }) => {
+            if (method === "inspect") return { status: "removable" };
             if (method !== "remove")
               throw new Error(`Unexpected host operation: ${method}`);
             return { status: "removed" };
@@ -2758,13 +2866,18 @@ describe("worktree adoption cleanup", () => {
           "removed",
         );
         expect(fake.harness.experimental_hostRpcCalls).toHaveLength(
-          owned ? 1 : 0,
+          owned ? 2 : 0,
         );
-        if (owned)
+        if (owned) {
           expect(fake.harness.experimental_hostRpcCalls[0]).toMatchObject({
+            method: "inspect",
+            input: { path: existing.path, pathKey: "original-key" },
+          });
+          expect(fake.harness.experimental_hostRpcCalls[1]).toMatchObject({
             method: "remove",
             input: { path: existing.path, pathKey: "original-key" },
           });
+        }
       }),
   );
 });
@@ -2815,6 +2928,10 @@ it.each([
           .set({ status: "error", archivedAt: Date.now() })
           .where(eq(threads.id, fixture.thread.id))
           .run();
+        recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+          kind: "system",
+          threadId: null,
+        });
         await sweepProviderEnvironment(harness.deps, row.id);
       } else {
         await expect(
@@ -2897,6 +3014,10 @@ it.each([false, true])(
         .set({ status: "idle", archivedAt: Date.now() })
         .where(eq(threads.id, fixture.thread.id))
         .run();
+      recordThreadEnvironmentReleases(harness.db, [fixture.thread.id], {
+        kind: "system",
+        threadId: null,
+      });
       const unsupported = registerHostRpcResponder(harness, {
         hostId: fixture.host.id,
         sessionId: fixture.session.id,

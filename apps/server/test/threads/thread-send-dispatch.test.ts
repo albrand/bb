@@ -11,6 +11,7 @@ import {
   setQueuedThreadMessageFailureReason,
   setQueuedThreadMessageGroupBoundary,
   updateThread,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import type { EnvironmentRow } from "@bb/db";
 import {
@@ -172,7 +173,7 @@ describe("queued message dispatch hook", () => {
         content: textInput("queued while idle"),
       });
 
-      archiveThread(harness.db, harness.hub, thread.id);
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
       expect(getThread(harness.db, thread.id)).toMatchObject({
         status: "idle",
         archivedAt: expect.any(Number),
@@ -220,7 +221,10 @@ describe("queued message dispatch hook", () => {
         content: textInput("queued while idle"),
       });
 
-      markThreadDeleted(harness.db, harness.hub, { threadId: thread.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: thread.id,
+      });
 
       await expect(
         sendQueuedMessage(harness.deps, {
@@ -633,9 +637,15 @@ describe("startup queue waits", () => {
           value: operation === "archive" ? 63 : 64,
         });
         if (operation === "archive") {
-          archiveThread(harness.db, harness.hub, thread.id);
+          archiveThread(
+            harness.db,
+            harness.hub,
+            thread.id,
+            SYSTEM_RELEASE_ACTOR,
+          );
         } else {
           markThreadDeleted(harness.db, harness.hub, {
+            release: SYSTEM_RELEASE_ACTOR,
             threadId: thread.id,
           });
         }
@@ -1138,7 +1148,7 @@ describe("startup queue waits", () => {
         systemMessageKind: "child-completed",
         systemMessageSubject: null,
       });
-      archiveThread(harness.db, harness.hub, thread.id);
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
 
       await expect(delivered).resolves.toBe(false);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
@@ -1785,7 +1795,7 @@ describe("service tier execution lifecycle", () => {
         thread,
         payload: { input: textInput("standard turn"), serviceTier: "default" },
       });
-      archiveThread(harness.db, harness.hub, thread.id);
+      archiveThread(harness.db, harness.hub, thread.id, SYSTEM_RELEASE_ACTOR);
       await expect(
         acceptThreadSendRequest(harness.deps, {
           thread,

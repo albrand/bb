@@ -3,6 +3,7 @@ import {
   createNativeTerminalThread,
   getThread,
   markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { HOST_RECONNECT_GRACE_MS } from "../../src/constants.js";
 import { describe, expect, it, vi } from "vitest";
@@ -307,6 +308,7 @@ describe("host thread runtime status notifications", () => {
         status: "active",
       });
       markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deletedActiveThread.id,
       });
       const socket = createMockHubSocket();

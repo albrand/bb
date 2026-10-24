@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `storage_delete_refusal` text;

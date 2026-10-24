@@ -59,7 +59,7 @@ import { writeHostFile } from "./command-handlers/file-write.js";
 import { discoverRepos } from "./command-handlers/discover-repos.js";
 import {
   mkdirHostPath,
-  moveHostPath,
+  moveHostFile,
   removeHostPath,
 } from "./command-handlers/path-mutations.js";
 import { resolveInteractiveRequest } from "./command-handlers/interactive.js";
@@ -634,7 +634,7 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.list_paths": (command, _options, signal) =>
     listHostPaths(command, signal),
   "host.mkdir": mkdirHostPath,
-  "host.move_path": moveHostPath,
+  "host.move_file": (command) => moveHostFile(command),
   "host.remove_path": removeHostPath,
   "host.browse_directory": browseHostDirectory,
   "host.paths_exist": checkHostPathsExist,

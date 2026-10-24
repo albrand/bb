@@ -11,8 +11,10 @@ import {
 } from "@bb/domain";
 import { ApiError } from "../../errors.js";
 import {
+  failedTeardownGuidance,
   threadEnvironmentUnavailableDetails,
   threadNotWritableReasonForStatus,
+  throwEnvironmentNotReady,
   throwThreadEnvironmentUnavailable,
   throwThreadNotWritable,
 } from "../lib/lifecycle-api-errors.js";
@@ -25,6 +27,7 @@ export interface ThreadEnvironmentRestoreDeps {
 export type ThreadEnvironmentRestoreRefusal =
   | "never_attached"
   | "not_destroyed"
+  | "teardown_failed"
   | "thread_busy"
   | "unrecoverable";
 
@@ -36,7 +39,11 @@ export interface ThreadEnvironmentRestoreTarget {
 
 export type ThreadEnvironmentRestoreResolution =
   | { restorable: true; target: ThreadEnvironmentRestoreTarget }
-  | { restorable: false; refusal: ThreadEnvironmentRestoreRefusal };
+  | {
+      restorable: false;
+      refusal: ThreadEnvironmentRestoreRefusal;
+      environment?: EnvironmentRow;
+    };
 
 type RestoreCandidateThread = Pick<
   Thread,
@@ -64,6 +71,9 @@ export function resolveThreadEnvironmentRestore(
   const environment = getEnvironment(deps.db, thread.environmentId);
   if (environment === null) {
     return { restorable: false, refusal: "never_attached" };
+  }
+  if (environment.teardownStatus === "failed") {
+    return { restorable: false, refusal: "teardown_failed", environment };
   }
   if (environment.status !== "destroyed") {
     return { restorable: false, refusal: "not_destroyed" };
@@ -106,8 +116,16 @@ export function canRestoreThreadEnvironment(
 export function throwThreadEnvironmentRestoreRefusal(
   refusal: ThreadEnvironmentRestoreRefusal,
   thread: Pick<Thread, "archivedAt" | "deletedAt" | "status">,
+  environment?: EnvironmentRow,
 ): never {
   switch (refusal) {
+    case "teardown_failed":
+      if (environment === undefined)
+        throw new Error("A failed teardown refusal needs its environment");
+      return throwEnvironmentNotReady(
+        environment,
+        failedTeardownGuidance(environment),
+      );
     case "never_attached":
       return throwThreadEnvironmentUnavailable(
         threadEnvironmentUnavailableDetails("never_attached", null),

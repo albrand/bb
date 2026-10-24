@@ -90,7 +90,7 @@ function fixture(subPath = "host_test") {
     removedCount: 1,
     removedBytes: 20,
     skippedCount: 0,
-    stoppedProcessCount: 1,
+    held: [],
     }),
   );
   const start = vi.fn(async () => null);
@@ -136,34 +136,26 @@ function fixture(subPath = "host_test") {
   return { slot, configure, remove, start, hosts, reports };
 }
 
-it("stops a running development instance only after the user confirms stop and remove", async () => {
+it("keeps a running development instance, stops nothing, and tells the user why", async () => {
   const { slot, remove } = fixture();
   remove.mockResolvedValueOnce({
     running: ["after"],
     removedCount: 0,
     removedBytes: 0,
     skippedCount: 0,
-    stoppedProcessCount: 0,
+    held: [],
   });
   const page = within(slot.container);
   fireEvent.click(
     await page.findByRole("button", { name: "Remove instance: after" }),
   );
-  const confirmation = await page.findByRole("region", {
-    name: "Confirm cleanup",
-  });
+  expect(
+    await within(document.body).findByText(/its dev server is running/i),
+  ).toBeTruthy();
   expect(remove.mock.calls.map(([input]) => input)).toEqual([
-    { hostId: "host_test", names: ["after"], stopRunning: false },
+    { hostId: "host_test", names: ["after"] },
   ]);
-  fireEvent.click(
-    within(confirmation).getByRole("button", { name: "Stop and remove" }),
-  );
-  await waitFor(() =>
-    expect(remove.mock.calls.map(([input]) => input)).toEqual([
-      { hostId: "host_test", names: ["after"], stopRunning: false },
-      { hostId: "host_test", names: ["after"], stopRunning: true },
-    ]),
-  );
+  expect(page.queryByRole("button", { name: "Stop and remove" })).toBeNull();
 });
 
 it("shows cleanup failures as toasts, keeps other actions available, and permits retry", async () => {
@@ -431,7 +423,7 @@ it("shows the development path below a short pending title and updates the same 
       removedCount: 1,
       removedBytes: 20,
       skippedCount: 0,
-      stoppedProcessCount: 0,
+      held: [],
     }),
   );
   await waitFor(() =>

@@ -37,10 +37,23 @@ function environmentNotReadyDetails(
   };
 }
 
+export function failedTeardownGuidance(environment: {
+  path: string | null;
+  teardownMessage: string | null;
+}): string {
+  const reason = environment.teardownMessage ?? "no reason was recorded";
+  const recover =
+    environment.path === null
+      ? "recover the workspace yourself"
+      : `recover ${environment.path} yourself`;
+  return `Workspace removal failed and the workspace may be partly removed: ${reason} Archive this thread so bb can finish removing it, then unarchive to restore it; or ${recover}.`;
+}
+
 export function throwEnvironmentNotReady(
   environment: EnvironmentReadinessFields,
+  message = "Environment unavailable",
 ): never {
-  throw new ApiError(409, "environment_not_ready", "Environment unavailable", {
+  throw new ApiError(409, "environment_not_ready", message, {
     details: environmentNotReadyDetails(environment),
   });
 }

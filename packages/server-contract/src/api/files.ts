@@ -117,6 +117,6 @@ export type HostPathListResponse =
   HostDaemonOnlineRpcResultByType["host.list_paths"];
 export type HostMkdirResponse = HostDaemonOnlineRpcResultByType["host.mkdir"];
 export type HostMovePathResponse =
-  HostDaemonOnlineRpcResultByType["host.move_path"];
+  HostDaemonOnlineRpcResultByType["host.move_file"];
 export type HostRemovePathResponse =
   HostDaemonOnlineRpcResultByType["host.remove_path"];

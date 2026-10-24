@@ -23,6 +23,7 @@ import {
   updateThread,
   upsertThreadSearchSegments,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 interface SetupResult {
@@ -244,7 +245,7 @@ describe("thread search data", () => {
         providerId: "codex",
         title: "archivewriterneedle",
       });
-      archiveThread(db, noopNotifier, archivedThread.id);
+      archiveThread(db, noopNotifier, archivedThread.id, SYSTEM_RELEASE_ACTOR);
 
       const deletedThread = createThread(db, noopNotifier, {
         projectId: project.id,
@@ -265,7 +266,7 @@ describe("thread search data", () => {
         title: "hiddenarchivedwriterneedle",
         visibility: "hidden",
       });
-      archiveThread(db, noopNotifier, hiddenArchivedThread.id);
+      archiveThread(db, noopNotifier, hiddenArchivedThread.id, SYSTEM_RELEASE_ACTOR);
 
       const activeResults = searchThreadsWithPendingInteractionState(db, {
         query: "livewriterneedle",
@@ -661,7 +662,7 @@ describe("thread search data", () => {
           providerId: "codex",
           title: `partitionneedle archived ${index}`,
         });
-        archiveThread(db, noopNotifier, archivedThread.id);
+        archiveThread(db, noopNotifier, archivedThread.id, SYSTEM_RELEASE_ACTOR);
         archivedIds.push(archivedThread.id);
       }
 

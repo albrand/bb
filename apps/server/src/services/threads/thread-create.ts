@@ -5,6 +5,7 @@ import {
   acquireProjectAttachmentOwnership,
   createNativeTerminalThread,
   isNativeTerminalThread,
+  FAILED_CREATE_RELEASE_ACTOR,
   markThreadDeleted,
   getEnvironment,
   getThread,
@@ -571,10 +572,11 @@ async function createPendingThreadAndAttemptFirstDispatch(
       updatedAt: Date.now(),
     });
     const deleted = markThreadDeleted(deps.db, deps.hub, {
+      release: FAILED_CREATE_RELEASE_ACTOR,
       threadId: thread.id,
     });
     if (deleted)
-      requestThreadStorageDeletion(
+      void requestThreadStorageDeletion(
         deps,
         deleted,
         deleted.environmentId

@@ -97,6 +97,7 @@ export type DiscoveredWorkspaceProperties = z.infer<
 export const environmentLifecycleSchema = z.object({
   phase: z.enum(["active", "retiring", "teardown", "destroyed"]),
   retireAt: z.number().nullable(),
+  message: z.string().optional(),
   teardown: z
     .object({
       status: z.enum(["running", "failed", "removed"]),

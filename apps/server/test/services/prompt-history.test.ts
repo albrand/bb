@@ -10,6 +10,7 @@ import {
   promptHistoryEntries,
   upsertHost,
   type DbConnection,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import type { PromptHistoryScope, PromptInput } from "@bb/domain";
@@ -170,7 +171,7 @@ describe("prompt history service", () => {
       createdAt: 20,
       input: textInput("Archived starter prompt"),
     });
-    archiveThread(db, noopNotifier, archivedThread.id);
+    archiveThread(db, noopNotifier, archivedThread.id, SYSTEM_RELEASE_ACTOR);
 
     expect(
       listProjectPromptHistory(
@@ -276,7 +277,10 @@ describe("prompt history service", () => {
       createdAt: 20,
       input: textInput("Deleted starter prompt"),
     });
-    markThreadDeleted(db, noopNotifier, { threadId: deletedThread.id });
+    markThreadDeleted(db, noopNotifier, {
+      release: SYSTEM_RELEASE_ACTOR,
+      threadId: deletedThread.id,
+    });
 
     expect(
       listProjectPromptHistory(

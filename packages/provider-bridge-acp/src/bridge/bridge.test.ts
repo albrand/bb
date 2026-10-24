@@ -2464,6 +2464,94 @@ describe("acp bridge", () => {
     });
   });
 
+  it("rejects a dynamic tool frame whose thread does not match its token, an unknown token, and a repeated call id", async () => {
+    const { providerThreadId } = await startThread({
+      dynamicTools: [
+        {
+          name: "update_environment_directory",
+          description: "Move this thread to another environment directory.",
+          inputSchema: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+        },
+      ],
+    });
+    const turnId = sendTurnRequest("turn/start", providerThreadId, {
+      input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
+    });
+    await waitForResponse(turnId);
+    await waitForTurnCompleted();
+    const configText = agentMessageTexts().find((text) =>
+      text.startsWith("mcp-server-config:"),
+    );
+    if (!configText) {
+      throw new Error("Fake ACP agent did not report MCP server config");
+    }
+    const [mcpServerConfig] = JSON.parse(
+      configText.slice("mcp-server-config:".length),
+    ) as { env: { name: string; value: string }[]; name: string }[];
+    const env = new Map(
+      (mcpServerConfig?.env ?? []).map(({ name, value }) => [name, value]),
+    );
+    const host = env.get("BB_ACP_DYNAMIC_TOOL_HOST");
+    const port = Number(env.get("BB_ACP_DYNAMIC_TOOL_PORT"));
+    const threadId = env.get("BB_ACP_DYNAMIC_TOOL_THREAD_ID");
+    const token = env.get("BB_ACP_DYNAMIC_TOOL_TOKEN");
+    if (!host || !Number.isInteger(port) || !threadId || !token) {
+      throw new Error("MCP server config is missing dynamic tool bridge env");
+    }
+    const frame = (overrides: { callId: string; threadId?: string; token?: string }) =>
+      callDynamicToolBridge({
+        host,
+        port,
+        threadId: overrides.threadId ?? threadId,
+        token: overrides.token ?? token,
+        callId: overrides.callId,
+        tool: "update_environment_directory",
+        toolArguments: { path: "/tmp/next-worktree" },
+      });
+
+    await expect(
+      frame({ callId: "forged-thread", threadId: "thr_someone_else" }),
+    ).resolves.toEqual({ ok: false, error: "Invalid dynamic tool request" });
+    await expect(
+      frame({ callId: "forged-token", token: "not-the-token" }),
+    ).resolves.toEqual({ ok: false, error: "Invalid dynamic tool request" });
+    expect(
+      output.messages.filter((message) => message.method === "item/tool/call"),
+    ).toEqual([]);
+
+    const first = frame({ callId: "same-call" });
+    const forwarded = await waitFor(
+      () =>
+        output.messages.find(
+          (message) =>
+            message.method === "item/tool/call" && message.id !== undefined,
+        ),
+      "forwarded dynamic tool call",
+    );
+    handleLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: forwarded.id,
+        result: {
+          success: true,
+          contentItems: [{ type: "inputText", text: "done" }],
+        },
+      }),
+    );
+    await first;
+    await expect(frame({ callId: "same-call" })).resolves.toEqual({
+      ok: false,
+      error: "Duplicate tool call id",
+    });
+    expect(
+      output.messages.filter((message) => message.method === "item/tool/call"),
+    ).toHaveLength(1);
+  });
+
   it.each(["socket-close", "provider-exit", "turn-end"])(
     "cancels the runtime tool request after %s",
     async (kind) => {

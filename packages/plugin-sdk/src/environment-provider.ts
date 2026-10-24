@@ -92,7 +92,27 @@ export type PluginEnvironmentProviderCreateResult =
       mergeBaseBranch?: string | null;
       resource?: JsonValue;
     }
-  | { status: "failed"; message: string };
+  | {
+      status: "failed";
+      message: string;
+      /** Experimental: what the failed attempt left behind. `{ path }` means it kept that path on purpose; `null` means it kept nothing. Leaving the field out means the provider does not know, and core treats the attempt as unresolved. Core records a retention so the machine cannot be destroyed and the path cannot be removed or moved through core until the retention is closed: see docs/api_to_audit.md. */
+      experimental_retained?: { path: string } | null;
+    };
+
+export interface PluginEnvironmentProviderRetentionProofContext {
+  hostId: string;
+  /** The path the attempt kept, or null when the provider never reported one: then `pathKey` and `branchName` identify the attempt. */
+  path: string | null;
+  pathKey: string | null;
+  branchName: string | null;
+  sourcePath: string | null;
+  threadId: string | null;
+  signal: AbortSignal;
+}
+
+export type PluginEnvironmentProviderRetentionProof =
+  | { absent: true; proof: string }
+  | { absent: false; reason: string };
 
 export interface PluginEnvironmentProviderRemoveContext {
   environment: Environment | null;
@@ -107,7 +127,13 @@ export interface PluginEnvironmentProviderRemoveContext {
 
 export type PluginEnvironmentProviderRemoveResult =
   | { status: "removed" }
+  /** Experimental: nothing changed and the resource was kept on purpose. Core restores the environment's earlier state and retries after a backoff: see docs/api_to_audit.md. */
+  | { status: "retained"; message: string }
   | { status: "failed"; message: string };
+
+export type PluginEnvironmentProviderPreflightRemoveResult =
+  | { status: "removable" }
+  | { status: "retained"; message: string };
 
 /** Core normalizes omitted policy members once at registration. */
 export interface PluginEnvironmentProviderPolicy {
@@ -153,6 +179,18 @@ export interface PluginEnvironmentProviderDefinition<
   restore?(
     context: PluginEnvironmentProviderRestoreContext<R, S>,
   ): Promise<PluginEnvironmentProviderCreateResult>;
+  /** Experimental: inspect without mutating before core runs the teardown hook. A retained answer skips the hook and the removal: see docs/api_to_audit.md. */
+  experimental_preflightRemove?(
+    context: PluginEnvironmentProviderRemoveContext,
+  ):
+    | PluginEnvironmentProviderPreflightRemoveResult
+    | Promise<PluginEnvironmentProviderPreflightRemoveResult>;
+  /** Experimental: prove, without mutating, that what an attempt kept is gone from the machine: not on disk (at the path, or at the place the provider would have put it for `pathKey`), not registered as a workspace of its repository, and not held by a branch of the thread. Core closes the retention only on `absent: true`, never on an error or a timeout, and records the proof: see docs/api_to_audit.md. */
+  experimental_proveRetentionAbsent?(
+    context: PluginEnvironmentProviderRetentionProofContext,
+  ):
+    | PluginEnvironmentProviderRetentionProof
+    | Promise<PluginEnvironmentProviderRetentionProof>;
   remove(
     context: PluginEnvironmentProviderRemoveContext,
   ): Promise<PluginEnvironmentProviderRemoveResult>;

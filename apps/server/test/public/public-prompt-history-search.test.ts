@@ -1,4 +1,8 @@
-import { createPromptHistoryEntry, markThreadDeleted } from "@bb/db";
+import {
+  createPromptHistoryEntry,
+  markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import type { PromptHistoryScope, PromptInput } from "@bb/domain";
 import { promptHistorySearchResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
@@ -293,6 +297,7 @@ describe("public prompt history search route", () => {
         input: textInput("prompt from a deleted thread"),
       });
       markThreadDeleted(harness.deps.db, harness.deps.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deletedThread.id,
       });
 

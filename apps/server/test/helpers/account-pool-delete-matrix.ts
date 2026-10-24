@@ -692,6 +692,8 @@ function seedWorld(base: TestAppHarness): World {
   return world;
 }
 
+const DELETE_ROUTE_BUDGET_MS = 1_400;
+
 async function deletionOutcome(
   world: World,
   lifetime: Lifetime,
@@ -995,6 +997,7 @@ async function deletionOutcome(
       point,
     );
     const deleteMutations = deleteInjection.mutations;
+    const requestedAt = Date.now();
     const deleted = await world.base.app.request(
       `${API}/threads/${thread.id}`,
       {
@@ -1003,6 +1006,11 @@ async function deletionOutcome(
         body: JSON.stringify({ childThreadsConfirmed: false }),
       },
     );
+    const waitedMs = Date.now() - requestedAt;
+    if (waitedMs >= DELETE_ROUTE_BUDGET_MS)
+      throw new Error(
+        `The delete route took ${waitedMs} ms; it waits for the host's answer about the thread's storage for up to 1500 ms, so a host that is not answered makes every cell of this matrix that slow`,
+      );
     const deliveries = world.deliveries.splice(0);
     const delivery = await settle(
       Promise.all(deliveries),

@@ -1,5 +1,5 @@
 import { prepareCachedQuery } from "../connection.js";
-import { and, asc, count, eq, inArray, isNotNull, isNull, ne, or, placeholder, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, or, placeholder, sql } from "drizzle-orm";
 import type {
   DiscoveredWorkspaceProperties,
   EnvironmentChangeKind,
@@ -11,7 +11,7 @@ import type {
 import { areHostPathsEqual, evaluateEnvironmentLifecycleEvent } from "@bb/domain";
 import type { DbConnection, DbTransaction, DbQueryConnection } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
-import { environments, threads } from "../schema.js";
+import { environmentHookOperations, environments, queuedThreadMessages, threads } from "../schema.js";
 import { createEnvironmentId } from "../ids.js";
 import { hostPathContains, hostPathEquals } from "./host-path-sql.js";
 
@@ -626,7 +626,7 @@ export function reserveEnvironment(db: EnvironmentWriteConnection, input: Omit<t
     const now = Date.now();
     if (existing !== null) {
       if (existing.teardownStatus !== "removed") throw new Error("Previous environment cleanup is incomplete");
-      return tx.update(environments).set({ ...input, path: null, resource: null, claimPath: null, teardownStatus: null, teardownMessage: null, teardownAttempt: 0, retireAt: null, pendingLog: "", updatedAt: now }).where(eq(environments.id, existing.id)).returning().get()!;
+      return tx.update(environments).set({ ...input, path: null, resource: null, claimPath: null, teardownStatus: null, teardownMessage: null, teardownAttempt: 0, teardownFailures: 0, retireAt: null, pendingLog: "", updatedAt: now }).where(eq(environments.id, existing.id)).returning().get()!;
     }
     return tx.insert(environments).values({ ...input, id: createEnvironmentId(), createdAt: now, updatedAt: now }).returning().get();
   });
@@ -665,8 +665,225 @@ export function listProviderLifecycleEnvironments(
     .all();
 }
 
+const liveThreadStates = or(
+  and(isNull(threads.archivedAt), isNull(threads.deletedAt)),
+  eq(threads.status, "stopping"),
+  eq(threads.status, "active"),
+  sql`exists (select 1 from ${queuedThreadMessages} where ${queuedThreadMessages.threadId} = ${threads.id} and ${queuedThreadMessages.state} = 'claimed')`,
+);
+
 export function environmentHasLiveThreads(db: EnvironmentWriteConnection, environmentId: string): boolean {
-  return db.select({ id: threads.id }).from(threads).where(and(eq(threads.environmentId, environmentId), or(and(isNull(threads.archivedAt), isNull(threads.deletedAt)), eq(threads.status, "stopping"), eq(threads.status, "active")))).limit(1).get() !== undefined;
+  return db.select({ id: threads.id }).from(threads).where(and(eq(threads.environmentId, environmentId), liveThreadStates)).limit(1).get() !== undefined;
+}
+
+export function listEnvironmentReferencingThreadIds(db: EnvironmentWriteConnection, environmentId: string): string[] {
+  return db
+    .select({ id: threads.id })
+    .from(threads)
+    .where(and(eq(threads.environmentId, environmentId), isNull(threads.deletedAt)))
+    .all()
+    .map((thread) => thread.id);
+}
+
+export function listBranchHolderEnvironments(
+  db: EnvironmentWriteConnection,
+  args: {
+    hostId: string;
+    branchName: string;
+    environmentProviderId: string;
+    excludeEnvironmentIds: readonly string[];
+  },
+): EnvironmentRow[] {
+  return db
+    .select()
+    .from(environments)
+    .where(
+      and(
+        eq(environments.hostId, args.hostId),
+        eq(environments.branchName, args.branchName),
+        eq(environments.environmentProviderId, args.environmentProviderId),
+        eq(environments.providerOwnsPath, true),
+        isNotNull(environments.path),
+        ne(environments.status, "destroyed"),
+        or(isNull(environments.teardownStatus), ne(environments.teardownStatus, "removed")),
+        args.excludeEnvironmentIds.length === 0 ? undefined : notInArray(environments.id, [...args.excludeEnvironmentIds]),
+      ),
+    )
+    .orderBy(asc(environments.createdAt))
+    .all();
+}
+
+export function listEnvironmentLiveThreadIds(db: EnvironmentWriteConnection, environmentId: string): string[] {
+  return db
+    .select({ id: threads.id })
+    .from(threads)
+    .where(and(eq(threads.environmentId, environmentId), liveThreadStates))
+    .orderBy(desc(threads.createdAt))
+    .all()
+    .map((thread) => thread.id);
+}
+
+const liveThreadsPredicate = (environmentId: string) =>
+  sql`exists (select 1 from ${threads} where ${threads.environmentId} = ${environmentId} and ((${threads.archivedAt} is null and ${threads.deletedAt} is null) or ${threads.status} = 'stopping' or ${threads.status} = 'active' or exists (select 1 from ${queuedThreadMessages} where ${queuedThreadMessages.threadId} = ${threads.id} and ${queuedThreadMessages.state} = 'claimed')))`;
+
+export interface EnvironmentTeardownClaimInput {
+  row: EnvironmentRow;
+  attempt: number;
+  resumed: boolean;
+}
+
+export function claimEnvironmentTeardown(db: EnvironmentWriteConnection, input: EnvironmentTeardownClaimInput): boolean {
+  const { row, attempt, resumed } = input;
+  return (
+    db
+      .update(environments)
+      .set({
+        status: row.status === "destroyed" ? "destroyed" : "error",
+        teardownStatus: "running",
+        teardownAttempt: attempt,
+        teardownMessage: null,
+        ...(resumed ? {} : { teardownPriorStatus: sql`coalesce(${environments.teardownPriorStatus}, ${environments.status})` }),
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(environments.id, row.id),
+          eq(environments.teardownAttempt, row.teardownAttempt),
+          row.teardownStatus === null ? isNull(environments.teardownStatus) : eq(environments.teardownStatus, row.teardownStatus),
+          eq(environments.status, row.status),
+          sql`not ${liveThreadsPredicate(row.id)}`,
+        ),
+      )
+      .run().changes > 0
+  );
+}
+
+export function releaseUnstartedEnvironmentTeardown(db: EnvironmentWriteConnection, row: EnvironmentRow): boolean {
+  return (
+    db
+      .update(environments)
+      .set({ teardownStatus: null, retireAt: null, updatedAt: Date.now() })
+      .where(
+        and(
+          eq(environments.id, row.id),
+          eq(environments.teardownStatus, "running"),
+          eq(environments.teardownAttempt, row.teardownAttempt),
+          eq(environments.status, row.status),
+          isNull(environments.teardownPriorStatus),
+        ),
+      )
+      .run().changes > 0
+  );
+}
+
+export function releaseCancelledEnvironmentOwner(db: EnvironmentWriteConnection, row: EnvironmentRow): boolean {
+  if (row.ownerThreadId === null || row.teardownStatus === null) return false;
+  return (
+    db
+      .update(environments)
+      .set({ ownerThreadId: null, claimPath: null, retireAt: null, teardownStatus: null, teardownPriorStatus: null, updatedAt: Date.now() })
+      .where(
+        and(
+          eq(environments.id, row.id),
+          eq(environments.ownerThreadId, row.ownerThreadId),
+          eq(environments.teardownStatus, row.teardownStatus),
+          eq(environments.teardownAttempt, row.teardownAttempt),
+        ),
+      )
+      .run().changes > 0
+  );
+}
+
+export function reviveFailedEnvironmentTeardown(db: EnvironmentWriteConnection, environmentId: string): boolean {
+  const row = getEnvironment(db, environmentId);
+  if (row === null || row.teardownStatus !== "failed" || row.teardownPriorStatus === null) return false;
+  return (
+    db
+      .update(environments)
+      .set({
+        status: sql`${environments.teardownPriorStatus}`,
+        teardownStatus: null,
+        teardownPriorStatus: null,
+        retireAt: null,
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(environments.id, environmentId),
+          eq(environments.teardownStatus, "failed"),
+          eq(environments.teardownAttempt, row.teardownAttempt),
+          isNotNull(environments.teardownPriorStatus),
+          isNull(environments.ownerThreadId),
+          sql`not exists (select 1 from ${environmentHookOperations} where ${environmentHookOperations.id} = 'environment:' || ${environments.id} || ':' || coalesce(${environments.environmentProviderInstanceKey}, 'null') || ':teardown')`,
+        ),
+      )
+      .run().changes > 0
+  );
+}
+
+export function updateRunningEnvironmentTeardown(
+  db: EnvironmentWriteConnection,
+  input: { environmentId: string; attempt: number },
+  change: Partial<EnvironmentRow>,
+): boolean {
+  return (
+    db
+      .update(environments)
+      .set({ ...change, updatedAt: Date.now() })
+      .where(and(eq(environments.id, input.environmentId), eq(environments.teardownStatus, "running"), eq(environments.teardownAttempt, input.attempt)))
+      .run().changes > 0
+  );
+}
+
+export function failRunningEnvironmentTeardown(
+  db: EnvironmentWriteConnection,
+  input: { environmentId: string; attempt: number; message: string; retireAt: number | null; keepSnapshot: boolean },
+): boolean {
+  return (
+    db
+      .update(environments)
+      .set({
+        teardownStatus: "failed",
+        teardownMessage: input.message,
+        teardownFailures: sql`${environments.teardownFailures} + 1`,
+        teardownPriorStatus: input.keepSnapshot
+          ? sql`case when exists (select 1 from ${environmentHookOperations} where ${environmentHookOperations.id} = 'environment:' || ${environments.id} || ':' || coalesce(${environments.environmentProviderInstanceKey}, 'null') || ':teardown') then null else ${environments.teardownPriorStatus} end`
+          : null,
+        retireAt: input.retireAt,
+        updatedAt: Date.now(),
+      })
+      .where(and(eq(environments.id, input.environmentId), eq(environments.teardownStatus, "running"), eq(environments.teardownAttempt, input.attempt)))
+      .run().changes > 0
+  );
+}
+
+export function retainRunningEnvironmentTeardown(
+  db: EnvironmentWriteConnection,
+  input: { environmentId: string; attempt: number; message: string; retireAt: number },
+): boolean {
+  return (
+    db
+      .update(environments)
+      .set({
+        status: sql`${environments.teardownPriorStatus}`,
+        teardownStatus: null,
+        teardownMessage: input.message,
+        teardownPriorStatus: null,
+        retireAt: input.retireAt,
+        ownerThreadId: sql`case when ${environments.ownerThreadId} is not null and ${environments.teardownPriorStatus} = 'ready' and ${environments.path} is not null then null else ${environments.ownerThreadId} end`,
+        claimPath: sql`case when ${environments.ownerThreadId} is not null and ${environments.teardownPriorStatus} = 'ready' and ${environments.path} is not null then null else ${environments.claimPath} end`,
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(environments.id, input.environmentId),
+          eq(environments.teardownStatus, "running"),
+          eq(environments.teardownAttempt, input.attempt),
+          isNotNull(environments.teardownPriorStatus),
+        ),
+      )
+      .run().changes > 0
+  );
 }
 
 export function releaseFinishedEnvironmentPreparationOwners(db: EnvironmentWriteConnection): void {

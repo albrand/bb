@@ -13,6 +13,7 @@ import {
   deleteThread,
   getThread,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 function setup() {
@@ -39,9 +40,9 @@ describe("lifecycle ownership", () => {
     const child = spawn(owner.id);
     const leaf = spawn(child.id);
     const independent = spawn();
-    archiveThread(db, hub, child.id);
+    archiveThread(db, hub, child.id, SYSTEM_RELEASE_ACTOR);
     expect(getThread(db, owner.id)?.archivedAt).toBeNull();
-    archiveThread(db, hub, owner.id);
+    archiveThread(db, hub, owner.id, SYSTEM_RELEASE_ACTOR);
     for (const thread of [owner, child, leaf])
       expect(getThread(db, thread.id)?.archivedAt).toEqual(expect.any(Number));
     expect(unarchiveThread(db, hub, leaf.id)).toBeNull();
@@ -49,7 +50,7 @@ describe("lifecycle ownership", () => {
     expect(getThread(db, child.id)?.archivedAt).toEqual(expect.any(Number));
     unarchiveThread(db, hub, child.id);
     expect(unarchiveThread(db, hub, leaf.id)?.archivedAt).toBeNull();
-    markThreadDeleted(db, hub, { threadId: owner.id });
+    markThreadDeleted(db, hub, { release: SYSTEM_RELEASE_ACTOR, threadId: owner.id });
     expect(deleteThread(db, hub, owner.id)).toBe(false);
     expect(() =>
       db.delete(threads).where(eq(threads.id, owner.id)).run(),
@@ -66,10 +67,10 @@ describe("lifecycle ownership", () => {
     const { db, spawn, project, host } = setup();
     expect(() => spawn("missing")).toThrow(/lifecycleOwner/);
     const owner = spawn();
-    archiveThread(db, hub, owner.id);
+    archiveThread(db, hub, owner.id, SYSTEM_RELEASE_ACTOR);
     expect(() => spawn(owner.id)).toThrow(/lifecycleOwner/);
     unarchiveThread(db, hub, owner.id);
-    markThreadDeleted(db, hub, { threadId: owner.id });
+    markThreadDeleted(db, hub, { release: SYSTEM_RELEASE_ACTOR, threadId: owner.id });
     expect(() => spawn(owner.id)).toThrow(/lifecycleOwner/);
     const live = spawn();
     const other = createProject(db, hub, {
@@ -82,9 +83,9 @@ describe("lifecycle ownership", () => {
       providerId: "test",
       lifecycleOwnerThreadId: live.id,
     });
-    archiveThread(db, hub, live.id);
+    archiveThread(db, hub, live.id, SYSTEM_RELEASE_ACTOR);
     expect(getThread(db, dependent.id)?.archivedAt).toEqual(expect.any(Number));
-    markThreadDeleted(db, hub, { threadId: live.id });
+    markThreadDeleted(db, hub, { release: SYSTEM_RELEASE_ACTOR, threadId: live.id });
     expect(getThread(db, dependent.id)?.deletedAt).toEqual(expect.any(Number));
   });
 
@@ -97,11 +98,11 @@ describe("lifecycle ownership", () => {
       .set({ archivedAt: 100, updatedAt: 100 })
       .where(eq(threads.id, archived.id))
       .run();
-    markThreadDeleted(db, hub, { threadId: deleted.id, deletedAt: 200 });
-    archiveThread(db, hub, owner.id);
+    markThreadDeleted(db, hub, { release: SYSTEM_RELEASE_ACTOR, threadId: deleted.id, deletedAt: 200 });
+    archiveThread(db, hub, owner.id, SYSTEM_RELEASE_ACTOR);
     expect(getThread(db, archived.id)?.archivedAt).toBe(100);
     expect(getThread(db, deleted.id)?.archivedAt).toBeNull();
-    markThreadDeleted(db, hub, { threadId: owner.id, deletedAt: 300 });
+    markThreadDeleted(db, hub, { release: SYSTEM_RELEASE_ACTOR, threadId: owner.id, deletedAt: 300 });
     expect(getThread(db, deleted.id)?.deletedAt).toBe(200);
     expect(getThread(db, archived.id)?.deletedAt).toBe(300);
   });

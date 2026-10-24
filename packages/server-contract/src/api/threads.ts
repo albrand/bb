@@ -768,6 +768,14 @@ export type ThreadChildSummaryResponse = z.infer<
   typeof threadChildSummaryResponseSchema
 >;
 
+export const threadStorageDeletionResponseSchema = z.object({
+  deletedAt: z.number().int().nonnegative().nullable(),
+  keptReason: z.string().nullable(),
+});
+export type ThreadStorageDeletionResponse = z.infer<
+  typeof threadStorageDeletionResponseSchema
+>;
+
 export const threadSpendBreakdownSchema = z.object({
   inputTokens: z.number().nullable(),
   cachedInputTokens: z.number().nullable(),

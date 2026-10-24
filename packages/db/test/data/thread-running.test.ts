@@ -9,6 +9,7 @@ import {
   listRunningThreads,
   markThreadDeleted,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createMigratedConnection } from "../../src/testing.js";
 
 function setup() {
@@ -82,8 +83,8 @@ describe("listRunningThreads", () => {
     const hidden = make("hidden");
     const archived = make();
     const deleted = make();
-    archiveThread(db, noopNotifier, archived.id);
-    markThreadDeleted(db, noopNotifier, { threadId: deleted.id });
+    archiveThread(db, noopNotifier, archived.id, SYSTEM_RELEASE_ACTOR);
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deleted.id });
 
     // A hidden thread burns a real slot on a real machine, so hiding it here
     // would under-report occupancy; archival and deletion actually stop one.

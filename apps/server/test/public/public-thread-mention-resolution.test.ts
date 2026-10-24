@@ -1,4 +1,4 @@
-import { archiveThread, markThreadDeleted } from "@bb/db";
+import { archiveThread, markThreadDeleted, SYSTEM_RELEASE_ACTOR } from "@bb/db";
 import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@bb/domain";
 import { resolveThreadMentionsResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
@@ -47,12 +47,18 @@ describe("public thread mention resolution route", () => {
         projectId: project.id,
         title: "Archived mention target",
       });
-      archiveThread(harness.deps.db, harness.deps.hub, archived.id);
+      archiveThread(
+        harness.deps.db,
+        harness.deps.hub,
+        archived.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
       const deleted = seedThread(harness.deps, {
         projectId: project.id,
         title: "Deleted mention target",
       });
       markThreadDeleted(harness.deps.db, harness.deps.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deleted.id,
       });
 

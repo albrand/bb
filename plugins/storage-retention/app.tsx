@@ -1041,7 +1041,7 @@ function StoragePage({
                     rowActions={rowActions}
                     confirmationKey={cleanup?.key ?? null}
                     confirmation={cleanupConfirmation}
-                    onRemove={(entry, label) =>
+                    onRemove={(entry) =>
                       void runRowAction(
                         `dev:${entry.name}`,
                         {
@@ -1054,44 +1054,19 @@ function StoragePage({
                           const result = await rpc.call("removeDevInstances", {
                             hostId: report.hostId,
                             names: [entry.name],
-                            stopRunning: false,
                           });
+                          const held = result.held[0];
+                          if (held !== undefined)
+                            throw new Error(`Kept: ${held.reason}.`);
                           if (result.running.length > 0)
-                            setCleanup({
-                              key: `dev-instance:${entry.name}`,
-                              feedback: {
-                                title: "Deleting development data",
-                                completed: "Development data deleted",
-                                failed: "Couldn’t delete development data",
-                                description: `${report.developerStorage!.path}/${entry.name}`,
-                              },
-                              action: "Stop and remove",
-                              title: `Stop and remove “${label}” (${bytes(entry.sizeBytes)})?`,
-                              detail:
-                                "Its dev server is running. BB will stop it, then delete its database, logs, and thread files. The source checkout is kept. This can’t be undone.",
-                              run: async () => {
-                                const stopped = await rpc.call(
-                                  "removeDevInstances",
-                                  {
-                                    hostId: report.hostId,
-                                    names: [entry.name],
-                                    stopRunning: true,
-                                  },
-                                );
-                                if (stopped.removedCount === 0)
-                                  throw new Error(
-                                    "No data was deleted. Rescan the machine to update its status.",
-                                  );
-                                return `${report.developerStorage!.path}/${entry.name} · ${bytes(stopped.removedBytes)} freed`;
-                              },
-                            });
-                          else if (result.removedCount === 0)
+                            throw new Error(
+                              "Kept: its dev server is running. Stop it yourself, then delete it.",
+                            );
+                          if (result.removedCount === 0)
                             throw new Error(
                               "No data was deleted. Rescan the machine to update its status.",
                             );
-                          else
-                            return `${report.developerStorage!.path}/${entry.name} · ${bytes(result.removedBytes)} freed`;
-                          return null;
+                          return `${report.developerStorage!.path}/${entry.name} · ${bytes(result.removedBytes)} freed`;
                         },
                       )
                     }

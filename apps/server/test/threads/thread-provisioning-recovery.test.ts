@@ -13,6 +13,7 @@ import {
   markThreadDeleted,
   threads,
   reserveEnvironment,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import {
   encodeClientTurnRequestIdNumber,
@@ -1172,7 +1173,10 @@ it.each(["startup", "periodic"] as const)(
         .set({ ownerThreadId: thread.id, teardownStatus: "running" })
         .where(eq(environments.id, environment.id))
         .run();
-      markThreadDeleted(harness.db, harness.hub, { threadId: thread.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: thread.id,
+      });
       await (sweep === "startup"
         ? runThreadLifecycleSweep(harness.deps)
         : runPeriodicSweeps({

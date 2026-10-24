@@ -16,25 +16,43 @@ import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import { foreignProjectOwnedPathRefusal } from "../threads/workspace-path-claims.js";
 import {
   cancelPendingEnvironmentHook,
+  environmentHookOperationExists,
+  environmentTeardownHookId,
   runEnvironmentHook,
   ENVIRONMENT_HOOK_TIMEOUT_MS,
 } from "./environment-hooks.js";
 import { eq, and, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  closeEnvironmentRetention,
+  deleteEnvironmentRetentionIntents,
+  getProjectSourceByHost,
+  listOpenEnvironmentRetentionsForThread,
+  listOpenEnvironmentRetentionsForProvider,
+  markEnvironmentRetentionsUnresolved,
+  recordEnvironmentRetention,
   releaseFinishedEnvironmentPreparationOwners,
   environmentHasLiveThreads,
+  listUnreleasedEnvironmentThreadIds,
   environments,
+  listBranchHolderEnvironments,
+  listEnvironmentLiveThreadIds,
   environmentHookOperations,
   getEnvironment,
-  getHost,
   getThread,
   findProjectEnvironmentByHostPath,
   getPreparingEnvironment,
   claimEnvironmentPath,
+  claimEnvironmentTeardown,
+  failRunningEnvironmentTeardown,
   bindEnvironmentPath,
   listProviderLifecycleEnvironments,
+  releaseCancelledEnvironmentOwner,
+  releaseUnstartedEnvironmentTeardown,
+  retainRunningEnvironmentTeardown,
+  reviveFailedEnvironmentTeardown,
   updatePreparingEnvironment,
+  updateRunningEnvironmentTeardown,
   type DbConnection,
   type DbTransaction,
   type EnvironmentRow,
@@ -176,11 +194,25 @@ const createResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("failed"),
     message: z.string().min(1),
+    experimental_retained: z
+      .object({ path: z.string().min(1) })
+      .strict()
+      .nullable()
+      .optional(),
   }),
 ]);
 const removeResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("removed") }),
+  z.object({ status: z.literal("retained"), message: z.string().min(1) }),
   z.object({ status: z.literal("failed"), message: z.string().min(1) }),
+]);
+const retentionProofSchema = z.discriminatedUnion("absent", [
+  z.object({ absent: z.literal(true), proof: z.string().min(1) }),
+  z.object({ absent: z.literal(false), reason: z.string().min(1) }),
+]);
+const preflightRemoveResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("removable") }),
+  z.object({ status: z.literal("retained"), message: z.string().min(1) }),
 ]);
 const environmentOperations = new WeakMap<
   object,
@@ -325,6 +357,15 @@ function runTrackedOperation(args: {
   return operation;
 }
 
+const TEARDOWN_RETRY_BASE_MS = 60_000;
+const TEARDOWN_RETRY_MAX_MS = 60 * 60_000;
+
+export function teardownRetryDelayMs(attempt: number): number {
+  return Math.min(
+    TEARDOWN_RETRY_MAX_MS,
+    TEARDOWN_RETRY_BASE_MS * 2 ** Math.max(0, Math.min(attempt - 1, 20)),
+  );
+}
 const REMOVE_RETRY_MS = 60_000;
 const MAX_REMOVE_ATTEMPTS = 5;
 const PROVIDER_OWNER_MISMATCH_MESSAGE =
@@ -371,6 +412,78 @@ async function invokeRestore(
   return createResultSchema.parse(invocation.value);
 }
 
+function branchHolderBlockers(
+  deps: Deps,
+  holder: EnvironmentRow,
+  requesterThreadId: string,
+): string[] {
+  const live = listEnvironmentLiveThreadIds(deps.db, holder.id);
+  const blockers = live.filter((threadId) => threadId !== requesterThreadId);
+  if (
+    holder.ownerThreadId !== null &&
+    holder.ownerThreadId !== requesterThreadId
+  ) {
+    const owner = getThread(deps.db, holder.ownerThreadId);
+    if (
+      owner !== null &&
+      owner.deletedAt === null &&
+      (owner.archivedAt === null ||
+        owner.status === "active" ||
+        owner.status === "stopping")
+    )
+      blockers.push(owner.id);
+  }
+  return [...new Set(blockers)];
+}
+
+function branchHolderInUseMessage(
+  holder: EnvironmentRow,
+  branchName: string,
+  threadIds: string[],
+): string {
+  const plural = threadIds.length > 1;
+  return `Branch ${branchName} is still checked out at ${holder.path} for ${plural ? "threads" : "thread"} ${threadIds.join(", ")}; the ${plural ? "owners have" : "owner has"} to release that workspace before this can continue, so that work is not deleted`;
+}
+
+async function clearBranchHolders(
+  deps: Deps,
+  record: PluginEnvironmentProviderRecord,
+  args: {
+    hostId: string;
+    branchName: string | null;
+    requesterThreadId: string;
+    excludeEnvironmentIds: readonly string[];
+  },
+): Promise<string | null> {
+  if (args.branchName === null) return null;
+  const holders = listBranchHolderEnvironments(deps.db, {
+    hostId: args.hostId,
+    branchName: args.branchName,
+    environmentProviderId: record.provider.id,
+    excludeEnvironmentIds: args.excludeEnvironmentIds,
+  });
+  for (const holder of holders) {
+    const blockers = branchHolderBlockers(deps, holder, args.requesterThreadId);
+    if (blockers.length > 0)
+      return branchHolderInUseMessage(holder, args.branchName, blockers);
+    if (!requestEnvironmentRemoval(deps, holder.id)) {
+      const retry = branchHolderBlockers(deps, holder, args.requesterThreadId);
+      if (retry.length > 0)
+        return branchHolderInUseMessage(holder, args.branchName, retry);
+      return `Branch ${args.branchName} is still checked out at ${holder.path} by another workspace that is being used, so it was left alone`;
+    }
+    await sweepProviderEnvironment(deps, holder.id);
+    const after = getEnvironment(deps.db, holder.id);
+    if (
+      after !== null &&
+      after.status !== "destroyed" &&
+      after.teardownStatus !== "removed"
+    )
+      return `Branch ${args.branchName} is still checked out at ${holder.path} by another workspace that could not be removed: ${after.teardownMessage ?? "its cleanup did not finish"}`;
+  }
+  return null;
+}
+
 async function runCreate(
   deps: Deps,
   record: PluginEnvironmentProviderRecord,
@@ -414,36 +527,151 @@ async function runCreate(
           }) !== null
         )
           return false;
-        return claimEnvironmentPath(deps.db, provisioning, normalizedPath);
+        const claimed = claimEnvironmentPath(
+          deps.db,
+          provisioning,
+          normalizedPath,
+        );
+        if (claimed)
+          recordEnvironmentRetention(deps.db, {
+            environmentId: provisioning.id,
+            projectId: provisioning.projectId,
+            hostId: context.host.id,
+            ownerThreadId: context.thread.id,
+            providerId: record.provider.id,
+            originalPath: normalizedPath,
+            keptPath: normalizedPath,
+            state: "intent",
+            message:
+              "A create started at this path and has not reported a result.",
+          });
+        return claimed;
       },
       report: provisioningReporter(deps, provisioning),
       signal: signal,
     };
-    let result =
+    const providerCall = !(
       provisioning.providerOwnsPath && provisioning.path !== null
+    );
+    const earlierKept = providerCall
+      ? listOpenEnvironmentRetentionsForThread(deps.db, context.thread.id)
+          .filter(
+            (retention) =>
+              retention.environmentId !== provisioning.id &&
+              retention.keptPath !== null,
+          )
+      : [];
+    const keptRefusal =
+      earlierKept.length > 0
+        ? `An earlier attempt of this thread kept work at ${earlierKept
+            .map((retention) => retention.keptPath)
+            .join(", ")} that has not been released, so another attempt cannot start yet and nothing was created. Release or recover that work first.`
+        : null;
+    const branchRefusal = providerCall && keptRefusal === null
+      ? await clearBranchHolders(deps, record, {
+          hostId: context.host.id,
+          branchName:
+            previous?.status === "destroyed"
+              ? previous.branchName
+              : context.suggestedBranchName,
+          requesterThreadId: context.thread.id,
+          excludeEnvironmentIds:
+            previous === null
+              ? [provisioning.id]
+              : [provisioning.id, previous.id],
+        })
+      : null;
+    signal.throwIfAborted();
+    if (providerCall && branchRefusal === null && keptRefusal === null)
+      recordEnvironmentRetention(deps.db, {
+        environmentId: provisioning.id,
+        projectId: provisioning.projectId,
+        hostId: context.host.id,
+        ownerThreadId: context.thread.id,
+        providerId: record.provider.id,
+        originalPath: null,
+        keptPath: null,
+        state: "intent",
+        message:
+          "A create was dispatched to the provider and has not reported a result.",
+      });
+    let result: PluginEnvironmentProviderCreateResult =
+      keptRefusal !== null
         ? {
-            status: "created" as const,
-            path: provisioning.path,
-            ownsPath: true,
-            mergeBaseBranch: provisioning.mergeBaseBranch ?? undefined,
-            resource: provisioning.resource ?? undefined,
+            status: "failed",
+            message: keptRefusal,
+            experimental_retained: null,
           }
-        : previous?.status === "destroyed"
-          ? await invokeRestore(record, {
-              ...operation,
-              previous: {
-                environment: toEnvironmentResponse(deps.db, previous),
-                resource:
-                  previous.teardownStatus === "removed"
-                    ? null
-                    : previous.resource,
-              },
-            })
-          : await invokeCreate(record, {
-              ...operation,
-              suggestedBranchName: context.suggestedBranchName,
-            });
+        : branchRefusal !== null
+          ? {
+              status: "failed",
+              message: branchRefusal,
+              experimental_retained: null,
+            }
+        : provisioning.providerOwnsPath && provisioning.path !== null
+          ? {
+              status: "created" as const,
+              path: provisioning.path,
+              ownsPath: true,
+              mergeBaseBranch: provisioning.mergeBaseBranch ?? undefined,
+              resource: provisioning.resource ?? undefined,
+            }
+          : previous?.status === "destroyed"
+            ? await invokeRestore(record, {
+                ...operation,
+                previous: {
+                  environment: toEnvironmentResponse(deps.db, previous),
+                  resource:
+                    previous.teardownStatus === "removed"
+                      ? null
+                      : previous.resource,
+                },
+              })
+            : await invokeCreate(record, {
+                ...operation,
+                suggestedBranchName: context.suggestedBranchName,
+              });
+    if (result.status === "failed") {
+      const kept = result.experimental_retained;
+      if (kept === undefined) {
+        if (record.provider.experimental_proveRetentionAbsent === null) {
+          deps.logger.warn(
+            {
+              environmentId: provisioning.id,
+              providerId: record.provider.id,
+              pluginId: record.pluginId,
+            },
+            "A failed create did not say what it kept and the provider cannot prove absence, so it is treated as having kept nothing",
+          );
+          deleteEnvironmentRetentionIntents(deps.db, provisioning.id);
+        } else {
+          markEnvironmentRetentionsUnresolved(
+            deps.db,
+            provisioning.id,
+            `${result.message} The provider did not say whether anything was kept, so the workspace may still hold work.`,
+          );
+        }
+      } else if (kept === null) {
+        deleteEnvironmentRetentionIntents(deps.db, provisioning.id);
+      } else {
+        const keptPath = canonicalizeHostPath(kept.path);
+        recordEnvironmentRetention(deps.db, {
+          environmentId: provisioning.id,
+          projectId: provisioning.projectId,
+          hostId: context.host.id,
+          ownerThreadId: context.thread.id,
+          providerId: record.provider.id,
+          originalPath:
+            getEnvironment(deps.db, provisioning.id)?.claimPath ?? keptPath,
+          keptPath,
+          state: "retained",
+          message: result.message,
+        });
+        deleteEnvironmentRetentionIntents(deps.db, provisioning.id);
+      }
+    }
     if (result.status === "created") {
+      const bytesAt = result.path;
       let adoptedExistingEnvironment = false;
       let existingProviderOwnsLifecycle = false;
       try {
@@ -504,6 +732,18 @@ async function runCreate(
         );
         result = { ...result, path: producedPath };
       } catch (error) {
+        recordEnvironmentRetention(deps.db, {
+          environmentId: provisioning.id,
+          projectId: provisioning.projectId,
+          hostId: context.host.id,
+          ownerThreadId: context.thread.id,
+          providerId: record.provider.id,
+          originalPath:
+            getEnvironment(deps.db, provisioning.id)?.claimPath ?? bytesAt,
+          keptPath: canonicalizeHostPath(bytesAt),
+          state: "unresolved",
+          message: `The provider created ${bytesAt} but core could not bind it: ${errorMessage(error)}`,
+        });
         mutateProvisioning(
           deps,
           provisioning,
@@ -536,6 +776,7 @@ async function runCreate(
           }
         },
       );
+      deleteEnvironmentRetentionIntents(deps.db, provisioning.id);
       signal.throwIfAborted();
     }
     changed = mutateProvisioning(
@@ -559,6 +800,23 @@ async function runCreate(
       current.teardownStatus === "running"
     )
       return;
+    if (record.provider.experimental_proveRetentionAbsent === null) {
+      deps.logger.warn(
+        {
+          environmentId: provisioning.id,
+          providerId: record.provider.id,
+          pluginId: record.pluginId,
+        },
+        "A create threw and the provider cannot prove absence, so it is treated as having kept nothing",
+      );
+      deleteEnvironmentRetentionIntents(deps.db, provisioning.id);
+    } else {
+      markEnvironmentRetentionsUnresolved(
+        deps.db,
+        provisioning.id,
+        `The create did not report a result (${errorMessage(error)}), so the workspace may still hold work.`,
+      );
+    }
     changed = mutateProvisioning(deps, provisioning, ["creating"], (row) => {
       row.status = "error";
       row.statusMessage = `The "${record.provider.id}" environment provider (plugin "${record.pluginId}") failed: ${errorMessage(error)}`;
@@ -657,13 +915,10 @@ export function requestEnvironmentRemoval(
 ): boolean {
   const row = getEnvironment(deps.db, environmentId);
   if (row === null) return false;
-  const removingMachine = getHost(deps.db, row.hostId)?.phase === "removing";
-  if (!removingMachine && environmentHasLiveThreads(deps.db, environmentId))
-    return false;
+  if (environmentHasLiveThreads(deps.db, environmentId)) return false;
   if (row.ownerThreadId !== null && row.teardownStatus === null) {
     const owner = getThread(deps.db, row.ownerThreadId);
     if (
-      !removingMachine &&
       owner !== null &&
       owner.status === "starting" &&
       owner.archivedAt === null &&
@@ -697,18 +952,94 @@ export function requestEnvironmentRemoval(
   return true;
 }
 
+function recordTeardownFailed(
+  deps: Pick<Deps, "db" | "hub">,
+  target: { environmentId: string; attempt: number },
+  message: string,
+  options: { keepSnapshot?: boolean } = {},
+): boolean {
+  const exhausted =
+    (getEnvironment(deps.db, target.environmentId)?.teardownFailures ?? 0) +
+      1 >=
+    MAX_REMOVE_ATTEMPTS;
+  const written = failRunningEnvironmentTeardown(deps.db, {
+    ...target,
+    message: exhausted
+      ? `Needs recovery: ${message} Inspect the workspace, then run bb environment cleanup ${target.environmentId} --recover.`
+      : message,
+    retireAt: exhausted
+      ? null
+      : Date.now() + teardownRetryDelayMs(target.attempt),
+    keepSnapshot: options.keepSnapshot === true,
+  });
+  if (written)
+    deps.hub.notifyEnvironment(target.environmentId, ["metadata-changed"]);
+  return written;
+}
+
+function recordTeardownRetained(
+  deps: Pick<Deps, "db" | "hub">,
+  target: { environmentId: string; attempt: number },
+  args: { message: string; resumedInFlight: boolean },
+): void {
+  const current = getEnvironment(deps.db, target.environmentId);
+  if (
+    current === null ||
+    current.teardownStatus !== "running" ||
+    current.teardownAttempt !== target.attempt
+  )
+    return;
+  const failed = (message: string) =>
+    void recordTeardownFailed(deps, target, message);
+  if (
+    environmentHookOperationExists(deps.db, environmentTeardownHookId(current))
+  )
+    return failed(
+      `${args.message} The teardown script had already started, so the earlier state was not restored.`,
+    );
+  if (current.teardownPriorStatus === null)
+    return failed(
+      `${args.message} The state before removal began is unknown, so it was not restored.`,
+    );
+  if (
+    args.resumedInFlight &&
+    (!current.providerOwnsPath || current.hostId === null)
+  )
+    return failed(
+      `${args.message} Removal resumed after an interruption and this provider does not own the path or record a teardown-script row, so the earlier state was not restored.`,
+    );
+  if (args.resumedInFlight && current.path === null)
+    return failed(
+      `${args.message} Removal resumed after an interruption and no record shows which workspaces were already removed, so the earlier state was not restored.`,
+    );
+  if (
+    current.ownerThreadId !== null &&
+    !(current.teardownPriorStatus === "ready" && current.path !== null)
+  )
+    return failed(args.message);
+  if (
+    retainRunningEnvironmentTeardown(deps.db, {
+      ...target,
+      message: args.message,
+      retireAt: Date.now() + teardownRetryDelayMs(target.attempt),
+    })
+  )
+    deps.hub.notifyEnvironment(target.environmentId, ["metadata-changed"]);
+}
+
 async function runRemove(
   deps: Deps,
   environmentId: string,
   attempt: number,
-  resumeOnly: boolean,
+  resumedInFlight: boolean,
   signal: AbortSignal,
 ): Promise<void> {
   const row = getEnvironment(deps.db, environmentId);
   if (
     row === null ||
     row.environmentProviderId === null ||
-    row.teardownStatus !== "running"
+    row.teardownStatus !== "running" ||
+    row.teardownAttempt !== attempt
   )
     return;
   const record = getEnvironmentProvider(row.environmentProviderId);
@@ -719,16 +1050,70 @@ async function runRemove(
     throw new Error(
       `Environment provider "${row.environmentProviderId}" is unavailable or belongs to another plugin`,
     );
+  const target = { environmentId, attempt };
+  let dispatched = resumedInFlight;
   await withHostCleanup(deps, row.hostId, async () => {
     try {
+      const removeContext = () => ({
+        environment:
+          row.ownerThreadId !== null
+            ? null
+            : toEnvironmentResponse(deps.db, row),
+        hostId: row.hostId,
+        path: row.path,
+        pathKey: row.environmentProviderInstanceKey ?? row.id,
+        resource: row.resource,
+        attempt,
+        report: emptyReporter(),
+        signal,
+      });
+      if (row.providerOwnsPath && row.path !== null) {
+        const unreleased = listUnreleasedEnvironmentThreadIds(
+          deps.db,
+          environmentId,
+        );
+        if (unreleased.length > 0) {
+          recordTeardownRetained(deps, target, {
+            message: `Kept ${row.path}: no archive or delete through bb has released it for ${unreleased.length === 1 ? "thread" : "threads"} ${unreleased.join(", ")}. Archive or delete ${unreleased.length === 1 ? "that thread" : "those threads"}, or remove the workspace yourself.`,
+            resumedInFlight,
+          });
+          return;
+        }
+      }
+      if (record.provider.experimental_preflightRemove !== null) {
+        const inspection = await invokeEnvironmentProvider(
+          record,
+          "environment remove preflight",
+          () =>
+            Promise.resolve(
+              record.provider.experimental_preflightRemove?.(
+                removeContext(),
+              ) ?? {
+                status: "removable",
+              },
+            ),
+        );
+        if (!inspection.ok) throw new Error(inspection.error);
+        if (inspection.value === null)
+          throw new Error("The environment provider became unavailable.");
+        const preflight = preflightRemoveResultSchema.parse(inspection.value);
+        if (preflight.status === "retained") {
+          recordTeardownRetained(deps, target, {
+            message: preflight.message,
+            resumedInFlight,
+          });
+          return;
+        }
+      }
       if (row.providerOwnsPath && row.hostId !== null && row.path !== null) {
+        dispatched = true;
         await runEnvironmentHook(deps, {
           projectId: row.projectId,
-          id: `environment:${environmentId}:${row.environmentProviderInstanceKey}:teardown`,
+          id: environmentTeardownHookId(row),
           hostId: row.hostId,
           path: row.path,
           kind: "teardown",
-          resumeOnly,
+          resumeOnly: false,
           report: {
             step: () => undefined,
             log: (text) =>
@@ -740,45 +1125,62 @@ async function runRemove(
           signal,
         });
       }
+      const beforeRemove = getEnvironment(deps.db, environmentId);
+      if (
+        beforeRemove === null ||
+        beforeRemove.teardownStatus !== "running" ||
+        beforeRemove.teardownAttempt !== attempt
+      )
+        return;
+      if (environmentHasLiveThreads(deps.db, environmentId)) {
+        recordTeardownRetained(deps, target, {
+          message:
+            "A thread started using this workspace while it was being removed, so it was kept.",
+          resumedInFlight,
+        });
+        return;
+      }
+      dispatched = true;
       const invocation = await invokeEnvironmentProvider(
         record,
         "environment remove",
-        () =>
-          record.provider.remove({
-            environment:
-              row.ownerThreadId !== null
-                ? null
-                : toEnvironmentResponse(deps.db, row),
-            hostId: row.hostId,
-            path: row.path,
-            pathKey: row.environmentProviderInstanceKey ?? row.id,
-            resource: row.resource,
-            attempt,
-            report: emptyReporter(),
-            signal,
-          }),
+        () => record.provider.remove(removeContext()),
       );
       if (!invocation.ok) throw new Error(invocation.error);
       if (invocation.value === null)
         throw new Error("The environment provider became unavailable.");
       const result = removeResultSchema.parse(invocation.value);
       if (result.status === "failed") {
-        writeEnvironmentTeardownFailure(deps, environmentId, result.message);
+        recordTeardownFailed(deps, target, result.message);
         return;
       }
-      deps.db.transaction(() => {
-        writeEnvironment(deps, environmentId, {
-          teardownStatus: "removed",
-          teardownMessage: null,
-          claimPath: null,
-          resource: null,
-          retireAt: null,
+      if (result.status === "retained") {
+        recordTeardownRetained(deps, target, {
+          message: result.message,
+          resumedInFlight,
         });
+        return;
+      }
+      const removed = deps.db.transaction(() => {
+        if (
+          !updateRunningEnvironmentTeardown(deps.db, target, {
+            teardownStatus: "removed",
+            teardownMessage: null,
+            teardownPriorStatus: null,
+            claimPath: null,
+            resource: null,
+            retireAt: null,
+          })
+        )
+          return false;
+        deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
         applyLoggedEnvironmentLifecycleEvent(deps, {
           environmentId,
           event: { type: "destroy.recorded" },
         });
+        return true;
       });
+      if (!removed) return;
       emitPluginEnvironmentRemoved({
         environmentId,
         removedAt: Date.now(),
@@ -787,7 +1189,9 @@ async function runRemove(
         providerOwnedPath: row.providerOwnsPath,
       });
     } catch (error) {
-      writeEnvironmentTeardownFailure(deps, environmentId, errorMessage(error));
+      recordTeardownFailed(deps, target, errorMessage(error), {
+        keepSnapshot: !dispatched,
+      });
     }
   });
 }
@@ -799,7 +1203,7 @@ function writeEnvironmentTeardownFailure(
 ): void {
   const row = getEnvironment(deps.db, environmentId);
   if (row === null) return;
-  const exhausted = row.teardownAttempt >= MAX_REMOVE_ATTEMPTS;
+  const exhausted = row.teardownFailures >= MAX_REMOVE_ATTEMPTS;
   const written = deps.db
     .update(environments)
     .set({
@@ -857,6 +1261,44 @@ async function removeEnvironment(
   await operation.done;
 }
 
+export function settleUnclaimedEnvironmentTeardown(
+  deps: Pick<Deps, "db" | "hub">,
+  row: EnvironmentRow,
+): void {
+  if (row.teardownStatus !== "running") return;
+  const current = getEnvironment(deps.db, row.id);
+  if (
+    current === null ||
+    current.teardownAttempt !== row.teardownAttempt ||
+    current.teardownStatus !== "running" ||
+    current.status !== row.status ||
+    current.teardownMessage !== row.teardownMessage
+  )
+    return;
+  if (isResumedTeardown(row)) {
+    recordTeardownRetained(
+      deps,
+      { environmentId: row.id, attempt: row.teardownAttempt },
+      {
+        message:
+          "A thread is using this workspace, so its removal was cancelled.",
+        resumedInFlight: true,
+      },
+    );
+    return;
+  }
+  if (releaseUnstartedEnvironmentTeardown(deps.db, row))
+    deps.hub.notifyEnvironment(row.id, ["metadata-changed"]);
+}
+
+function isResumedTeardown(row: EnvironmentRow): boolean {
+  return (
+    row.teardownStatus === "running" &&
+    row.teardownAttempt > 0 &&
+    row.teardownMessage === null
+  );
+}
+
 async function sweepProviderEnvironmentInSlot(
   deps: Deps,
   environmentId: string,
@@ -870,23 +1312,22 @@ async function sweepProviderEnvironmentInSlot(
   )
     return;
   const environmentProviderId = row.environmentProviderId;
-  const machineRemoving = getHost(deps.db, row.hostId)?.phase === "removing";
-  const shared =
-    !machineRemoving && environmentHasLiveThreads(deps.db, environmentId);
+  const shared = environmentHasLiveThreads(deps.db, environmentId);
   if (
-    !machineRemoving &&
     row.ownerThreadId !== null &&
     row.teardownStatus !== null &&
     (shared || (row.status === "ready" && row.path !== null))
   ) {
-    const released = {
+    if (!releaseCancelledEnvironmentOwner(deps.db, row)) return;
+    deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
+    row = {
+      ...row,
       ownerThreadId: null,
       claimPath: null,
       retireAt: null,
       teardownStatus: null,
+      teardownPriorStatus: null,
     };
-    writeEnvironment(deps, environmentId, released);
-    row = { ...row, ...released };
   }
   const cancelled = row.ownerThreadId !== null && row.teardownStatus !== null;
   if (!cancelled && row.ownerThreadId !== null) return;
@@ -894,7 +1335,12 @@ async function sweepProviderEnvironmentInSlot(
   if (record === undefined) return;
   const now = Date.now();
   if (shared) {
-    if (row.retireAt !== null && row.teardownStatus === null)
+    if (
+      row.teardownStatus === "failed" &&
+      reviveFailedEnvironmentTeardown(deps.db, environmentId)
+    )
+      deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
+    else if (row.retireAt !== null && row.teardownStatus === null)
       writeEnvironment(deps, environmentId, { retireAt: null });
     return;
   }
@@ -906,7 +1352,10 @@ async function sweepProviderEnvironmentInSlot(
       });
     return;
   }
-  if (row.teardownAttempt >= MAX_REMOVE_ATTEMPTS) {
+  if (
+    row.teardownStatus === "failed" &&
+    row.teardownFailures >= MAX_REMOVE_ATTEMPTS
+  ) {
     if (
       row.retireAt !== null ||
       !row.teardownMessage?.startsWith("Needs recovery:")
@@ -942,16 +1391,20 @@ async function sweepProviderEnvironmentInSlot(
     row.retireAt > now
   )
     return;
-  const attempt =
-    row.teardownStatus === "running" && row.teardownAttempt > 0
-      ? row.teardownAttempt
-      : row.teardownAttempt + 1;
-  writeEnvironment(deps, environmentId, {
-    status: row.status === "destroyed" ? "destroyed" : "error",
-    teardownStatus: "running",
-    teardownAttempt: attempt,
-    teardownMessage: null,
+  const resumedInFlight = isResumedTeardown(row);
+  const attempt = resumedInFlight
+    ? row.teardownAttempt
+    : row.teardownAttempt + 1;
+  const claimed = claimEnvironmentTeardown(deps.db, {
+    row,
+    attempt,
+    resumed: resumedInFlight,
   });
+  if (!claimed) {
+    settleUnclaimedEnvironmentTeardown(deps, row);
+    return;
+  }
+  deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
   try {
     const setupOperation = deps.db
       .select({ finishedAt: environmentHookOperations.finishedAt })
@@ -983,15 +1436,14 @@ async function sweepProviderEnvironmentInSlot(
         hostId: row.hostId,
       });
     }
-    await runRemove(
-      deps,
-      environmentId,
-      attempt,
-      row.teardownAttempt > 0,
-      signal,
-    );
+    await runRemove(deps, environmentId, attempt, resumedInFlight, signal);
   } catch (error) {
-    writeEnvironmentTeardownFailure(deps, environmentId, errorMessage(error));
+    recordTeardownFailed(
+      deps,
+      { environmentId, attempt },
+      errorMessage(error),
+      { keepSnapshot: true },
+    );
   }
 }
 
@@ -1005,7 +1457,10 @@ export function cleanupEnvironment(deps: Deps, environmentId: string): boolean {
   )
     return false;
   if (row.teardownStatus === "removed") return true;
-  if (row.teardownAttempt >= MAX_REMOVE_ATTEMPTS)
+  if (
+    row.teardownStatus === "failed" &&
+    row.teardownFailures >= MAX_REMOVE_ATTEMPTS
+  )
     throw new ApiError(
       409,
       "invalid_request",
@@ -1019,6 +1474,30 @@ export function cleanupEnvironment(deps: Deps, environmentId: string): boolean {
     );
   });
   return true;
+}
+
+export const RECOVER_RESPONSE_WAIT_MS = 5_000;
+
+export async function recoverEnvironmentCleanupWithinBudget(
+  deps: Deps,
+  environmentId: string,
+): Promise<"done" | "checking"> {
+  const finished = recoverEnvironmentCleanup(deps, environmentId);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<"checking">((resolve) => {
+    timer = setTimeout(() => resolve("checking"), RECOVER_RESPONSE_WAIT_MS);
+  });
+  try {
+    return await Promise.race([finished.then(() => "done" as const), budget]);
+  } finally {
+    clearTimeout(timer);
+    void finished.catch((error) => {
+      deps.logger.warn(
+        { environmentId, error: errorMessage(error) },
+        "Environment recovery will retry",
+      );
+    });
+  }
 }
 
 export async function recoverEnvironmentCleanup(
@@ -1127,6 +1606,7 @@ export async function recoverEnvironmentCleanup(
             }
           writeEnvironment(deps, environmentId, {
             teardownAttempt: 0,
+            teardownFailures: 0,
             retireAt: Date.now(),
             teardownMessage: null,
           });
@@ -1180,7 +1660,84 @@ export async function sweepProviderLifecycles(deps: Deps): Promise<void> {
     );
   }
   await Promise.all(pending);
+  await reconcileEnvironmentRetentions(deps);
   releaseFinishedEnvironmentPreparationOwners(deps.db);
+}
+
+const INTENT_RECONCILE_MIN_AGE_MS = 5 * 60_000;
+
+export async function reconcileEnvironmentRetentions(
+  deps: Pick<Deps, "db" | "logger">,
+  options: { isOperationRunning?: (environmentId: string) => boolean } = {},
+): Promise<void> {
+  const operations = perDbRegistry(environmentOperations, deps.db);
+  const isOperationRunning =
+    options.isOperationRunning ??
+    ((environmentId: string) => operations.has(environmentId));
+  for (const record of listEnvironmentProviders()) {
+    const prove = record.provider.experimental_proveRetentionAbsent;
+    if (prove === null) continue;
+    for (const row of listOpenEnvironmentRetentionsForProvider(
+      deps.db,
+      record.provider.id,
+    )) {
+      if (isOperationRunning(row.environmentId)) continue;
+      if (
+        row.state === "intent" &&
+        Date.now() - row.updatedAt < INTENT_RECONCILE_MIN_AGE_MS
+      )
+        continue;
+      try {
+        const source = getProjectSourceByHost(
+          deps.db,
+          row.projectId,
+          row.hostId,
+        );
+        const environment =
+          row.keptPath === null ? getEnvironment(deps.db, row.environmentId) : null;
+        const invocation = await invokeEnvironmentProvider(
+          record,
+          "retention proof",
+          () =>
+            Promise.resolve(
+              prove({
+                hostId: row.hostId,
+                path: row.keptPath,
+                pathKey:
+                  environment?.environmentProviderInstanceKey ??
+                  (row.keptPath === null ? row.environmentId : null),
+                branchName: environment?.branchName ?? null,
+                sourcePath:
+                  source !== null && source.type === "local_path"
+                    ? source.path
+                    : null,
+                threadId: row.ownerThreadId,
+                signal: AbortSignal.timeout(30_000),
+              }),
+            ),
+        );
+        if (!invocation.ok || invocation.value === null) continue;
+        const proof = retentionProofSchema.parse(invocation.value);
+        if (!proof.absent) continue;
+        if (isOperationRunning(row.environmentId)) continue;
+        const closure = closeEnvironmentRetention(deps.db, {
+          id: row.id,
+          proof: `${proof.proof} (host ${row.hostId}, checked ${new Date().toISOString()})`,
+          expectedUpdatedAt: row.updatedAt,
+        });
+        if (closure === "stale")
+          deps.logger.info(
+            { retentionId: row.id },
+            "Retention changed after it was read, so the proof of absence was not applied",
+          );
+      } catch (error) {
+        deps.logger.warn(
+          { retentionId: row.id, error: errorMessage(error) },
+          "Retention proof failed; the retention stays open",
+        );
+      }
+    }
+  }
 }
 
 export function providerEnvironmentHasPendingWork(

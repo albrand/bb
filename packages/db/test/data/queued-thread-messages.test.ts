@@ -24,7 +24,8 @@ import {
 } from "../../src/data/queued-thread-messages.js";
 import { createEnvironment } from "../../src/data/environments.js";
 import { createProject } from "../../src/data/projects.js";
-import { archiveThread, createThread } from "../../src/data/threads.js";
+import { archiveThread, createThread} from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { environments, queuedThreadMessages } from "../../src/schema.js";
 import { createMigratedConnection } from "../../src/testing.js";
@@ -151,7 +152,7 @@ describe("queued thread messages", () => {
 
     const archived = idleThread();
     queueTurnEndMessage(db, archived, defaultInput);
-    archiveThread(db, noopNotifier, archived);
+    archiveThread(db, noopNotifier, archived, SYSTEM_RELEASE_ACTOR);
 
     const active = createThread(db, noopNotifier, {
       projectId: project.id,

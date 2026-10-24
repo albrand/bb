@@ -6,6 +6,7 @@ import {
   environments,
   getEnvironment,
   getHost,
+  recordEnvironmentRetention,
   updateHost,
 } from "@bb/db";
 import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
@@ -196,6 +197,43 @@ it("finishes removing a machine whose workspace cleanup cannot reach it", async 
     const attempts = workspaceRemove.mock.calls.length;
     await sweepProviderMachine(harness.deps, target.host.id);
     expect(workspaceRemove.mock.calls.length).toBe(attempts);
+  }));
+
+it("refuses to skip cleanup, and forgets nothing, while the machine holds work a failed create kept", async () =>
+  withTestHarness(async (harness) => {
+    const { target, environment, machineRemove } =
+      seedMachineWithWorkspace(harness);
+    await strandRemoval(harness, target.host.id, target.session.id);
+    recordEnvironmentRetention(harness.db, {
+      environmentId: "env_failed_create",
+      projectId: environment.projectId,
+      hostId: target.host.id,
+      ownerThreadId: null,
+      providerId: "gone-worktree",
+      originalPath: "/tmp/kept-attempt",
+      keptPath: "/tmp/kept-attempt",
+      state: "retained",
+      message: "setup failed; the workspace stays in place",
+    });
+    const removals = captureEnvironmentRemovals();
+
+    await expect(
+      forceMachineRemoval(harness.deps, target.host.id),
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { code: "machine_holds_kept_work" },
+    });
+
+    expect(getEnvironment(harness.db, environment.id)).toMatchObject({
+      status: "error",
+      path: "/tmp/gone-worktree",
+    });
+    expect(getHost(harness.db, target.host.id)).toMatchObject({
+      phase: "removing",
+      destroyedAt: null,
+    });
+    expect(machineRemove).not.toHaveBeenCalled();
+    expect(removals).toEqual([]);
   }));
 
 it("refuses to skip cleanup before teardown has failed", async () =>

@@ -1,4 +1,9 @@
-import { archiveThread, getThread, markThreadDeleted } from "@bb/db";
+import {
+  archiveThread,
+  getThread,
+  markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import { threadSchema } from "@bb/domain";
 import { describe, expect, it } from "vitest";
 import {
@@ -30,9 +35,15 @@ describe("public lifecycle ownership admission", () => {
         });
         const owner = seedThread(harness.deps, { projectId: ownerProject.id });
         if (state === "archived")
-          archiveThread(harness.db, harness.deps.hub, owner.id);
+          archiveThread(
+            harness.db,
+            harness.deps.hub,
+            owner.id,
+            SYSTEM_RELEASE_ACTOR,
+          );
         if (state === "deleted")
           markThreadDeleted(harness.db, harness.deps.hub, {
+            release: SYSTEM_RELEASE_ACTOR,
             threadId: owner.id,
           });
         const response = await harness.app.request("/api/v1/threads", {

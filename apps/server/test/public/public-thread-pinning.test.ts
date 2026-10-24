@@ -1,4 +1,9 @@
-import { getThread, markThreadDeleted, pinThread } from "@bb/db";
+import {
+  getThread,
+  markThreadDeleted,
+  pinThread,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import { threadSchema } from "@bb/domain";
 import { apiErrorSchema, threadListResponseSchema } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
@@ -105,6 +110,7 @@ describe("public thread pinning", () => {
 
       expect(
         markThreadDeleted(harness.db, harness.hub, {
+          release: SYSTEM_RELEASE_ACTOR,
           threadId: thread.id,
         }),
       ).not.toBeNull();

@@ -1,5 +1,10 @@
 import { and, eq } from "drizzle-orm";
-import { markThreadDeleted, threadPluginMetadata, threads } from "@bb/db";
+import {
+  markThreadDeleted,
+  threadPluginMetadata,
+  threads,
+  SYSTEM_RELEASE_ACTOR,
+} from "@bb/db";
 import { jsonObjectSchema, PLUGIN_METADATA_MAX_BYTES } from "@bb/domain";
 import { pluginThreadMetadataListResponseSchema } from "@bb/server-contract";
 import { describe, expect, it, vi } from "vitest";
@@ -275,7 +280,10 @@ describe("public thread plugin metadata routes", () => {
         .set({ archivedAt: 1 })
         .where(eq(threads.id, archived!.id))
         .run();
-      markThreadDeleted(harness.db, harness.hub, { threadId: deleted!.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: deleted!.id,
+      });
       harness.db
         .update(threadPluginMetadata)
         .set({ metadataJson: "not json" })
@@ -333,7 +341,10 @@ describe("public thread plugin metadata routes", () => {
     await withTestHarness(async (harness) => {
       const thread = seedMetadataThread(harness);
       expect(
-        markThreadDeleted(harness.db, harness.hub, { threadId: thread.id }),
+        markThreadDeleted(harness.db, harness.hub, {
+          release: SYSTEM_RELEASE_ACTOR,
+          threadId: thread.id,
+        }),
       ).not.toBeNull();
       const notFound = {
         status: 404,

@@ -30,6 +30,7 @@ import {
   applyThreadLifecycleEvent,
   requireThreadLifecycleEventApplied,
 } from "../../src/data/threads.js";
+import { SYSTEM_RELEASE_ACTOR } from "../../src/data/environment-release-consents.js";
 import { createPendingInteraction } from "../../src/data/pending-interactions.js";
 import {
   createThreadSection,
@@ -110,7 +111,7 @@ describe("threads", () => {
       });
       expect(hasActiveThreadAttention(db)).toBe(true);
 
-      archiveThread(db, noopNotifier, thread.id);
+      archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
       expect(hasActiveThreadAttention(db)).toBe(false);
 
       const sideChat = createThread(db, noopNotifier, {
@@ -163,7 +164,7 @@ describe("threads", () => {
       providerId: "codex",
       title: "Deleted title",
     });
-    markThreadDeleted(db, noopNotifier, { threadId: deleted.id });
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deleted.id });
 
     expect(
       listThreadMentionRowsByIds(db, [
@@ -531,9 +532,9 @@ describe("threads", () => {
       providerId: "codex",
       sectionId: workSection.id,
     });
-    archiveThread(db, noopNotifier, archivedInWork.id);
-    archiveThread(db, noopNotifier, otherArchivedInWork.id);
-    archiveThread(db, noopNotifier, archivedInPlay.id);
+    archiveThread(db, noopNotifier, archivedInWork.id, SYSTEM_RELEASE_ACTOR);
+    archiveThread(db, noopNotifier, otherArchivedInWork.id, SYSTEM_RELEASE_ACTOR);
+    archiveThread(db, noopNotifier, archivedInPlay.id, SYSTEM_RELEASE_ACTOR);
 
     const workArchived = listThreadsWithPendingInteractionState(db, {
       projectId: project.id,
@@ -565,8 +566,8 @@ describe("threads", () => {
       providerId: "codex",
       sectionId: section.id,
     });
-    archiveThread(db, noopNotifier, looseArchived.id);
-    archiveThread(db, noopNotifier, sectioned.id);
+    archiveThread(db, noopNotifier, looseArchived.id, SYSTEM_RELEASE_ACTOR);
+    archiveThread(db, noopNotifier, sectioned.id, SYSTEM_RELEASE_ACTOR);
 
     const unsectionedArchived = listThreadsWithPendingInteractionState(db, {
       projectId: project.id,
@@ -618,7 +619,7 @@ describe("threads", () => {
       projectId: project.id,
       providerId: "codex",
     });
-    archiveThread(db, noopNotifier, child.id);
+    archiveThread(db, noopNotifier, child.id, SYSTEM_RELEASE_ACTOR);
 
     expect(
       listThreadsWithPendingInteractionState(db, {
@@ -648,8 +649,8 @@ describe("threads", () => {
         providerId: "codex",
       }),
     );
-    archiveThread(db, noopNotifier, archived!.id);
-    markThreadDeleted(db, noopNotifier, { threadId: deleted!.id });
+    archiveThread(db, noopNotifier, archived!.id, SYSTEM_RELEASE_ACTOR);
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deleted!.id });
     const threadIds = [kept!.id, archived!.id, deleted!.id, "thr_unknown"];
 
     expect(
@@ -713,7 +714,7 @@ describe("threads", () => {
       created.push(thread);
     }
     for (const thread of created) {
-      archiveThread(db, noopNotifier, thread.id);
+      archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
 
@@ -752,7 +753,7 @@ describe("threads", () => {
       parentThreadId: parent.id,
     });
 
-    archiveThread(db, noopNotifier, archivedChild.id);
+    archiveThread(db, noopNotifier, archivedChild.id, SYSTEM_RELEASE_ACTOR);
 
     expect(
       countNonDeletedAssignedChildThreads(db, {
@@ -773,7 +774,7 @@ describe("threads", () => {
       parentThreadId: parent.id,
     });
 
-    markThreadDeleted(db, noopNotifier, { threadId: deletedChild.id });
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deletedChild.id });
 
     expect(
       countNonDeletedAssignedChildThreads(db, {
@@ -1197,7 +1198,7 @@ describe("threads", () => {
       providerId: "codex",
     });
 
-    const deleted = markThreadDeleted(db, noopNotifier, {
+    const deleted = markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR,
       threadId: thread.id,
     });
 
@@ -1214,7 +1215,7 @@ describe("threads", () => {
       projectId: project.id,
       providerId: "codex",
     });
-    archiveThread(db, noopNotifier, thread.id);
+    archiveThread(db, noopNotifier, thread.id, SYSTEM_RELEASE_ACTOR);
 
     const unarchived = unarchiveThread(db, noopNotifier, thread.id);
     expect(unarchived?.archivedAt).toBeNull();
@@ -1249,8 +1250,8 @@ describe("threads", () => {
       status: "idle",
     });
 
-    archiveThread(db, noopNotifier, archivedThread.id);
-    markThreadDeleted(db, noopNotifier, { threadId: deletedThread.id });
+    archiveThread(db, noopNotifier, archivedThread.id, SYSTEM_RELEASE_ACTOR);
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deletedThread.id });
 
     expect(
       countLiveThreadsInEnvironment(db, { environmentId: environment.id }),
@@ -1390,8 +1391,8 @@ describe("threads", () => {
       environmentId: environment.id,
       providerId: "codex",
     });
-    archiveThread(db, noopNotifier, archivedThread.id);
-    markThreadDeleted(db, noopNotifier, { threadId: deletedThread.id });
+    archiveThread(db, noopNotifier, archivedThread.id, SYSTEM_RELEASE_ACTOR);
+    markThreadDeleted(db, noopNotifier, { release: SYSTEM_RELEASE_ACTOR, threadId: deletedThread.id });
 
     expect([...listHostThreadIds(db, { hostId: host.id })].sort()).toEqual(
       [

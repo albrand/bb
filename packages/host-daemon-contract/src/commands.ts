@@ -70,10 +70,12 @@ export {
   HOST_DAEMON_CONNECT_NEXT_PROTOCOL_VERSION,
   HOST_DAEMON_DESKTOP_BROKER_PROOF_PROTOCOL_VERSION,
   HOST_DAEMON_ENVIRONMENT_CLEANUP_INSPECTION_PROTOCOL_VERSION,
+  HOST_DAEMON_MOVE_FILE_PROTOCOL_VERSION,
   HOST_DAEMON_PROTOCOL_VERSION,
   hostDaemonSupportsConnectNext,
   hostDaemonSupportsDesktopBrokerProof,
   hostDaemonSupportsEnvironmentCleanupInspection,
+  hostDaemonSupportsMoveFile,
   isCompatibleHostDaemonProtocolVersion,
 } from "./protocol.js";
 export {
@@ -573,9 +575,9 @@ const hostMkdirCommandSchema = z
   })
   .strict();
 
-const hostMovePathCommandSchema = z
+const hostMoveFileCommandSchema = z
   .object({
-    type: z.literal("host.move_path"),
+    type: z.literal("host.move_file"),
     sourcePath: z.string().min(1),
     destinationPath: z.string().min(1),
     rootPath: z.string().min(1).optional(),
@@ -1755,9 +1757,9 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
-  "host.move_path": defineHostDaemonCommandDescriptor({
-    type: "host.move_path",
-    schema: hostMovePathCommandSchema,
+  "host.move_file": defineHostDaemonCommandDescriptor({
+    type: "host.move_file",
+    schema: hostMoveFileCommandSchema,
     resultSchema: hostPathMutationResultSchema,
     transport: "onlineRpc",
     retryable: false,

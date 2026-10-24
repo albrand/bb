@@ -40,5 +40,48 @@ it("keeps retirement and path-key defaults and overrides", () => {
       ...declaration,
       policy: { retireGraceMs: null, pathKeys: "per-attempt" },
     }).policy,
-  ).toEqual({ retireGraceMs: null, pathKeys: "per-attempt" });
+  ).toEqual({
+    retireGraceMs: null,
+    pathKeys: "per-attempt",
+  });
+});
+
+it("normalizes an optional remove preflight and rejects a non-function", () => {
+  expect(
+    validatePluginEnvironmentProviderDeclaration(declaration)
+      .experimental_preflightRemove,
+  ).toBeNull();
+  const preflight = () => ({ status: "removable" as const });
+  expect(
+    validatePluginEnvironmentProviderDeclaration({
+      ...declaration,
+      experimental_preflightRemove: preflight,
+    }).experimental_preflightRemove,
+  ).toBe(preflight);
+  expect(() =>
+    validatePluginEnvironmentProviderDeclaration({
+      ...declaration,
+      experimental_preflightRemove: "yes" as never,
+    }),
+  ).toThrow();
+});
+
+it("normalizes an optional retention proof and rejects a non-function", () => {
+  expect(
+    validatePluginEnvironmentProviderDeclaration(declaration)
+      .experimental_proveRetentionAbsent,
+  ).toBeNull();
+  const prove = () => ({ absent: false as const, reason: "present" });
+  expect(
+    validatePluginEnvironmentProviderDeclaration({
+      ...declaration,
+      experimental_proveRetentionAbsent: prove,
+    }).experimental_proveRetentionAbsent,
+  ).toBe(prove);
+  expect(() =>
+    validatePluginEnvironmentProviderDeclaration({
+      ...declaration,
+      experimental_proveRetentionAbsent: "yes" as never,
+    }),
+  ).toThrow();
 });

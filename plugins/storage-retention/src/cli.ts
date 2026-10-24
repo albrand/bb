@@ -258,13 +258,13 @@ export function registerCli(
         }),
         "remove-dev-instances": cliCommand({
           summary:
-            "Remove ~/.bb-dev instances whose source checkout no longer exists, stopping servers still running from them",
+            "Remove ~/.bb-dev instances whose source checkout no longer exists; never stops a process and keeps any instance that is running or contains a git worktree",
           options: {
             machine: MACHINE,
             instance: {
               type: "string",
               description:
-                "Remove only this ~/.bb-dev entry, stopping its dev server first if it is running (default: every instance with a missing checkout)",
+                "Remove only this ~/.bb-dev entry unless it is running or contains a git worktree (default: every instance with a missing checkout)",
             },
             yes: YES,
           },
@@ -272,13 +272,14 @@ export function registerCli(
             output(async () => {
               if (!input.options.yes)
                 throw new Error(
-                  "Pass --yes to stop their servers and permanently remove development instance data.",
+                  "Pass --yes to permanently remove development instance data.",
                 );
               return storage.removeDevInstances({
                 hostId: required(input.options.machine, "machine"),
-                ...(input.options.instance === undefined
-                  ? { names: null }
-                  : { names: [input.options.instance], stopRunning: true }),
+                names:
+                  input.options.instance === undefined
+                    ? null
+                    : [input.options.instance],
               });
             }),
         }),

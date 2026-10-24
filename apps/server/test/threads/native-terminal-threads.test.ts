@@ -23,6 +23,7 @@ import {
   unarchiveThread,
   upsertProjectExecutionDefaults,
   type DbConnection,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { eq } from "drizzle-orm";
@@ -949,7 +950,12 @@ describe("native terminal threads", () => {
     if (terminalId === null || terminalId === undefined) {
       throw new Error("native thread has no terminal");
     }
-    archiveThread(fixture.harness.db, noopNotifier, thread.id);
+    archiveThread(
+      fixture.harness.db,
+      noopNotifier,
+      thread.id,
+      SYSTEM_RELEASE_ACTOR,
+    );
     fixture.harness.db
       .update(terminalSessions)
       .set({ status: "exited", closeReason: "thread-archived" })
@@ -1007,7 +1013,12 @@ describe("native terminal threads", () => {
     if (record.nativeSessionId === null) {
       throw new Error("native thread has no provider session");
     }
-    archiveThread(fixture.harness.db, noopNotifier, thread.id);
+    archiveThread(
+      fixture.harness.db,
+      noopNotifier,
+      thread.id,
+      SYSTEM_RELEASE_ACTOR,
+    );
     fixture.harness.db
       .update(terminalSessions)
       .set({ status: "exited", closeReason: "thread-archived" })
@@ -1269,7 +1280,12 @@ describe("native terminal threads", () => {
     if (record.nativeSessionId === null) {
       throw new Error("native thread has no provider session");
     }
-    archiveThread(fixture.harness.db, noopNotifier, thread.id);
+    archiveThread(
+      fixture.harness.db,
+      noopNotifier,
+      thread.id,
+      SYSTEM_RELEASE_ACTOR,
+    );
     fixture.harness.db
       .update(terminalSessions)
       .set({ status: "exited", closeReason: "thread-archived" })

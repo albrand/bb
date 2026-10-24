@@ -5,6 +5,7 @@ import {
   getQueuedThreadMessage,
   listEvents,
   setQueuedThreadMessageFailureReason,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import type { PluginHookName } from "@get-bb/plugin-sdk";
 import { describe, expect, it } from "vitest";
@@ -284,7 +285,12 @@ describe("recordQueuedMessageDrainFailure", () => {
         hostConnected: true,
         hostName: "M4",
       });
-      archiveThread(harness.db, harness.deps.hub, thread.id);
+      archiveThread(
+        harness.db,
+        harness.deps.hub,
+        thread.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       recordQueuedMessageDrainFailure(harness.deps, {
         error: new ApiError(409, "thread_not_writable", "Thread is archived"),

@@ -261,6 +261,7 @@ import type {
   TerminalResizeRequest,
   ThreadArchiveAllResponse,
   ThreadChildSummaryResponse,
+  ThreadStorageDeletionResponse,
   ThreadSpendSummaryResponse,
   ThreadEventWaitQuery,
   ThreadEventsQuery,
@@ -1246,7 +1247,7 @@ export const publicApiRoutes = {
       request: optionalQueryRequest<PathId, EnvironmentCleanupQuery>(
         environmentCleanupQuerySchema,
       ),
-      response: jsonResponse<{ ok: true }>(),
+      response: jsonResponse<{ ok: true; checking?: true }>(),
     }),
     list: defineRoute({
       path: "/environments",
@@ -1592,6 +1593,12 @@ export const publicApiRoutes = {
         deleteThreadRequestSchema,
       ),
       response: jsonResponse<{ ok: true }>(),
+    }),
+    storageDeletion: defineRoute({
+      path: "/threads/:id/storage-deletion",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ThreadStorageDeletionResponse>(),
     }),
     childSummary: defineRoute({
       path: "/threads/:id/child-summary",

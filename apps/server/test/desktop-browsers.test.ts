@@ -3,6 +3,7 @@ import {
   getStoredThreadTabs,
   hostDaemonSessions,
   markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import {
   desktopBrowserLeaseSchema,
@@ -670,6 +671,7 @@ describe("desktop browser public API", () => {
     await withBrowserTest(async (test, harness) => {
       const lease = await test.acquire();
       markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: test.scope.threadId,
       });
       const before = test.responder.requests.length;
@@ -868,7 +870,10 @@ describe("desktop browser public API", () => {
         projectId: test.project.id,
         environmentId: test.environment.id,
       });
-      markThreadDeleted(harness.db, harness.hub, { threadId: deleted.id });
+      markThreadDeleted(harness.db, harness.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
+        threadId: deleted.id,
+      });
       for (const threadId of [
         "plugin-panel:cloud-sandbox:cloud-machines:pane-1",
         "thr_missing",

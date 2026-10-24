@@ -16,14 +16,14 @@ keeps conversations and uploaded attachments and requires confirmation. The
 matching CLI command is `bb storage clear-archived-files --machine HOST_ID --yes`.
 
 The Clean up section offers Remove instances for `~/.bb-dev` entries whose
-source checkout no longer exists. The host re-verifies each checkout is missing,
-stops processes whose working directory is inside it, then removes the entry. The
-matching CLI command is `bb storage remove-dev-instances --machine HOST_ID --yes`.
+source checkout no longer exists. The host re-verifies each checkout is missing
+and removes the entry. It never stops a process. The matching CLI command is
+`bb storage remove-dev-instances --machine HOST_ID --yes`.
 Every development row's trash button removes that single entry immediately
 (`--instance NAME`), like the thread rows' trash button clears a thread's files.
-If the instance's dev server is running (fresh daemon lock), the row asks
-"Stop and remove?" first; confirming stops that instance's launcher and
-removes it. The CLI's `--yes` covers that confirmation.
+An entry whose dev server is running (fresh daemon lock), that contains a git
+checkout or worktree, or whose checkout path a live environment still covers is
+kept, and the page and CLI say why.
 
 Large-file cleanup from the page starts a background job so slow folder walks
 can finish after the remote HTTP request returns. Each machine reports running,

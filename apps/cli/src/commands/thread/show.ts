@@ -46,6 +46,10 @@ import {
   printEnvironmentInfo,
 } from "../environment-helpers.js";
 import { fetchThreadPendingTodos, printPendingTodos } from "./pending-todos.js";
+import {
+  describeThreadStorageDeletion,
+  readThreadStorageDeletion,
+} from "./storage-deletion.js";
 
 interface ThreadShowCommandOptions {
   self?: boolean;
@@ -431,7 +435,20 @@ export function registerShowCommand(
       action(async (id: string | undefined, opts: ThreadShowCommandOptions) => {
         const threadId = requireThreadIdOrSelf(id, opts);
         const sdk = createCliBbSdk(getUrl());
-        const thread = await sdk.threads.get({ threadId });
+        let thread: Thread;
+        try {
+          thread = await sdk.threads.get({ threadId });
+        } catch (error) {
+          const storage =
+            error instanceof BbHttpError && error.status === 404
+              ? await readThreadStorageDeletion(sdk, threadId)
+              : null;
+          if (storage === null || storage.state === "removed") throw error;
+          if (outputJson(opts, { id: threadId, deleted: true, storage }))
+            return;
+          console.log(describeThreadStorageDeletion(threadId, storage));
+          return;
+        }
         const lastError =
           thread.status === "error"
             ? await fetchLastThreadErrorMessage(sdk, threadId)

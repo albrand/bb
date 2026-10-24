@@ -97,10 +97,18 @@ export function seedHost(
 
 export function seedHostSession(
   deps: Pick<AppDeps, "db" | "hub">,
-  args: { id?: string; name?: string; platform?: HostPlatform } = {},
+  args: {
+    id?: string;
+    name?: string;
+    platform?: HostPlatform;
+    protocolVersion?: number;
+  } = {},
 ) {
   const host = seedHost(deps, args);
-  const session = seedSession(deps, host.id, { platform: args.platform });
+  const session = seedSession(deps, host.id, {
+    platform: args.platform,
+    protocolVersion: args.protocolVersion,
+  });
   return { host, session };
 }
 
@@ -114,14 +122,18 @@ export function seedPrimaryHost(
 export function seedSession(
   deps: Pick<AppDeps, "db" | "hub">,
   hostId: string,
-  options: { instanceId?: string; platform?: HostPlatform } = {},
+  options: {
+    instanceId?: string;
+    platform?: HostPlatform;
+    protocolVersion?: number;
+  } = {},
 ) {
   const session = openSession(deps.db, {
     hostId,
     instanceId: options.instanceId ?? "instance-1",
     hostName: "Test Host",
     dataDir: `/tmp/bb-host-data/${hostId}`,
-    protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+    protocolVersion: options.protocolVersion ?? HOST_DAEMON_PROTOCOL_VERSION,
     heartbeatIntervalMs: 5_000,
     leaseTimeoutMs: 30_000,
   });

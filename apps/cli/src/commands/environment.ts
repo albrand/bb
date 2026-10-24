@@ -391,7 +391,11 @@ export function registerEnvironmentCommands(
             recover: opts.recover,
           });
           if (!outputJson(opts, result))
-            console.log("Environment cleanup requested.");
+            console.log(
+              result.checking === true
+                ? `Environment cleanup requested; bb is still checking it in the background. Run bb environment show ${id} to follow it.`
+                : "Environment cleanup requested.",
+            );
         },
       ),
     );
@@ -539,6 +543,8 @@ export function registerEnvironmentCommands(
           console.log(
             `  Retire at: ${new Date(env.lifecycle.retireAt).toISOString()}`,
           );
+        if (env.lifecycle.message !== undefined)
+          console.log(`  Kept: ${env.lifecycle.message}`);
         if (env.lifecycle.teardown !== null) {
           console.log(
             `  Teardown: ${env.lifecycle.teardown.status} (attempt ${env.lifecycle.teardown.attempt})`,

@@ -4,6 +4,7 @@ import {
   createThreadSection,
   getThread,
   markThreadDeleted,
+  SYSTEM_RELEASE_ACTOR,
 } from "@bb/db";
 import { threadSchema } from "@bb/domain";
 import {
@@ -72,6 +73,7 @@ describe("public thread parenting routes", () => {
 
         if (mode === "archive") {
           archiveThreadAndReleaseChildren(harness.deps, {
+            release: SYSTEM_RELEASE_ACTOR,
             threadId: parent.id,
           });
         } else {
@@ -379,12 +381,18 @@ describe("public thread parenting routes", () => {
         parentThreadId: parentThread.id,
         projectId: project.id,
       });
-      archiveThread(harness.deps.db, harness.deps.hub, archivedChild.id);
+      archiveThread(
+        harness.deps.db,
+        harness.deps.hub,
+        archivedChild.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
       const deletedChild = seedThread(harness.deps, {
         parentThreadId: parentThread.id,
         projectId: project.id,
       });
       markThreadDeleted(harness.deps.db, harness.deps.hub, {
+        release: SYSTEM_RELEASE_ACTOR,
         threadId: deletedChild.id,
       });
       seedThread(harness.deps, {
@@ -429,7 +437,12 @@ describe("public thread parenting routes", () => {
         projectId: project.id,
         parentThreadId: child.id,
       });
-      archiveThread(harness.db, harness.deps.hub, child.id);
+      archiveThread(
+        harness.db,
+        harness.deps.hub,
+        child.id,
+        SYSTEM_RELEASE_ACTOR,
+      );
 
       const response = await harness.app.request(
         `/api/v1/threads/${parent.id}/child-summary`,
@@ -622,7 +635,12 @@ describe("public thread parenting routes", () => {
           parentThreadId: hiddenFork.id,
         });
         if (archivedIntermediary) {
-          archiveThread(harness.db, harness.deps.hub, grandchild.id);
+          archiveThread(
+            harness.db,
+            harness.deps.hub,
+            grandchild.id,
+            SYSTEM_RELEASE_ACTOR,
+          );
         }
         const unrelated = seedThread(harness.deps, defaults);
         const visibleFork = seedThread(harness.deps, {
