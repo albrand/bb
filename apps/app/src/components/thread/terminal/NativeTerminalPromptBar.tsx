@@ -12,6 +12,7 @@ import { Button } from "@bb/shared-ui/button";
 import { Icon } from "@bb/shared-ui/icon";
 import { useUploadPromptAttachment } from "@/hooks/mutations/project-mutations";
 import { useSendNativeTerminalMessage } from "@/hooks/queries/native-terminal-queries";
+import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 
 interface NativeTerminalPromptBarProps {
   projectId: string;
@@ -109,6 +110,12 @@ export function NativeTerminalPromptBar({
     if (!canSend) return;
     const sentAttachments = attachments;
     const sentText = text;
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId,
+      threadId,
+    });
+    const sentDraft = draft.getCurrent();
     const input: PromptInput[] = [
       ...sentAttachments.map(attachmentPromptInput),
       ...(message.length === 0
@@ -119,6 +126,7 @@ export function NativeTerminalPromptBar({
       { input, threadId },
       {
         onSuccess: () => {
+          draft.clearIfCurrentMatches(sentDraft);
           setText((current) => (current === sentText ? "" : current));
           setAttachments((current) =>
             current.filter(

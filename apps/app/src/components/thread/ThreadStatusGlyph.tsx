@@ -31,27 +31,21 @@ const WAITING_ICONS = {
 
 function ThreadDraftIndicator({
   hideIdleLabel = false,
-  isWorking,
   size,
 }: {
   hideIdleLabel?: boolean;
-  isWorking: boolean;
   size: "default" | "compact";
 }) {
-  const label = getThreadListIndicatorLabel(
-    isWorking ? "working-draft" : "draft",
-  );
+  const label = getThreadListIndicatorLabel("draft");
   return (
     <Icon
       name="Edit"
       className={cn(
         "pointer-events-none shrink-0",
         size === "compact" ? "size-3.5" : SIDEBAR_STATUS_ICON_CLASS,
-        isWorking
-          ? ["animate-shine-icon", SIDEBAR_WORKING_STATUS_COLOR_CLASS]
-          : "text-muted-foreground",
+        "text-muted-foreground",
       )}
-      {...(!isWorking && hideIdleLabel
+      {...(hideIdleLabel
         ? { "aria-hidden": true }
         : { "aria-label": label ?? undefined })}
     />
@@ -173,6 +167,7 @@ export function ThreadStatusGlyph({
         />
       );
     case "working":
+    case "working-draft":
       return (
         <Icon
           name="Loading"
@@ -229,8 +224,6 @@ export function ThreadStatusGlyph({
           aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
         />
       );
-    case "working-draft":
-      return <ThreadDraftIndicator isWorking size={size} />;
     case "workflow":
     case "background-agent":
     case "background-command":
@@ -261,11 +254,7 @@ export function ThreadStatusGlyph({
       );
     case "draft":
       return (
-        <ThreadDraftIndicator
-          hideIdleLabel={hideIdleDraftLabel}
-          isWorking={false}
-          size={size}
-        />
+        <ThreadDraftIndicator hideIdleLabel={hideIdleDraftLabel} size={size} />
       );
     case "unread-success":
       return (

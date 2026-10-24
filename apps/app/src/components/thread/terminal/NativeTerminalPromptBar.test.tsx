@@ -8,7 +8,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { serializePromptDraftStorage } from "@bb/client-core";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import { NativeTerminalPromptBar } from "./NativeTerminalPromptBar";
 
 const send = vi.hoisted(() => vi.fn());
@@ -74,6 +76,114 @@ describe("NativeTerminalPromptBar", () => {
       input: [{ type: "text", text: "fix the build", mentions: [] }],
       mode: "auto",
     });
+  });
+
+  it("clears the thread's saved composer draft after a native send succeeds", async () => {
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-n",
+      threadId: "thr-n",
+    });
+    draft.setDraft({
+      text: "saved composer draft",
+      mentions: [],
+      attachments: [],
+    });
+    expect(window.localStorage.getItem(draft.storageKey)).not.toBeNull();
+    const { input, sendButton } = renderBar();
+    fireEvent.change(input, { target: { value: "native message" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(draft.getCurrent().text).toBe(""));
+    expect(window.localStorage.getItem(draft.storageKey)).toBeNull();
+    expect(input.value).toBe("");
+  });
+
+  it("keeps a replacement thread draft written while a send is pending", async () => {
+    let resolveSend: (() => void) | undefined;
+    send.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-n",
+      threadId: "thr-n",
+    });
+    draft.setDraft({ text: "sent draft", mentions: [], attachments: [] });
+    const { input, sendButton } = renderBar();
+    fireEvent.change(input, { target: { value: "sent draft" } });
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+
+    const replacementDraft = {
+      text: "replacement draft",
+      mentions: [],
+      attachments: [],
+    };
+    const replacementStorageValue =
+      serializePromptDraftStorage(replacementDraft);
+    if (replacementStorageValue === null) {
+      throw new Error("replacement draft should serialize");
+    }
+    window.localStorage.setItem(draft.storageKey, replacementStorageValue);
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: draft.storageKey,
+        newValue: replacementStorageValue,
+      }),
+    );
+    resolveSend?.();
+
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(draft.getCurrent().text).toBe("replacement draft");
+  });
+
+  it("keeps the saved draft when a native send fails", async () => {
+    send.mockRejectedValue(new Error("offline"));
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-n",
+      threadId: "thr-n",
+    });
+    draft.setDraft({ text: "retry this draft", mentions: [], attachments: [] });
+    const { input, sendButton } = renderBar();
+    fireEvent.change(input, { target: { value: "retry this draft" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(sendButton).toHaveProperty("disabled", false));
+    expect(draft.getCurrent().text).toBe("retry this draft");
+    expect(input.value).toBe("retry this draft");
+  });
+
+  it("only clears the sent thread draft and preserves other thread and project drafts", async () => {
+    const sentDraft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-n",
+      threadId: "thr-n",
+    });
+    const otherThreadDraft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-n",
+      threadId: "thr-other",
+    });
+    const otherProjectDraft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj-other",
+      threadId: "thr-n",
+    });
+    sentDraft.setDraft({ text: "sent draft", mentions: [], attachments: [] });
+    otherThreadDraft.setDraft({ text: "thread B", mentions: [], attachments: [] });
+    otherProjectDraft.setDraft({ text: "other project", mentions: [], attachments: [] });
+    const { input, sendButton } = renderBar();
+    fireEvent.change(input, { target: { value: "sent draft" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(sentDraft.getCurrent().text).toBe(""));
+    expect(otherThreadDraft.getCurrent().text).toBe("thread B");
+    expect(otherProjectDraft.getCurrent().text).toBe("other project");
   });
 
   it("keeps Shift+Enter and IME composition as editing keys", () => {

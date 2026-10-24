@@ -7,17 +7,20 @@ import type { NativeTerminalThread } from "@bb/server-contract";
 import type { BbNavigate, PluginThreadActionTarget } from "@get-bb/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { nativeTerminalThreadQueryKey } from "@/hooks/queries/query-keys";
+import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import {
   nativeTerminalModeItem,
   useNativeTerminalModeData,
 } from "./native-terminal-mode-action";
 
-const { get, providerOf } = vi.hoisted(() => ({
+const { get, providerOf, switchMode, entries } = vi.hoisted(() => ({
   get: vi.fn<(args: { threadId: string }) => Promise<unknown>>(),
+  switchMode: vi.fn(),
   providerOf: new Map<string, string>(),
+  entries: new Map<string, { providerId: string; projectId: string }>(),
 }));
 
-vi.mock("@/lib/sdk", () => ({ sdk: { nativeTerminals: { get } } }));
+vi.mock("@/lib/sdk", () => ({ sdk: { nativeTerminals: { get, switchMode } } }));
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemProviders: () => ({
     data: [
@@ -28,7 +31,7 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 vi.mock("@/lib/sidebar-thread-entries", () => ({
-  useSidebarThreadEntries: () => new Map(),
+  useSidebarThreadEntries: () => entries,
 }));
 vi.mock("@/lib/cached-thread", () => ({
   lookupCachedThread: (_client: unknown, threadId: string) => {
@@ -65,9 +68,48 @@ afterEach(() => {
   cleanup();
   get.mockReset();
   providerOf.clear();
+  entries.clear();
+  switchMode.mockReset();
 });
 
 describe("thread menu mode for threads the app has not loaded", () => {
+  it("clears a saved composer draft after switching a thread to native terminal", async () => {
+    const threadId = "thr_convert";
+    const projectId = "prj_convert";
+    providerOf.set(threadId, "claude-code");
+    entries.set(threadId, { providerId: "claude-code", projectId });
+    get.mockResolvedValue(null);
+    switchMode.mockResolvedValue(view(threadId, true));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useNativeTerminalModeData({ threadIds: [threadId] }),
+      { wrapper },
+    );
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId,
+      threadId,
+    });
+    draft.setDraft({
+      text: "saved composer draft",
+      mentions: [],
+      attachments: [],
+    });
+    expect(window.localStorage.getItem(draft.storageKey)).not.toBeNull();
+
+    await waitFor(() => expect(result.current.modeOf(threadId)).toBe("chat"));
+    await result.current.switchMode(threadId, "terminal", projectId);
+
+    expect(draft.getCurrent().text).toBe("");
+    expect(window.localStorage.getItem(draft.storageKey)).toBeNull();
+    expect(switchMode).toHaveBeenCalledWith({ threadId, mode: "terminal" });
+  });
+
   it("reads each native thread's mode before offering a switch, and offers none until it knows", async () => {
     providerOf.set("thr_chat", "claude-code");
     providerOf.set("thr_terminal", "codex");

@@ -144,6 +144,16 @@ describe("thread-activity", () => {
       ).toBe(kind);
     });
 
+    it("keeps needs-input ahead of a concurrent draft", () => {
+      expect(
+        resolveThreadListIndicator({
+          ...idleIndicatorState,
+          hasPendingInteraction: true,
+          hasUnsubmittedDraft: true,
+        }),
+      ).toBe("needs-input");
+    });
+
     it.each([
       "hasUnreadSuccess",
       "isWorkflowActive",
