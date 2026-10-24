@@ -5,7 +5,10 @@ import {
   type JsonValue,
   type ThreadListEntry,
 } from "@bb/domain";
-import { isNativeActivityUnconfirmed } from "@bb/client-core";
+import {
+  isNativeActivityUnconfirmed,
+  nativeActivityEvidenceKind,
+} from "@bb/client-core";
 import { action } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import { resolveExplicitIdFlag } from "../../context-env.js";
@@ -193,7 +196,11 @@ function formatThreadListStatus(
     thread.runtime !== undefined &&
     isNativeActivityUnconfirmed(thread.runtime)
   ) {
-    flags.push("activity unconfirmed");
+    flags.push(
+      nativeActivityEvidenceKind(thread.runtime) === "tool-call"
+        ? "agent tool call seen"
+        : "activity not reported",
+    );
   }
   if (thread.archivedAt !== null) {
     flags.push("archived");
@@ -297,5 +304,8 @@ export function formatThreadListIndicator(
   }
   if (wokeThreadIds.has(thread.id)) return "Woke";
   if (thread.listIndicator === "done-unread") return "Done";
+  if (thread.listIndicator === "activity-unreported") {
+    return "Activity not reported";
+  }
   return "-";
 }

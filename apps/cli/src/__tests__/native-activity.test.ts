@@ -3,6 +3,7 @@ import {
   appendFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -23,6 +24,7 @@ import {
   nativeActivityHookSettings,
   NativeActivityTracker,
 } from "../native-activity.js";
+import { HookSpoolReader } from "../native-hook-spool.js";
 
 const CLAUDE_ACTIVITY: ProviderNativeTerminalActivity =
   providerNativeTerminalActivitySchema.parse({
@@ -117,14 +119,15 @@ describe("native terminal activity", () => {
     ).toThrow();
   });
 
-  it("installs hooks that append each event's input to the events file", () => {
+  it("installs hooks that publish each event's input as its own numbered record, in order, and leave nothing else behind", () => {
     const hooks = {
       ...CLAUDE_ACTIVITY.hooks!,
       idle: [],
       pending: ["Stop"],
     };
-    const eventsFile = path.join(tempDir(), "it's events.jsonl");
-    const settings = JSON.parse(nativeActivityHookSettings(hooks, eventsFile));
+    const spool = path.join(tempDir(), "it's spool");
+    mkdirSync(spool);
+    const settings = JSON.parse(nativeActivityHookSettings(hooks, spool));
     const home = tempDir();
     mkdirSync(path.join(home, ".claude"));
     const userSettings = path.join(home, ".claude", "settings.json");
@@ -150,10 +153,16 @@ describe("native terminal activity", () => {
       expect(output.toString()).toBe("");
     }
     expect(readFileSync(userSettings, "utf8")).toBe(existing);
-    const tail = new JsonlTail(0);
-    const signals = tail
-      .readRecords(eventsFile)
-      .map((record) => classifyHookRecord(hooks, record));
+    expect(readdirSync(spool).sort()).toEqual([
+      ".hint",
+      "000000000001",
+      "000000000002",
+      "000000000003",
+      "000000000004",
+    ]);
+    const signals = new HookSpoolReader(spool)
+      .read()
+      .records.map((record) => classifyHookRecord(hooks, record));
     expect(signals).toEqual([
       { state: "working", prompt: "fix the build" },
       { state: null, prompt: null },

@@ -749,6 +749,7 @@
         "$TURBO_ROOT$/examples/plugins/echo-provider/*.ts",
         "$TURBO_ROOT$/examples/plugins/echo-provider/package.json",
         "$TURBO_ROOT$/examples/plugins/echo-provider/src/**",
+        "$TURBO_ROOT$/apps/cli/src/**",
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },

@@ -64,6 +64,7 @@ describe("resolveNativeTerminalSession", () => {
       resolveNativeTerminalState({
         session: resolved,
         threadIsProvisioning: false,
+        threadIsRunning: false,
       }),
     ).toEqual({ kind: "ended", exitCode: null });
   });
@@ -92,6 +93,7 @@ describe("resolveNativeTerminalSession", () => {
       resolveNativeTerminalState({
         session: resolved,
         threadIsProvisioning: false,
+        threadIsRunning: false,
       }),
     ).toEqual({ kind: "ended", exitCode: 2 });
   });
@@ -118,7 +120,43 @@ describe("resolveNativeTerminalSession", () => {
           viewUpdatedAt: 10,
         }),
         threadIsProvisioning: true,
+        threadIsRunning: false,
       }),
     ).toEqual({ kind: "preparing" });
+  });
+
+  it("shows a neutral reconnecting state, not an ended session, while a daemon-disconnected terminal awaits its reattach", () => {
+    const superseded = session({
+      status: "exited",
+      closeReason: "daemon-disconnect",
+    });
+    expect(
+      resolveNativeTerminalState({
+        session: superseded,
+        threadIsProvisioning: false,
+        threadIsRunning: true,
+      }),
+    ).toEqual({ kind: "reconnecting" });
+    expect(
+      resolveNativeTerminalState({
+        session: superseded,
+        threadIsProvisioning: false,
+        threadIsRunning: false,
+      }),
+    ).toEqual({ kind: "ended", exitCode: null });
+  });
+
+  it("still reports a process exit as an ended session while the thread is running", () => {
+    expect(
+      resolveNativeTerminalState({
+        session: session({
+          status: "exited",
+          closeReason: "process-exit",
+          exitCode: 1,
+        }),
+        threadIsProvisioning: false,
+        threadIsRunning: true,
+      }),
+    ).toEqual({ kind: "ended", exitCode: 1 });
   });
 });

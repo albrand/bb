@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isRunningThreadRuntimeDisplayStatus } from "@bb/client-core";
 import { Button } from "@bb/shared-ui/button";
 import { useMediaQuery } from "@bb/shared-ui/hooks/use-media-query";
 import type { NativeTerminalThread } from "@bb/server-contract";
@@ -12,8 +13,9 @@ import {
 import { useThreadPendingInteractions } from "@/hooks/queries/thread-queries";
 import { useThreadTerminals } from "@/hooks/queries/thread-terminal-queries";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
+import { NativeActivityNotice } from "./NativeActivityNotice";
 import { NativeTerminalPromptBar } from "./NativeTerminalPromptBar";
-import { useNativeActivityUnconfirmed } from "@/hooks/useNativeActivityUnconfirmed";
+import { useNativeActivityNotice } from "@/hooks/useNativeActivityUnconfirmed";
 import {
   NativeTerminalWaitingBanner,
   nativeTerminalWaitingPrompts,
@@ -40,7 +42,7 @@ export function NativeThreadTerminalMain({
   threadIsProvisioning,
   view,
 }: NativeThreadTerminalMainProps) {
-  const activityUnconfirmed = useNativeActivityUnconfirmed(runtime);
+  const activityNotice = useNativeActivityNotice(runtime);
   const terminalsQuery = useThreadTerminals(threadId);
   const interactionsQuery = useThreadPendingInteractions(threadId);
   const nativeQuery = useNativeTerminalThread(threadId);
@@ -51,8 +53,15 @@ export function NativeThreadTerminalMain({
     view,
     viewUpdatedAt: nativeQuery.dataUpdatedAt,
   });
-  const state = resolveNativeTerminalState({ session, threadIsProvisioning });
+  const state = resolveNativeTerminalState({
+    session,
+    threadIsProvisioning,
+    threadIsRunning: isRunningThreadRuntimeDisplayStatus(runtime.displayStatus),
+  });
   const providerLabel = view.displayName;
+  const waitingPrompts = nativeTerminalWaitingPrompts(
+    interactionsQuery.data ?? [],
+  );
   const paneIsFocused = useOptionalPaneContext()?.isFocused ?? true;
   const isTouchDevice = useMediaQuery("(pointer: coarse)");
   const { refetch } = nativeQuery;
@@ -71,14 +80,15 @@ export function NativeThreadTerminalMain({
         data-no-sidebar-swipe=""
       >
         <NativeTerminalWaitingBanner
-          prompts={nativeTerminalWaitingPrompts(interactionsQuery.data ?? [])}
+          prompts={waitingPrompts}
           providerLabel={providerLabel}
         />
-        {activityUnconfirmed ? (
-          <p className="px-3 py-1 text-xs text-muted-foreground" role="status">
-            Activity unconfirmed — No recent report from this native session
-          </p>
-        ) : null}
+        <NativeActivityNotice
+          hostId={view.terminal?.hostId ?? null}
+          notice={activityNotice}
+          pendingPromptCount={waitingPrompts.length}
+          threadId={threadId}
+        />
         <LazyThreadTerminalPanel
           autoFocus={paneIsFocused && !isTouchDevice}
           isPanelOpen
@@ -100,13 +110,15 @@ export function NativeThreadTerminalMain({
     );
   }
 
-  if (state.kind === "preparing") {
+  if (state.kind === "preparing" || state.kind === "reconnecting") {
     return (
       <div
         className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground"
         data-native-terminal-thread={view.providerId}
       >
-        Preparing the workspace for {providerLabel}…
+        {state.kind === "preparing"
+          ? `Preparing the workspace for ${providerLabel}…`
+          : `Reconnecting to ${providerLabel}…`}
       </div>
     );
   }

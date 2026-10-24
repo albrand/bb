@@ -932,19 +932,48 @@ tool-identifying field, and tool ids to skip because the transcript already
 reports them) mark a CLI blocked on a question or permission prompt; the
 question fields require host daemon protocol 238. The wrapper reports
 working, waiting (with the open question ids and texts), idle and the first
-new prompt through `sdk.nativeTerminals.reportActivity`; a waiting report
+new prompt through `sdk.nativeTerminals.reportActivity` (the optional `closes` lists
+the question ids a report closes: omitted keeps closing everything the report
+does not list, an empty list closes none, a populated list closes exactly the
+named questions that are still open; the optional `confirms: false` makes the
+server clear the activity evidence instead of stamping it when the report
+closed an open question, so the thread shows Activity not reported; the holder
+sends `closes` on every report, gives each permission prompt its own
+id (tool name, a per-process random nonce and an occurrence number), uses `confirms: false` only when an open question was dropped
+from its holding bound and then never restores Working from a close, and on a
+400 naming the fields retries the report once without exactly those fields;
+each hook event is published as its own whole record by the generated hook command (temp file, then an exclusive `ln` under the next sequence number in a per-launch directory) and the reader consumes the records strictly in order, treating an unreadable record, a dead temp file or a gap that persists 10 seconds as lost evidence (a persistent gap is reserved with an exclusive create and then skipped so later questions still reach the server; it picks the first of the system temp directory, `XDG_RUNTIME_DIR` and a private directory under the bb home (network file systems last) that supports hard links, then a private append file whose appenders are serialized by a pid-naming `ln -s` lock (verified after creation) or a `mkdir` lock with a pid file (accepted only when the symlink names the hook's own pid), which only the reader breaks, and only for a dead pid or after 10 minutes; a waiter polls until a 20 second wall-clock deadline and then publishes its record as a late file that the reader counts as lost evidence and applies only if it opens a question (a hook that cannot write it leaves a `.lost` marker; a line incomplete for 10 seconds, a dead hook's marker and a broken lock are counted), with no capture at all withholds every Working report and heartbeat; it withholds Working and heartbeats rather than assume no question is pending); the server ends the questions of the previous binding when it binds a new
+terminal and records a durable tombstone for every question a report closes by
+name that had no stored row (at most 8 per report), so the existing
+already-handled rule refuses a delayed registration of it; open finding (not accepted), Claude Code only: the
+holder cannot match a completion hook to its permission prompt exactly because
+`PermissionRequest` has no `tool_use_id`, so it closes the oldest open prompt of
+that tool, which can remove Needs input while the CLI is still waiting); a waiting report
 registers one pending interaction per open question (so the sidebar and
 favicon show needs-input exactly as for a chat thread, and the thread view
 shows a banner above the terminal), a later report clears the ones no longer
 open, and answering them through the bridge is refused with 409 because the
-answer belongs in the terminal. The server moves
+answer belongs in the terminal. `transcript.continuation` (a record match and
+the field naming the next session id) declares the provider's own record that a
+CLI session continues in another one (Claude's `continued-in` record after a
+compaction). The wrapper follows a hook from another session only when a record
+in the bound transcript's last 64 KiB matches and names exactly that id, the id
+was not left before, its own transcript exists, and fewer than 256 moves were followed; it then moves the thread's
+binding with `sdk.nativeTerminals.recordSession({ replacesNativeSessionId })`,
+which the server accepts only for the current live credential and when the
+replaced id is still the stored one. A move the server cannot take yet (401,
+408, 429, 5xx, a terminal that is not live, a network failure) is retried on each
+heartbeat tick and credential refresh; any other refusal or unexpected failure
+(an unparsable response, an unexpected throw, a TypeError that is not a fetch transport failure) is permanent and stops
+the wrapper from confirming activity, so the thread shows Activity not reported. Until the move is recorded the wrapper holds the new session's records (at most 64), sends no heartbeat and publishes nothing for it; it replays them once after the move is recorded and drops them after a permanent refusal. The server moves
 the thread between idle and active and titles an untitled thread from the
 prompt. Validated at registration by
 `providerNativeTerminalSchema` in `@bb/domain`: bare executable name, at most
 16 arguments per list, only the documented tokens (none in `launchArgs`), relative patterns without
 dot segments. Core callers: `apps/server/src/services/threads/native-terminal-threads.ts`
 (provider lookup, terminal command, launch spec), `apps/cli/src/native-harness.ts`
-(argv and session discovery) and the new-thread composer's native terminal
+(argv and session discovery), `apps/cli/src/native-activity-reader.ts`
+(`transcript.continuation` session rotation and the follow-after-bind holding) and the new-thread composer's native terminal
 toggle. First-party declarations: `provider-claude-code` (`assigned`) and
 `provider-codex` (`discovered`).
 
@@ -991,7 +1020,7 @@ reach a native CLI through this declaration; and check that a host-specific
 session root (a moved config directory) is the env override's job rather
 than the declaration's. For `activity`, confirm that hook events plus
 transcript record matches describe a third CLI's turns, and decide whether a
-CLI that offers neither should report activity from screen state instead.
+CLI that offers neither should report activity from screen state instead. For `transcript.continuation`, audit the 64 KiB tail window, the 256-move cap and the compare-and-swap move against a provider whose continuation record is written outside that tail or whose next session id is not the id its hooks report, and confirm that holding the new session's records (at most 64) until the move is recorded still covers a provider whose hooks carry no session id field.
 
 ## `PluginProviderDeclaration.experimental_nativeCommandRoots`
 
@@ -2691,9 +2720,31 @@ doc covers three September 2026 additions:
   indicators. Freshness expires locally after 90 seconds without a newer
   holder report. A receipt proves only that the bound holder reported activity;
   it does not establish model or tool progress or task completion. Older holders
-  cannot confirm this receipt and may display activity as unconfirmed. Older
+  cannot confirm this receipt and may show Activity not reported. Older
   apps may still display Working, and new apps paired with older servers retain
-  their previous display because the diagnostic is absent.
+  their previous display because the diagnostic is absent. The diagnostic's
+  `evidenceKind` separates a holder report (`holder-report`, the only kind that
+  confirms activity) from an authenticated agent tool call bound to the
+  thread's current terminal and provider session (`tool-call`, carried with
+  `lastToolCallAt`) and from `unknown`. A tool call proves the credential holder
+  acted; it never enables a Working indicator. Activity reports always require the current credential of the native terminal the thread is bound to; that terminal must be running, disconnected or awaiting its reattach (a current-credential report from a disconnected terminal, or from one that a daemon disconnect exited, before reattach still has its lifecycle effect; a report with the stored credential of a terminal that exited otherwise, of an archived thread or of a thread with no terminal gets 409 native_terminal_not_live and changes nothing), and only a report from a terminal that has not exited (running or disconnected) is stamped as confirmation; a missing, stale or other-thread credential gets 401 and changes nothing. Holders that predate this report without a credential and show Activity not reported until the thread is reopened. A holder keeps its last non-heartbeat report that the server did not accept for a transient reason (401, 408, 429, 5xx, a client timeout or a transport failure; one report, replaced by any newer one) and resends it on the next credential refresh or heartbeat tick; any other refusal is dropped.
+- `PluginSidebarThread.experimental_queuedFailedCount` is how many queued
+  messages failed to send (0 unless `queuedWork` is "failed"), so a sidebar
+  row can say "N queued messages not delivered". It is `ThreadListEntry.queuedFailedCount`
+  projected by `toPluginSidebarThread` in `apps/app/src/lib/plugin-sidebar-threads.ts`,
+  the same value core's rows read (`ThreadSearchPaletteMode`,
+  `RootComposeMobileRecents`, `RelatedThreadsSection`). Stabilization requires
+  auditing the count against the queue's live rows.
+- `PluginThreadStatusGlyphProps.experimental_queuedFailedCount` is the same
+  number passed to `experimental_ThreadStatusGlyph`, so the `queued-failed`
+  indicator reads "N queued messages not delivered". `experimental_ThreadStatusGlyph`
+  is core's own `ThreadStatusGlyph` (`apps/app/src/lib/plugin-sdk-app-impl.tsx`),
+  and core passes the prop itself (`RelatedThreadsSection`). The test host mirrors
+  it as `data-queued-failed-count` (`packages/plugin-sdk/src/testing/app.tsx`).
+  Stabilization requires auditing the indicator's precedence below queued work.
+- The `activity-unreported` sidebar indicator is the neutral state of a running
+  native thread that has no confirmed holder report; it ranks below the queued
+  indicators. It is a new value of `PluginSidebarThreadIndicator`, not a new member.
 
 Docs: `frontend-registration.md`.
 

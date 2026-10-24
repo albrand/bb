@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ProviderNativeTerminal } from "@bb/domain";
 import { afterEach, describe, expect, it } from "vitest";
+import { publishHooks } from "./helpers/hook-spool.js";
 import { NativeActivityReader } from "../native-activity-reader.js";
 
 interface ClaudePluginTestHost {
@@ -74,7 +75,9 @@ function claudeDeclaration(): ProviderNativeTerminal {
 
 describe("native activity over a blocked Stop followed by a long foreground tool call", () => {
   it("keeps the thread working from the Stop hook error through the unanswered foreground tool call", () => {
-    const transcript = readFixture("long-tool-after-blocked-stop.transcript.jsonl");
+    const transcript = readFixture(
+      "long-tool-after-blocked-stop.transcript.jsonl",
+    );
     const hooks = readFixture("long-tool-after-blocked-stop.hooks.jsonl");
     const feedback = transcript.findIndex((record) => {
       const message = record.message;
@@ -108,7 +111,7 @@ describe("native activity over a blocked Stop followed by a long foreground tool
     );
     const stops = hooks.filter((hook) => hook.hook_event_name === "Stop");
     expect(stops).toHaveLength(1);
-    writeFileSync(eventsFile, jsonl(prompts));
+    publishHooks(eventsFile, jsonl(prompts));
 
     const reader = new NativeActivityReader(
       claudeDeclaration(),
@@ -119,7 +122,7 @@ describe("native activity over a blocked Stop followed by a long foreground tool
     reader.read();
     expect(reader.heartbeat()).toEqual({ state: "working", prompt: null });
 
-    appendFileSync(eventsFile, jsonl(stops));
+    publishHooks(eventsFile, jsonl(stops));
     reader.read();
 
     appendFileSync(transcriptFile, jsonl(transcript.slice(feedback)));

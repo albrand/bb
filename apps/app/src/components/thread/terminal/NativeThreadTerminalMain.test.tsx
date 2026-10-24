@@ -28,6 +28,12 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
 
 vi.mock("@/hooks/useNativeActivityUnconfirmed", () => ({
   useNativeActivityUnconfirmed: () => false,
+  useNativeActivityNotice: () => ({
+    evidenceKind: "unknown",
+    lastToolCallAt: null,
+    now: 0,
+    unconfirmed: false,
+  }),
 }));
 
 vi.mock("@bb/shared-ui/hooks/use-media-query", () => ({

@@ -156,6 +156,71 @@ export function createPendingInteraction(
     .get();
 }
 
+export function createInterruptedProviderPendingInteraction(
+  db: PendingInteractionWriteConnection,
+  input: {
+    payload: string;
+    providerId: string;
+    providerRequestId: string;
+    providerThreadId: string;
+    statusReason: string;
+    threadId: string;
+    turnId: string;
+  },
+): PendingInteractionRow {
+  const now = Date.now();
+
+  return db
+    .insert(pendingInteractions)
+    .values({
+      id: createPendingInteractionId(),
+      threadId: input.threadId,
+      originKind: "provider",
+      turnId: input.turnId,
+      providerId: input.providerId,
+      providerThreadId: input.providerThreadId,
+      providerRequestId: input.providerRequestId,
+      pluginId: null,
+      rendererId: null,
+      status: "interrupted",
+      payload: input.payload,
+      resolution: null,
+      statusReason: input.statusReason,
+      createdAt: now,
+      expiresAt: null,
+      resolvedAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get();
+}
+
+export function retagInterruptedPendingInteraction(
+  db: PendingInteractionWriteConnection,
+  args: {
+    fromStatusReason: string;
+    id: string;
+    threadId: string;
+    toStatusReason: string;
+  },
+): PendingInteractionRow | null {
+  return (
+    db
+      .update(pendingInteractions)
+      .set({ statusReason: args.toStatusReason, updatedAt: Date.now() })
+      .where(
+        and(
+          eq(pendingInteractions.id, args.id),
+          eq(pendingInteractions.threadId, args.threadId),
+          eq(pendingInteractions.status, "interrupted"),
+          eq(pendingInteractions.statusReason, args.fromStatusReason),
+        ),
+      )
+      .returning()
+      .get() ?? null
+  );
+}
+
 export function getPendingInteraction(
   db: PendingInteractionReadConnection,
   id: string,

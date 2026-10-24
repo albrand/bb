@@ -83,6 +83,7 @@ export function threadListEntry(
     environmentWorkspaceDisplayKind: "other",
     nativeTerminal: false,
     queuedWork: "none",
+    queuedFailedCount: 0,
     rowState: { statuses: {}, progress: null },
     listIndicator: busy ? "working" : "none",
   };
@@ -104,6 +105,7 @@ export function threadResponse(
     environmentIsWorktree: _environmentIsWorktree,
     environmentWorkspaceDisplayKind: _environmentWorkspaceDisplayKind,
     queuedWork: _queuedWork,
+    queuedFailedCount: _queuedFailedCount,
     listIndicator: _listIndicator,
     rowState: _rowState,
     ...thread

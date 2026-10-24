@@ -478,13 +478,15 @@ function TestThreadTitle({ threadId }: { threadId: string }) {
 /**
  * `experimental_ThreadStatusGlyph` draws nothing for "none" without a row
  * status, and otherwise exposes what the row asked for as data attributes:
- * the indicator (or "archived"), the row status label and tone, and the size.
+ * the indicator (or "archived"), the row status label and tone, the queued
+ * failed count, and the size.
  */
 function TestThreadStatusGlyph({
   indicator,
   archived = false,
   rowStatus = null,
   hideIdleDraftLabel = false,
+  experimental_queuedFailedCount: queuedFailedCount,
   size = "default",
 }: PluginThreadStatusGlyphProps) {
   if (!archived && indicator === "none" && rowStatus === null) return null;
@@ -494,6 +496,7 @@ function TestThreadStatusGlyph({
       data-row-status={rowStatus?.label}
       data-row-status-tone={rowStatus?.tone}
       data-hide-idle-draft-label={hideIdleDraftLabel ? "" : undefined}
+      data-queued-failed-count={queuedFailedCount}
       data-size={size}
     />
   );

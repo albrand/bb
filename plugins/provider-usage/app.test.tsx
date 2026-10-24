@@ -41,6 +41,7 @@ function threadOnMachine(
     status: "idle",
     runtimeStatus: "idle",
     queuedWork: "none",
+    experimental_queuedFailedCount: 0,
     hasPendingInteraction: false,
     activity: {
       workflows: 0,

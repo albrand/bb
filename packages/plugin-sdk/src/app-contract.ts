@@ -1241,6 +1241,7 @@ export type PluginSidebarThreadIndicator =
   | "draft"
   | "unread-success"
   | "queued-waiting"
+  | "activity-unreported"
   | "none";
 
 /** Live work counts on a thread. All zero means nothing is running. */
@@ -1309,6 +1310,8 @@ export interface PluginSidebarThread {
    * queued message failed to send ("failed"). "none" otherwise.
    */
   queuedWork: ThreadQueuedWork;
+  /** How many queued messages failed to send; 0 unless `queuedWork` is "failed". */
+  experimental_queuedFailedCount: number;
   /** The agent is blocked on the user: an approval or a question. */
   hasPendingInteraction: boolean;
   activity: PluginSidebarThreadActivity;
@@ -1643,6 +1646,11 @@ export interface PluginThreadStatusGlyphProps {
    * technology, for rows that already announce the status as text.
    */
   hideAccessibleLabel?: boolean;
+  /**
+   * How many queued messages failed to send. The "queued-failed" indicator
+   * names it in its label ("3 queued messages not delivered").
+   */
+  experimental_queuedFailedCount?: number;
   /** "compact" draws a 14 px glyph; "default" matches bb's sidebar rows. */
   size?: "default" | "compact";
 }

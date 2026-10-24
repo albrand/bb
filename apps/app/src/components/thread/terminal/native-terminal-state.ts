@@ -5,6 +5,7 @@ import type {
 
 export type NativeTerminalState =
   | { kind: "preparing" }
+  | { kind: "reconnecting" }
   | { kind: "live"; terminalId: string }
   | { kind: "ended"; exitCode: number | null };
 
@@ -27,11 +28,19 @@ export function resolveNativeTerminalSession(args: {
 export function resolveNativeTerminalState(args: {
   session: TerminalSession | null;
   threadIsProvisioning: boolean;
+  threadIsRunning: boolean;
 }): NativeTerminalState {
   if (args.session === null) {
     return args.threadIsProvisioning
       ? { kind: "preparing" }
       : { kind: "ended", exitCode: null };
+  }
+  if (
+    args.session.status === "exited" &&
+    args.session.closeReason === "daemon-disconnect" &&
+    args.threadIsRunning
+  ) {
+    return { kind: "reconnecting" };
   }
   if (args.session.status === "exited") {
     return { kind: "ended", exitCode: args.session.exitCode };

@@ -84,7 +84,7 @@ type RegisterPendingInteractionResult =
       reason: string;
     };
 
-const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
+export const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
   "Host daemon restarted while awaiting user interaction; retry the thread to continue";
 
 interface RegisterPendingInteractionArgs {

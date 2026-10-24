@@ -18,6 +18,7 @@ import {
   projectAttachmentThreads,
   queuedThreadMessages,
   setNativeTerminalThreadTerminal,
+  setQueuedThreadMessageFailureReason,
   terminalSessions,
   threads,
   unarchiveThread,
@@ -44,6 +45,7 @@ import { queueParentSystemMessage } from "../../src/services/threads/parent-syst
 import { sendThreadMessage } from "../../src/services/threads/thread-send.js";
 import {
   NATIVE_TERMINAL_ENDED_MESSAGE,
+  NATIVE_TOOL_CREDENTIAL_ENV,
   nativeTerminalLaunchCommand,
   reopenNativeTerminalsAfterDaemonReconnect,
   resumeNativeTerminalAfterUnarchive,
@@ -65,6 +67,7 @@ import {
   seedHostSession,
   seedPrimaryHost,
   seedProjectWithSource,
+  seedQueuedMessage,
   seedSession,
   seedThread,
 } from "../helpers/seed.js";
@@ -170,10 +173,14 @@ async function postJson(
   fixture: Fixture,
   path: string,
   body: unknown,
+  authorization?: string,
 ): Promise<Response> {
   return fixture.harness.app.request(`/api/v1${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(authorization === undefined ? {} : { authorization }),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -2284,6 +2291,49 @@ describe("native terminal threads", () => {
     );
   });
 
+  it("rejects a queued message for a native thread at enqueue and leaves existing queue rows untouched", async () => {
+    const fixture = await createFixture();
+    const { thread } = await openRunningNativeThread(fixture, {
+      providerId: "claude-code",
+    });
+    const existing = seedQueuedMessage(fixture.harness.deps, {
+      content: textInput("queued before the guard"),
+      threadId: thread.id,
+    });
+    setQueuedThreadMessageFailureReason(fixture.harness.db, noopNotifier, {
+      id: existing.id,
+      threadId: thread.id,
+      failureReason: "This thread runs its agent in a native terminal",
+      now: Date.now(),
+      retryDelaysMs: [],
+    });
+    const rowsBefore = fixture.harness.db
+      .select()
+      .from(queuedThreadMessages)
+      .where(eq(queuedThreadMessages.threadId, thread.id))
+      .all();
+
+    const response = await postJson(
+      fixture,
+      `/threads/${thread.id}/queued-messages`,
+      { input: textInput("will never deliver") },
+    );
+    expect(response.status).toBe(409);
+    expect(apiErrorSchema.parse(await readJson(response))).toEqual({
+      code: "native_terminal_thread",
+      message:
+        "This thread runs its agent in a native terminal; send input through the terminal",
+    });
+
+    const rowsAfter = fixture.harness.db
+      .select()
+      .from(queuedThreadMessages)
+      .where(eq(queuedThreadMessages.threadId, thread.id))
+      .all();
+    expect(rowsAfter).toEqual(rowsBefore);
+    expect(rowsAfter).toHaveLength(1);
+  });
+
   it("rejects providers without a native harness", async () => {
     const fixture = await createFixture();
     const response = await postJson(fixture, "/threads", {
@@ -2377,13 +2427,37 @@ describe("native terminal threads", () => {
     const first = await openRunningNativeThread(fixture, {
       providerId: "codex",
     });
-    const second = await createNativeThread(fixture, { providerId: "codex" });
+    const secondThread = await createNativeThread(fixture, {
+      providerId: "codex",
+    });
+    const secondOpen = await waitForTerminalOpen(fixture.socket, 1);
+    acknowledgeOpen(fixture, secondOpen);
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const record = getNativeTerminalThread(
+        fixture.harness.db,
+        secondThread.id,
+      );
+      if (record?.terminalSessionId === secondOpen.terminalId) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const second = { thread: secondThread };
+    const credentialOf = (threadId: string) => {
+      const open = daemonMessages(fixture.socket).find(
+        (message): message is TerminalOpenMessage =>
+          message.type === "terminal.open" && message.threadId === threadId,
+      );
+      const entry = open?.contributedEnv.find(
+        (candidate) => candidate.name === NATIVE_TOOL_CREDENTIAL_ENV,
+      );
+      return `Bearer ${entry?.value}`;
+    };
     const sessionId = "01a1246a-b896-7b71-9895-ce5345f5f623";
 
     const recorded = await postJson(
       fixture,
       `/threads/${first.thread.id}/native-terminal/session`,
       { nativeSessionId: sessionId },
+      credentialOf(first.thread.id),
     );
     expect(recorded.status).toBe(200);
     expect(
@@ -2393,8 +2467,9 @@ describe("native terminal threads", () => {
 
     const stolen = await postJson(
       fixture,
-      `/threads/${second.id}/native-terminal/session`,
+      `/threads/${second.thread.id}/native-terminal/session`,
       { nativeSessionId: sessionId },
+      credentialOf(second.thread.id),
     );
     expect(stolen.status).toBe(409);
 
@@ -2402,6 +2477,7 @@ describe("native terminal threads", () => {
       fixture,
       `/threads/${first.thread.id}/native-terminal/session`,
       { nativeSessionId: "11111111-2222-3333-4444-555555555555" },
+      credentialOf(first.thread.id),
     );
     expect(rebound.status).toBe(409);
   });
@@ -3641,7 +3717,12 @@ describe("native terminal threads", () => {
               ?.terminalSessionId,
         )
         .toBe(reopen.terminalId);
+      const reopenedCredential = reopen.contributedEnv.find(
+        (entry) => entry.name === NATIVE_TOOL_CREDENTIAL_ENV,
+      )?.value;
       recordNativeTerminalActivity(fixture.harness.deps, {
+        confirms: true,
+        authorization: `Bearer ${reopenedCredential}`,
         threadId: running.thread.id,
         state: "working",
       });

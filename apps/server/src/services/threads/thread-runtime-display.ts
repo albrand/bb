@@ -85,7 +85,11 @@ type ThreadResponseDisplayDeps = NativeActivityDisplayDeps &
 type ThreadPromptBannerDeps = NativeActivityDisplayDeps;
 type NativeActivityThreadRecord = Pick<
   NativeTerminalThreadRecord,
-  "providerId" | "lastEvidenceAt"
+  | "providerId"
+  | "lastEvidenceAt"
+  | "lastToolCallAt"
+  | "lastToolCallSessionId"
+  | "nativeSessionId"
 >;
 
 interface ResolveThreadRuntimeStateArgs {
@@ -124,6 +128,7 @@ interface ToThreadListEntryResponseFromLatestSessionArgs {
   nativeTerminalThread: NativeActivityThreadRecord | null;
   now?: number;
   queuedWork: ThreadQueuedWork;
+  queuedFailedCount: number;
   rowState: ReturnType<typeof getThreadRowState>;
   thread: ThreadWithPendingInteractionState;
 }
@@ -323,12 +328,29 @@ function addNativeActivityDiagnostic(
     lastEvidenceAt !== null &&
     now >= lastEvidenceAt &&
     now - lastEvidenceAt <= NATIVE_TERMINAL_ACTIVITY_FRESH_FOR_MS;
+  const lastToolCallAt = nativeThread.lastToolCallAt;
+  const toolCallIsBoundToSession =
+    nativeThread.nativeSessionId !== null &&
+    nativeThread.lastToolCallSessionId === nativeThread.nativeSessionId;
+  const toolCallIsFresh =
+    toolCallIsBoundToSession &&
+    lastToolCallAt !== null &&
+    now >= lastToolCallAt &&
+    now - lastToolCallAt <= NATIVE_TERMINAL_ACTIVITY_FRESH_FOR_MS;
   return {
     ...runtime,
     nativeActivity: {
       lastEvidenceAt,
+      ...(toolCallIsBoundToSession && lastToolCallAt !== null
+        ? { lastToolCallAt }
+        : {}),
       freshForMs: NATIVE_TERMINAL_ACTIVITY_FRESH_FOR_MS,
       confirmation: isFresh ? "confirmed" : "unconfirmed",
+      evidenceKind: isFresh
+        ? "holder-report"
+        : toolCallIsFresh
+          ? "tool-call"
+          : "unknown",
     },
   };
 }
@@ -673,19 +695,24 @@ function buildThreadActivityStateByThreadId(
   return result;
 }
 
+interface ThreadQueuedWorkSummary {
+  queuedFailedCount: number;
+  queuedWork: ThreadQueuedWork;
+}
+
 function buildThreadQueuedWorkByThreadId(
   deps: ThreadRuntimeDisplayDeps,
   threads: readonly Thread[],
-): Map<string, ThreadQueuedWork> {
-  const result = new Map<string, ThreadQueuedWork>();
+): Map<string, ThreadQueuedWorkSummary> {
+  const result = new Map<string, ThreadQueuedWorkSummary>();
   for (const counts of listQueuedThreadMessageCountsByThreadIds(deps.db, {
     threadIds: threads.map((thread) => thread.id),
   })) {
     if (counts.queuedMessageCount === 0) continue;
-    result.set(
-      counts.threadId,
-      counts.failedQueuedMessageCount > 0 ? "failed" : "waiting",
-    );
+    result.set(counts.threadId, {
+      queuedFailedCount: counts.failedQueuedMessageCount,
+      queuedWork: counts.failedQueuedMessageCount > 0 ? "failed" : "waiting",
+    });
   }
   return result;
 }
@@ -729,7 +756,9 @@ export function toThreadListEntryResponses(
     const entry = toThreadListEntryResponseFromLatestSession({
       deps,
       activity: activityByThreadId.get(thread.id) ?? EMPTY_THREAD_ACTIVITY,
-      queuedWork: queuedWorkByThreadId.get(thread.id) ?? "none",
+      queuedWork: queuedWorkByThreadId.get(thread.id)?.queuedWork ?? "none",
+      queuedFailedCount:
+        queuedWorkByThreadId.get(thread.id)?.queuedFailedCount ?? 0,
       hostConnected:
         thread.environmentHostId !== null &&
         connectedActiveHostIds.has(thread.environmentHostId),
@@ -768,6 +797,7 @@ function toThreadListEntryResponseFromLatestSession(
     nativeTerminal: args.nativeTerminalThread !== null,
     activity: args.activity,
     queuedWork: args.queuedWork,
+    queuedFailedCount: args.queuedFailedCount,
     pinSortKey: args.thread.pinSortKey,
     environmentBranchName: args.thread.environmentBranchName,
     environmentHostId: args.thread.environmentHostId,

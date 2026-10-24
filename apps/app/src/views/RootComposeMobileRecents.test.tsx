@@ -570,6 +570,7 @@ describe("RootComposeMobileRecents", () => {
           lastEvidenceAt: Date.now(),
           freshForMs: 90_000,
           confirmation: "confirmed",
+          evidenceKind: "holder-report",
         },
       },
     });

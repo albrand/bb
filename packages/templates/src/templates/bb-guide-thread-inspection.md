@@ -27,7 +27,7 @@ Listing:
   Needs input, Working, automation Woke, or unread Done when applicable. Woke
   is omitted when the Automations plugin RPC is unavailable. An active native
   thread with no recent authenticated terminal activity report shows
-  `activity unconfirmed` in Status and does not show runtime-only Working.
+  `activity not reported` in Status and does not show runtime-only Working.
   This reports holder activity, not model or tool progress. JSON rows include
   `listIndicator` and optional runtime `nativeActivity` diagnostics. Title uses
   the thread title, then the fallback title from the first prompt, then "-". Long

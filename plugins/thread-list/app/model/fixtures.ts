@@ -68,6 +68,7 @@ export function makeSidebarThread(
     status: "idle",
     runtimeStatus: "idle",
     queuedWork: "none",
+    experimental_queuedFailedCount: 0,
     hasPendingInteraction: false,
     indicator: "none",
     indicatorLabel: null,

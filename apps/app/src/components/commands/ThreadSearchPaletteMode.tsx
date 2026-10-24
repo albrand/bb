@@ -677,7 +677,12 @@ function ThreadSearchPaletteStatus({ row }: { row: PaletteThreadSearchRow }) {
     isRuntimeActive: state.isRuntimeActive && !nativeActivityUnconfirmed,
   });
   const rowStatus = usePluginThreadRowStatus(row.threadId);
-  const { accessibleLabel: label } = resolveThreadStatus(indicator, rowStatus);
+  const { accessibleLabel: label } = resolveThreadStatus(
+    indicator,
+    rowStatus,
+    false,
+    state.queuedFailedCount,
+  );
   if (label === null) return null;
   return (
     <>
@@ -698,6 +703,7 @@ function ThreadSearchPaletteStatus({ row }: { row: PaletteThreadSearchRow }) {
           >
             <ThreadStatusGlyph
               indicator={indicator}
+              experimental_queuedFailedCount={state.queuedFailedCount}
               rowStatus={rowStatus}
               size="compact"
             />

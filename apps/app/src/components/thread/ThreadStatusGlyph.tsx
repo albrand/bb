@@ -115,6 +115,7 @@ export function resolveThreadStatus(
   indicator: ThreadListIndicatorKind,
   rowStatus: PluginComposerThreadRowStatus | null = null,
   archived = false,
+  queuedFailedCount = 0,
 ): ThreadStatusResolution {
   const indicatorKind = archived ? "archived" : indicator;
   const rowStatusIsVisible =
@@ -131,7 +132,7 @@ export function resolveThreadStatus(
       ? rowStatus.label
       : indicatorKind === "archived"
         ? "Archived thread"
-        : getThreadListIndicatorLabel(indicatorKind),
+        : getThreadListIndicatorLabel(indicatorKind, queuedFailedCount),
     indicatorKind,
     rowStatusIsVisible,
   };
@@ -143,6 +144,7 @@ export function ThreadStatusGlyph({
   rowStatus = null,
   hideIdleDraftLabel = false,
   hideAccessibleLabel = false,
+  experimental_queuedFailedCount: queuedFailedCount = 0,
   size = "default",
 }: PluginThreadStatusGlyphProps) {
   const iconSizeClass =
@@ -151,6 +153,7 @@ export function ThreadStatusGlyph({
     indicator,
     rowStatus,
     archived,
+    queuedFailedCount,
   );
 
   if (rowStatusIsVisible && rowStatus) {
@@ -212,7 +215,6 @@ export function ThreadStatusGlyph({
         />
       );
     case "unread-error":
-    case "queued-failed":
       return (
         <Icon
           name="CircleX"
@@ -220,11 +222,29 @@ export function ThreadStatusGlyph({
           aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
         />
       );
+    case "queued-failed":
+      return (
+        <Icon
+          name="Mail"
+          className={cn("text-warning", iconSizeClass)}
+          aria-label={
+            getThreadListIndicatorLabel(kind, queuedFailedCount) ?? undefined
+          }
+        />
+      );
     case "waiting-for-input":
     case "queued-waiting":
       return (
         <Icon
           name={WAITING_ICONS[kind]}
+          className={cn("text-muted-foreground/75", iconSizeClass)}
+          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        />
+      );
+    case "activity-unreported":
+      return (
+        <Icon
+          name="Minus"
           className={cn("text-muted-foreground/75", iconSizeClass)}
           aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
         />

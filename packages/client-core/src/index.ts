@@ -1,6 +1,7 @@
 export * from "./api-types.js";
 
 export * from "./thread/thread-read-state.js";
+export * from "./thread/native-activity-guidance.js";
 export * from "./thread/thread-activity.js";
 
 export * from "./codepoint-compare.js";

@@ -20,6 +20,8 @@ export interface ThreadListIndicatorState {
   hasUnreadError: boolean;
   hasUnreadSuccess: boolean;
   isAutomationWoken: boolean;
+  isActivityUnreported: boolean;
+  queuedFailedCount: number;
   isBackgroundAgentActive: boolean;
   isBackgroundCommandActive: boolean;
   isGoalActive: boolean;
@@ -48,16 +50,24 @@ const THREAD_LIST_INDICATOR_LABELS: Record<
   "plan-mode": "Plan mode active",
   goal: "Goal active",
   runtime: "Thread working",
-  "queued-failed": "Queued message failed to send",
+  "queued-failed": "Queued messages not delivered",
   "queued-waiting": "Thread has a message waiting to send",
+  "activity-unreported": "Activity not reported",
   draft: "Thread has unsubmitted draft",
   "unread-success": "Unread thread succeeded",
 };
 
 export function getThreadListIndicatorLabel(
   kind: ThreadListIndicatorKind,
+  queuedFailedCount = 0,
 ): string | null {
-  return kind === "none" ? null : THREAD_LIST_INDICATOR_LABELS[kind];
+  if (kind === "none") return null;
+  if (kind === "queued-failed" && queuedFailedCount > 0) {
+    return queuedFailedCount === 1
+      ? "1 queued message not delivered"
+      : `${queuedFailedCount} queued messages not delivered`;
+  }
+  return THREAD_LIST_INDICATOR_LABELS[kind];
 }
 
 const RUNNING_RUNTIME_STATUSES: Record<
@@ -83,9 +93,58 @@ const DONE_THREAD_STATUSES: Record<PluginSidebarThread["status"], boolean> = {
   pending: false,
 };
 
+function isNativeActivityConfirmedOrAbsent(
+  thread: ThreadRuntimeShape,
+): boolean {
+  const activity = thread.experimental_nativeActivity;
+  return activity === undefined || activity.confirmation === "confirmed";
+}
+
 export function isRuntimeBusyThread(thread: ThreadRuntimeShape): boolean {
   return (
-    thread.experimental_nativeActivity?.confirmation !== "unconfirmed" &&
+    isNativeActivityConfirmedOrAbsent(thread) &&
+    (RUNNING_RUNTIME_STATUSES[thread.runtimeStatus] ?? false)
+  );
+}
+
+export function nativeActivityNoticeText(
+  thread: ThreadRuntimeShape,
+  now = Date.now(),
+): string {
+  const activity = thread.experimental_nativeActivity;
+  const lastToolCallAt = activity?.lastToolCallAt;
+  if (
+    activity?.evidenceKind !== "tool-call" ||
+    lastToolCallAt === undefined ||
+    now < lastToolCallAt
+  ) {
+    return "Activity not reported";
+  }
+  const minutes = Math.floor((now - lastToolCallAt) / 60_000);
+  return minutes < 1
+    ? "Agent tool call seen just now"
+    : `Agent tool call seen ${minutes}m ago`;
+}
+
+export function nativeActivityGuidanceText(
+  thread: Pick<
+    PluginSidebarThread,
+    "experimental_nativeActivity" | "host" | "id"
+  >,
+): string | null {
+  const activity = thread.experimental_nativeActivity;
+  if (activity === undefined || activity.confirmation === "confirmed") {
+    return null;
+  }
+  return `If this session started before bb was updated, update bb on ${
+    thread.host?.name ?? "this thread's machine"
+  }, save your work, type /exit in the terminal, then reopen with bb thread native ${thread.id}. A pending question will need to be asked again.`;
+}
+
+function isActivityUnreportedThread(thread: ThreadRuntimeShape): boolean {
+  return (
+    thread.experimental_nativeActivity !== undefined &&
+    !isNativeActivityConfirmedOrAbsent(thread) &&
     (RUNNING_RUNTIME_STATUSES[thread.runtimeStatus] ?? false)
   );
 }
@@ -152,6 +211,7 @@ export function resolveThreadListIndicator(
   if (state.hasUnreadError || state.hasUnreadSuccess) return "done-unread";
   if (state.queuedWork === "failed") return "queued-failed";
   if (state.queuedWork === "waiting") return "queued-waiting";
+  if (state.isActivityUnreported) return "activity-unreported";
   if (state.hasUnsubmittedDraft) return "draft";
   return "none";
 }
@@ -177,7 +237,7 @@ export function resolveThreadStatus(
   return {
     accessibleLabel: rowStatusIsVisible
       ? rowStatus.label
-      : getThreadListIndicatorLabel(indicatorKind),
+      : getThreadListIndicatorLabel(indicatorKind, state.queuedFailedCount),
     indicatorKind,
     rowStatusIsVisible,
   };
@@ -187,7 +247,10 @@ export function threadListIndicatorStateForThread(
   thread: ThreadStatusShape &
     ThreadRuntimeShape &
     ThreadActivityStateShape &
-    Pick<PluginSidebarThread, "hasPendingInteraction" | "queuedWork">,
+    Pick<
+      PluginSidebarThread,
+      "experimental_queuedFailedCount" | "hasPendingInteraction" | "queuedWork"
+    >,
   hasUnsubmittedDraft: boolean,
 ): ThreadListIndicatorState {
   const unreadDone = isUnreadDoneThread(thread);
@@ -201,6 +264,8 @@ export function threadListIndicatorStateForThread(
     isBackgroundCommandActive: hasActiveBackgroundCommandActivity(thread),
     isGoalActive: hasActiveGoalActivity(thread),
     queuedWork: thread.queuedWork,
+    queuedFailedCount: thread.experimental_queuedFailedCount,
+    isActivityUnreported: isActivityUnreportedThread(thread),
     isPlanModeActive: hasActivePlanModeActivity(thread),
     isRuntimeActive: isRuntimeBusyThread(thread),
     isWorkflowActive: hasActiveWorkflowActivity(thread),

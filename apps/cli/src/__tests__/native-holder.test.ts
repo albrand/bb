@@ -462,6 +462,59 @@ try {
     expect(existsSync(socketPath)).toBe(false);
   });
 
+  it("serves the credential of the terminal that reattached and signals only a real change", async () => {
+    const socketPath = socketIn();
+    let current: () => string | null = () => null;
+    let changes = 0;
+    const held = runNativeHolder({
+      socketPath,
+      cwd: os.tmpdir(),
+      env: { ...process.env, PS1: "" },
+      onCredentialChanged: () => {
+        changes += 1;
+      },
+      prepare: async (context) => {
+        current = context.currentCredential;
+        return ECHO_LOOP;
+      },
+      spawnPty: (process, options) =>
+        spawnPty(process.command, process.args, {
+          name: "xterm-256color",
+          cols: options.cols,
+          rows: options.rows,
+          cwd: options.cwd,
+          env: options.env,
+        }),
+    });
+    const sendCredential = (socket: net.Socket, value: string): void => {
+      socket.write(
+        encodeNativeHolderFrame(
+          NativeHolderFrame.credential,
+          Buffer.from(value),
+        ),
+      );
+    };
+    const socket = await waitForNativeHolder(socketPath, 30_000);
+    if (socket === null) throw new Error("holder did not listen");
+    sendCredential(socket, "credential-before-swap");
+    const first = new Client(socket);
+    await first.waitFor(/started:\d+/u);
+    expect(current()).toBe("credential-before-swap");
+
+    first.socket.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const reattachedSocket = await waitForNativeHolder(socketPath, 30_000);
+    if (reattachedSocket === null) throw new Error("holder did not listen");
+    sendCredential(reattachedSocket, "credential-before-swap");
+    sendCredential(reattachedSocket, "credential-after-swap");
+    const second = new Client(reattachedSocket);
+    await expect.poll(() => current()).toBe("credential-after-swap");
+    expect(changes).toBe(2);
+
+    second.type("\u0004");
+    await expect(held).resolves.toBe(7);
+  });
+
   it("stops the CLI when no terminal reattaches within the reap window", async () => {
     const socketPath = socketIn();
     const held = startHolder(socketPath, ECHO_LOOP, 300);

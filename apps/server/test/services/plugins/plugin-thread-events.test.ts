@@ -291,6 +291,7 @@ describe("plugin thread lifecycle events", () => {
         runtime: {
           nativeActivity: {
             confirmation: "confirmed",
+            evidenceKind: "holder-report",
             freshForMs: 90_000,
             lastEvidenceAt,
           },

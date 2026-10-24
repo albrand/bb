@@ -198,6 +198,7 @@ describe("useSidebarThreads", () => {
             lastEvidenceAt,
             freshForMs: 90_000,
             confirmation: "confirmed",
+            evidenceKind: "holder-report",
           },
         },
       });
@@ -259,8 +260,8 @@ describe("useSidebarThreads", () => {
     expect(thread().experimental_nativeActivity?.confirmation).toBe(
       "unconfirmed",
     );
-    expect(thread().indicator).toBe("none");
-    expect(thread().indicatorLabel).toBeNull();
+    expect(thread().indicator).toBe("activity-unreported");
+    expect(thread().indicatorLabel).toBe("Activity not reported");
     expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(false);
 
     const recovered = withReceipt(Date.now());
@@ -273,6 +274,39 @@ describe("useSidebarThreads", () => {
     expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(false);
     effects.dispose();
     queryClient.clear();
+  });
+
+  it("drops tool-call evidence from the projection when it goes stale, without a new receipt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    state.data = payload([
+      makeThreadListEntry({
+        id: "thr_tool_call",
+        status: "active",
+        runtime: {
+          displayStatus: "active",
+          nativeActivity: {
+            lastEvidenceAt: null,
+            lastToolCallAt: Date.now(),
+            freshForMs: 90_000,
+            confirmation: "unconfirmed",
+            evidenceKind: "tool-call",
+          },
+        },
+      }),
+    ]);
+    const { result } = renderHook(() => useSidebarThreads());
+    const thread = () => result.current.threads[0]!;
+    expect(thread().experimental_nativeActivity?.evidenceKind).toBe(
+      "tool-call",
+    );
+    expect(thread().indicator).toBe("activity-unreported");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(91_000);
+    });
+    expect(thread().experimental_nativeActivity?.evidenceKind).toBe("unknown");
+    expect(thread().indicator).toBe("activity-unreported");
   });
 
   it("keeps DTO identity for entries that did not change across a sidebar update", () => {

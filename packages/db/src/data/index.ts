@@ -519,11 +519,13 @@ export type {
 } from "./terminal-sessions.js";
 
 export {
+  createInterruptedProviderPendingInteraction,
   createPendingInteraction,
   getActivePendingInteractionForThread,
   hasTurnBoundActivePendingInteractionForThread,
   getPendingInteraction,
   getPendingInteractionByProviderRequest,
+  retagInterruptedPendingInteraction,
   reviveInterruptedProviderInteraction,
   interruptPendingInteractionsForThreadIds,
   interruptPendingInteractionsForThreads,

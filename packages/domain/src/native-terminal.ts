@@ -155,6 +155,13 @@ export const providerNativeTerminalActivitySchema = z
               .strict(),
           )
           .max(8),
+        continuation: z
+          .object({
+            match: providerNativeTerminalRecordMatchSchema,
+            nextSessionId: recordFieldPathSchema,
+          })
+          .strict()
+          .optional(),
         questions: z
           .object({
             open: z

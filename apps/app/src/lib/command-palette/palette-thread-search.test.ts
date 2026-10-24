@@ -52,6 +52,7 @@ function makeThread(
     environmentWorkspaceDisplayKind: "other",
     runtime: { displayStatus: "idle" },
     queuedWork: "none",
+    queuedFailedCount: 0,
     rowState: { statuses: {}, progress: null },
     listIndicator: "none",
     ...overrides,

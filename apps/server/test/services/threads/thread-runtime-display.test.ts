@@ -387,9 +387,9 @@ describe("thread runtime display", () => {
     expect(fresh[1]?.runtime.nativeActivity?.confirmation).toBe("confirmed");
     expect(fresh[1]?.listIndicator).toBe("working");
     expect(stale[0]?.runtime.nativeActivity?.confirmation).toBe("unconfirmed");
-    expect(stale[0]?.listIndicator).toBe("none");
+    expect(stale[0]?.listIndicator).toBe("activity-unreported");
     expect(stale[1]?.runtime.nativeActivity?.confirmation).toBe("unconfirmed");
-    expect(stale[1]?.listIndicator).toBe("none");
+    expect(stale[1]?.listIndicator).toBe("activity-unreported");
     expect(detail.runtime.nativeActivity?.confirmation).toBe("unconfirmed");
     expect(detail.nativeTerminal).toBe(true);
     expect(stale[2]?.runtime.nativeActivity).toBeUndefined();
@@ -425,6 +425,7 @@ describe("thread runtime display", () => {
       lastEvidenceAt: 100_000,
       freshForMs: 90_000,
       confirmation: "confirmed",
+      evidenceKind: "holder-report",
     });
     expect(pluginFresh.runtime.nativeActivity).toEqual(
       detailFresh.runtime.nativeActivity,
@@ -433,6 +434,7 @@ describe("thread runtime display", () => {
       lastEvidenceAt: 100_000,
       freshForMs: 90_000,
       confirmation: "unconfirmed",
+      evidenceKind: "unknown",
     });
     expect(pluginExpired.runtime.nativeActivity).toEqual(
       detailExpired.runtime.nativeActivity,

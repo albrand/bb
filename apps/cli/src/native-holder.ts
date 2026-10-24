@@ -253,7 +253,9 @@ export interface RunNativeHolderOptions {
   prepare(context: {
     credential: string | null;
     credentialSocket: string;
+    currentCredential(): string | null;
   }): Promise<NativeHolderProcess>;
+  onCredentialChanged?(): void;
   spawnPty(
     process: NativeHolderProcess,
     options: {
@@ -496,6 +498,7 @@ export async function runNativeHolder(
       child = await options.prepare({
         credential,
         credentialSocket: credentialSocketPath,
+        currentCredential: () => credential,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -570,7 +573,10 @@ export async function runNativeHolder(
           else pty.write(input);
         } else if (message.type === NativeHolderFrame.credential) {
           const next = message.payload.toString("utf8");
-          if (next.length > 0) credential = next;
+          if (next.length > 0 && next !== credential) {
+            credential = next;
+            options.onCredentialChanged?.();
+          }
         } else if (message.type === NativeHolderFrame.resize) {
           const next = parseSize(message.payload);
           if (next !== null) applySize(next);

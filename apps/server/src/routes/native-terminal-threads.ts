@@ -14,7 +14,10 @@ import {
   recordNativeTerminalSession,
   takeNativeTerminalLaunchSpec,
 } from "../services/threads/native-terminal-threads.js";
-import { recordNativeTerminalActivity } from "../services/threads/native-terminal-activity.js";
+import {
+  recordNativeTerminalActivity,
+  recordNativeTerminalToolCallEvidence,
+} from "../services/threads/native-terminal-activity.js";
 import { switchNativeTerminalMode } from "../services/threads/native-terminal-mode.js";
 import type { AppDeps } from "../types.js";
 
@@ -59,14 +62,16 @@ export function registerNativeTerminalThreadRoutes(
   );
 
   post(routes.callAgentTool, async (context, payload) => {
-    const { environment, thread } = await requireNativeTerminalAgentToolCall(
-      deps,
-      {
+    const { environment, terminalSessionId, thread } =
+      await requireNativeTerminalAgentToolCall(deps, {
         authorization: context.req.header("authorization"),
         threadId: context.req.param("id"),
         tool: context.req.param("tool"),
-      },
-    );
+      });
+    recordNativeTerminalToolCallEvidence(deps, {
+      terminalSessionId,
+      threadId: context.req.param("id"),
+    });
     return runAgentToolCall(deps, {
       callId: payload.callId,
       environment,
@@ -92,6 +97,7 @@ export function registerNativeTerminalThreadRoutes(
       authorization: context.req.header("authorization"),
       threadId: context.req.param("id"),
       ...payload,
+      confirms: payload.confirms ?? true,
     });
     return context.json({ ok: true as const });
   });
@@ -99,8 +105,12 @@ export function registerNativeTerminalThreadRoutes(
   post(routes.recordSession, (context, payload) =>
     context.json(
       recordNativeTerminalSession(deps, {
+        authorization: context.req.header("authorization"),
         threadId: context.req.param("id"),
         nativeSessionId: payload.nativeSessionId,
+        ...(payload.replacesNativeSessionId === undefined
+          ? {}
+          : { replacesNativeSessionId: payload.replacesNativeSessionId }),
       }),
     ),
   );

@@ -8,7 +8,10 @@ import {
   type SecondaryFixedPanelTab,
   type TerminalFixedPanelTab,
 } from "@/lib/fixed-panel-tabs-state";
-import { shouldShowRetainedTerminalSession } from "@/lib/terminal-session-visibility";
+import {
+  omitSupersededDisconnectedSessions,
+  shouldShowRetainedTerminalSession,
+} from "@/lib/terminal-session-visibility";
 import type { PendingTerminalIds } from "@/components/thread/terminal/pending-terminals";
 
 interface TerminalTabSources {
@@ -41,7 +44,7 @@ function getTerminalSessionTabIds({
   terminalSessions,
 }: TerminalTabSources): ReadonlySet<string> {
   const ids = new Set(pendingTerminalIds.starting);
-  for (const session of terminalSessions) {
+  for (const session of omitSupersededDisconnectedSessions(terminalSessions)) {
     if (shouldShowRetainedTerminalSession({ retainedTerminalIds, session })) {
       ids.add(session.id);
     }
@@ -122,7 +125,7 @@ function syncTerminalTabsWithSessions<T extends SecondaryFixedPanelTab>({
     syncedTabs.push(tab);
   }
 
-  for (const session of terminalSessions) {
+  for (const session of omitSupersededDisconnectedSessions(terminalSessions)) {
     if (!terminalSessionIds.has(session.id)) {
       continue;
     }

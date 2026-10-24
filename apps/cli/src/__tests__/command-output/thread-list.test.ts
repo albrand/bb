@@ -309,6 +309,7 @@ describe("bb thread list command output", () => {
             lastEvidenceAt: null,
             freshForMs: 90_000,
             confirmation: "unconfirmed" as const,
+            evidenceKind: "unknown" as const,
           },
         },
         activity: {
@@ -328,7 +329,7 @@ describe("bb thread list command output", () => {
     await runCommand(["thread", "list"], register);
 
     const table = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(table).toContain("active (activity unconfirmed)");
+    expect(table).toContain("active (activity not reported)");
     expect(table).not.toContain("Working");
   });
 
@@ -357,6 +358,7 @@ describe("bb thread list command output", () => {
           lastEvidenceAt: null,
           freshForMs: 90_000,
           confirmation: "unconfirmed" as const,
+          evidenceKind: "unknown" as const,
         },
       },
       activity: {
@@ -383,7 +385,7 @@ describe("bb thread list command output", () => {
     await runCommand(["thread", "list"], register);
 
     const table = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(table).toContain("active (activity unconfirmed)");
+    expect(table).toContain("active (activity not reported)");
     expect(table).toContain("Needs input");
     expect(table).toContain("Working");
   });

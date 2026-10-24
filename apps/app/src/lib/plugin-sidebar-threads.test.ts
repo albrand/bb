@@ -208,10 +208,13 @@ describe("toPluginSidebarThread", () => {
   });
 
   it("reports queued work as its own indicators", () => {
-    const failed = toPluginSidebarThread(makeThread({ queuedWork: "failed" }));
+    const failed = toPluginSidebarThread(
+      makeThread({ queuedWork: "failed", queuedFailedCount: 3 }),
+    );
     expect(failed.queuedWork).toBe("failed");
+    expect(failed.experimental_queuedFailedCount).toBe(3);
     expect(failed.indicator).toBe("queued-failed");
-    expect(failed.indicatorLabel).toBe("Queued message failed to send");
+    expect(failed.indicatorLabel).toBe("3 queued messages not delivered");
 
     const waiting = toPluginSidebarThread(
       makeThread({ queuedWork: "waiting" }),

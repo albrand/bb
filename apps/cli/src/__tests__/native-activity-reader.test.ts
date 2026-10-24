@@ -15,10 +15,15 @@ import {
   providerNativeTerminalActivitySchema,
   type ProviderNativeTerminal,
 } from "@bb/domain";
+import { BbHttpError, BbRequestTimeoutError } from "@bb/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonlTail } from "../native-activity.js";
+import { publishHooks } from "./helpers/hook-spool.js";
+import { createNativeActivityReporter } from "../native-activity-reporter.js";
+import { createNativeActivityWiring } from "../native-activity-wiring.js";
 import { EvictedRecordIndex } from "../native-activity-index.js";
 import {
+  MAX_SESSION_ADOPTIONS,
   measureResumedTranscript,
   NativeActivityReader,
 } from "../native-activity-reader.js";
@@ -175,9 +180,15 @@ function claudeFixture(
   extraWorking: boolean = false,
   onUnconfirmed?: (total: number) => void,
   onUnconfirmedHookIdentity?: (
-    reason: "missing-session" | "foreign-session" | "unbound",
+    reason:
+      | "missing-session"
+      | "foreign-session"
+      | "held-overflow"
+      | "unreadable-record",
     total: number,
   ) => void,
+  onSessionAdopted?: (sessionId: string, previousSessionId: string) => void,
+  acceptRotationAtOnce: boolean = true,
 ) {
   const host = createFakePluginHost({ pluginId: "provider-claude-code" });
   claudeCodePlugin(host.bb);
@@ -244,7 +255,7 @@ function claudeFixture(
       ]),
     ),
   );
-  writeFileSync(
+  publishHooks(
     events,
     jsonl([
       {
@@ -255,6 +266,7 @@ function claudeFixture(
       },
     ]),
   );
+  let created: NativeActivityReader | undefined;
   const reader = new NativeActivityReader(
     native,
     { HOME: home },
@@ -265,13 +277,21 @@ function claudeFixture(
     },
     onUnconfirmed,
     onUnconfirmedHookIdentity,
+    onSessionAdopted === undefined
+      ? undefined
+      : (sessionId, previousSessionId) => {
+          onSessionAdopted(sessionId, previousSessionId);
+          if (acceptRotationAtOnce) created?.sessionRebound(sessionId);
+        },
   );
+  created = reader;
   expect(reader.read()).toEqual([{ state: "working", prompt: "first prompt" }]);
   return {
     reader,
+    dir,
     transcript,
     hook: (records: unknown[]) =>
-      appendFileSync(
+      publishHooks(
         events,
         jsonl(
           records.map((record) => ({
@@ -326,6 +346,313 @@ function retainedIdentitySizes(reader: NativeActivityReader) {
     recentEvictedIds: recentEvictedIds.size,
   };
 }
+
+describe("NativeActivityReader session rotation", () => {
+  const ROTATED = "5c0ffee0-1111-4222-8333-444455556666";
+  type Fixture = ReturnType<typeof claudeFixture>;
+
+  const continuedIn = (nextSessionId: string) => ({
+    type: "continued-in",
+    continuedInSessionId: nextSessionId,
+    sessionId: SESSION_ID,
+    timestamp: new Date().toISOString(),
+  });
+
+  function startRotation(
+    fixture: Fixture,
+    options: { sessionId?: string; continuation?: boolean } = {},
+  ): string {
+    const sessionId = options.sessionId ?? ROTATED;
+    const file = path.join(fixture.dir, `${sessionId}.jsonl`);
+    writeFileSync(file, "");
+    if (options.continuation !== false) {
+      appendFileSync(fixture.transcript, jsonl([continuedIn(sessionId)]));
+    }
+    return file;
+  }
+
+  const rotatedPrompt = (sessionId = ROTATED) => ({
+    hook_event_name: "UserPromptSubmit",
+    session_id: sessionId,
+    prompt_id: `turn-${sessionId}`,
+    prompt: "second prompt",
+  });
+
+  const adoptions =
+    (list: Array<[string, string]>) => (id: string, previous: string) => {
+      list.push([id, previous]);
+    };
+
+  it("adopts the session the bound transcript continues into, and reads its questions", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    finalClaudeStop(fixture);
+    fixture.reader.read();
+    const next = startRotation(fixture);
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([
+      { state: "working", prompt: "second prompt" },
+    ]);
+    expect(adopted).toEqual([[ROTATED, SESSION_ID]]);
+
+    appendFileSync(
+      next,
+      jsonl([
+        {
+          type: "assistant",
+          isSidechain: false,
+          uuid: "ask-1",
+          parentUuid: null,
+          promptId: `turn-${ROTATED}`,
+          timestamp: new Date().toISOString(),
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_ask",
+                name: "AskUserQuestion",
+                input: { questions: [{ question: "Which layout?" }] },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(fixture.reader.read()).toEqual([
+      {
+        state: "waiting",
+        prompt: null,
+        questions: [{ id: "toolu_ask", prompt: "Which layout?" }],
+      },
+    ]);
+  });
+
+  it("negative control: a foreign session with no continuation record is ignored, even with a fresh transcript", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture, { continuation: false });
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+  });
+
+  it("negative control: a continuation naming a different session does not adopt this one", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture, { continuation: false });
+    appendFileSync(
+      fixture.transcript,
+      jsonl([continuedIn("9f0ffee0-1111-4222-8333-444455556666")]),
+    );
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+  });
+
+  it("negative control: a continuation in some other transcript does not count", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture, { continuation: false });
+    writeFileSync(
+      path.join(fixture.dir, "aaaaaaaa-1111-4222-8333-444455556666.jsonl"),
+      jsonl([continuedIn(ROTATED)]),
+    );
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+  });
+
+  it("negative control: a replay of the session already left is never adopted again", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    const next = startRotation(fixture);
+    fixture.hook([rotatedPrompt()]);
+    fixture.reader.read();
+    expect(adopted).toEqual([[ROTATED, SESSION_ID]]);
+
+    appendFileSync(next, jsonl([continuedIn(SESSION_ID)]));
+    fixture.hook([
+      {
+        hook_event_name: "UserPromptSubmit",
+        session_id: SESSION_ID,
+        prompt_id: "turn-1-replayed",
+        prompt: "replayed prompt",
+      },
+    ]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([[ROTATED, SESSION_ID]]);
+  });
+
+  it("negative control: hooks that arrive before the continuation record are held, not applied, and applied once it exists", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture, { continuation: false });
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+
+    appendFileSync(fixture.transcript, jsonl([continuedIn(ROTATED)]));
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 3_000);
+    expect(fixture.reader.read()).toEqual([
+      { state: "working", prompt: "second prompt" },
+    ]);
+    expect(adopted).toEqual([[ROTATED, SESSION_ID]]);
+  });
+
+  it("does not adopt an id that is not a session id, even with a continuation and a transcript", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    const odd = "NOT-a-hex-session";
+    writeFileSync(path.join(fixture.dir, `${odd}.jsonl`), "");
+    appendFileSync(fixture.transcript, jsonl([continuedIn(odd)]));
+    fixture.hook([rotatedPrompt(odd)]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+  });
+
+  it("adopts when other records were written after the continuation record", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture);
+    appendFileSync(
+      fixture.transcript,
+      jsonl([
+        { type: "system", subtype: "turn_duration", isSidechain: false },
+        { type: "last-prompt", lastPrompt: "x" },
+      ]),
+    );
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([
+      { state: "working", prompt: "second prompt" },
+    ]);
+    expect(adopted).toEqual([[ROTATED, SESSION_ID]]);
+  });
+
+  it("negative control: a continuation older than the tail window does not count", () => {
+    const adopted: Array<[string, string]> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      adoptions(adopted),
+    );
+    startRotation(fixture);
+    const filler = { type: "system", subtype: "filler", text: "x".repeat(900) };
+    appendFileSync(
+      fixture.transcript,
+      jsonl(Array.from({ length: 120 }, () => filler)),
+    );
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(adopted).toEqual([]);
+  });
+
+  it("makes the cap visible: past it the thread stops confirming and the drop is reported", () => {
+    const adopted: Array<[string, string]> = [];
+    const drops: Array<{ reason: string; total: number }> = [];
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      (reason, total) => drops.push({ reason, total }),
+      adoptions(adopted),
+    );
+    let current = fixture.transcript;
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const rotate = (index: number) => {
+      const sessionId = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      const next = path.join(fixture.dir, `${sessionId}.jsonl`);
+      writeFileSync(next, "");
+      appendFileSync(current, jsonl([continuedIn(sessionId)]));
+      current = next;
+      clock += 3_000;
+      fixture.hook([rotatedPrompt(sessionId)]);
+      return fixture.reader.read();
+    };
+    for (let index = 0; index < MAX_SESSION_ADOPTIONS; index += 1) {
+      rotate(index);
+    }
+    expect(adopted).toHaveLength(MAX_SESSION_ADOPTIONS);
+    expect(fixture.reader.heartbeat()).not.toBeNull();
+    expect(drops).toEqual([]);
+
+    expect(rotate(MAX_SESSION_ADOPTIONS)).toEqual([]);
+    expect(adopted).toHaveLength(MAX_SESSION_ADOPTIONS);
+    expect(fixture.reader.heartbeat()).toBeNull();
+    expect(drops.at(-1)?.reason).toBe("foreign-session");
+  });
+
+  it("stops reporting and confirming once suspended, so the thread shows Activity not reported", () => {
+    const fixture = claudeFixture();
+    startRotation(fixture);
+    fixture.hook([rotatedPrompt()]);
+    expect(fixture.reader.read()).toHaveLength(1);
+    expect(fixture.reader.heartbeat()).not.toBeNull();
+
+    fixture.reader.suspend();
+    fixture.hook([
+      {
+        hook_event_name: "UserPromptSubmit",
+        session_id: ROTATED,
+        prompt_id: "after-suspend",
+        prompt: "ignored",
+      },
+    ]);
+    expect(fixture.reader.read()).toEqual([]);
+    expect(fixture.reader.heartbeat()).toBeNull();
+  });
+
+  it("reports each identity drop with its reason and no event content", () => {
+    const drops: Array<{ reason: string; total: number }> = [];
+    const fixture = claudeFixture(false, undefined, (reason, total) =>
+      drops.push({ reason, total }),
+    );
+    fixture.hook([rotatedPrompt()]);
+    fixture.reader.read();
+    expect(drops).toEqual([{ reason: "foreign-session", total: 1 }]);
+    expect(JSON.stringify(drops)).not.toContain("second prompt");
+  });
+});
 
 describe("NativeActivityReader", () => {
   it("does not recover from a matching Stop, unknown event, or unmatched permission close", () => {
@@ -417,14 +744,20 @@ describe("NativeActivityReader", () => {
 
   it("recovers on a bound permission close only when that permission is open", () => {
     const fixture = claudeFixture();
-    fixture.hook([{ hook_event_name: "PermissionRequest", tool_name: "Bash" }]);
+    fixture.hook([
+      {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command: "make" },
+      },
+    ]);
     expect(fixture.reader.read()).toEqual([
       {
         state: "waiting",
         prompt: null,
         questions: [
           {
-            id: "permission:Bash",
+            id: expect.stringMatching(/^permission:Bash#[0-9a-f]{16}\.1$/u),
             prompt: "Claude Code needs permission to use: Bash",
           },
         ],
@@ -440,7 +773,14 @@ describe("NativeActivityReader", () => {
     ]);
     expect(fixture.reader.read()).toEqual([]);
     expect(fixture.reader.heartbeat()).toBeNull();
-    fixture.hook([{ hook_event_name: "PostToolUse", tool_name: "Bash" }]);
+    fixture.hook([
+      {
+        hook_event_name: "PostToolUse",
+        tool_name: "Bash",
+        tool_use_id: "toolu_make",
+        tool_input: { command: "make" },
+      },
+    ]);
     expect(fixture.reader.read()).toEqual([{ state: "working", prompt: null }]);
     expect(fixture.reader.heartbeat()).toEqual({
       state: "working",
@@ -470,7 +810,7 @@ describe("NativeActivityReader", () => {
     ]);
   });
 
-  it("rejects hooks before discovery, rejects stale transcript replay, then recovers on bound evidence", () => {
+  it("holds hooks before discovery and rejects those of another session, rejects stale transcript replay, then recovers on bound evidence", () => {
     const diagnostics: string[] = [];
     const host = createFakePluginHost({ pluginId: "provider-claude-code" });
     claudeCodePlugin(host.bb);
@@ -489,7 +829,7 @@ describe("NativeActivityReader", () => {
     );
     mkdirSync(path.dirname(transcript), { recursive: true });
     writeFileSync(transcript, "");
-    writeFileSync(events, "");
+    mkdirSync(events, { recursive: true });
     const reader = new NativeActivityReader(
       cli,
       { HOME: home },
@@ -498,12 +838,12 @@ describe("NativeActivityReader", () => {
       undefined,
       (reason) => diagnostics.push(reason),
     );
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
           hook_event_name: "UserPromptSubmit",
-          session_id: SESSION_ID,
+          session_id: "other-session",
           prompt_id: "unbound-turn",
           prompt: "private",
         },
@@ -526,7 +866,7 @@ describe("NativeActivityReader", () => {
         },
       ]),
     );
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -556,7 +896,7 @@ describe("NativeActivityReader", () => {
         },
       ]),
     );
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -569,7 +909,7 @@ describe("NativeActivityReader", () => {
     expect(reader.read()).toEqual([{ state: "working", prompt: null }]);
     expect(Reflect.get(reader, "currentTurn")).toBe("fresh-bound-turn");
     expect(Reflect.get(reader, "unconfirmedTranscriptOffset")).toBeNull();
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -580,7 +920,7 @@ describe("NativeActivityReader", () => {
       ]),
     );
     expect(reader.read()).toEqual([]);
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -595,7 +935,7 @@ describe("NativeActivityReader", () => {
       { state: "working", prompt: "bound prompt" },
     ]);
     expect(Reflect.get(reader, "currentTurn")).toBe("bound-turn");
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -608,7 +948,7 @@ describe("NativeActivityReader", () => {
     expect(reader.read()).toEqual([
       { state: "waiting", prompt: null, questions: expect.any(Array) },
     ]);
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -625,10 +965,15 @@ describe("NativeActivityReader", () => {
       typeof tracker === "object" && tracker !== null
         ? Reflect.get(tracker, "questions")
         : undefined;
-    expect(questions instanceof Map && questions.has("permission:Bash")).toBe(
-      true,
-    );
-    appendFileSync(
+    expect(
+      questions instanceof Map &&
+        [...questions.keys()].some(
+          (id) =>
+            typeof id === "string" &&
+            /^permission:Bash#[0-9a-f]{16}\.1$/u.test(id),
+        ),
+    ).toBe(true);
+    publishHooks(
       events,
       jsonl([
         {
@@ -646,7 +991,7 @@ describe("NativeActivityReader", () => {
       state: "working",
       prompt: null,
     });
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         {
@@ -659,7 +1004,6 @@ describe("NativeActivityReader", () => {
     expect(reader.read()).toEqual([]);
     expect(reader.heartbeat()).toBeNull();
     expect(diagnostics).toEqual([
-      "unbound",
       "foreign-session",
       "foreign-session",
       "foreign-session",
@@ -2090,14 +2434,14 @@ describe("NativeActivityReader", () => {
   it("reads hook events while the assigned transcript does not exist yet", () => {
     const home = tempHome();
     const events = path.join(home, "events.jsonl");
-    writeFileSync(events, "");
+    mkdirSync(events, { recursive: true });
     const reader = new NativeActivityReader(
       CLAUDE_CLI,
       { HOME: home },
       events,
       { kind: "start", id: SESSION_ID },
     );
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([
         { hook_event_name: "UserPromptSubmit", prompt: "fix the build" },
@@ -2109,21 +2453,492 @@ describe("NativeActivityReader", () => {
       { state: "working", prompt: "fix the build" },
       { state: "idle", prompt: null },
     ]);
-    appendFileSync(events, jsonl([{ hook_event_name: "PreToolUse" }]));
+    publishHooks(events, jsonl([{ hook_event_name: "PreToolUse" }]));
     expect(reader.read()).toEqual([{ state: "working", prompt: null }]);
-    appendFileSync(
+    publishHooks(
       events,
       jsonl(
         Array.from({ length: 100 }, () => ({ hook_event_name: "PreToolUse" })),
       ),
     );
     expect(reader.read()).toEqual([]);
-    appendFileSync(
+    publishHooks(
       events,
       jsonl([{ hook_event_name: "Stop", stop_hook_active: true }]),
     );
     expect(reader.read()).toEqual([{ state: "idle", prompt: null }]);
     expect(reader.read()).toEqual([]);
     expect(reader.heartbeat()).toBeNull();
+  });
+});
+
+describe("idle delivery through the real reader, reporter and wiring", () => {
+  const HEARTBEAT_MS = 30_000;
+  const http = (status: number, code: string) =>
+    new BbHttpError({ body: null, code, message: code, status });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function holder(answers: { idle?: unknown[]; working?: unknown[] }) {
+    vi.useFakeTimers();
+    const fixture = claudeFixture();
+    const accepted: string[] = [];
+    const sent: string[] = [];
+    const scripts = {
+      idle: [...(answers.idle ?? [])],
+      working: [...(answers.working ?? [])],
+    };
+    const reporter = createNativeActivityReporter({
+      currentCredential: () => "current",
+      send: async (args) => {
+        sent.push(args.state);
+        const script = args.state === "idle" ? scripts.idle : scripts.working;
+        const next = script.shift();
+        if (next instanceof Error) throw next;
+        accepted.push(args.state);
+        return { ok: true };
+      },
+      threadId: "thr_1",
+    });
+    const wiring = createNativeActivityWiring({
+      currentCredential: () => "current",
+      log: () => undefined,
+      reader: () => fixture.reader,
+      recordSession: async () => ({}),
+      report: reporter.report,
+      retryReport: reporter.retry,
+    });
+    const timer = setInterval(wiring.onHeartbeatTick, HEARTBEAT_MS);
+    const forward = () => {
+      for (const next of fixture.reader.read()) reporter.report(next);
+    };
+    reporter.report({ state: "working", prompt: "first prompt" });
+    const stopTurn = () => {
+      fixture.hook([
+        {
+          hook_event_name: "Stop",
+          prompt_id: "turn-1",
+          stop_hook_active: false,
+        },
+      ]);
+      fixture.append([
+        {
+          type: "system",
+          subtype: "stop_hook_summary",
+          isSidechain: false,
+          hasOutput: false,
+          uuid: "end-1",
+          parentUuid: "answer-1",
+        },
+      ]);
+      forward();
+    };
+    const tick = async (times: number) => {
+      for (let index = 0; index < times; index += 1) {
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        await reporter.settled();
+      }
+    };
+    return {
+      accepted,
+      fixture,
+      forward,
+      reporter,
+      sent,
+      stopTurn,
+      stop: () => clearInterval(timer),
+      tick,
+      wiring,
+    };
+  }
+
+  it("delivers an idle report exactly once after a 401 and then a network failure, by the second heartbeat tick", async () => {
+    const h = holder({
+      idle: [
+        http(401, "native_terminal_credential_invalid"),
+        new TypeError("fetch failed"),
+      ],
+    });
+    h.stopTurn();
+    await h.reporter.settled();
+    expect(h.accepted).toEqual(["working"]);
+    await h.tick(1);
+    expect(h.accepted).toEqual(["working"]);
+    await h.tick(1);
+    expect(h.accepted).toEqual(["working", "idle"]);
+    await h.tick(4);
+    expect(h.accepted).toEqual(["working", "idle"]);
+    expect(h.sent.filter((state) => state === "idle")).toHaveLength(3);
+    h.stop();
+  });
+
+  it("retries an idle report whose first send failed on the network, and delivers it once", async () => {
+    const h = holder({ idle: [new TypeError("fetch failed")] });
+    h.stopTurn();
+    await h.reporter.settled();
+    expect(h.accepted).toEqual(["working"]);
+    await h.tick(1);
+    expect(h.accepted).toEqual(["working", "idle"]);
+    await h.tick(3);
+    expect(h.sent.filter((state) => state === "idle")).toHaveLength(2);
+    h.stop();
+  });
+
+  it("sends an idle report exactly once after an ambiguous client timeout", async () => {
+    const h = holder({ idle: [new BbRequestTimeoutError(10_000)] });
+    h.stopTurn();
+    await h.reporter.settled();
+    await h.tick(1);
+    expect(h.accepted).toEqual(["working", "idle"]);
+    await h.tick(3);
+    expect(h.sent.filter((state) => state === "idle")).toHaveLength(2);
+    h.stop();
+  });
+
+  it("never retries a refusal that is not transient", async () => {
+    const h = holder({ idle: [http(403, "forbidden")] });
+    h.stopTurn();
+    await h.reporter.settled();
+    await h.tick(4);
+    expect(h.sent.filter((state) => state === "idle")).toHaveLength(1);
+    expect(h.accepted).toEqual(["working"]);
+    h.stop();
+  });
+
+  it("does not let the retained idle report overwrite a newer report", async () => {
+    const h = holder({
+      idle: [http(401, "native_terminal_credential_invalid")],
+    });
+    h.stopTurn();
+    await h.reporter.settled();
+    h.fixture.hook([
+      {
+        hook_event_name: "UserPromptSubmit",
+        prompt_id: "turn-2",
+        prompt: "second prompt",
+      },
+    ]);
+    h.forward();
+    await h.reporter.settled();
+    expect(h.accepted).toEqual(["working", "working"]);
+    await h.tick(3);
+    expect(h.sent.filter((state) => state === "idle")).toHaveLength(1);
+    expect(h.accepted).not.toContain("idle");
+    h.stop();
+  });
+});
+
+describe("a rotated session is followed only after its binding is accepted", () => {
+  const ROTATED = "5c0ffee0-1111-4222-8333-444455556666";
+  const releases: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const release of releases.splice(0)) release();
+  });
+
+  function holdOpen(): {
+    promise: Promise<unknown>;
+    reject(error: unknown): void;
+    resolve(): void;
+  } {
+    let resolve: () => void = () => undefined;
+    let reject: (error: unknown) => void = () => undefined;
+    const promise = new Promise<unknown>((res, rej) => {
+      resolve = () => res({});
+      reject = rej;
+    });
+    releases.push(resolve);
+    return { promise, reject, resolve };
+  }
+
+  function holder(
+    answers: Array<() => Promise<unknown>>,
+    oldSession: "idle" | "working" | "asking" = "idle",
+  ) {
+    const attempts: Array<{ replaces: string; session: string }> = [];
+    const sent: string[] = [];
+    const logged: string[] = [];
+    let wiring: ReturnType<typeof createNativeActivityWiring> | undefined;
+    const fixture = claudeFixture(
+      false,
+      undefined,
+      undefined,
+      (sessionId, previousSessionId) =>
+        wiring?.onSessionAdopted(sessionId, previousSessionId),
+      false,
+    );
+    const reporter = createNativeActivityReporter({
+      currentCredential: () => "current",
+      send: async (args) => {
+        sent.push(args.state);
+      },
+      threadId: "thr_rotation",
+    });
+    wiring = createNativeActivityWiring({
+      currentCredential: () => "current",
+      log: (event) => logged.push(event),
+      reader: () => fixture.reader,
+      recordSession: async (args) => {
+        attempts.push({
+          replaces: args.replacesNativeSessionId,
+          session: args.nativeSessionId,
+        });
+        const answer = answers[attempts.length - 1];
+        return answer === undefined ? {} : answer();
+      },
+      report: reporter.report,
+      retryReport: reporter.retry,
+    });
+    const active = wiring;
+    if (oldSession === "idle") {
+      fixture.hook([
+        {
+          hook_event_name: "Stop",
+          prompt_id: "turn-1",
+          stop_hook_active: false,
+        },
+      ]);
+      fixture.append([
+        {
+          type: "system",
+          subtype: "stop_hook_summary",
+          isSidechain: false,
+          hasOutput: false,
+          uuid: "end-1",
+          parentUuid: "answer-1",
+        },
+      ]);
+      expect(fixture.reader.read()).toEqual([{ state: "idle", prompt: null }]);
+    }
+    if (oldSession === "asking") {
+      fixture.hook([
+        {
+          hook_event_name: "PermissionRequest",
+          prompt_id: "turn-1",
+          tool_name: "Edit",
+        },
+      ]);
+      expect(fixture.reader.read().map((report) => report.state)).toEqual([
+        "waiting",
+      ]);
+    }
+    const file = path.join(fixture.dir, `${ROTATED}.jsonl`);
+    writeFileSync(file, "");
+    appendFileSync(
+      fixture.transcript,
+      jsonl([
+        {
+          type: "continued-in",
+          continuedInSessionId: ROTATED,
+          sessionId: SESSION_ID,
+          timestamp: new Date().toISOString(),
+        },
+      ]),
+    );
+    const rotated = (record: Record<string, unknown>) =>
+      fixture.hook([{ session_id: ROTATED, ...record }]);
+    const forward = async (): Promise<string[]> => {
+      for (const next of fixture.reader.read()) reporter.report(next);
+      await reporter.settled();
+      return [...sent];
+    };
+    return {
+      attempts,
+      fixture,
+      forward,
+      heartbeat: async () => {
+        active.onHeartbeatTick();
+        await reporter.settled();
+        return [...sent];
+      },
+      logged,
+      rotated,
+      settled: () => active.settled(),
+    };
+  }
+
+  const opening = {
+    hook_event_name: "UserPromptSubmit",
+    prompt: "second prompt",
+    prompt_id: "turn-rotated",
+  };
+  const ask = {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    tool_input: { command: "make" },
+  };
+  const answered = {
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_use_id: "toolu_make",
+    tool_input: { command: "make" },
+  };
+
+  it("publishes nothing for the new session while the rebind is pending, then replays once after it is recorded", async () => {
+    const binding = holdOpen();
+    const h = holder([() => binding.promise]);
+    try {
+      h.rotated(opening);
+      h.rotated(ask);
+      expect(await h.forward()).toEqual([]);
+      expect(h.attempts).toEqual([{ replaces: SESSION_ID, session: ROTATED }]);
+      h.rotated(answered);
+      expect(await h.forward()).toEqual([]);
+      expect(await h.heartbeat()).toEqual([]);
+
+      binding.resolve();
+      await h.settled();
+      expect(await h.forward()).toEqual(["working", "waiting", "working"]);
+      expect(await h.forward()).toEqual(["working", "waiting", "working"]);
+      expect(h.attempts).toHaveLength(1);
+    } finally {
+      binding.resolve();
+    }
+  });
+
+  it("publishes nothing, drops the held records and shows unconfirmed activity after a permanent refusal", async () => {
+    const binding = holdOpen();
+    const h = holder([() => binding.promise]);
+    try {
+      h.rotated(opening);
+      h.rotated(ask);
+      expect(await h.forward()).toEqual([]);
+
+      binding.reject(
+        new BbHttpError({
+          body: null,
+          code: "native_session_claimed",
+          message: "claimed",
+          status: 409,
+        }),
+      );
+      await h.settled();
+      expect(h.logged).toContain("activity-session-rebind-refused");
+      expect(await h.forward()).toEqual([]);
+      h.rotated(answered);
+      expect(await h.forward()).toEqual([]);
+      expect(await h.heartbeat()).toEqual([]);
+      expect(h.fixture.reader.heartbeat()).toBeNull();
+    } finally {
+      binding.resolve();
+    }
+  });
+
+  it("keeps holding through a retryable failure and replays once when the retry is recorded", async () => {
+    const h = holder([
+      async () => {
+        throw new BbHttpError({
+          body: null,
+          code: "unavailable",
+          message: "unavailable",
+          status: 503,
+        });
+      },
+    ]);
+    h.rotated(opening);
+    h.rotated(ask);
+    expect(await h.forward()).toEqual([]);
+    await h.settled();
+    expect(h.attempts).toHaveLength(1);
+    expect(await h.forward()).toEqual([]);
+
+    expect(await h.heartbeat()).toEqual([]);
+    await h.settled();
+    expect(h.attempts).toHaveLength(2);
+    expect(await h.forward()).toEqual(["working", "waiting"]);
+    expect(await h.forward()).toEqual(["working", "waiting"]);
+    expect(h.logged).not.toContain("activity-session-rebind-refused");
+  });
+
+  it.each([
+    ["working", "working"],
+    ["asking", "waiting"],
+  ] as const)(
+    "does not heartbeat the old session while the rebind is pending when it was %s mid-turn, and replays once after it is recorded",
+    async (oldSession, oldState) => {
+      const binding = holdOpen();
+      const h = holder([() => binding.promise], oldSession);
+      try {
+        expect(h.fixture.reader.heartbeat()?.state).toBe(oldState);
+        h.rotated(opening);
+        h.rotated(ask);
+        expect(await h.forward()).toEqual([]);
+        expect(h.fixture.reader.heartbeat()).toBeNull();
+        expect(await h.heartbeat()).toEqual([]);
+        expect(await h.heartbeat()).toEqual([]);
+
+        binding.resolve();
+        await h.settled();
+        expect(await h.forward()).toEqual(["working", "waiting"]);
+        expect(await h.forward()).toEqual(["working", "waiting"]);
+        expect(h.attempts).toHaveLength(1);
+      } finally {
+        binding.resolve();
+      }
+    },
+  );
+});
+
+describe("NativeActivityReader without any hook capture", () => {
+  function transcriptOnlyReader(source: string | { unavailable: true }) {
+    const host = createFakePluginHost({ pluginId: "provider-claude-code" });
+    claudeCodePlugin(host.bb);
+    const cli = host.harness.registrations.providerRegistrations.find(
+      (entry) => entry.id === "claude-code",
+    )?.experimental_nativeTerminal;
+    if (cli === undefined) throw new Error("Claude native declaration missing");
+    const home = tempHome();
+    const dir = path.join(home, ".claude", "projects", "work");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `${SESSION_ID}.jsonl`),
+      jsonl([
+        {
+          type: "user",
+          uuid: "user-1",
+          parentUuid: null,
+          promptId: "turn-1",
+          origin: { kind: "human" },
+          message: { content: "first prompt" },
+          timestamp: "2026-10-11T10:00:01.000Z",
+        },
+        {
+          type: "assistant",
+          isSidechain: false,
+          uuid: "answer-1",
+          parentUuid: "user-1",
+          message: {
+            id: "message-1",
+            content: [{ type: "text", text: "first answer" }],
+          },
+          timestamp: "2026-10-11T10:00:02.000Z",
+        },
+      ]),
+    );
+    if (typeof source === "string") mkdirSync(source, { recursive: true });
+    return new NativeActivityReader(cli, { HOME: home }, source, {
+      kind: "start",
+      id: SESSION_ID,
+    });
+  }
+
+  it("control: with a working capture the same transcript shows Working", () => {
+    const reader = transcriptOnlyReader(path.join(tempHome(), "spool"));
+    expect(reader.read().some((report) => report.state === "working")).toBe(
+      true,
+    );
+  });
+
+  it("never shows Working or heartbeats when hook history is permanently unavailable, so the thread shows Activity not reported", () => {
+    const reader = transcriptOnlyReader({ unavailable: true });
+    expect(reader.read().some((report) => report.state === "working")).toBe(
+      false,
+    );
+    expect(reader.heartbeat()).toBeNull();
+    expect(reader.read().some((report) => report.state === "working")).toBe(
+      false,
+    );
   });
 });

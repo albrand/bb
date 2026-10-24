@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   consumeNativeTerminalThreadLaunchInput,
+  deleteNativeTerminalToolCredential,
   getNativeTerminalToolCredential,
   setNativeTerminalToolCredential,
   getEnvironment,
@@ -10,6 +11,8 @@ import {
   getThread,
   listNativeTerminalThreadsWithDisconnectedTerminal,
   recordNativeTerminalThreadSessionId,
+  rebindNativeTerminalThreadSessionId,
+  clearNativeTerminalThreadEvidence,
   setNativeTerminalThreadTerminal,
   type NativeTerminalThreadRecord,
 } from "@bb/db";
@@ -41,6 +44,10 @@ import {
 import { resolvePluginProviderEnv } from "../plugins/plugin-agent-contributions.js";
 import { applyLoggedThreadLifecycleEventInTransaction } from "./lifecycle-outcome.js";
 import {
+  forgetRejectedNativeQuestions,
+  interruptNativeTerminalQuestions,
+} from "./native-terminal-questions.js";
+import {
   decodeTerminalOutputChunks,
   terminalOutputAlreadyShowsText,
   terminalOutputShowsPaste,
@@ -66,7 +73,13 @@ const NATIVE_TERMINAL_DEFAULT_ROWS = 36;
 
 type NativeTerminalDeps = Pick<
   AppDeps,
-  "config" | "db" | "logger" | "providerRegistry" | "terminalSessions"
+  | "config"
+  | "db"
+  | "hub"
+  | "logger"
+  | "pendingInteractions"
+  | "providerRegistry"
+  | "terminalSessions"
 >;
 
 type NativeTerminalReopenDeps = NativeTerminalDeps &
@@ -84,6 +97,21 @@ interface PendingNativeTerminalOpen {
 
 const pendingOpens = new Map<string, PendingNativeTerminalOpen>();
 const pendingSends = new Map<string, Promise<void>>();
+const rebindsInFlight = new Map<string, number>();
+
+function beginNativeTerminalRebind(threadId: string): void {
+  rebindsInFlight.set(threadId, (rebindsInFlight.get(threadId) ?? 0) + 1);
+}
+
+function endNativeTerminalRebind(threadId: string): void {
+  const remaining = (rebindsInFlight.get(threadId) ?? 1) - 1;
+  if (remaining <= 0) rebindsInFlight.delete(threadId);
+  else rebindsInFlight.set(threadId, remaining);
+}
+
+export function isNativeTerminalRebindInFlight(threadId: string): boolean {
+  return rebindsInFlight.has(threadId);
+}
 const reattachEpochs = new Map<string, number>();
 
 function currentReattachEpoch(threadId: string): number {
@@ -438,42 +466,65 @@ async function openNativeTerminalOnce(
     }
   }
   const credential = issueNativeTerminalToolCredential(record.providerId);
-  const terminal = await deps.terminalSessions.createTerminal({
-    ...(args.repaintOnAttach
-      ? {
-          onTerminalStarted: (terminalId: string) =>
-            deps.terminalSessions.requestNativeTerminalRepaintOnNextAttach(
-              terminalId,
-            ),
+  const previousCredential = getNativeTerminalToolCredential(
+    deps.db,
+    thread.id,
+  );
+  beginNativeTerminalRebind(thread.id);
+  try {
+    deleteNativeTerminalToolCredential(deps.db, thread.id);
+    clearNativeTerminalThreadEvidence(deps.db, thread.id);
+    const terminal = await deps.terminalSessions
+      .createTerminal({
+        ...(args.repaintOnAttach
+          ? {
+              onTerminalStarted: (terminalId: string) =>
+                deps.terminalSessions.requestNativeTerminalRepaintOnNextAttach(
+                  terminalId,
+                ),
+            }
+          : {}),
+        payload: {
+          cols: args.request.cols ?? NATIVE_TERMINAL_DEFAULT_COLS,
+          rows: args.request.rows ?? NATIVE_TERMINAL_DEFAULT_ROWS,
+          start: {
+            mode: "command",
+            command: nativeTerminalLaunchCommand({
+              executable: provider.cli.executable,
+              launchArgs: provider.cli.launchArgs,
+              reattachOnly: args.reattachOnly,
+              threadId: thread.id,
+            }),
+          },
+          target: { kind: "thread", threadId: thread.id },
+          title: provider.displayName,
+        },
+        extraContributedEnv: [...providerEnv, credential.env],
+      })
+      .catch((error: unknown) => {
+        if (
+          previousCredential !== null &&
+          getNativeTerminalToolCredential(deps.db, thread.id) === null
+        ) {
+          setNativeTerminalToolCredential(deps.db, previousCredential);
         }
-      : {}),
-    payload: {
-      cols: args.request.cols ?? NATIVE_TERMINAL_DEFAULT_COLS,
-      rows: args.request.rows ?? NATIVE_TERMINAL_DEFAULT_ROWS,
-      start: {
-        mode: "command",
-        command: nativeTerminalLaunchCommand({
-          executable: provider.cli.executable,
-          launchArgs: provider.cli.launchArgs,
-          reattachOnly: args.reattachOnly,
-          threadId: thread.id,
-        }),
-      },
-      target: { kind: "thread", threadId: thread.id },
-      title: provider.displayName,
-    },
-    extraContributedEnv: [...providerEnv, credential.env],
-  });
-  setNativeTerminalToolCredential(deps.db, {
-    threadId: thread.id,
-    terminalSessionId: terminal.id,
-    credentialHash: credential.hash,
-  });
-  setNativeTerminalThreadTerminal(deps.db, {
-    threadId: thread.id,
-    terminalSessionId: terminal.id,
-  });
-  return toNativeTerminalThread(deps, record, terminal);
+        throw error;
+      });
+    setNativeTerminalToolCredential(deps.db, {
+      threadId: thread.id,
+      terminalSessionId: terminal.id,
+      credentialHash: credential.hash,
+    });
+    setNativeTerminalThreadTerminal(deps.db, {
+      threadId: thread.id,
+      terminalSessionId: terminal.id,
+    });
+    interruptNativeTerminalQuestions(deps, thread.id);
+    forgetRejectedNativeQuestions(deps, thread.id);
+    return toNativeTerminalThread(deps, record, terminal);
+  } finally {
+    endNativeTerminalRebind(thread.id);
+  }
 }
 
 export async function settlePendingNativeTerminalOpen(
@@ -992,7 +1043,7 @@ function issueNativeTerminalToolCredential(providerId: string) {
 export function requireNativeTerminalToolCredential(
   deps: Pick<AppDeps, "db" | "terminalSessions">,
   args: { authorization: string | undefined; threadId: string },
-): void {
+): { terminalSessionId: string } {
   const record = getNativeTerminalThread(deps.db, args.threadId);
   const match = /^Bearer ([A-Za-z0-9_-]+)$/u.exec(args.authorization ?? "");
   const stored = getNativeTerminalToolCredential(deps.db, args.threadId);
@@ -1009,9 +1060,10 @@ export function requireNativeTerminalToolCredential(
     throw new ApiError(
       401,
       "native_terminal_credential_invalid",
-      "A valid credential for this thread's running native terminal is required",
+      "A valid credential for this thread's current native terminal is required",
     );
   }
+  return { terminalSessionId: stored.terminalSessionId };
 }
 
 export function requireLiveNativeTerminalToolThread(
@@ -1038,14 +1090,40 @@ export function requireLiveNativeTerminalToolThread(
   return lookup;
 }
 
+export function nativeTerminalAwaitsReattach(
+  deps: Pick<AppDeps, "db" | "terminalSessions">,
+  threadId: string,
+): boolean {
+  const thread = getThread(deps.db, threadId);
+  const record = getNativeTerminalThread(deps.db, threadId);
+  if (
+    thread === null ||
+    thread.archivedAt !== null ||
+    thread.deletedAt !== null ||
+    record === null
+  ) {
+    return false;
+  }
+  const terminal = readRecordTerminal(deps, record);
+  return (
+    terminal !== null &&
+    (terminal.status === "disconnected" ||
+      (terminal.status === "exited" &&
+        terminal.closeReason === "daemon-disconnect"))
+  );
+}
+
 export async function resolveNativeTerminalAgentTools(
   deps: AppDeps,
   args: { authorization: string | undefined; threadId: string },
 ): Promise<
-  ThreadEnvironmentLookupResult & { tools: NativeTerminalAgentTools["tools"] }
+  ThreadEnvironmentLookupResult & {
+    terminalSessionId: string;
+    tools: NativeTerminalAgentTools["tools"];
+  }
 > {
   const { threadId } = args;
-  requireNativeTerminalToolCredential(deps, args);
+  const { terminalSessionId } = requireNativeTerminalToolCredential(deps, args);
   const lookup = requireLiveNativeTerminalToolThread(deps, threadId);
   const record = requireNativeTerminalThreadRecord(deps, threadId);
   const tools = await resolveThreadDynamicTools(deps, {
@@ -1055,6 +1133,7 @@ export async function resolveNativeTerminalAgentTools(
   });
   return {
     ...lookup,
+    terminalSessionId,
     tools: tools.filter(
       (tool) => tool.name !== UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
     ),
@@ -1072,11 +1151,9 @@ export async function listNativeTerminalAgentTools(
 export async function requireNativeTerminalAgentToolCall(
   deps: AppDeps,
   args: { authorization: string | undefined; threadId: string; tool: string },
-): Promise<ThreadEnvironmentLookupResult> {
-  const { environment, thread, tools } = await resolveNativeTerminalAgentTools(
-    deps,
-    args,
-  );
+): Promise<ThreadEnvironmentLookupResult & { terminalSessionId: string }> {
+  const { environment, terminalSessionId, thread, tools } =
+    await resolveNativeTerminalAgentTools(deps, args);
   if (!tools.some((tool) => tool.name === args.tool)) {
     throw new ApiError(
       404,
@@ -1084,25 +1161,58 @@ export async function requireNativeTerminalAgentToolCall(
       `Tool ${args.tool} is not available to this thread`,
     );
   }
-  return { environment, thread };
+  return { environment, terminalSessionId, thread };
 }
 
 export function recordNativeTerminalSession(
   deps: NativeTerminalViewDeps,
-  args: { threadId: string; nativeSessionId: string },
+  args: {
+    authorization?: string;
+    threadId: string;
+    nativeSessionId: string;
+    replacesNativeSessionId?: string;
+  },
 ): NativeTerminalThread {
   requireNativeTerminalThreadRecord(deps, args.threadId);
+  requireNativeTerminalToolCredential(deps, {
+    authorization: args.authorization,
+    threadId: args.threadId,
+  });
+  requireLiveNativeTerminalToolThread(deps, args.threadId);
   const result = recordNativeTerminalThreadSessionId(deps.db, args);
   switch (result.kind) {
     case "recorded":
     case "unchanged":
       break;
-    case "already-bound":
-      throw new ApiError(
-        409,
-        "native_session_already_bound",
-        `Thread is already bound to native session ${result.nativeSessionId}`,
-      );
+    case "already-bound": {
+      if (args.replacesNativeSessionId === undefined) {
+        throw new ApiError(
+          409,
+          "native_session_already_bound",
+          `Thread is already bound to native session ${result.nativeSessionId}`,
+        );
+      }
+      const rebound = rebindNativeTerminalThreadSessionId(deps.db, {
+        nativeSessionId: args.nativeSessionId,
+        replacesNativeSessionId: args.replacesNativeSessionId,
+        threadId: args.threadId,
+      });
+      if (rebound.kind === "claimed-by-other-thread") {
+        throw new ApiError(
+          409,
+          "native_session_claimed",
+          `Native session belongs to thread ${rebound.threadId}`,
+        );
+      }
+      if (rebound.kind === "stale") {
+        throw new ApiError(
+          409,
+          "native_session_rebind_stale",
+          "The thread's native session changed since this move was requested",
+        );
+      }
+      break;
+    }
     case "claimed-by-other-thread":
       throw new ApiError(
         409,

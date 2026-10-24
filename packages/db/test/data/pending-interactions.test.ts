@@ -4,11 +4,13 @@ import { createEnvironment } from "../../src/data/environments.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { createProject } from "../../src/data/projects.js";
 import {
+  createInterruptedProviderPendingInteraction,
   createPendingInteraction,
   getActivePendingInteractionForThread,
   getPendingInteractionByProviderRequest,
   interruptPendingInteractionsForThreads,
   listPendingInteractionsByThread,
+  retagInterruptedPendingInteraction,
   setPendingInteractionResolved,
 } from "../../src/data/pending-interactions.js";
 import { createThread } from "../../src/data/threads.js";
@@ -243,3 +245,66 @@ describe("pending interactions", () => {
   );
 
 });
+
+describe("retagging an interrupted provider interaction", () => {
+  const identity = {
+    providerId: "claude-code",
+    providerRequestId: "native:permission:Bash#aaaa.1",
+    providerThreadId: "session-retag",
+  };
+
+  function interrupted(db: ReturnType<typeof setup>["db"], threadId: string) {
+    return createInterruptedProviderPendingInteraction(db, {
+      ...identity,
+      payload: "{}",
+      statusReason: "daemon restarted",
+      threadId,
+      turnId: "native-terminal-turn",
+    });
+  }
+
+  it("changes the reason of the owning thread's row", () => {
+    const { db, thread } = setup();
+    const row = interrupted(db, thread.id);
+    const retagged = retagInterruptedPendingInteraction(db, {
+      fromStatusReason: "daemon restarted",
+      id: row.id,
+      threadId: thread.id,
+      toStatusReason: "answered",
+    });
+    expect(retagged).toMatchObject({ statusReason: "answered" });
+    expect(getPendingInteractionByProviderRequest(db, identity)).toMatchObject({
+      status: "interrupted",
+      statusReason: "answered",
+    });
+  });
+
+  it("returns null and leaves the row unchanged when the thread id does not match", () => {
+    const { db, siblingThread, thread } = setup();
+    const row = interrupted(db, thread.id);
+    expect(
+      retagInterruptedPendingInteraction(db, {
+        fromStatusReason: "daemon restarted",
+        id: row.id,
+        threadId: siblingThread.id,
+        toStatusReason: "answered",
+      }),
+    ).toBeNull();
+    expect(getPendingInteractionByProviderRequest(db, identity)).toEqual(row);
+  });
+
+  it("returns null and leaves the row unchanged when the current reason is not the expected one", () => {
+    const { db, thread } = setup();
+    const row = interrupted(db, thread.id);
+    expect(
+      retagInterruptedPendingInteraction(db, {
+        fromStatusReason: "something else",
+        id: row.id,
+        threadId: thread.id,
+        toStatusReason: "answered",
+      }),
+    ).toBeNull();
+    expect(getPendingInteractionByProviderRequest(db, identity)).toEqual(row);
+  });
+});
+

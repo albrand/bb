@@ -51,3 +51,24 @@ export function shouldCloseUnretainedDisconnectedTerminalSession({
     session.status === "disconnected" && !retainedTerminalIds.has(session.id)
   );
 }
+
+export function omitSupersededDisconnectedSessions(
+  sessions: readonly TerminalSession[],
+): readonly TerminalSession[] {
+  return sessions.filter(
+    (session) =>
+      !(
+        session.status === "exited" &&
+        session.closeReason === "daemon-disconnect" &&
+        (session.exitCode ?? 0) === 0 &&
+        session.threadId !== null &&
+        sessions.some(
+          (other) =>
+            other.id !== session.id &&
+            other.threadId === session.threadId &&
+            other.status === "running" &&
+            other.createdAt > session.createdAt,
+        )
+      ),
+  );
+}

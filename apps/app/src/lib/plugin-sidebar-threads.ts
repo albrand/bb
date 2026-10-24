@@ -4,6 +4,7 @@ import {
   getThreadListIndicatorLabel,
   isNativeActivityUnconfirmed,
   isThreadRead,
+  nativeActivityEvidenceKind,
   resolveThreadListIndicator,
   threadListIndicatorStateForThread,
 } from "@bb/client-core";
@@ -61,9 +62,15 @@ export function toPluginSidebarThread(
             confirmation: nativeActivityUnconfirmed
               ? "unconfirmed"
               : "confirmed",
+            evidenceKind: nativeActivityEvidenceKind(
+              entry.runtime,
+              now,
+              nativeActivityUnconfirmed,
+            ),
           },
         }),
     queuedWork: entry.queuedWork,
+    experimental_queuedFailedCount: entry.queuedFailedCount,
     hasPendingInteraction: entry.hasPendingInteraction,
     activity: {
       workflows: entry.activity.activeWorkflowCount,
@@ -73,7 +80,10 @@ export function toPluginSidebarThread(
       goals: entry.activity.activeGoalCount,
     },
     indicator,
-    indicatorLabel: getThreadListIndicatorLabel(indicator),
+    indicatorLabel: getThreadListIndicatorLabel(
+      indicator,
+      entry.queuedFailedCount,
+    ),
     isUnread: !isThreadRead(entry),
     isPinned: entry.pinnedAt !== null,
     pinnedAt: entry.pinnedAt,

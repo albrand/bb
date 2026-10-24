@@ -311,6 +311,24 @@ describe("readJsonResponse()", () => {
     );
   });
 
+  it("keeps the original connection error as the cause of the connection error", async () => {
+    const connError = new TypeError("fetch failed", {
+      cause: { code: "ECONNREFUSED" },
+    });
+
+    const thrown = await readJsonResponse(Promise.reject(connError)).catch(
+      (error: unknown) => error,
+    );
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({
+      message:
+        "Cannot connect to BB server. Ensure it is running and BB_SERVER_URL is correct.",
+    });
+    expect(thrown).toHaveProperty("cause", connError);
+    expect(thrown).toHaveProperty("cause.cause.code", "ECONNREFUSED");
+  });
+
   it("rethrows non-TypeError connection errors", async () => {
     const error = new RangeError("something wrong");
 

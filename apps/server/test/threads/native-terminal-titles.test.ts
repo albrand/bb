@@ -1,4 +1,12 @@
-import { getNativeTerminalThread, getThread, updateThread } from "@bb/db";
+import { createHash } from "node:crypto";
+import {
+  createTerminalSession,
+  getNativeTerminalThread,
+  getThread,
+  setNativeTerminalThreadTerminal,
+  setNativeTerminalToolCredential,
+  updateThread,
+} from "@bb/db";
 import { threadResponseSchema } from "@bb/server-contract";
 import { describe, expect, it, vi } from "vitest";
 import { registerFakeAiService } from "../helpers/ai-services.js";
@@ -35,7 +43,7 @@ async function withTitleFixture(
       builtin: true,
       complete,
     });
-    const { host } = seedHostSession(harness.deps);
+    const { host, session } = seedHostSession(harness.deps);
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
@@ -77,11 +85,37 @@ async function withTitleFixture(
           return thread.id;
         },
         async activity(threadId, prompt) {
+          const credential = "synthetic-title-test-credential";
+          const terminal = createTerminalSession(harness.db, {
+            cols: 80,
+            daemonSessionId: session.id,
+            environmentId: environment.id,
+            hostId: host.id,
+            initialCwd: "/tmp/native-title",
+            rows: 24,
+            status: "running",
+            threadId,
+            title: "Claude Code",
+          });
+          setNativeTerminalThreadTerminal(harness.db, {
+            terminalSessionId: terminal.id,
+            threadId,
+          });
+          setNativeTerminalToolCredential(harness.db, {
+            credentialHash: createHash("sha256")
+              .update(credential)
+              .digest("hex"),
+            terminalSessionId: terminal.id,
+            threadId,
+          });
           const response = await harness.app.request(
             `/api/v1/threads/${threadId}/native-terminal/activity`,
             {
               method: "POST",
-              headers: { "content-type": "application/json" },
+              headers: {
+                authorization: `Bearer ${credential}`,
+                "content-type": "application/json",
+              },
               body: JSON.stringify({ state: "working", prompt }),
             },
           );

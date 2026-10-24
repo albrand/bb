@@ -218,6 +218,46 @@ describe("terminalPanelTabs", () => {
     ]);
   });
 
+  describe("a daemon-disconnect record superseded by a newer running terminal of the thread", () => {
+    const superseded = terminalSession({
+      closeReason: "daemon-disconnect",
+      createdAt: 1,
+      exitCode: 0,
+      id: "term_old",
+      status: "exited",
+      threadId: "thr_1",
+    });
+    const current = terminalSession({
+      createdAt: 2,
+      id: "term_new",
+      status: "running",
+      threadId: "thr_1",
+    });
+
+    it("loses its tab when terminal tabs are pruned, and the newer terminal keeps its tab", () => {
+      const tabs = pruneTerminalTabsForSessions({
+        pendingTerminalIds: NO_PENDING_TERMINALS,
+        tabs: [
+          createTerminalFixedPanelTab({ terminalId: "term_old" }),
+          createTerminalFixedPanelTab({ terminalId: "term_new" }),
+        ],
+        terminalSessions: [superseded, current],
+      });
+
+      expect(tabIds(tabs)).toEqual(["terminal:term_new:none"]);
+    });
+
+    it("gets no tab when sessions are synced, and the newer terminal gets one", () => {
+      const tabs = buildTerminalSyncedSecondaryFileTabs({
+        orderedTabs: [],
+        pendingTerminalIds: NO_PENDING_TERMINALS,
+        terminalSessions: [superseded, current],
+      });
+
+      expect(tabIds(tabs)).toEqual(["terminal:term_new:none"]);
+    });
+  });
+
   it("syncs missing server terminal sessions into fixed panel state", () => {
     const fileTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env_1",

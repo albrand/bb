@@ -44,6 +44,7 @@ const LIST_FACET: Record<ListFacetKey, true> = {
   listIndicator: true,
   rowState: true,
   queuedWork: true,
+  queuedFailedCount: true,
   pinSortKey: true,
   hasPendingInteraction: true,
   environmentHostId: true,

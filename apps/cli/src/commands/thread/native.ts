@@ -1,11 +1,5 @@
 import { spawn } from "node:child_process";
-import {
-  mkdirSync,
-  rmSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, statSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command } from "commander";
@@ -19,10 +13,19 @@ import {
 } from "../../native-tool-credential.js";
 import { requireThreadIdOrSelf } from "../../context-env.js";
 import { fillNativeTerminalTemplate } from "@bb/domain";
+import { createSessionDiscoverer } from "../../native-session-discovery.js";
 import {
-  nativeActivityHookSettings,
-  type NativeActivityReport,
-} from "../../native-activity.js";
+  createNativeActivityPump,
+  createNativeActivityWiring,
+} from "../../native-activity-wiring.js";
+import { createNativeActivityReporter } from "../../native-activity-reporter.js";
+import { nativeActivityHookSettings } from "../../native-activity.js";
+import {
+  hookSpoolCandidates,
+  openHookCapture,
+  removeHookSpool,
+  type HookCapture,
+} from "../../native-hook-spool.js";
 import {
   measureResumedTranscript,
   NativeActivityReader,
@@ -189,60 +192,60 @@ async function holdNativeHarness(
     cli: Parameters<typeof findNativeSession>[0]["cli"];
     launchedAtMs: number;
   } | null = null;
-  let recorded = true;
-  const discover = async (): Promise<void> => {
-    if (recorded || discovery === null) return;
-    let match: ReturnType<typeof findNativeSession>;
-    try {
-      match = findNativeSession({
-        cli: discovery.cli,
-        cwd,
-        env: process.env,
-        launchedAtMs: discovery.launchedAtMs,
-        nowMs: Date.now(),
-      });
-    } catch {
-      return;
-    }
-    if (match.kind !== "unique") return;
-    recorded = true;
-    reader?.sessionDiscovered(match.sessionId);
-    try {
-      await sdk.nativeTerminals.recordSession({
-        threadId,
-        nativeSessionId: match.sessionId,
-      });
-    } catch {
-      recorded = false;
-    }
-  };
+  const discoverer = createSessionDiscoverer({
+    currentCredential: () => currentCredential(),
+    discardUnsentReports: () => reporter.discardRetained(),
+    find: () => {
+      if (discovery === null) return null;
+      try {
+        const match = findNativeSession({
+          cli: discovery.cli,
+          cwd,
+          env: process.env,
+          launchedAtMs: discovery.launchedAtMs,
+          nowMs: Date.now(),
+        });
+        return match.kind === "unique" ? match.sessionId : null;
+      } catch {
+        return null;
+      }
+    },
+    log: (event, fields) => {
+      if (ownsSocket) logNativeHolderEvent(socketPath, event, fields);
+    },
+    reader: () => reader,
+    recordSession: (args) =>
+      sdk.nativeTerminals.recordSession({ ...args, threadId }),
+  });
+  const discover = discoverer.discover;
   let reader: NativeActivityReader | null = null;
-  let eventsFile: string | null = null;
+  let hookSpoolDirectory: string | null = null;
   const activityTimers: NodeJS.Timeout[] = [];
-  let activityAuthorization: string | undefined;
-  let reporting: Promise<void> = Promise.resolve();
-  const report = (next: NativeActivityReport | null): void => {
-    if (next === null) return;
-    reporting = reporting.then(() =>
-      sdk.nativeTerminals
-        .reportActivity({
-          threadId,
-          ...(activityAuthorization === undefined
-            ? {}
-            : { authorization: activityAuthorization }),
-          state: next.state,
-          ...(next.prompt === null ? {} : { prompt: next.prompt }),
-          ...(next.state === "waiting" ? { questions: next.questions } : {}),
-        })
-        .then(
-          () => undefined,
-          () => undefined,
-        ),
-    );
-  };
-  const readActivity = (): void => {
-    for (const next of reader?.read() ?? []) report(next);
-  };
+  let currentCredential: () => string | null = () => null;
+  const reporter = createNativeActivityReporter({
+    currentCredential: () => currentCredential(),
+    log: (event, fields) => {
+      if (ownsSocket) logNativeHolderEvent(socketPath, event, fields);
+    },
+    send: (args) => sdk.nativeTerminals.reportActivity(args),
+    threadId,
+  });
+  const report = reporter.report;
+  const wiring = createNativeActivityWiring({
+    currentCredential: () => currentCredential(),
+    log: (event, fields) => {
+      if (ownsSocket) logNativeHolderEvent(socketPath, event, fields);
+    },
+    reader: () => reader,
+    recordSession: (args) =>
+      sdk.nativeTerminals.recordSession({ ...args, threadId }),
+    report,
+    retryReport: reporter.retry,
+  });
+  const readActivity = createNativeActivityPump({
+    reader: () => reader,
+    report,
+  });
   const finishActivity = (): void => {
     report(reader?.finish() ?? null);
   };
@@ -254,30 +257,63 @@ async function holdNativeHarness(
     holderSid: process.pid,
     cwd,
     env: process.env,
-    prepare: async ({ credential, credentialSocket }) => {
-      activityAuthorization =
-        credential === null ? undefined : `Bearer ${credential}`;
+    onCredentialChanged: wiring.onCredentialChanged,
+    prepare: async ({
+      credential,
+      credentialSocket,
+      currentCredential: readCredential,
+    }) => {
+      currentCredential = readCredential;
       const spec = await sdk.nativeTerminals.launch({
         imagesAsArgv: true,
         threadId,
       });
       const activity = spec.cli.activity;
       const hooks = activity?.hooks;
-      const file =
+      const capture: HookCapture | null =
         hooks === undefined
           ? null
-          : path.join(
-              os.tmpdir(),
-              `bb-native-activity-${threadId}-${process.pid}.jsonl`,
+          : openHookCapture(
+              hookSpoolCandidates({
+                env: process.env,
+                home: os.homedir(),
+                tmpDir: os.tmpdir(),
+              }),
+              threadId,
+              {
+                appendFallback: () => {
+                  if (ownsSocket) {
+                    logNativeHolderEvent(
+                      socketPath,
+                      "activity-hook-spool-append-fallback",
+                      {},
+                    );
+                  }
+                },
+                unsupported: () => {
+                  if (ownsSocket) {
+                    logNativeHolderEvent(
+                      socketPath,
+                      "activity-hook-spool-unsupported",
+                      {},
+                    );
+                  }
+                },
+              },
             );
-      if (file !== null) writeFileSync(file, "", { mode: 0o600 });
-      eventsFile = file;
+      hookSpoolDirectory = capture?.directory ?? null;
+      const source = capture?.source;
+      const hookTarget =
+        source === undefined ||
+        (typeof source === "object" && "unavailable" in source)
+          ? null
+          : source;
       const activityArgs =
-        hooks === undefined || file === null
+        hooks === undefined || hookTarget === null
           ? []
           : hooks.args.map((arg) =>
               fillNativeTerminalTemplate(arg, {
-                settings: nativeActivityHookSettings(hooks, file),
+                settings: nativeActivityHookSettings(hooks, hookTarget),
               }),
             );
       const script = process.argv[1];
@@ -306,11 +342,11 @@ async function holdNativeHarness(
         cwd,
       );
       discovery = { cli: spec.cli, launchedAtMs: Date.now() };
-      recorded = launch.session.kind !== "discover";
+      discoverer.arm(launch.session.kind === "discover");
       reader = new NativeActivityReader(
         spec.cli,
         process.env,
-        file,
+        capture?.source ?? null,
         launch.session.kind === "resume"
           ? {
               ...launch.session,
@@ -340,14 +376,12 @@ async function holdNativeHarness(
             );
           }
         },
+        wiring.onSessionAdopted,
       );
       if (activity !== undefined) {
         activityTimers.push(
           setInterval(readActivity, ACTIVITY_POLL_INTERVAL_MS),
-          setInterval(
-            () => report(reader?.heartbeat() ?? null),
-            ACTIVITY_HEARTBEAT_INTERVAL_MS,
-          ),
+          setInterval(wiring.onHeartbeatTick, ACTIVITY_HEARTBEAT_INTERVAL_MS),
         );
       }
       return { command: launch.command, args: launch.args };
@@ -377,10 +411,10 @@ async function holdNativeHarness(
   readActivity();
   finishActivity();
   await Promise.race([
-    reporting,
+    Promise.all([reporter.settled(), wiring.settled()]),
     new Promise((resolve) => setTimeout(resolve, ACTIVITY_FLUSH_TIMEOUT_MS)),
   ]);
-  if (eventsFile !== null) rmSync(eventsFile, { force: true });
+  if (hookSpoolDirectory !== null) removeHookSpool(hookSpoolDirectory);
   return exitCode;
 }
 

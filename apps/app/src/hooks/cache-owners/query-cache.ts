@@ -492,6 +492,7 @@ export function optimisticallyInsertThread(
     hasPendingInteraction: false,
     pinSortKey: null,
     queuedWork,
+    queuedFailedCount: 0,
     rowState: { statuses: {}, progress: null },
   };
   const upsertThread = (threads: ThreadListEntry[]): ThreadListEntry[] => {

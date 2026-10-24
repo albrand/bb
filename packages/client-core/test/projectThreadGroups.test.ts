@@ -80,6 +80,7 @@ describe("buildChronologicalThreadList", () => {
           lastEvidenceAt: 1_000_000,
           freshForMs: 90_000,
           confirmation: "confirmed",
+          evidenceKind: "holder-report",
         },
       },
     });

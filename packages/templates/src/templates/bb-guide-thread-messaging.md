@@ -129,6 +129,11 @@ Queued messages:
   SDK: `threads.queue.list` (all threads) and
   `threads.queuedMessages.list|send|update|delete` (one thread).
 
+  A native terminal thread cannot take queued messages: `queue create` is
+  rejected with `native_terminal_thread` and "This thread runs its agent in a
+  native terminal; send input through the terminal", because a queued row
+  could never be delivered. Send input through the terminal instead.
+
   A queued message is one that could not dispatch yet. It is not in the
   timeline or `thread log` until it dispatches; thread list rows carry
   `queuedWork: none|waiting|failed`. Every one carries a typed reason in its

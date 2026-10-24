@@ -6,7 +6,10 @@ import {
   type ThreadListEntry,
 } from "@bb/domain";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { isNativeActivityUnconfirmed } from "@bb/client-core";
+import {
+  isNativeActivityUnconfirmed,
+  nativeActivityEvidenceKind,
+} from "@bb/client-core";
 import type {
   PluginSdkApp,
   PluginSidebarProject,
@@ -88,7 +91,7 @@ const pluginSidebarThreadByEntry = new WeakMap<
   {
     hostNamesById: ReadonlyMap<string, string>;
     titleResources: ThreadTitleMentionResources;
-    nativeActivityUnconfirmed: boolean;
+    nativeActivityKey: string;
     thread: PluginSidebarThread;
   }
 >();
@@ -104,11 +107,22 @@ function toPluginSidebarThreadCached(
     entry.runtime,
     now,
   );
+  const evidenceKind = nativeActivityEvidenceKind(
+    entry.runtime,
+    now,
+    nativeActivityUnconfirmed,
+  );
+  const lastToolCallAt = entry.runtime.nativeActivity?.lastToolCallAt;
+  const toolCallAgeMinutes =
+    evidenceKind === "tool-call" && lastToolCallAt !== undefined
+      ? Math.floor((now - lastToolCallAt) / 60_000)
+      : 0;
+  const nativeActivityKey = `${nativeActivityUnconfirmed}:${evidenceKind}:${toolCallAgeMinutes}`;
   if (
     cached !== undefined &&
     cached.hostNamesById === hostNamesById &&
     cached.titleResources === titleResources &&
-    cached.nativeActivityUnconfirmed === nativeActivityUnconfirmed
+    cached.nativeActivityKey === nativeActivityKey
   ) {
     return cached.thread;
   }
@@ -122,7 +136,7 @@ function toPluginSidebarThreadCached(
   pluginSidebarThreadByEntry.set(entry, {
     hostNamesById,
     titleResources,
-    nativeActivityUnconfirmed,
+    nativeActivityKey,
     thread,
   });
   return thread;

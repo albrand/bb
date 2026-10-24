@@ -294,7 +294,12 @@ describe("@bb/sdk", () => {
 
     const foreignQueue = createFetchQueue([
       { body: makeTerminalSession({ id: "term_move" }) },
-      { body: makeTerminalSession({ id: "term_foreign", threadId: "thr_other" }) },
+      {
+        body: makeTerminalSession({
+          id: "term_foreign",
+          threadId: "thr_other",
+        }),
+      },
     ]);
     const foreignSdk = createBbSdk({
       transport: createHttpTransport({
@@ -335,6 +340,82 @@ describe("@bb/sdk", () => {
         bodyText: JSON.stringify({ state: "working" }),
         method: "POST",
         url: "http://bb.test/api/v1/threads/thr_test/native-terminal/activity",
+      },
+    ]);
+  });
+
+  it("sends confirms and closes only when the caller sets them, and keeps an empty list", async () => {
+    const queue = createFetchQueue([
+      { body: { ok: true } },
+      { body: { ok: true } },
+      { body: { ok: true } },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await sdk.nativeTerminals.reportActivity({
+      threadId: "thr_test",
+      state: "working",
+    });
+    await sdk.nativeTerminals.reportActivity({
+      closes: [],
+      threadId: "thr_test",
+      state: "working",
+    });
+    await sdk.nativeTerminals.reportActivity({
+      closes: ["q1"],
+      confirms: false,
+      threadId: "thr_test",
+      state: "working",
+    });
+    expect(queue.requests.map((request) => request.bodyText)).toEqual([
+      JSON.stringify({ state: "working" }),
+      JSON.stringify({ state: "working", closes: [] }),
+      JSON.stringify({ state: "working", confirms: false, closes: ["q1"] }),
+    ]);
+  });
+
+  it("passes an optional credential when recording a native session", async () => {
+    const queue = createFetchQueue([
+      {
+        body: {
+          threadId: "thr_test",
+          providerId: "claude-code",
+          displayName: "Claude Code",
+          nativeSessionId: "11111111-2222-3333-4444-555555555555",
+          canReturnToChat: true,
+          terminal: null,
+        },
+      },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await sdk.nativeTerminals.recordSession({
+      threadId: "thr_test",
+      nativeSessionId: "11111111-2222-3333-4444-555555555555",
+      replacesNativeSessionId: "22222222-2222-3333-4444-555555555555",
+      authorization: "Bearer synthetic-sdk-test-credential",
+    });
+    expect(queue.requests).toEqual([
+      {
+        authorization: "Bearer synthetic-sdk-test-credential",
+        bodyText: JSON.stringify({
+          nativeSessionId: "11111111-2222-3333-4444-555555555555",
+          replacesNativeSessionId: "22222222-2222-3333-4444-555555555555",
+        }),
+        method: "POST",
+        url: "http://bb.test/api/v1/threads/thr_test/native-terminal/session",
       },
     ]);
   });
@@ -841,6 +922,36 @@ describe("@bb/sdk", () => {
       "http://bb.test/api/v1/projects/proj_image/attachments",
       "http://bb.test/api/v1/projects/proj_image/attachments/content?path=pixel-uploaded.png",
     ]);
+  });
+
+  it("surfaces the native terminal guard message when a queued message is refused", async () => {
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: async () =>
+          jsonResponse({
+            body: {
+              code: "native_terminal_thread",
+              message:
+                "This thread runs its agent in a native terminal; send input through the terminal",
+            },
+            status: 409,
+          }),
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.threads.queuedMessages.create({
+        threadId: "thr_native",
+        input: [{ type: "text", text: "hello", mentions: [] }],
+      }),
+    ).rejects.toMatchObject({
+      code: "native_terminal_thread",
+      message:
+        "HTTP 409: This thread runs its agent in a native terminal; send input through the terminal",
+      status: 409,
+    });
   });
 
   it("preserves project attachment error envelopes", async () => {

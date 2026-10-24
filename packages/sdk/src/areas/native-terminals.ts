@@ -24,7 +24,9 @@ export interface NativeTerminalOpenArgs extends NativeTerminalThreadArgs {
 }
 
 export interface NativeTerminalRecordSessionArgs extends NativeTerminalThreadArgs {
+  authorization?: string;
   nativeSessionId: string;
+  replacesNativeSessionId?: string;
 }
 
 export interface NativeTerminalSwitchModeArgs extends NativeTerminalThreadArgs {
@@ -36,6 +38,8 @@ export interface NativeTerminalReportActivityArgs extends NativeTerminalThreadAr
   state: NativeTerminalActivityState;
   prompt?: string;
   questions?: NativeTerminalOpenQuestion[];
+  confirms?: boolean;
+  closes?: string[];
 }
 
 export interface NativeTerminalCallAgentToolArgs extends NativeTerminalThreadArgs {
@@ -153,6 +157,10 @@ export function createNativeTerminalsArea(
               ...(input.questions === undefined
                 ? {}
                 : { questions: input.questions }),
+              ...(input.confirms === undefined
+                ? {}
+                : { confirms: input.confirms }),
+              ...(input.closes === undefined ? {} : { closes: input.closes }),
             },
           },
           ...(Object.keys(init).length === 0 ? [] : [{ init }]),
@@ -160,13 +168,25 @@ export function createNativeTerminalsArea(
       );
     },
     async recordSession(input) {
+      const signalOptions = signalRequestArgs(input.signal)[0];
+      const init = {
+        ...signalOptions?.init,
+        ...(input.authorization === undefined
+          ? {}
+          : { headers: { authorization: input.authorization } }),
+      };
       return transport.readJson(
         route().session.$post(
           {
             param: { id: input.threadId },
-            json: { nativeSessionId: input.nativeSessionId },
+            json: {
+              nativeSessionId: input.nativeSessionId,
+              ...(input.replacesNativeSessionId === undefined
+                ? {}
+                : { replacesNativeSessionId: input.replacesNativeSessionId }),
+            },
           },
-          ...signalRequestArgs(input.signal),
+          ...(Object.keys(init).length === 0 ? [] : [{ init }]),
         ),
       );
     },

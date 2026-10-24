@@ -196,6 +196,7 @@ export function makeThreadListEntry(
     environmentIsWorktree: null,
     environmentWorkspaceDisplayKind: "other",
     queuedWork: "none",
+    queuedFailedCount: 0,
     rowState: { statuses: {}, progress: null },
   };
   return {
