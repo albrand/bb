@@ -2049,6 +2049,162 @@ describe("ThreadTerminalView terminal replay and reconnect", () => {
 });
 
 describe("terminal first paint", () => {
+  it("fits a live native session at phone width without retained-history scrolling", async () => {
+    prepareFirstAttachFontMetricsHarness();
+    testState.touchEnabled = true;
+    vi.stubGlobal("innerWidth", 390);
+    const session = renderMobileTerminal({ cols: 120, rows: 36 }, true);
+    await waitForReadinessCondition(() => {
+      expect(testState.sockets).toHaveLength(1);
+    }, "live terminal socket did not mount");
+    const socket = testState.sockets[0]!;
+    await waitForReadiness(socket.opened, "live terminal socket did not open");
+    await waitForReadinessCondition(() => {
+      expect(
+        testState.socketMessages.map((message) => JSON.parse(message)),
+      ).toContainEqual({ type: "resize", cols: 51, rows: 47 });
+    }, "live terminal did not send the phone fit");
+    socket.receive({
+      type: "attached",
+      session: { ...session, cols: 51, rows: 47 },
+      replayStartSeq: 0,
+      nextSeq: 1,
+    });
+    socket.receive({
+      type: "output",
+      chunk: { seq: 0, dataBase64: btoa("LIVE-PHONE-FIT\r\n") },
+    });
+    await waitForReadinessCondition(() => {
+      expect(
+        testState.socketMessages.map((message) => JSON.parse(message)),
+      ).toContainEqual({ type: "ack", nextSeq: 1 });
+    }, "live terminal replay did not finish");
+    const host = document.querySelector<HTMLElement>("[data-terminal-renderer]")!;
+    expect(host.dataset.fitGridCols).toBe("51");
+    expect(host.dataset.renderGridCols).toBe("51");
+    expect(host.style.opacity).toBe("");
+    expect(host.style.overflowX).toBe("");
+    expect(host.style.overflowY).toBe("");
+    expect(host.style.paddingLeft).toBe("");
+    expect(host.style.touchAction).toBe("");
+    const documentTouch = vi.fn();
+    document.addEventListener("touchcancel", documentTouch);
+    try {
+      fireEvent.touchCancel(host, { touches: [], changedTouches: [] });
+      expect(documentTouch).toHaveBeenCalledOnce();
+    } finally {
+      document.removeEventListener("touchcancel", documentTouch);
+    }
+    expect(host.querySelector<HTMLElement>(".xterm")?.dataset.surfaceScale).toBe("1");
+  });
+
+  it.each([80, 120, 200])(
+    "keeps phone history at the normal text size for %i recorded columns",
+    async (cols) => {
+      prepareFirstAttachFontMetricsHarness();
+      testState.touchEnabled = true;
+      vi.stubGlobal("innerWidth", 390);
+      vi.mocked(FitAddon.prototype.proposeDimensions).mockReturnValue({
+        cols: 49,
+        rows: 48,
+      });
+      let actualTerminal: Terminal | null = null;
+      const open = Terminal.prototype.open;
+      vi.spyOn(Terminal.prototype, "open").mockImplementation(function (
+        this: Terminal,
+        element: HTMLElement,
+      ) {
+        actualTerminal = this;
+        open.call(this, element);
+      });
+      const prompt = `Hgjpq${"x".repeat(cols - 6)}]`;
+      testState.output.mockResolvedValue({
+        chunks: [
+          {
+            seq: 0,
+            dataBase64: btoa(
+              `\x1b]7791;bb-grid;${cols};36\x07\x1b[48;5;8m${prompt}\x1b[0m\r\nAFTER-BAND`,
+            ),
+          },
+        ],
+        nextSeq: 1,
+      });
+      renderMobileTerminal(
+        { status: "exited", exitCode: 0, cols, rows: 36 },
+        true,
+      );
+      await waitForReadinessCondition(() => {
+        expect(pageText()).toContain("Terminal exited with code");
+      }, "retained replay did not finish");
+      await act(async () => {
+        await writeReplay(actualTerminal!, "");
+      });
+      const host = document.querySelector<HTMLElement>(
+        "[data-terminal-renderer]",
+      )!;
+      const surface = host.querySelector<HTMLElement>(".xterm")!;
+      expect(host.dataset.renderGridCols).toBe(String(cols));
+      expect(host.style.opacity).toBe("");
+      expect(surface.dataset.surfaceScale).toBe("1");
+      expect(surface.style.transform).toBe("scale(1)");
+      expect(host.style.overflowX).toBe("auto");
+      expect(host.style.overflowY).toBe("auto");
+      expect(host.style.touchAction).toBe("pan-x pan-y");
+      expect(host.parentElement?.classList.contains("touch-pan-x")).toBe(true);
+      expect(host.parentElement?.classList.contains("touch-pan-y")).toBe(true);
+      expect(
+        actualTerminal!.buffer.active.getLine(0)?.translateToString(true),
+      ).toBe(prompt);
+      expect(
+        actualTerminal!.buffer.active.getLine(1)?.translateToString(true),
+      ).toBe("AFTER-BAND");
+    },
+  );
+
+  it("leaves exited phone-history swipes to the browser instead of xterm's document handlers", async () => {
+    prepareFirstAttachFontMetricsHarness();
+    testState.touchEnabled = true;
+    vi.stubGlobal("innerWidth", 390);
+    renderMobileTerminal(
+      { status: "exited", exitCode: 0, cols: 120, rows: 96 },
+      true,
+    );
+    await waitForReadinessCondition(() => {
+      expect(pageText()).toContain("Terminal exited with code");
+    }, "retained replay did not finish");
+    const host = document.querySelector<HTMLElement>("[data-terminal-renderer]")!;
+    const documentTouch = vi.fn();
+    const types = ["touchstart", "touchmove", "touchend", "touchcancel"];
+    for (const type of types) document.addEventListener(type, documentTouch);
+    try {
+      const point = {
+        identifier: 1,
+        clientX: 100,
+        clientY: 100,
+        pageX: 100,
+        pageY: 100,
+        target: host,
+      };
+      const active = Object.assign([point], {
+        item: (index: number) => index === 0 ? point : null,
+      });
+      const empty = Object.assign([], { item: () => null });
+      for (const type of types) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.assign(event, {
+          touches: type === "touchstart" || type === "touchmove" ? active : empty,
+          targetTouches: type === "touchstart" || type === "touchmove" ? active : empty,
+          changedTouches: active,
+        });
+        fireEvent(host, event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(documentTouch).not.toHaveBeenCalled();
+    } finally {
+      for (const type of types) document.removeEventListener(type, documentTouch);
+    }
+  });
+
   it("hides exited native replay until the first fitted resize", async () => {
     prepareFirstAttachFontMetricsHarness();
     vi.stubGlobal("innerWidth", 390);
@@ -2098,11 +2254,64 @@ describe("terminal first paint", () => {
       });
     });
     await waitForReadinessCondition(() => {
-      expect(surface.dataset.renderGridCols).toBe("51");
+      expect(surface.dataset.renderGridCols).toBe("135");
       expect(surface.style.opacity).toBe("");
     }, "fitted retained output was not revealed");
     expect(paintOpacities.length).toBeGreaterThan(0);
     expect(paintOpacities.every((opacity) => opacity === "0")).toBe(true);
+  });
+
+  it("preserves a full prompt band when phone fit is narrower than retained output", async () => {
+    prepareFirstAttachFontMetricsHarness();
+    vi.stubGlobal("innerWidth", 390);
+    vi.mocked(FitAddon.prototype.proposeDimensions).mockReturnValue({
+      cols: 49,
+      rows: 48,
+    });
+    let actualTerminal: Terminal | null = null;
+    const open = Terminal.prototype.open;
+    vi.spyOn(Terminal.prototype, "open").mockImplementation(function (
+      this: Terminal,
+      element: HTMLElement,
+    ) {
+      actualTerminal = this;
+      open.call(this, element);
+    });
+    const prompt = "  thr_i8bb9fauv2.[child of @thread:thr_i8bb9fauv2]";
+    testState.output.mockResolvedValue({
+      chunks: [
+        {
+          seq: 0,
+          dataBase64: btoa(
+            `\x1b]7791;bb-grid;51;48\x07\x1b[48;5;8m\x1b[K${prompt}\x1b[0m\r\nAFTER-BAND`,
+          ),
+        },
+      ],
+      nextSeq: 1,
+    });
+    renderMobileTerminal({ status: "exited", exitCode: 0, cols: 51, rows: 48 }, true);
+    await waitForReadinessCondition(() => {
+      expect(pageText()).toContain("Terminal exited with code");
+    }, "retained replay did not finish");
+    await act(async () => {
+      await writeReplay(actualTerminal!, "");
+    });
+    const surface = document.querySelector<HTMLElement>(
+      "[data-terminal-renderer]",
+    )!;
+    expect(surface.style.opacity).toBe("");
+    expect(surface.dataset.fitGridCols).toBe("49");
+    expect(surface.dataset.renderGridCols).toBe("51");
+    expect(surface.style.paddingLeft).toBe("0px");
+    expect(
+      surface.querySelector<HTMLElement>(".xterm")?.dataset.surfaceScale,
+    ).toBe("1");
+    expect(
+      actualTerminal!.buffer.active.getLine(0)?.translateToString(true),
+    ).toBe(prompt);
+    expect(
+      actualTerminal!.buffer.active.getLine(1)?.translateToString(true),
+    ).toBe("AFTER-BAND");
   });
 
   it("keeps the terminal hidden when its first fit has no dimensions", async () => {
@@ -2251,7 +2460,7 @@ describe("terminal first paint recovery", () => {
         "[data-terminal-renderer]",
       )!;
       expect(surface.style.opacity).toBe("");
-      expect(surface.dataset.renderGridCols).toBe("51");
+      expect(surface.dataset.renderGridCols).toBe("135");
       expect(pageText()).toContain("Terminal history unavailable");
       expect(pageText()).toContain("Terminal exited with code 7");
     }, "failed retained output left no visible exit state");
@@ -2288,7 +2497,7 @@ describe("terminal first paint recovery", () => {
         );
       });
       expect(surface.style.opacity).toBe("");
-      expect(surface.dataset.renderGridCols).toBe("51");
+      expect(surface.dataset.renderGridCols).toBe("135");
       expect(pageText()).toContain("Terminal history unavailable");
       expect(pageText()).toContain("Terminal exited with code 7");
     } finally {
@@ -2359,7 +2568,7 @@ describe("terminal first paint recovery", () => {
     });
     await waitForReadinessCondition(() => {
       expect(surface.style.opacity).toBe("");
-      expect(surface.dataset.renderGridCols).toBe("51");
+      expect(surface.dataset.renderGridCols).toBe("80");
     }, "newly exited terminal was not fitted and revealed");
     expect(
       open.mock.calls.filter(([container]) => container === surface),

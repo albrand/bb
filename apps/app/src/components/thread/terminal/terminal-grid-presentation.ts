@@ -57,6 +57,7 @@ export function canRevealTerminalSurface({
 export function applyTerminalSurfaceScale(
   surface: HTMLElement,
   scale: number,
+  constrainToWidth = true,
 ): void {
   const currentScale = readTerminalSurfaceScale(surface);
   const screenWidth =
@@ -66,8 +67,9 @@ export function applyTerminalSurfaceScale(
   if (naturalWidth > 0) {
     surface.style.setProperty("--terminal-natural-width", `${naturalWidth}px`);
   }
-  surface.style.transform =
-    "scale(min(var(--terminal-grid-scale, 1), calc(100cqw / var(--terminal-natural-width, 1px))))";
+  surface.style.transform = constrainToWidth
+    ? "scale(min(var(--terminal-grid-scale, 1), calc(100cqw / var(--terminal-natural-width, 1px))))"
+    : `scale(${scale})`;
   surface.style.transformOrigin = "top left";
   surface.dataset.surfaceScale = String(scale);
 }

@@ -1911,12 +1911,24 @@ export function ThreadTerminalView({
             rendererGrid: { cols: terminal.cols, rows: terminal.rows },
           });
         containerElement.style.opacity = "0";
+        const scrollRetainedOutput =
+          retainedOutputGrid !== null && window.innerWidth < 768;
+        containerElement.style.overflowX = scrollRetainedOutput ? "auto" : "";
+        containerElement.style.overflowY = scrollRetainedOutput ? "auto" : "";
+        containerElement.style.paddingLeft = scrollRetainedOutput ? "0" : "";
+        containerElement.style.touchAction = scrollRetainedOutput
+          ? "pan-x pan-y"
+          : "";
         const scale =
-          localFitGrid !== null
+          localFitGrid !== null && !scrollRetainedOutput
             ? terminalSurfaceScale(displayGrid, localFitGrid)
             : 1;
         if (terminal.element) {
-          applyTerminalSurfaceScale(terminal.element, scale);
+          applyTerminalSurfaceScale(
+            terminal.element,
+            scale,
+            !scrollRetainedOutput,
+          );
         }
         const rendererWidth = containerElement.getBoundingClientRect().width;
         const paintedWidth =
@@ -1924,7 +1936,8 @@ export function ThreadTerminalView({
             ?.querySelector<HTMLElement>(".xterm-screen")
             ?.getBoundingClientRect().width ?? 0;
         const widthFits =
-          rendererWidth > 0 && paintedWidth <= rendererWidth + 1;
+          rendererWidth > 0 &&
+          (scrollRetainedOutput || paintedWidth <= rendererWidth + 1);
         containerElement.dataset.ptyGridCols = String(latestPtyGrid.cols);
         containerElement.dataset.ptyGridRows = String(latestPtyGrid.rows);
         if (canReveal && widthFits) {
@@ -2350,10 +2363,7 @@ export function ThreadTerminalView({
         replayPreview?.setFitGrid(fitted.cols, fitted.rows);
         if (retainNativeOutput && sessionStatusRef.current === "exited") {
           if (retainedOutputReplayed) {
-            retainedOutputGrid =
-              window.innerWidth < 768 && fitted.cols < latestPtyGrid.cols
-                ? localFitGrid
-                : latestPtyGrid;
+            retainedOutputGrid = latestPtyGrid;
             terminal.resize(retainedOutputGrid.cols, retainedOutputGrid.rows);
           }
           updateGridVisibility();
@@ -3227,6 +3237,17 @@ export function ThreadTerminalView({
       x: touch.clientX,
       y: touch.clientY,
     }));
+  const stopRetainedHistoryTouchPropagation = (
+    event: ReactTouchEvent<HTMLDivElement>,
+  ) => {
+    if (
+      retainNativeOutput &&
+      session.status === "exited" &&
+      window.innerWidth < 768
+    ) {
+      event.stopPropagation();
+    }
+  };
   const ensurePinchGesture = () => {
     pinchGestureRef.current ??= createTerminalPinchGesture({
       getFontSize: () => terminalFontSizeRef.current,
@@ -3308,15 +3329,17 @@ export function ThreadTerminalView({
         <ContextMenuTrigger asChild>
           <TerminalAttentionPane
             attention={session.attention}
-            className={`group/terminal-pane relative min-h-0 w-full flex-1 overflow-hidden bg-sidebar p-2 ${isTouchDevice ? "touch-pan-y" : ""}`}
+            className={`group/terminal-pane relative min-h-0 w-full flex-1 overflow-hidden bg-sidebar p-2 ${isTouchDevice ? (retainNativeOutput && session.status === "exited" ? "touch-pan-x touch-pan-y" : "touch-pan-y") : ""}`}
             onContextMenuCapture={captureTerminalContextMenu}
             onTouchStart={(event) => {
+              stopRetainedHistoryTouchPropagation(event);
               beginTerminalLongPress(event.touches);
               ensurePinchGesture().start(gestureTouches(event.touches));
               touchHandlers().start(event);
               handleTerminalTouchStart(event);
             }}
             onTouchMove={(event) => {
+              stopRetainedHistoryTouchPropagation(event);
               const points = gestureTouches(event.touches);
               longPressGestureRef.current?.move(points);
               ensurePinchGesture().move(points);
@@ -3324,12 +3347,14 @@ export function ThreadTerminalView({
               handleTerminalTouchMove(event);
             }}
             onTouchEnd={(event) => {
+              stopRetainedHistoryTouchPropagation(event);
               longPressGestureRef.current?.cancel();
               ensurePinchGesture().end();
               touchHandlers().end(event);
               handleTerminalTouchEnd(event);
             }}
-            onTouchCancel={() => {
+            onTouchCancel={(event) => {
+              stopRetainedHistoryTouchPropagation(event);
               longPressGestureRef.current?.cancel();
               ensurePinchGesture().cancel();
               touchHandlers().cancel();
