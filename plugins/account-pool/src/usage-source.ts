@@ -23,7 +23,7 @@ export function usageWindowLabel(
 }
 
 export { displayPlanLabel as usagePlanLabel } from "./display.js";
-import { displayPlanLabel } from "./display.js";
+import { displayPlanLabel, modelWeeklyRows } from "./display.js";
 
 function accountKey(account: AccountSummary): string | null {
   return account.provider === "codex"
@@ -153,15 +153,17 @@ export function registerUsageSource(
               null,
             );
           }
-          for (const [family, window] of Object.entries(account.familyWeekly)) {
-            if (window !== null)
-              add(
-                `weekly:${family}`,
-                `Weekly · ${family}`,
-                window.utilization,
-                window.resetAt,
-                family,
-              );
+          for (const { name, quota } of modelWeeklyRows(
+            account,
+            display.weekly[account.id],
+          )) {
+            add(
+              `weekly:${name}`,
+              `Weekly · ${name}`,
+              quota.utilization,
+              quota.resetAt,
+              name,
+            );
           }
           const accountFields = {
             plan: account.subscriptionType

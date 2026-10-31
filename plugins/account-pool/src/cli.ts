@@ -1,4 +1,8 @@
-import { displayPlanLabel, type PoolDisplay } from "./display.js";
+import {
+  displayPlanLabel,
+  modelWeeklyRows,
+  type PoolDisplay,
+} from "./display.js";
 import {
   PluginCliError,
   cliCommand,
@@ -18,7 +22,6 @@ import {
   bypassInputSchema,
   codexLoginPollInputSchema,
   loginCompleteInputSchema,
-  modelFamilySchema,
   parentModeSchema,
   tokenRotateInputSchema,
   routingSetInputSchema,
@@ -31,7 +34,6 @@ import {
   type FamilyQuota,
   type LimitWindow,
   type LocalLogin,
-  type ModelFamily,
   type PoolStatus,
   type PoolStatusReport,
 } from "./contracts.js";
@@ -81,10 +83,6 @@ function formatUtilization(value: number | null): string {
   return value === null ? "-" : `${Math.round(value * 100)}%`;
 }
 
-function familyLabel(family: ModelFamily): string {
-  return family[0]?.toUpperCase() + family.slice(1);
-}
-
 function formatWindowLabel(window: LimitWindow): string {
   if (window.windowMinutes === null) return window.slot;
   if (window.windowMinutes % 1_440 === 0)
@@ -118,9 +116,15 @@ function formatAccounts(
   display: PoolDisplay,
 ): string {
   if (accounts.length === 0) return "No accounts configured.";
-  const families = modelFamilySchema.options.filter((family) =>
-    accounts.some((account) => account.familyWeekly[family] !== null),
-  );
+  const families = [
+    ...new Set(
+      accounts.flatMap((account) =>
+        modelWeeklyRows(account, display.weekly[account.id]).map(
+          (row) => row.name,
+        ),
+      ),
+    ),
+  ];
   return [
     [
       "ID",
@@ -143,7 +147,7 @@ function formatAccounts(
       "Reset recovery/h",
       "Last automatic choice",
       "Extra usage",
-      ...families.map(familyLabel),
+      ...families.map((name) => `7d · ${name}`),
       "Status",
     ].join("\t"),
     ...accounts.map((account) =>
@@ -171,7 +175,11 @@ function formatAccounts(
         account.lastAutomaticChoice?.reason ?? "-",
         account.extraUsage?.status ?? "-",
         ...families.map((family) =>
-          formatFamilyQuota(account.familyWeekly[family]),
+          formatFamilyQuota(
+            modelWeeklyRows(account, display.weekly[account.id]).find(
+              (row) => row.name === family,
+            )?.quota ?? null,
+          ),
         ),
         account.status,
       ].join("\t"),

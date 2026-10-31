@@ -746,7 +746,16 @@ export class AccountPoolHub {
   }
 
   async display() {
-    return { plans: await this.options.accounts.planDisplayNames() };
+    const accounts = await this.options.accounts.list();
+    return {
+      plans: await this.options.accounts.planDisplayNames(),
+      weekly: Object.fromEntries(
+        accounts.flatMap(({ id }) => {
+          const windows = this.options.quotas.modelWeekly(id);
+          return windows === undefined ? [] : [[id, windows]];
+        }),
+      ),
+    };
   }
 
   async status(): Promise<Omit<PoolStatus, "routing" | "parent">> {

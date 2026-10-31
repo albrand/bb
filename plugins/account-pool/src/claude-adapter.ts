@@ -22,7 +22,7 @@ import {
   quotaFromHeaders,
 } from "./quota.js";
 import { parseRequestBody } from "./request-body.js";
-import { quotaFromUsage } from "./usage.js";
+import { modelWeeklyFromUsage, quotaFromUsage } from "./usage.js";
 
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -161,6 +161,9 @@ export function createClaudeAdapter(options: {
       if (quota === null)
         throw new Error("Usage refresh returned unreadable data.");
       context.quotas.put(quota);
+      const models = modelWeeklyFromUsage(payload, context.now());
+      if (models !== null)
+        context.quotas.putModelWeekly(context.account.id, models);
       const account = context.account;
       const checkedAt = profileCheckedAt.get(account.id);
       if (

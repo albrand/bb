@@ -964,6 +964,31 @@ describe("Account Pool settings", () => {
     ).toBeTruthy();
   });
 
+  it("shows a future model weekly row with its API name and falls back for legacy servers", async () => {
+    const current = account({ label: "Future subscription" });
+    const slot = render([current], {
+      "display.get": () => ({
+        plans: {},
+        weekly: {
+          [current.id]: {
+            "Claude Future 42": {
+              utilization: 0.45,
+              resetAt: Date.now() + 86400000,
+              status: "allowed",
+              observedAt: Date.now(),
+              source: "usage",
+            },
+          },
+        },
+      }),
+    });
+    await slot.findByText(current.label);
+    await openActions(slot, current.label);
+    fireEvent.click(await slot.findByText("Usage details"));
+    expect(await slot.findByText("7d · Claude Future 42")).toBeTruthy();
+    expect(slot.queryByText("7d · Other")).toBeNull();
+  });
+
   it("shows Ultra badges and usage details from display metadata over a legacy Max record", async () => {
     const current = account({
       label: "Primary subscription",

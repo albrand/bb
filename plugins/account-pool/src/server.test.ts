@@ -6949,6 +6949,7 @@ describe("Account Pool plugin", () => {
       | "payload"
       | "identity"
       | null = null,
+    usage: object = { seven_day: { utilization: 13 } },
   ) {
     const profileCalls: string[] = [];
     const fixture = await createFixture({
@@ -6985,8 +6986,7 @@ describe("Account Pool plugin", () => {
             }
             return Response.json(profile);
           }
-          if (url.pathname === "/usage")
-            return Response.json({ seven_day: { utilization: 13 } });
+          if (url.pathname === "/usage") return Response.json(usage);
           return Response.json({ ok: true });
         },
       },
@@ -7000,6 +7000,58 @@ describe("Account Pool plugin", () => {
         .find((account) => account.id === fixture.account.id);
     return { fixture, listed, profileCalls };
   }
+
+  it("preserves a future model API name in weekly rows without changing the legacy quota shape", async () => {
+    const { fixture, listed } = await claudePlanFixture(
+      {
+        account: { uuid: "11111111-1111-4111-8111-111111111111" },
+      },
+      null,
+      {
+        limits: [
+          {
+            kind: "weekly_scoped",
+            group: "weekly",
+            percent: 45,
+            resets_at: "2099-01-01T00:00:00Z",
+            scope: { model: { display_name: "Claude Future 42" } },
+          },
+        ],
+      },
+    );
+    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      accountId: fixture.account.id,
+    });
+    expect(Object.keys((await listed())!.familyWeekly)).toEqual([
+      "fable",
+      "sonnet",
+      "opus",
+      "haiku",
+      "other",
+    ]);
+    const fetched = usageMeasurementSchema.parse(
+      await fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+        resourceId: fixture.account.id,
+        refresh: false,
+      }),
+    );
+    expect(fetched.usage).toMatchObject({
+      windows: expect.arrayContaining([
+        expect.objectContaining({
+          model: "Claude Future 42",
+          label: "Weekly · Claude Future 42",
+          usedPercent: 45,
+        }),
+      ]),
+    });
+    const table = await fixture.host.harness.behavior.runCli([
+      "account",
+      "list",
+    ]);
+    expect(table.exitCode).toBe(0);
+    expect(table.stdout).toContain("7d · Claude Future 42");
+    expect(table.stdout).not.toContain("7d · Other");
+  });
 
   it("shows the provider Ultra display name over legacy Max fields without changing legacy records", async () => {
     const { fixture, listed } = await claudePlanFixture({
@@ -7026,7 +7078,10 @@ describe("Account Pool plugin", () => {
         refresh: false,
       }),
     );
-    expect(fetched.usage).toMatchObject({ planLabel: "Ultra" });
+    expect(fetched.usage).toMatchObject({
+      planLabel: "Ultra",
+      plan: { id: "max", multiplier: 20 },
+    });
     const table = await fixture.host.harness.behavior.runCli([
       "account",
       "list",

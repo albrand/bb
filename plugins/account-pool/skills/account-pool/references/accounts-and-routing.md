@@ -394,3 +394,11 @@ account names remain unchanged. Without a provider display name, the pool shows
 Max with its reported multiplier, or the capitalised subscription type.
 The additive `display.get` RPC returns display names in `plans`, keyed by account
 ID. Legacy account records and `status.get` retain their existing shape.
+
+The `weekly` map in `display.get` preserves each API-reported model display name
+and weekly quota, keyed by account ID and model name. Usage details, the usage
+card and CLI show one weekly row per reported name, including future models.
+Servers without this method fall back to the legacy family rows. Model display
+quotas use an additive SQLite table; existing routing-family quotas and stored
+account records remain readable. An empty model map means the latest usage
+response reported no scoped limits; an absent map uses legacy observations.

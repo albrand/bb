@@ -64,7 +64,6 @@ import type {
   FamilyQuota,
   LimitWindow,
   LocalLogin,
-  ModelFamily,
   PoolAvailability,
   PoolProvider,
   PoolStatus,
@@ -78,7 +77,6 @@ import type { CodexDeviceLoginStart } from "./src/codex-device-login.js";
 import {
   CLAUDE_OAUTH_REDIRECT_URI,
   DEFAULT_ACCOUNT_POOL_CONFIG,
-  modelFamilySchema,
   statusSchema,
 } from "./src/contracts.js";
 import { blockingResetAt } from "./src/quota.js";
@@ -126,13 +124,6 @@ const PROVIDERS: Array<{
     description: "Codex threads route through these ChatGPT accounts.",
   },
 ];
-const FAMILY_LABELS: Record<ModelFamily, string> = {
-  fable: "Fable 7 day",
-  sonnet: "Sonnet 7 day",
-  opus: "Opus 7 day",
-  haiku: "Haiku 7 day",
-  other: "Other 7 day",
-};
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -334,7 +325,12 @@ function StateWord({ state }: { state: SubscriptionState }) {
   );
 }
 
-import { displayPlanLabel, type PoolDisplay } from "./src/display.js";
+import {
+  displayPlanLabel,
+  modelWeeklyRows,
+  type ModelWeekly,
+  type PoolDisplay,
+} from "./src/display.js";
 
 function planBadge(
   account: Pick<AccountSummary, "kind" | "subscriptionType" | "rateLimitTier">,
@@ -1077,7 +1073,10 @@ function AccountPoolSettings() {
     typeof accountPoolRpcContract & typeof accountPoolBindingReadRpcContract
   >();
   const navigate = useBbNavigate();
-  const [display, setDisplay] = useState<PoolDisplay>({ plans: {} });
+  const [display, setDisplay] = useState<PoolDisplay>({
+    plans: {},
+    weekly: {},
+  });
   const [status, setStatus] = useState<PoolStatus | null>(readCachedStatus);
   const [statusIsCached, setStatusIsCached] = useState(status !== null);
   const [config, setConfig] = useState<AccountPoolConfig | null>(null);
@@ -1149,10 +1148,11 @@ function AccountPoolSettings() {
           )
         : null;
       writeCachedStatus(next);
+      const nextDisplay = await rpc
+        .call("display.get", null)
+        .catch(() => ({ plans: {}, weekly: {} }));
       if (!mounted.current) return;
-      setDisplay(
-        await rpc.call("display.get", null).catch(() => ({ plans: {} })),
-      );
+      setDisplay(nextDisplay);
       setStatus(next);
       setStatusIsCached(false);
       setNextAccountId(pick);
@@ -1938,6 +1938,7 @@ function AccountPoolSettings() {
           <AccountDialog
             account={selectedAccount}
             displayName={display.plans[selectedAccount.id] ?? null}
+            weekly={display.weekly?.[selectedAccount.id]}
             threshold={threshold}
             act={(action) => void accountAction(selectedAccount, action)}
           />
@@ -2159,11 +2160,13 @@ function AccountPoolSettings() {
 function AccountDialog({
   account,
   displayName,
+  weekly,
   threshold,
   act,
 }: {
   account: AccountSummary;
   displayName: string | null;
+  weekly: ModelWeekly | undefined;
   threshold: number;
   act: (action: "toggle" | "refresh" | "remove") => void;
 }) {
@@ -2247,18 +2250,18 @@ function AccountDialog({
               )}
               threshold={threshold}
             />
-            {modelFamilySchema.options.flatMap((family) =>
-              account.familyWeekly[family] === null
-                ? []
-                : [
-                    <QuotaDetail
-                      key={family}
-                      label={FAMILY_LABELS[family]}
-                      quota={account.familyWeekly[family]}
-                      threshold={threshold}
-                    />,
-                  ],
-            )}
+            {modelWeeklyRows(account, weekly).map(({ name, quota }) => (
+              <QuotaDetail
+                key={name}
+                label={
+                  weekly === undefined
+                    ? `${name.charAt(0).toUpperCase() + name.slice(1)} 7 day`
+                    : `7d · ${name}`
+                }
+                quota={quota}
+                threshold={threshold}
+              />
+            ))}
           </>
         )}
       </div>
