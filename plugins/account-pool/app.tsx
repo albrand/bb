@@ -334,14 +334,14 @@ function StateWord({ state }: { state: SubscriptionState }) {
   );
 }
 
+import { displayPlanLabel, type PoolDisplay } from "./src/display.js";
+
 function planBadge(
   account: Pick<AccountSummary, "kind" | "subscriptionType" | "rateLimitTier">,
+  displayName: string | null = null,
 ): string | null {
   if (account.kind === "api-key") return "API key";
-  const max = account.rateLimitTier?.match(/max_(\d+)x/u);
-  if (max) return `Max ${max[1]}x`;
-  const plan = account.subscriptionType;
-  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null;
+  return displayPlanLabel(account, displayName);
 }
 
 function secondaryEmail(account: AccountSummary): string | null {
@@ -400,6 +400,7 @@ type SubscriptionAction =
 
 function SubscriptionRow({
   account,
+  displayName,
   state,
   pending,
   refreshing,
@@ -408,6 +409,7 @@ function SubscriptionRow({
   onRename,
 }: {
   account: AccountSummary;
+  displayName: string | null;
   state: SubscriptionState;
   pending: boolean;
   refreshing: boolean;
@@ -417,7 +419,7 @@ function SubscriptionRow({
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(account.label);
-  const plan = planBadge(account);
+  const plan = planBadge(account, displayName);
   const email = secondaryEmail(account);
   const signInAgain = account.signInExpired && account.kind === "oauth";
   const {
@@ -1075,6 +1077,7 @@ function AccountPoolSettings() {
     typeof accountPoolRpcContract & typeof accountPoolBindingReadRpcContract
   >();
   const navigate = useBbNavigate();
+  const [display, setDisplay] = useState<PoolDisplay>({ plans: {} });
   const [status, setStatus] = useState<PoolStatus | null>(readCachedStatus);
   const [statusIsCached, setStatusIsCached] = useState(status !== null);
   const [config, setConfig] = useState<AccountPoolConfig | null>(null);
@@ -1147,6 +1150,9 @@ function AccountPoolSettings() {
         : null;
       writeCachedStatus(next);
       if (!mounted.current) return;
+      setDisplay(
+        await rpc.call("display.get", null).catch(() => ({ plans: {} })),
+      );
       setStatus(next);
       setStatusIsCached(false);
       setNextAccountId(pick);
@@ -1708,6 +1714,7 @@ function AccountPoolSettings() {
                           <SubscriptionRow
                             key={account.id}
                             account={account}
+                            displayName={display.plans[account.id] ?? null}
                             state={subscriptionState(
                               account,
                               threshold,
@@ -1930,6 +1937,7 @@ function AccountPoolSettings() {
         {dialog?.kind === "account" && selectedAccount !== null ? (
           <AccountDialog
             account={selectedAccount}
+            displayName={display.plans[selectedAccount.id] ?? null}
             threshold={threshold}
             act={(action) => void accountAction(selectedAccount, action)}
           />
@@ -2150,10 +2158,12 @@ function AccountPoolSettings() {
 
 function AccountDialog({
   account,
+  displayName,
   threshold,
   act,
 }: {
   account: AccountSummary;
+  displayName: string | null;
   threshold: number;
   act: (action: "toggle" | "refresh" | "remove") => void;
 }) {
@@ -2172,7 +2182,7 @@ function AccountDialog({
     account.provider === "claude"
       ? account.accountUuid
       : account.codexAccountId;
-  const plan = planBadge(account);
+  const plan = planBadge(account, displayName);
   return (
     <DialogFrame
       title={account.label}

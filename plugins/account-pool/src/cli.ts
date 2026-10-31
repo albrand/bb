@@ -1,3 +1,4 @@
+import { displayPlanLabel, type PoolDisplay } from "./display.js";
 import {
   PluginCliError,
   cliCommand,
@@ -112,7 +113,10 @@ function formatFamilyQuota(quota: FamilyQuota | null): string {
   ].join(" ");
 }
 
-function formatAccounts(accounts: readonly AccountSummary[]): string {
+function formatAccounts(
+  accounts: readonly AccountSummary[],
+  display: PoolDisplay,
+): string {
   if (accounts.length === 0) return "No accounts configured.";
   const families = modelFamilySchema.options.filter((family) =>
     accounts.some((account) => account.familyWeekly[family] !== null),
@@ -124,6 +128,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
       "Email",
       "Provider",
       "Kind",
+      "Plan",
       "Enabled",
       "Sign-in",
       "Active",
@@ -148,6 +153,7 @@ function formatAccounts(accounts: readonly AccountSummary[]): string {
         account.email ?? "-",
         account.provider,
         account.kind,
+        displayPlanLabel(account, display.plans[account.id] ?? null) ?? "-",
         String(account.enabled),
         account.signInExpired ? "expired" : "ok",
         String(account.active),
@@ -192,7 +198,7 @@ function formatLocalLogins(logins: readonly LocalLogin[]): string {
   ].join("\n");
 }
 
-function formatStatus(status: PoolStatusReport): string {
+function formatStatus(status: PoolStatusReport, display: PoolDisplay): string {
   return [
     `Route: ${status.route}`,
     `Accepting: ${status.accepting}`,
@@ -215,7 +221,7 @@ function formatStatus(status: PoolStatusReport): string {
             `${thread.threadId}\t${thread.hostName ?? thread.hostId}\t${thread.localClaudeStatus}`,
         )),
     "",
-    formatAccounts(status.accounts),
+    formatAccounts(status.accounts, display),
   ].join("\n");
 }
 
@@ -598,11 +604,12 @@ export function registerPoolCli(
           run: (input) =>
             attempt(async () => {
               const accounts = await operations.list();
+              const display = await operations.display();
               return {
                 exitCode: 0,
                 stdout: input.options.json
                   ? json({ accounts })
-                  : `${formatAccounts(accounts)}\n`,
+                  : `${formatAccounts(accounts, display)}\n`,
               };
             }),
         }),
@@ -889,6 +896,7 @@ export function registerPoolCli(
                   operations.status(),
                   operations.routedThreadsWithoutLocalLogin(),
                 ]);
+              const display = await operations.display();
               const status: PoolStatusReport = {
                 ...poolStatus,
                 routedThreadsWithoutLocalLogin,
@@ -897,7 +905,7 @@ export function registerPoolCli(
                 exitCode: 0,
                 stdout: input.options.json
                   ? json(status)
-                  : `${formatStatus(status)}\n`,
+                  : `${formatStatus(status, display)}\n`,
               };
             }),
         }),

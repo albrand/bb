@@ -7001,6 +7001,46 @@ describe("Account Pool plugin", () => {
     return { fixture, listed, profileCalls };
   }
 
+  it("shows the provider Ultra display name over legacy Max fields without changing legacy records", async () => {
+    const { fixture, listed } = await claudePlanFixture({
+      account: {
+        uuid: "11111111-1111-4111-8111-111111111111",
+        has_claude_max: true,
+      },
+      organization: {
+        organization_type: "claude_max",
+        rate_limit_tier: "default_claude_max_20x",
+        plan_display_name: "Ultra",
+      },
+    });
+    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      accountId: fixture.account.id,
+    });
+    expect(await listed()).toMatchObject({
+      subscriptionType: "max",
+      rateLimitTier: "default_claude_max_20x",
+    });
+    const fetched = usageMeasurementSchema.parse(
+      await fixture.host.harness.behavior.callRpc(usageFetchMethod, {
+        resourceId: fixture.account.id,
+        refresh: false,
+      }),
+    );
+    expect(fetched.usage).toMatchObject({ planLabel: "Ultra" });
+    const table = await fixture.host.harness.behavior.runCli([
+      "account",
+      "list",
+    ]);
+    expect(table.exitCode).toBe(0);
+    expect(table.stdout).toContain("Ultra");
+    expect(table.stdout).not.toContain("Max (20x)");
+    const display = await fixture.host.harness.behavior.callRpc(
+      "display.get",
+      null,
+    );
+    expect(display).toMatchObject({ plans: { [fixture.account.id]: "Ultra" } });
+  });
+
   it("refreshes a Claude account's plan when Anthropic reports a new tier", async () => {
     const { fixture, listed, profileCalls } = await claudePlanFixture({
       account: {

@@ -27,6 +27,8 @@ import {
 
 const ACCOUNTS_KEY = "accounts:v1";
 const ORGANIZATIONS_KEY = "organizations:v1";
+const PLAN_NAMES_KEY = "plan-display-names:v1";
+const planNamesSchema = z.record(z.string().uuid(), z.string().min(1));
 const ACCOUNT_LAST_USED_PERSIST_MS = 60 * 1_000;
 const accountsSchema = z.array(accountSchema);
 const organizationsSchema = z.record(z.string(), z.string().uuid());
@@ -120,6 +122,9 @@ export class AccountStore {
       const organizations = await this.organizations();
       if (organizations.delete(id))
         await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
+      const names = await this.planDisplayNames();
+      delete names[id];
+      await this.kv.set(PLAN_NAMES_KEY, names);
       return true;
     });
   }
@@ -182,6 +187,19 @@ export class AccountStore {
     subscriptionType: string,
   ): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, subscriptionType }));
+  }
+
+  async planDisplayNames(): Promise<Record<string, string>> {
+    return planNamesSchema.parse((await this.kv.get(PLAN_NAMES_KEY)) ?? {});
+  }
+
+  async setPlanDisplayName(id: string, name: string | null): Promise<void> {
+    await this.serialized(async () => {
+      const names = await this.planDisplayNames();
+      if (name === null) delete names[id];
+      else names[id] = name;
+      await this.kv.set(PLAN_NAMES_KEY, planNamesSchema.parse(names));
+    });
   }
 
   async setPlan(

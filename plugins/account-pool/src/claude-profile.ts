@@ -18,6 +18,7 @@ export const claudeProfileSchema = z
         uuid: z.string().uuid().nullish(),
         name: z.string().trim().min(1).nullish(),
         organization_type: z.string().trim().min(1).nullish(),
+        plan_display_name: z.string().trim().min(1).nullish(),
         rate_limit_tier: z.string().trim().min(1).nullish(),
       })
       .passthrough()

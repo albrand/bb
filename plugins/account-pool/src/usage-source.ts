@@ -22,16 +22,8 @@ export function usageWindowLabel(
     : `${minutes / 60} hour limit`;
 }
 
-export function usagePlanLabel(
-  account: Pick<AccountSummary, "subscriptionType" | "rateLimitTier">,
-): string | null {
-  const maxMatch = (account.rateLimitTier ?? "").match(/max_(\d+)x/u);
-  if (maxMatch) return `Max (${maxMatch[1]}x)`;
-  const subscription = account.subscriptionType;
-  return subscription
-    ? subscription.charAt(0).toUpperCase() + subscription.slice(1)
-    : null;
-}
+export { displayPlanLabel as usagePlanLabel } from "./display.js";
+import { displayPlanLabel } from "./display.js";
 
 function accountKey(account: AccountSummary): string | null {
   return account.provider === "codex"
@@ -99,6 +91,7 @@ export function registerUsageSource(
         );
         if (accounts.length === 0)
           throw new Error("Usage resource no longer exists.");
+        const display = await hub.display();
         const resources: UsageResource[] = accounts.map((account) => {
           const windows: Extract<
             UsageResource["usage"],
@@ -180,7 +173,10 @@ export function registerUsageSource(
                 }
               : null,
             accountEmail: account.email,
-            planLabel: usagePlanLabel(account),
+            planLabel: displayPlanLabel(
+              account,
+              display.plans[account.id] ?? null,
+            ),
           };
           const error =
             (account.error === null

@@ -384,3 +384,13 @@ Known upstream limitation: the `claude-artifacts` MCP server that Claude Code 2.
 Provider Retry discovers Account Pooler’s `provider-retry.v1.availability` RPC. It accepts `{ threadId, requestId }` and reports `not-routed`, `ready`, `blocked` with `retryAt` in epoch milliseconds, or `unavailable` with a reason. Pool routing must have been recorded when the provider environment was prepared. The request must still be the thread’s latest request; its recorded model determines which quota windows apply. The pool uses the same recovery calculation for its HTTP 429 response and this RPC. Parent pools expose the authenticated `/retry-availability?provider=claude|codex&family=<family>` endpoint.
 
 The retry plugin remains responsible for queueing, maximum waits, and attempt limits. Inspect a skipped decision with `bb provider-retry explain <thread-id>` and pending work with `bb provider-retry status <thread-id>`.
+
+## Plan and model labels
+
+Claude plan badges and the CLI Plan column prefer Anthropic's
+`organization.plan_display_name` (for example Ultra) over legacy Max flags and
+rate-limit tier identifiers. The name is collected on the next profile refresh;
+account names remain unchanged. Without a provider display name, the pool shows
+Max with its reported multiplier, or the capitalised subscription type.
+The additive `display.get` RPC returns display names in `plans`, keyed by account
+ID. Legacy account records and `status.get` retain their existing shape.
