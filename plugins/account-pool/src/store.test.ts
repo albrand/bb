@@ -298,6 +298,47 @@ describe("AccountStore", () => {
 });
 
 describe("QuotaStore", () => {
+  it("adds model quota storage to a migrated database copy without changing pre-change rows", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "pool-model-migration-"));
+    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    const database = new Database(":memory:");
+    host.bb.storage.migrate(database, QUOTA_MIGRATIONS.slice(0, -1));
+    const accountId = "11111111-1111-4111-8111-111111111111";
+    database
+      .prepare(
+        "INSERT INTO account_quota (account_id, seven_day_utilization) VALUES (?, ?)",
+      )
+      .run(accountId, 0.5);
+    const before = new QuotaStore(database).get(accountId);
+    const copy = new Database(database.serialize());
+    try {
+      host.bb.storage.migrate(copy, QUOTA_MIGRATIONS);
+      host.bb.storage.migrate(copy, QUOTA_MIGRATIONS);
+      const store = new QuotaStore(copy);
+      expect(store.get(accountId)).toEqual(before);
+      expect(store.modelWeekly(accountId)).toBeUndefined();
+      const quota = {
+        utilization: 0.25,
+        resetAt: null,
+        status: "allowed",
+        observedAt: 1,
+        source: "usage" as const,
+      };
+      store.putModelWeekly(accountId, { "Claude Future 42": quota });
+      expect(new QuotaStore(copy).modelWeekly(accountId)).toEqual({
+        "Claude Future 42": quota,
+      });
+      expect(store.get(accountId)).toEqual(before);
+      store.putModelWeekly(accountId, {});
+      expect(store.modelWeekly(accountId)).toEqual({});
+    } finally {
+      copy.close();
+      database.close();
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("migrates an existing quota table to family observations", () => {
     const database = new Database(":memory:");
     const initial = QUOTA_MIGRATIONS[0];

@@ -25,8 +25,12 @@ import {
   type PoolProvider,
 } from "./contracts.js";
 
+import { modelWeeklySchema, type ModelWeekly } from "./display.js";
+
 const ACCOUNTS_KEY = "accounts:v1";
 const ORGANIZATIONS_KEY = "organizations:v1";
+const PLAN_NAMES_KEY = "plan-display-names:v1";
+const planNamesSchema = z.record(z.string().uuid(), z.string().min(1));
 const ACCOUNT_LAST_USED_PERSIST_MS = 60 * 1_000;
 const accountsSchema = z.array(accountSchema);
 const organizationsSchema = z.record(z.string(), z.string().uuid());
@@ -120,6 +124,9 @@ export class AccountStore {
       const organizations = await this.organizations();
       if (organizations.delete(id))
         await this.kv.set(ORGANIZATIONS_KEY, Object.fromEntries(organizations));
+      const names = await this.planDisplayNames();
+      delete names[id];
+      await this.kv.set(PLAN_NAMES_KEY, names);
       return true;
     });
   }
@@ -182,6 +189,19 @@ export class AccountStore {
     subscriptionType: string,
   ): Promise<Account | null> {
     return this.update(id, (account) => ({ ...account, subscriptionType }));
+  }
+
+  async planDisplayNames(): Promise<Record<string, string>> {
+    return planNamesSchema.parse((await this.kv.get(PLAN_NAMES_KEY)) ?? {});
+  }
+
+  async setPlanDisplayName(id: string, name: string | null): Promise<void> {
+    await this.serialized(async () => {
+      const names = await this.planDisplayNames();
+      if (name === null) delete names[id];
+      else names[id] = name;
+      await this.kv.set(PLAN_NAMES_KEY, planNamesSchema.parse(names));
+    });
   }
 
   async setPlan(
@@ -718,6 +738,31 @@ const EMPTY_QUOTA = {
 };
 
 export class QuotaStore {
+  modelWeekly(accountId: string): ModelWeekly | undefined {
+    const row = z
+      .object({ windows_json: z.string() })
+      .optional()
+      .parse(
+        this.db
+          .prepare(
+            "SELECT windows_json FROM pool_model_weekly WHERE account_id = ?",
+          )
+          .get(accountId),
+      );
+    return row === undefined
+      ? undefined
+      : modelWeeklySchema.parse(JSON.parse(row.windows_json));
+  }
+
+  putModelWeekly(accountId: string, windows: ModelWeekly): void {
+    this.db
+      .prepare(
+        `INSERT INTO pool_model_weekly (account_id, windows_json) VALUES (?, ?)
+      ON CONFLICT(account_id) DO UPDATE SET windows_json = excluded.windows_json`,
+      )
+      .run(accountId, JSON.stringify(modelWeeklySchema.parse(windows)));
+  }
+
   constructor(private readonly db: Database.Database) {}
 
   get(accountId: string): AccountQuota {
@@ -796,6 +841,9 @@ export class QuotaStore {
   }
 
   remove(accountId: string): void {
+    this.db
+      .prepare("DELETE FROM pool_model_weekly WHERE account_id = ?")
+      .run(accountId);
     this.db
       .prepare("DELETE FROM account_quota WHERE account_id = ?")
       .run(accountId);
@@ -969,5 +1017,9 @@ export const QUOTA_MIGRATIONS = [
     family TEXT NOT NULL,
     balance_json TEXT NOT NULL,
     PRIMARY KEY(provider, account_id)
+  )`,
+  `CREATE TABLE pool_model_weekly (
+    account_id TEXT PRIMARY KEY,
+    windows_json TEXT NOT NULL
   )`,
 ];

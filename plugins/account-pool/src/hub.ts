@@ -467,7 +467,8 @@ export class AccountPoolHub {
           relayed({
             kind: "error",
             errorClass:
-              cause instanceof Error && /^[A-Za-z0-9_$]{1,64}$/u.test(cause.name)
+              cause instanceof Error &&
+              /^[A-Za-z0-9_$]{1,64}$/u.test(cause.name)
                 ? cause.name
                 : "Error",
           });
@@ -742,6 +743,19 @@ export class AccountPoolHub {
         ),
       );
     }
+  }
+
+  async display() {
+    const accounts = await this.options.accounts.list();
+    return {
+      plans: await this.options.accounts.planDisplayNames(),
+      weekly: Object.fromEntries(
+        accounts.flatMap(({ id }) => {
+          const windows = this.options.quotas.modelWeekly(id);
+          return windows === undefined ? [] : [[id, windows]];
+        }),
+      ),
+    };
   }
 
   async status(): Promise<Omit<PoolStatus, "routing" | "parent">> {

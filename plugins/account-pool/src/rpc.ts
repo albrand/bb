@@ -35,11 +35,13 @@ import {
   threadSelectionSchema,
   type AccountPoolConfigController,
 } from "./contracts.js";
+import { poolDisplaySchema } from "./display.js";
 import type { PoolOperations } from "./operations.js";
 import type { ClaudeOAuthLogin } from "./oauth-login.js";
 import type { CodexDeviceLogin } from "./codex-device-login.js";
 
 export const accountPoolRpcContract = defineRpcContract({
+  "display.get": { input: z.null(), output: poolDisplaySchema },
   "routing.selection.get": {
     input: threadSelectionInputSchema,
     output: threadSelectionSchema,
@@ -186,6 +188,7 @@ export function createRpcHandlers(
   config: AccountPoolConfigController,
 ): PluginRpcHandlers<typeof accountPoolRpcContract> {
   return {
+    "display.get": () => operations.display(),
     "routing.selection.get": ({ threadId, provider }) =>
       operations.selectedAccount(threadId, provider),
     "routing.selection.set": ({ threadId, provider, accountId }) =>

@@ -412,6 +412,10 @@ export class PoolOperations {
     });
   }
 
+  async display() {
+    return this.hub.display();
+  }
+
   async list(): Promise<AccountSummary[]> {
     return (await this.status()).accounts;
   }

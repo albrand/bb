@@ -61,6 +61,8 @@ const usagePayloadSchema = z
   })
   .passthrough();
 
+import type { ModelWeekly } from "./display.js";
+
 type UsageBucket = z.infer<typeof usageBucketSchema>;
 
 function percentage(value: string | number | null | undefined): number | null {
@@ -118,6 +120,29 @@ function limitBucket(
     },
     now,
   );
+}
+
+export function modelWeeklyFromUsage(
+  payload: object,
+  now: number,
+): ModelWeekly | null {
+  const parsed = usagePayloadSchema.safeParse(payload);
+  if (!parsed.success || parsed.data.limits === undefined) return null;
+  const windows = new Map<string, FamilyQuota>();
+  for (const limit of parsed.data.limits) {
+    const name = limit.scope?.model?.display_name?.trim();
+    if (!name || (limit.kind !== "weekly_scoped" && limit.group !== "weekly"))
+      continue;
+    const candidate = limitBucket(
+      limit.percent,
+      limit.resets_at,
+      limit.status,
+      now,
+    );
+    const quota = stronger(windows.get(name) ?? null, candidate);
+    if (quota !== null) windows.set(name, quota);
+  }
+  return Object.fromEntries(windows);
 }
 
 export function quotaFromUsage(

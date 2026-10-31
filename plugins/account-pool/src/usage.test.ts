@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_FAMILY_WEEKLY, quotaSchema } from "./contracts.js";
-import { quotaFromUsage } from "./usage.js";
+import { modelWeeklyFromUsage, quotaFromUsage } from "./usage.js";
 
 describe("usage quota freshness", () => {
   it("clears expired windows when a refresh omits the window", () => {
@@ -47,6 +47,36 @@ describe("usage quota freshness", () => {
       fiveHourStatus: null,
       familyWeekly: { sonnet: null },
       observedAt: now,
+    });
+  });
+});
+
+describe("provider model weekly limits", () => {
+  it("preserves API display names, rejects malformed limits, and distinguishes omission from clearing", () => {
+    const now = 1000;
+    expect(modelWeeklyFromUsage({}, now)).toBeNull();
+    expect(modelWeeklyFromUsage({ limits: "invalid" }, now)).toBeNull();
+    expect(modelWeeklyFromUsage({ limits: [] }, now)).toEqual({});
+    const limit = (name: string, percent: number, reset: number) => ({
+      kind: "weekly_scoped",
+      percent,
+      resets_at: reset,
+      scope: { model: { display_name: name } },
+    });
+    expect(
+      modelWeeklyFromUsage(
+        {
+          limits: [
+            limit("Future 42", 25, 2000000),
+            limit("Future 42", 50, 2000000),
+            limit("Expired", 90, 1),
+            limit("", 20, 2000000),
+          ],
+        },
+        now,
+      ),
+    ).toEqual({
+      "Future 42": expect.objectContaining({ utilization: 0.5 }),
     });
   });
 });
